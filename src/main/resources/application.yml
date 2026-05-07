@@ -1,0 +1,139 @@
+spring:
+  profiles:
+    active: ${APP_ENV:dev}
+
+  application:
+    name: manufacturing-erp
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/manufacturing_erp}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: HikariPool-ERP
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+        jdbc:
+          batch_size: 25
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+    min-response-size: 1024
+    mime-types: application/json,text/html,text/xml
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+logging:
+  pattern:
+    console: "%d{ISO8601} [%X{traceId}] [%X{userId}] [%X{clientIp}] %-5level [%thread] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.erp.manufacturing: INFO
+
+# ── App custom properties ──────────────────────────────────────────────────
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-production-must-be-at-least-256-bits-long-secret-key}
+    access-token-expiry-ms: 900000        # 15 minutes
+    refresh-token-expiry-ms: 604800000    # 7 days
+
+  security:
+    trusted-proxies:
+      - "127.0.0.1"
+      - "::1"
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+
+  rate-limit:
+    enabled: true
+    rules:
+      - id: global-ip
+        scope: IP
+        pattern: "/**"
+        limit: 200
+        window-seconds: 60
+        action: BLOCK
+
+      - id: auth-ip
+        scope: IP
+        pattern: "/api/v1/auth/**"
+        limit: 10
+        window-seconds: 60
+        action: BLOCK
+
+      - id: auth-refresh-ip
+        scope: IP
+        pattern: "/api/v1/auth/refresh"
+        limit: 20
+        window-seconds: 60
+        action: BLOCK
+
+      - id: global-user
+        scope: USER
+        pattern: "/**"
+        limit: 500
+        window-seconds: 60
+        action: BLOCK
