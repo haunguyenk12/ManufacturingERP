@@ -1,7 +1,8 @@
 package com.erp.manufacturing.common.security;
 
-import com.erp.manufacturing.common.exception.AuthException;
-import com.erp.manufacturing.common.exception.TokenMalformedException;
+import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
@@ -76,7 +77,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             } else {
                 handleNormalPath(request, token);
             }
-        } catch (AuthException ex) {
+        } catch (AppException ex) {
             // Write error response directly – filter runs before Spring Security dispatcher
             writeAuthError(response, ex);
             return;
@@ -134,16 +135,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     /**
      * Parses JWT claims regardless of expiry. Still verifies the signature.
      *
-     * @throws TokenMalformedException if the signature is invalid or token is unparseable
+     * @throws AppException {@link AuthErrorCode#TOKEN_MALFORMED} if signature is invalid
      */
     private Claims extractClaimsAllowExpired(String token) {
         try {
             return jwtTokenProvider.validateAndExtractClaims(token);
-        } catch (com.erp.manufacturing.common.exception.TokenExpiredException e) {
-            // Token expired but signature was valid – extract claims from the exception
-            return jwtTokenProvider.extractClaimsFromExpired(token);
+        } catch (AppException e) {
+            if (AuthErrorCode.TOKEN_EXPIRED.code().equals(e.getErrorCode().code())) {
+                // Token expired but signature was valid – extract claims from the exception
+                return jwtTokenProvider.extractClaimsFromExpired(token);
+            }
+            throw e; // TOKEN_MALFORMED propagates up → writeAuthError
         }
-        // TokenMalformedException propagates up → caught by caller → writeAuthError
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────
@@ -162,7 +165,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private void writeAuthError(HttpServletResponse response, AuthException ex) throws IOException {
+    private void writeAuthError(HttpServletResponse response, AppException ex) throws IOException {
         response.setStatus(ex.getHttpStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(),

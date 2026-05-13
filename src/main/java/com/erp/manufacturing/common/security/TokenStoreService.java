@@ -1,6 +1,8 @@
 package com.erp.manufacturing.common.security;
 
-import com.erp.manufacturing.common.exception.TokenRevokedException;
+import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.config.JwtProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -92,7 +94,7 @@ public class TokenStoreService {
 
     /** Validates blacklist and throws if revoked. */
     public void assertNotBlacklisted(String jti) {
-        if (isBlacklisted(jti)) throw new TokenRevokedException();
+        if (isBlacklisted(jti)) throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_REVOKED);
     }
 
     // ── Brute-force Protection ────────────────────────────────────────────

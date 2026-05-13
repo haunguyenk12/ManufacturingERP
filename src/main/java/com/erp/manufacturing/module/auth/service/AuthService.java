@@ -2,9 +2,8 @@ package com.erp.manufacturing.module.auth.service;
 
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
-import com.erp.manufacturing.common.exception.AccountLockedException;
-import com.erp.manufacturing.common.exception.InvalidCredentialsException;
-import com.erp.manufacturing.common.exception.RefreshTokenExpiredException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.JwtProperties;
@@ -67,7 +66,8 @@ public class AuthService {
         if (failCount >= MAX_FAIL_ATTEMPTS) {
             auditLogService.logAuthFailure(request.username(), ip, traceId,
                     AuditAction.ACCOUNT_LOCKED, "Account locked after " + MAX_FAIL_ATTEMPTS + " failed attempts");
-            throw new AccountLockedException("Too many failed attempts. Try again in 15 minutes.");
+            throw ExceptionFactory.unauthorized(AuthErrorCode.ACCOUNT_LOCKED,
+                    "Too many failed attempts. Try again in 15 minutes.");
         }
 
         // Load user and validate password
@@ -76,16 +76,17 @@ public class AuthService {
             principal = (UserPrincipal) userDetailsService.loadUserByUsername(request.username());
         } catch (Exception e) {
             incrementFailAndAudit(request.username(), ip, traceId);
-            throw new InvalidCredentialsException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.INVALID_CREDENTIALS);
         }
 
         if (!passwordEncoder.matches(request.password(), principal.getPassword())) {
             incrementFailAndAudit(request.username(), ip, traceId);
-            throw new InvalidCredentialsException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.INVALID_CREDENTIALS);
         }
 
         if (!principal.isEnabled()) {
-            throw new AccountLockedException("Account is locked or inactive.");
+            throw ExceptionFactory.unauthorized(AuthErrorCode.ACCOUNT_INACTIVE,
+                    "Account is locked or inactive.");
         }
 
         // Clear fail counter on success
@@ -132,7 +133,7 @@ public class AuthService {
         // userId comes from the JWT subject (set by filter even for expired tokens)
         String username = (String) httpRequest.getAttribute("authenticatedUserId");
         if (username == null) {
-            throw new RefreshTokenExpiredException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
 
         UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(username);
@@ -140,7 +141,7 @@ public class AuthService {
         // Validate opaque refresh token
         String stored = tokenStore.getRefreshToken(principal.getUserId(), request.tokenId());
         if (stored == null || !stored.equals(request.refreshToken())) {
-            throw new RefreshTokenExpiredException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
 
         // Token rotation: delete old, issue new

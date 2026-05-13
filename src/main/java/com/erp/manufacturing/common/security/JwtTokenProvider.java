@@ -1,8 +1,9 @@
 package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.config.JwtProperties;
-import com.erp.manufacturing.common.exception.TokenExpiredException;
-import com.erp.manufacturing.common.exception.TokenMalformedException;
+import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -58,8 +59,8 @@ public class JwtTokenProvider {
      * Validates token signature and expiry.
      * Blacklist check is done separately in {@link JwtAuthenticationFilter}.
      *
-     * @throws TokenExpiredException   if token has expired
-     * @throws TokenMalformedException if token is invalid
+     * @throws AppException {@link AuthErrorCode#TOKEN_EXPIRED}   if token has expired
+     * @throws AppException {@link AuthErrorCode#TOKEN_MALFORMED} if token is invalid
      */
     public Claims validateAndExtractClaims(String token) {
         try {
@@ -69,9 +70,9 @@ public class JwtTokenProvider {
                     .parseSignedClaims(token)
                     .getPayload();
         } catch (ExpiredJwtException e) {
-            throw new TokenExpiredException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_EXPIRED);
         } catch (JwtException | IllegalArgumentException e) {
-            throw new TokenMalformedException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_MALFORMED);
         }
     }
 
@@ -108,7 +109,7 @@ public class JwtTokenProvider {
      * <p>Used exclusively by {@link JwtAuthenticationFilter} on the {@code /auth/refresh}
      * path so that clients can refresh after the access token has expired.
      *
-     * @throws TokenMalformedException if the token signature is invalid or the token is unparseable
+     * @throws AppException {@link AuthErrorCode#TOKEN_MALFORMED} if signature is invalid
      */
     public Claims extractClaimsFromExpired(String token) {
         try {
@@ -122,7 +123,7 @@ public class JwtTokenProvider {
             log.debug("[JWT] Extracting claims from expired token (refresh path)");
             return e.getClaims();
         } catch (JwtException | IllegalArgumentException e) {
-            throw new TokenMalformedException();
+            throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_MALFORMED);
         }
     }
 
@@ -130,7 +131,8 @@ public class JwtTokenProvider {
         try {
             Date expiry = validateAndExtractClaims(token).getExpiration();
             return Math.max(0, expiry.getTime() - Instant.now().toEpochMilli());
-        } catch (TokenExpiredException e) {
+        } catch (AppException e) {
+            // TOKEN_EXPIRED or TOKEN_MALFORMED – remaining TTL is 0
             return 0;
         }
     }

@@ -1,44 +1,35 @@
 package com.erp.manufacturing.common.exception;
 
+import org.springframework.http.HttpStatus;
+
 /**
- * Centralized error codes used in ApiResponse.code and exception handling.
- * Frontend should branch on these codes, NOT on HTTP status or message strings.
+ * Contract for all error codes in the system.
+ *
+ * <p>Each domain defines its own {@code enum} implementing this interface,
+ * grouping related errors together. This replaces the single flat enum approach
+ * and allows each module to own its error definitions independently.
+ *
+ * <h3>Convention</h3>
+ * <ul>
+ *   <li>{@link #code()}    – machine-readable string sent in API response ({@code "AUTH_001"})</li>
+ *   <li>{@link #message()} – default human-readable message (overridable per throw-site)</li>
+ *   <li>{@link #status()}  – default HTTP status for this error</li>
+ * </ul>
+ *
+ * <h3>Usage</h3>
+ * <pre>{@code
+ * throw ExceptionFactory.notFound(AuthErrorCode.USER_NOT_FOUND);
+ * throw ExceptionFactory.alreadyExists(AuthErrorCode.USERNAME_TAKEN, "admin");
+ * }</pre>
  */
-public enum ErrorCode {
+public interface ErrorCode {
 
-    // ── Success ────────────────────────────────────────────────────────────
-    SUCCESS,
+    /** Machine-readable code sent to frontend. E.g. {@code "AUTH_001"}. */
+    String code();
 
-    // ── Auth ───────────────────────────────────────────────────────────────
-    INVALID_CREDENTIALS,
-    ACCOUNT_LOCKED,
-    ACCOUNT_INACTIVE,
-    TOKEN_EXPIRED,
-    TOKEN_REVOKED,
-    TOKEN_MALFORMED,
-    REFRESH_TOKEN_EXPIRED,
-    SESSION_CONFLICT,
+    /** Default human-readable message for this error. */
+    String message();
 
-    // ── Authorization ──────────────────────────────────────────────────────
-    ACCESS_DENIED,
-
-    // ── Resource ───────────────────────────────────────────────────────────
-    RESOURCE_NOT_FOUND,
-    RESOURCE_ALREADY_EXISTS,
-
-    // ── Business ───────────────────────────────────────────────────────────
-    BUSINESS_RULE_VIOLATION,
-    INSUFFICIENT_STOCK,
-    BOM_CIRCULAR_REFERENCE,
-    MRP_CALCULATION_ERROR,
-
-    // ── Validation ─────────────────────────────────────────────────────────
-    VALIDATION_FAILED,
-
-    // ── Rate Limit ─────────────────────────────────────────────────────────
-    RATE_LIMIT_EXCEEDED,
-
-    // ── External / System ──────────────────────────────────────────────────
-    EXTERNAL_SERVICE_ERROR,
-    INTERNAL_SERVER_ERROR
+    /** Default HTTP status associated with this error. */
+    HttpStatus status();
 }

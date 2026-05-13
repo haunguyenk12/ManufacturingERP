@@ -1,6 +1,6 @@
 package com.erp.manufacturing.common.security;
 
-import com.erp.manufacturing.common.exception.ErrorCode;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,6 +28,6 @@ public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         objectMapper.writeValue(response.getOutputStream(),
-                ApiResponse.error(ErrorCode.TOKEN_MALFORMED, "Authentication required"));
+                ApiResponse.error(AuthErrorCode.TOKEN_MALFORMED, "Authentication required"));
     }
 }

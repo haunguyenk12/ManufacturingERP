@@ -1,6 +1,6 @@
 package com.erp.manufacturing.common.security;
 
-import com.erp.manufacturing.common.exception.ErrorCode;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,6 +28,6 @@ public class JwtAccessDeniedHandler implements AccessDeniedHandler {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         objectMapper.writeValue(response.getOutputStream(),
-                ApiResponse.error(ErrorCode.ACCESS_DENIED, "Insufficient permissions"));
+                ApiResponse.error(AuthErrorCode.ACCESS_DENIED, "Insufficient permissions"));
     }
 }

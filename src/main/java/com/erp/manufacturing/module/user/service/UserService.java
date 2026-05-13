@@ -2,8 +2,8 @@ package com.erp.manufacturing.module.user.service;
 
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
-import com.erp.manufacturing.common.exception.ResourceAlreadyExistsException;
-import com.erp.manufacturing.common.exception.ResourceNotFoundException;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.user.domain.Role;
 import com.erp.manufacturing.module.user.domain.User;
@@ -51,7 +51,7 @@ public class UserService {
     public UserResponse findById(UUID userId) {
         return userRepository.findById(userId)
                 .map(userMapper::toResponse)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
     }
 
     // ── Create ────────────────────────────────────────────────────────────
@@ -62,14 +62,16 @@ public class UserService {
                entityIdExpression = "userId.toString()")
     public UserResponse create(CreateUserRequest request) {
         if (userRepository.existsByUsername(request.username())) {
-            throw new ResourceAlreadyExistsException("Username already taken: " + request.username());
+            throw ExceptionFactory.alreadyExists(ValidationErrorCode.USERNAME_ALREADY_EXISTS,
+                    "Username already taken: " + request.username());
         }
         if (userRepository.existsByEmail(request.email())) {
-            throw new ResourceAlreadyExistsException("Email already in use: " + request.email());
+            throw ExceptionFactory.alreadyExists(ValidationErrorCode.EMAIL_ALREADY_EXISTS,
+                    "Email already in use: " + request.email());
         }
 
         Role defaultRole = roleRepository.findByName("OPERATOR")
-                .orElseThrow(() -> new ResourceNotFoundException("Role", "OPERATOR"));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", "OPERATOR"));
 
         User user = User.builder()
                 .username(request.username())
@@ -92,11 +94,12 @@ public class UserService {
                entityIdExpression = "userId.toString()")
     public UserResponse update(UUID userId, UpdateUserRequest request) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
 
         if (request.email() != null && !request.email().equals(user.getEmail())) {
             if (userRepository.existsByEmail(request.email())) {
-                throw new ResourceAlreadyExistsException("Email already in use: " + request.email());
+                throw ExceptionFactory.alreadyExists(ValidationErrorCode.EMAIL_ALREADY_EXISTS,
+                        "Email already in use: " + request.email());
             }
             user.setEmail(request.email());
         }
@@ -115,7 +118,7 @@ public class UserService {
                entityIdExpression = "toString()")
     public void delete(UUID userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
         user.setStatus(UserStatus.INACTIVE);
         userRepository.save(user);
         log.info("[USER] Deactivated user={}", userId);
@@ -129,9 +132,9 @@ public class UserService {
                entityIdExpression = "userId.toString()")
     public UserResponse assignRole(UUID userId, String roleName) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
         Role role = roleRepository.findByName(roleName)
-                .orElseThrow(() -> new ResourceNotFoundException("Role", roleName));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", roleName));
         user.getRoles().add(role);
         return userMapper.toResponse(userRepository.save(user));
     }
@@ -142,7 +145,7 @@ public class UserService {
                entityIdExpression = "userId.toString()")
     public UserResponse revokeRole(UUID userId, String roleName) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
         user.getRoles().removeIf(r -> r.getName().equals(roleName));
         return userMapper.toResponse(userRepository.save(user));
     }

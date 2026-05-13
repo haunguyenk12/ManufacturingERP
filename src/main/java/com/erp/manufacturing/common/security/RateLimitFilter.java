@@ -1,5 +1,7 @@
 package com.erp.manufacturing.common.security;
 
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ErrorCode;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.config.RateLimitProperties;
@@ -61,7 +63,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // ── Blacklist check ─────────────────────────────────────────────
         String blacklistReason = redisTemplate.opsForValue().get("rate:blacklist:ip:" + clientIp);
         if (blacklistReason != null) {
-            writeError(response, 403, ErrorCode.ACCESS_DENIED, "IP blocked: " + blacklistReason);
+            writeError(response, 403, AuthErrorCode.ACCESS_DENIED, "IP blocked: " + blacklistReason);
             return;
         }
 
@@ -69,7 +71,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         Optional<RateLimitResult> ipBlock = evaluate(path, Scope.IP, clientIp);
         if (ipBlock.isPresent()) {
             addRateLimitHeaders(response, ipBlock.get());
-            writeError(response, 429, ErrorCode.RATE_LIMIT_EXCEEDED,
+            writeError(response, 429, BusinessErrorCode.RATE_LIMIT_EXCEEDED,
                     "Too many requests. Retry after " + ipBlock.get().retryAfterSeconds() + "s.");
             return;
         }
@@ -80,7 +82,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             Optional<RateLimitResult> userBlock = evaluate(path, Scope.USER, userId);
             if (userBlock.isPresent()) {
                 addRateLimitHeaders(response, userBlock.get());
-                writeError(response, 429, ErrorCode.RATE_LIMIT_EXCEEDED, "User rate limit exceeded.");
+                writeError(response, 429, BusinessErrorCode.RATE_LIMIT_EXCEEDED, "User rate limit exceeded.");
                 return;
             }
         }
