@@ -1,6 +1,6 @@
 package com.erp.manufacturing.module.user.mapper;
 
-import com.erp.manufacturing.module.user.domain.Role;
+import com.erp.manufacturing.module.organization.domain.Role;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.dto.UserResponse;
 import org.mapstruct.Mapper;

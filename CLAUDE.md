@@ -210,26 +210,24 @@ INDEX: idx_users_username, idx_users_email
 ### 4.4 Redis Key Design
 
 ```
-# Refresh Token store (payload: { userId, tokenId, sessionCreatedAt, userAgent hash })
-auth:refresh:{userId}:{tokenId}  →  {payload}  TTL=7d (sliding)
+# Refresh Token store (value = opaque UUID refresh token)
+auth:refresh:{userId}:{tokenId}                →  {refreshToken}  TTL=7d
 
-# RTR – token đã dùng (giữ 60s để phát hiện reuse)
-auth:refresh:used:{tokenId}  →  "1"  TTL=60s
+# Access Token Blacklist (sau logout/bắt buộc vô hiệu hóa)
+auth:blacklist:{jti}                           →  "1"  TTL=<thời gian còn lại của access token>
 
-# Blacklist Access Token (sau logout/bắt buộc vô hiệu hóa)
-auth:blacklist:{jti}  →  "1"  TTL=<thời gian còn lại của access token>
+# Bộ đếm đăng nhập thất bại (brute-force protection)
+auth:failcount:{username}                      →  {count}  TTL=15m
 
-# Bộ đếm đăng nhập thất bại (bảo vệ brute-force – atomic Lua)
-auth:failcount:{username}  →  {count}  TTL=15m
+# Multi-device session (mỗi device có entry riêng)
+auth:session:device:{userId}:{deviceId}        →  {clientIp}  TTL=7d (sliding)
 
-# Single active session – IP đang sở hữu session hiện tại
-auth:session:ip:{userId}  →  "192.168.1.10"  TTL=7d
+# ── Planned (chưa implement) ────────────────────────────────────
+# RTR – token đã dùng (phát hiện reuse)
+auth:refresh:used:{tokenId}                    →  "1"  TTL=60s  [TODO Phase 2]
 
-# Forgot password token (single-use, TTL 15m)
-auth:reset:{token}  →  { userId, email }  TTL=15m
-
-# Rate limiting – cửa sổ trượt (per-IP & per-user)
-rate:counter:{ruleId}:{identifier}:{epochWindow}  →  {count}  TTL=windowSeconds
+# Forgot password token (single-use)
+auth:reset:{token}                             →  {userId}  TTL=15m  [TODO Phase 2]
 ```
 
 ### 4.5 Cấu Trúc JWT Claims
@@ -287,22 +285,20 @@ Client nhận 401 Unauthorized
   │
   ├─ Client gửi POST /api/v1/auth/refresh { refreshToken }
   │
-  ├─ Server validate refresh token (RTR flow):
+  ├─ Server validate refresh token (basic rotation – current):
   │   ├─ Tồn tại trong Redis? → tiếp tục
-  │   │   KHÔNG TÌM THẤY → kiểm tra auth:refresh:used:{tokenId}
-  │   │     ├─ Key "used" còn tồn tại → TOKEN_REUSE_DETECTED
-  │   │     │     → xóa TOÀN BỘ token của user (force logout)
-  │   │     │     → ghi audit SUSPICIOUS_TOKEN_REUSE
-  │   │     │     → 401 { "code": "TOKEN_REUSE_DETECTED" }
-  │   │     └─ Key "used" không tồn tại → REFRESH_TOKEN_EXPIRED (token thực sự hết hạn)
-  │   ├─ Chưa hết hạn absolute (sessionCreatedAt + 30d)? → tiếp tục
-  │   │   HẾT HẠN TUYỆT ĐỐI → 401 { "code": "SESSION_ABSOLUTE_TIMEOUT" }
-  │   └─ Kết hợp kiểm tra Absolute Timeout (xem 4.15)
+  │   ├─ KHÔNG TÌM THẤY → REFRESH_TOKEN_EXPIRED
+  │   └─ [TODO Phase 2] RTR reuse detection (xem 4.12):
+  │         → kiểm tra auth:refresh:used:{tokenId}
+  │           ├─ Key "used" tồn tại → TOKEN_REUSE_DETECTED (force logout all)
+  │           └─ Key hết hạn → REFRESH_TOKEN_EXPIRED (bình thường)
+  │
+  ├─ [TODO Phase 2] Absolute timeout check (xem 4.15):
+  │   sessionAge > 30 ngày → 401 SESSION_ABSOLUTE_TIMEOUT
   │
   └─ Nếu hợp lệ → Tạo accessToken MỚI + refreshToken MỚI (xoay vòng)
        ├─ Lưu refresh token MỚI vào Redis TRƯỚC
-       ├─ Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s
-       ├─ Xóa token cũ khỏi store sau 60s (hoặc xóa ngay, giữ key used)
+       ├─ [TODO Phase 2] Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s
        └─ Trả về { accessToken, refreshToken, expiresIn }
 
 Kịch bản: Force logout / hoạt động đáng ngờ
@@ -322,54 +318,43 @@ Admin gọi deleteAllUserTokens(userId)
 
 ### 4.9 Security Config
 
-Thứ tự filter chain (quan trọng — dùng `@Order` để đảm bảo):
+Thứ tự filter chain (quan trọng — được đăng ký trong `SecurityConfig`):
 
 | Order | Filter | Nhiệm vụ |
 |---|---|---|
-| 1 | `TraceIdFilter` | Set `traceId`, `clientIp` vào MDC + request attr |
-| 2 | `RateLimitFilter` | Kiểm tra IP blacklist + rate limit theo IP |
-| 3 | `JwtAuthenticationFilter` | Validate JWT → set userId vào MDC + attr |
-| 4 | `AuthorizedRateLimitFilter` | Rate limit theo USER (sau khi có userId) |
+| 1 | `TraceIdFilter` | Set `traceId`, `clientIp` vào MDC + request attr + response header |
+| 2 | `RateLimitFilter` | IP blacklist (403) + IP whitelist bypass + IP-scope rate limit |
+| 3 | `JwtAuthenticationFilter` | Validate JWT → set SecurityContext + `authenticatedUserId` vào MDC + attr |
+| 4 | `UserRateLimitFilter` | USER-scope rate limit (chỉ chạy sau khi có `authenticatedUserId`) |
 
-Permit: `/api/v1/auth/**`, `/actuator/health`, `/v3/api-docs/**`, `/swagger-ui/**`
+> **Lý do tách 2 filter rate limit**: IP-scope phải chạy trước JWT để bảo vệ unauthenticated endpoint.
+> USER-scope phải chạy sau JWT vì cần `authenticatedUserId`. Gộp vào 1 filter sẽ khiến USER-scope
+> không bao giờ thực thi (không có userId lúc chạy IP layer).
 
-### 4.10 Single Active Session / IP Enforcement
+Permit: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`
 
-> **Mục tiêu**: Một tài khoản chỉ đăng nhập tại **1 địa chỉ IP** tại cùng thời điểm.
+### 4.10 Multi-Device Session
 
-**Chiến lược**: IP-bound Session via Redis
+> **Thiết kế**: Mỗi thiết bị (device) có session độc lập. User có thể đăng nhập từ nhiều thiết bị cùng lúc.
+
+**deviceId resolution**:
+- Client cung cấp `deviceId` (stable identifier, max 128 chars)
+- Nếu không có → server tự sinh: `sha256(userAgent + ":" + ip)[:24]` với prefix `auto-`
 
 ```
 Luồng khi login:
   1. AuthService.login(LoginRequest, clientIp)
-  2. Kiểm tra auth:session:ip:{userId}
-     ├─ Không tồn tại → tiếp tục bình thường
-     └─ Tồn tại & ip ≠ clientIp
-          → Kick session cũ: xóa toàn bộ refresh token cũ
-          → Ghi audit log "SESSION_KICKED từ {oldIp} bởi login từ {newIp}"
-          → Tiếp tục cấp token mới cho IP mới
-  3. SET auth:session:ip:{userId} = clientIp  TTL=7d
-     (Dùng Lua script để đảm bảo check-and-set ATOMIC)
-  4. Khi logout: DEL auth:session:ip:{userId}
-  5. Khi token refresh: cập nhật lại TTL (sliding window)
+  2. Resolve deviceId từ request
+  3. SET auth:session:device:{userId}:{deviceId} = clientIp  TTL=7d
+  4. Phát hành cặp token mới
+  5. Khi refresh: extend TTL device session
+  6. Khi logout: xóa refresh token của tokenId đó
+  7. Khi logout-all: xóa tất cả auth:refresh:{userId}:* và auth:session:device:{userId}:*
 ```
 
-> **Lý do chọn Option Kick**: UX mượt hơn, user được thông báo bị kick. Phù hợp ERP nội bộ capstone.
-
-**Lấy Client IP đúng cách – Trusted Proxy Design**:
-- Nếu request đến từ **trusted proxy** (nginx/LB) → đọc `X-Forwarded-For`, duyệt từ phải sang trái, bỏ qua IP trusted → IP đầu tiên không trusted = IP thực
-- Nếu không phải trusted proxy → dùng `remoteAddr` trực tiếp (không tin `X-Forwarded-For` → tránh IP spoofing)
-- Danh sách trusted proxies cấu hình trong `application.yml`
-
-**Response khi bị kick**:
-```json
-{
-  "code":    "SUCCESS",
-  "result":  { "accessToken": "...", "refreshToken": "...", "expiresIn": 900 },
-  "message": "Login successful. Previous session from 10.0.0.5 was terminated."
-}
-```
-Header bổ sung: `X-Session-Warning: previous-session-terminated`
+> **Khác với single-IP enforcement**: Thiết kế hiện tại cho phép multi-device.
+> Single-IP enforcement đã được loại bỏ vì không phù hợp với ERP nội bộ
+> nơi user có thể làm việc trên nhiều máy tính.
 
 ### 4.11 Rate Limiting – Config-driven & Extensible
 
@@ -447,13 +432,15 @@ rate:blacklist:ip:{ip}  →  "lý do"  TTL tuỳ ý
 | `X-RateLimit-Rule` | Rule ID đang áp dụng |
 | `Retry-After` | Giây cần chờ (chỉ khi 429) |
 
-### 4.12 Refresh Token Reuse Detection (RTR)
+### 4.12 Refresh Token Reuse Detection (RTR) [🔜 Phase 2 – chưa implement]
 
-> **Mục tiêu**: Phát hiện kịp thời khi refresh token bị đánh cắp và dùng lại.
+> **Trạng thái**: Thiết kế đã có, chưa có code trong `AuthService.refresh`. Sẽ implement trong Phase 2.
+
+**Mục tiêu**: Phát hiện kịp thời khi refresh token bị đánh cắp và dùng lại.
 
 **Vấn đề với rotation đơn thuần**: Sau khi rotate, nếu token cũ bị dùng lại, server chỉ trả `REFRESH_TOKEN_EXPIRED` — không phân biệt được "hết hạn tự nhiên" với "token bị đánh cắp".
 
-**Giải pháp RTR**:
+**Giải pháp RTR (planned)**:
 ```
 Khi rotate thành công:
   → SET auth:refresh:used:{oldTokenId} "1" EX 60
@@ -484,7 +471,9 @@ Khi validate refresh token và KHÔNG TÌM THẤY trong store:
 
 ---
 
-### 4.14 Account Recovery Flow
+### 4.14 Account Recovery Flow [🔜 Phase 2 – chưa implement]
+
+> **Trạng thái**: Thiết kế bên dưới là planned. Hiện tại chưa có endpoint `/auth/forgot-password` hay `/auth/reset-password` trong code.
 
 #### Forgot Password
 ```
@@ -517,11 +506,13 @@ PATCH /api/v1/admin/users/{userId}/unlock
 
 ---
 
-### 4.15 Absolute Session Timeout
+### 4.15 Absolute Session Timeout [🔜 Phase 2 – chưa implement]
+
+> **Trạng thái**: Thiết kế đã có, chưa có code trong `AuthService.refresh`. Sẽ implement trong Phase 2.
 
 > **Vấn đề**: Refresh token TTL sliding 7 ngày — user active liên tục sẽ **không bao giờ bị force logout**. Với ERP có dữ liệu nhạy cảm, đây là rủi ro bảo mật.
 
-**Giải pháp**: Lưu `sessionCreatedAt` vào payload refresh token trong Redis.
+**Giải pháp (planned)**: Lưu `sessionCreatedAt` vào payload refresh token trong Redis.
 
 ```
 Refresh token payload trong Redis:
@@ -919,22 +910,22 @@ V5__create_audit_logs.sql
 
 ### 8.1 Security
 
-| # | Practice | Mô tả |
-|---|---|---|
-| S1 | **HTTPS only** | Disable plain HTTP trong production |
-| S2 | **Secret rotation** | JWT secret qua env variable (min 256-bit); không hardcode |
-| S3 | **BCrypt cost factor 12** | Cân bằng security và latency |
-| S4 | **Secure headers đầy đủ** | CSP, `X-Frame-Options`, HSTS, `Referrer-Policy`, `Permissions-Policy` (xem 4.17) |
-| S5 | **CORS strict** | Chỉ whitelist domain cụ thể trong production |
-| S6 | **Input sanitization** | `@Valid` + custom validator; không raw input vào query |
-| S7 | **Least Privilege** | JWT chỉ chứa `sub`, `jti`, `roles` |
-| S8 | **Audit logging 2 bảng** | `audit_logs` (khái quát) + `audit_log_changes` (chi tiết field) |
-| S9 | **Token jti uniqueness** | Mỗi access token có `jti` UUID để blacklist chính xác |
-| S10 | **Password policy** | Min 8 ký tự, có chữ hoa, thường, số, đặc biệt |
-| S11 | **RTR – Token Reuse Detection** | Phát hiện refresh token bị đánh cắp → force logout toàn bộ thiết bị |
-| S12 | **Account Enumeration Prevention** | Login/forgot-password luôn trả cùng message, dùng constant-time compare |
-| S13 | **Absolute session timeout** | Bắt buộc login lại sau 30 ngày dù user vẫn active |
-| S14 | **Log sanitization** | Password/token không bao giờ xuất hiện trong log; `@ToString.Exclude` trên field nhạy cảm |
+| # | Practice | Trạng thái | Mô tả |
+|---|---|---|---|
+| S1 | **HTTPS only** | ✅ Design | Disable plain HTTP trong production |
+| S2 | **Secret rotation** | ✅ Current | JWT secret qua env variable (min 256-bit); không hardcode |
+| S3 | **BCrypt cost factor 12** | ✅ Current | Cân bằng security và latency |
+| S4 | **Secure headers đầy đủ** | ✅ Design | CSP, `X-Frame-Options`, HSTS, `Referrer-Policy`, `Permissions-Policy` (xem 4.17) |
+| S5 | **CORS strict** | ✅ Design | Chỉ whitelist domain cụ thể trong production |
+| S6 | **Input sanitization** | ✅ Current | `@Valid` + custom validator; không raw input vào query |
+| S7 | **Least Privilege** | ✅ Current | JWT chỉ chứa `sub`, `jti`, `roles` |
+| S8 | **Audit logging** | ✅ Current (`audit_logs`) / 🔜 Phase 2 (`audit_log_changes`) | Current: 1 bảng `audit_logs`; Phase 2: thêm `audit_log_changes` cho chi tiết field |
+| S9 | **Token jti uniqueness** | ✅ Current | Mỗi access token có `jti` UUID để blacklist chính xác |
+| S10 | **Password policy** | ✅ Design | Min 8 ký tự, có chữ hoa, thường, số, đặc biệt |
+| S11 | **RTR – Token Reuse Detection** | 🔜 Phase 2 | Phát hiện refresh token bị đánh cắp → force logout toàn bộ thiết bị |
+| S12 | **Account Enumeration Prevention** | ✅ Current | Login/forgot-password luôn trả cùng message, dùng constant-time compare |
+| S13 | **Absolute session timeout** | 🔜 Phase 2 | Bắt buộc login lại sau 30 ngày dù user vẫn active |
+| S14 | **Log sanitization** | ✅ Design | Password/token không bao giờ xuất hiện trong log; `@ToString.Exclude` trên field nhạy cảm |
 
 ### 8.2 API Design
 
@@ -1034,18 +1025,21 @@ logging:
 Request
   │
   ├─ TraceIdFilter         → set traceId, clientIp vào MDC + attribute
+  ├─ RateLimitFilter       → IP blacklist + IP-scope rate limit
   ├─ JwtAuthFilter         → set userId vào MDC + attribute
-  ├─ RateLimitFilter       → check limit
+  ├─ UserRateLimitFilter   → USER-scope rate limit
   │
   ├─ Controller / Service
-  │     └─ @Auditable(action, entityType, captureChanges=true)  ← AOP
+  │     └─ @Auditable(action, entityType)  ← AOP
   │           │
   │           └─ publish AuditLogEvent (Spring ApplicationEvent)
   │                         │
   │                   [Async thread – auditExecutor]
   │                         │
   │                   AuditLogListener
-  │                     ├─ INSERT audit_logs        (1 row – khái quát)
+  │                     └─ INSERT audit_logs        (1 row – khái quát)
+  │
+  │              [TODO Phase 2]
   │                     └─ INSERT audit_log_changes (N rows – chi tiết từng field)
   │
   └─ Response
@@ -1060,7 +1054,13 @@ Auth events → AuditLogService.logAuth() trực tiếp (không dùng AOP)
 
 ---
 
-### 9.2 Database Schema – 2 Bảng Master-Detail
+### 9.2 Database Schema
+
+> **Current (implemented)**: chỉ có bảng `audit_logs`.
+> **Planned Phase 2**: thêm bảng `audit_log_changes` cho chi tiết field-level changes.
+> Migration hiện tại: `V5__create_audit_logs.sql` chỉ tạo `audit_logs`.
+
+### 9.2.1 Bảng Hiện Tại – `audit_logs`
 
 #### Bảng 1: `audit_logs` (Khái quát – 1 row / hành động)
 
@@ -1090,9 +1090,12 @@ CREATE INDEX idx_audit_trace_id   ON audit_logs(trace_id);
 CREATE INDEX idx_audit_user_time  ON audit_logs(user_id, created_at DESC);
 ```
 
-#### Bảng 2: `audit_log_changes` (Chi tiết – N rows / hành động)
+#### [🔜 Phase 2] Bảng `audit_log_changes` (Chi tiết field – chưa implement)
+
+> **Chưa có migration** cho bảng này. Sẽ thêm trong Phase 2 khi implement AOP `@Auditable`.
 
 ```sql
+-- [TODO Phase 2] V6__create_audit_log_changes.sql
 CREATE TABLE audit_log_changes (
     change_id   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     audit_id    UUID        NOT NULL REFERENCES audit_logs(audit_id) ON DELETE CASCADE,
@@ -1112,11 +1115,11 @@ CREATE INDEX idx_changes_field     ON audit_log_changes(field_name);
 | Hành động | `audit_logs` | `audit_log_changes` |
 |---|---|---|
 | LOGIN, LOGOUT, SESSION_KICKED | ✅ 1 row | ❌ Không có (không có entity thay đổi) |
-| WORK_ORDER_CREATED | ✅ 1 row | ✅ Tất cả field của entity mới (old=null) |
-| WORK_ORDER_UPDATED | ✅ 1 row | ✅ Chỉ các field **thực sự thay đổi** (old ≠ new) |
-| WORK_ORDER_DELETED | ✅ 1 row | ✅ Tất cả field của entity cũ (new=null) |
+| WORK_ORDER_CREATED | ✅ 1 row | ✅ Tất cả field của entity mới (old=null) [TODO Phase 2] |
+| WORK_ORDER_UPDATED | ✅ 1 row | ✅ Chỉ các field **thực sự thay đổi** (old ≠ new) [TODO Phase 2] |
+| WORK_ORDER_DELETED | ✅ 1 row | ✅ Tất cả field của entity cũ (new=null) [TODO Phase 2] |
 | MRP_RUN (bulk) | ✅ 1 row | ❌ Quá nhiều; ghi summary vào `description` |
-| INVENTORY_ADJUSTED | ✅ 1 row | ✅ `quantity`: old=50, new=45 |
+| INVENTORY_ADJUSTED | ✅ 1 row | ✅ `quantity`: old=50, new=45 [TODO Phase 2] |
 
 > **Quy tắc**: Chỉ ghi `audit_log_changes` khi action là **CREATE / UPDATE / DELETE** trên business entity. Auth events và bulk operations không cần chi tiết field.
 
@@ -1157,14 +1160,18 @@ Mọi entity kế thừa `BaseEntity` để nhận:
 
 ### 9.5 AuditLogEvent & AuditLogListener
 
-- **`AuditLogEvent`**: record chứa `RequestContext`, `action`, `entityType`, `entityId`, `description`, `status`, `List<FieldChange>` (có thể rỗng)
-- **`FieldChange`**: record chứa `fieldName`, `oldValue`, `newValue`, `valueType`
+**Current behavior (implemented)**:
+- **`AuditLogEvent`**: record chứa `RequestContext`, `action`, `entityType`, `entityId`, `description`, `status`
 - **`AuditLogListener`**: lắng nghe event, chạy trên `auditExecutor`
   1. INSERT vào `audit_logs` → lấy `audit_id`
-  2. Nếu `fieldChanges` không rỗng → batch INSERT vào `audit_log_changes`
 - Dùng `@TransactionalEventListener(phase = AFTER_COMMIT)` → chỉ ghi sau transaction chính commit
 
-### 9.6 So Sánh Change Detection
+**Phase 2 planned behavior**:
+- Thêm **`FieldChange`** record chứa `fieldName`, `oldValue`, `newValue`, `valueType`
+- Mở rộng `AuditLogEvent` để chứa `List<FieldChange>`
+- Sau khi INSERT `audit_logs`, batch INSERT field changes vào `audit_log_changes`
+
+### 9.6 [TODO Phase 2] So Sánh Change Detection
 
 **Cách lấy `fieldChanges` trong `@Auditable` AOP**:
 
@@ -1174,7 +1181,7 @@ Mọi entity kế thừa `BaseEntity` để nhận:
 | Hibernate `@EntityListeners` PreUpdate + PostUpdate | Tự động, không cần sửa service | Khó lấy context (userId, traceId) |
 | **AOP bắt argument request + response, so sánh** | Cân bằng giữa tự động và kiểm soát | SpEL phức tạp hơn |
 
-> **Quyết định**: Service method `update` nhận `OldSnapshot` và `NewSnapshot` rồi truyền vào `AuditLogEvent`. `@Auditable` AOP tự collect thông qua SpEL expression.
+> **Phase 2 direction**: Service method `update` nhận `OldSnapshot` và `NewSnapshot` rồi truyền vào `AuditLogEvent`. `@Auditable` AOP sẽ collect field changes thông qua SpEL expression.
 
 ### 9.7 AuditAction Enum (Tập Trung)
 
@@ -1204,7 +1211,8 @@ Gắn annotation `@Auditable` lên service method → tự động publish audit
 - `action`: `AuditAction` enum value
 - `entityType`: tên entity (e.g. `"WorkOrder"`)
 - `entityIdExpression`: SpEL lấy entityId từ return value hoặc param
-- `captureChanges`: boolean — nếu `true`, AOP sẽ collect `FieldChange` list từ event payload
+
+> **Current limitation**: `@Auditable` hiện chỉ ghi entity-level event vào `audit_logs`; chưa có `captureChanges` và chưa collect `FieldChange`. Field-level audit thuộc Phase 2.
 
 > **Lưu ý**: Auth events không dùng AOP (SecurityContext chưa set lúc login). Auth events gọi `auditLogService.logAuth()` trực tiếp.
 
@@ -1224,26 +1232,27 @@ Cấu hình `AsyncConfig`:
 TraceIdFilter (Order 1)        → MDC: traceId, clientIp; attr: traceId, clientIp
 RateLimitFilter (Order 2)      → IP blacklist + IP-scope rate limit
 JwtAuthFilter (Order 3)        → MDC: userId; attr: authenticatedUserId
-AuthzRateLimitFilter (Order 4) → USER-scope rate limit
+UserRateLimitFilter (Order 4)  → USER-scope rate limit
 Controller / Service
-  └─ @Auditable AOP → publish AuditLogEvent (với FieldChange list)
+  └─ @Auditable AOP → publish AuditLogEvent (entity-level)
 [Async thread] AuditLogListener
   ├─ INSERT audit_logs
-  └─ BATCH INSERT audit_log_changes
+  └─ [TODO Phase 2] BATCH INSERT audit_log_changes
 ```
 
 ### 9.11 Tóm Tắt Toàn Bộ Cải Tiến
 
-| Thay đổi | Lý do |
-|---|---|
-| 2 bảng: `audit_logs` + `audit_log_changes` | Tách khái quát và chi tiết; query linh hoạt hơn; không dư thừa với auth events |
-| `JwtAuthFilter` set `authenticatedUserId` vào MDC + attr | `RequestContext.capture()` cần userId |
-| `TraceIdFilter` set `clientIp` vào attr | Không cần inject `HttpServletRequest` khắp nơi |
-| `BaseEntity` có `updatedBy` | JPA Auditing tự điền người sửa cuối |
-| `MdcTaskDecorator` trong AsyncConfig | TraceId + userId không mất khi log async |
-| `AuditAction` enum tập trung | Tên event nhất quán, dễ query/filter |
-| `@TransactionalEventListener(AFTER_COMMIT)` | Không ghi audit khi transaction rollback |
-| Tách `AuthorizedRateLimitFilter` (Order 4) | USER-scope rate limit chạy sau JWT auth |
-| RTR – key `auth:refresh:used:{tokenId}` | Phát hiện token bị đánh cắp và reuse |
-| `auth:reset:{token}` trong Redis | Forgot password flow single-use, TTL 15m |
-| Absolute session timeout 30 ngày | Ngăn session sống mãi dù user vẫn active |
+| Thay đổi | Trạng thái | Lý do |
+|---|---|---|
+| Bảng `audit_logs` | ✅ Current | Ghi mọi action (LOGIN, LOGOUT, entity events) |
+| `audit_log_changes` (chi tiết field) | 🔜 Phase 2 | Tách khái quát và chi tiết; dùng khi mở rộng `@Auditable` để collect `FieldChange` |
+| `JwtAuthFilter` set `authenticatedUserId` vào MDC + attr | ✅ Current | `RequestContext.capture()` cần userId |
+| `TraceIdFilter` set `clientIp` vào attr | ✅ Current | Không cần inject `HttpServletRequest` khắp nơi |
+| `BaseEntity` có `updatedBy` | ✅ Current | JPA Auditing tự điền người sửa cuối |
+| `MdcTaskDecorator` trong AsyncConfig | ✅ Current | TraceId + userId không mất khi log async |
+| `AuditAction` enum tập trung | ✅ Current | Tên event nhất quán, dễ query/filter |
+| `@TransactionalEventListener(AFTER_COMMIT)` | ✅ Current | Không ghi audit khi transaction rollback |
+| Tách `UserRateLimitFilter` (Order 4) | ✅ Current | USER-scope rate limit chạy sau JWT auth |
+| RTR – key `auth:refresh:used:{tokenId}` | 🔜 Phase 2 | Phát hiện token bị đánh cắp và reuse |
+| `auth:reset:{token}` trong Redis | 🔜 Phase 2 | Forgot password flow single-use, TTL 15m |
+| Absolute session timeout 30 ngày | 🔜 Phase 2 | Ngăn session sống mãi dù user vẫn active |

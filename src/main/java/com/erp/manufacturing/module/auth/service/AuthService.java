@@ -31,8 +31,8 @@ import java.util.UUID;
  * <h3>Key behaviours:</h3>
  * <ul>
  *   <li><b>Brute-force protection</b> – max 5 failures in 15 min → temporary lockout</li>
- *   <li><b>Multi-device sessions</b> – each device (identified by {@code deviceId}) has an
- *       independent session. A user can be logged in from multiple devices simultaneously.
+ *   <li><b>Single-device session</b> – Enforced single-session per user. A user can only be
+ *       logged in from one device at a time. Logging in from a new device invalidates all prior sessions.
  *       If {@code deviceId} is not provided by the client, one is derived server-side
  *       from a hash of {@code User-Agent + IP}.</li>
  *   <li><b>Token rotation on refresh</b> – old tokenId deleted before issuing new pair</li>
@@ -92,10 +92,14 @@ public class AuthService {
         // Clear fail counter on success
         tokenStore.resetFailCount(request.username());
 
+        // Clear all previous device sessions and refresh tokens to enforce single-session per user
+        tokenStore.deleteAllUserTokens(principal.getUserId());
+        tokenStore.deleteAllDeviceSessions(principal.getUserId());
+
         // Resolve deviceId: use client-provided value or derive from UA + IP
         String deviceId = resolveDeviceId(request.deviceId(), httpRequest, ip);
 
-        // Register device session (replaces single-IP enforcement)
+        // Register device session
         tokenStore.saveDeviceSession(principal.getUserId(), deviceId, ip);
 
         // Issue token pair

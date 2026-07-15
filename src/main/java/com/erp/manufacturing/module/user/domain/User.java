@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.user.domain;
 
 import com.erp.manufacturing.common.audit.BaseEntity;
+import com.erp.manufacturing.module.organization.domain.Role;
 import jakarta.persistence.*;
 import lombok.*;
 

@@ -28,12 +28,33 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Config-driven rate limiting filter.
- * <p>
- * Rules are loaded from {@code app.rate-limit.rules} in YAML.
- * Runtime overrides are read from Redis: {@code rate:rule:override:{ruleId}}.
- * Whitelisted IPs skip all checks: {@code rate:whitelist:ip:{ip}}.
- * Blacklisted IPs are blocked with 403: {@code rate:blacklist:ip:{ip}}.
+ * IP-scope rate limiting filter. Runs BEFORE {@link JwtAuthenticationFilter}.
+ *
+ * <p>Responsibilities:
+ * <ul>
+ *   <li>IP blacklist check (403 for permanently blocked IPs)</li>
+ *   <li>IP whitelist bypass (whitelisted IPs skip all rate-limit checks)</li>
+ *   <li>IP-scoped rate-limit rules ({@code scope: IP} in YAML)</li>
+ * </ul>
+ *
+ * <p>USER-scope rules are handled by {@link UserRateLimitFilter} which runs
+ * <em>after</em> JWT authentication so that {@code authenticatedUserId} is available.
+ *
+ * <h3>Filter order</h3>
+ * <pre>
+ * TraceIdFilter (1) → RateLimitFilter/IP (2) → JwtAuthenticationFilter (3) → UserRateLimitFilter (4)
+ * </pre>
+ *
+ * <h3>Redis keys used</h3>
+ * <pre>
+ *   rate:counter:{ruleId}:{ip}:{epochWindow}  → request count  TTL=windowSeconds+10
+ *   rate:rule:override:{ruleId}               → hash{limit, windowSeconds}  runtime override
+ *   rate:whitelist:ip:{ip}                    → "1"  bypass all checks
+ *   rate:blacklist:ip:{ip}                    → reason string  permanent block (403)
+ * </pre>
+ *
+ * @see UserRateLimitFilter  USER-scope counterpart
+ * @see RateLimitProperties
  */
 @Component
 @RequiredArgsConstructor
@@ -76,17 +97,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        // ── USER-scope rules (after JwtFilter has set authenticatedUserId) ──
-        String userId = (String) request.getAttribute("authenticatedUserId");
-        if (userId != null) {
-            Optional<RateLimitResult> userBlock = evaluate(path, Scope.USER, userId);
-            if (userBlock.isPresent()) {
-                addRateLimitHeaders(response, userBlock.get());
-                writeError(response, 429, BusinessErrorCode.RATE_LIMIT_EXCEEDED, "User rate limit exceeded.");
-                return;
-            }
-        }
-
+        // USER-scope rules are handled by UserRateLimitFilter (runs after JwtAuthenticationFilter).
         chain.doFilter(request, response);
     }
 

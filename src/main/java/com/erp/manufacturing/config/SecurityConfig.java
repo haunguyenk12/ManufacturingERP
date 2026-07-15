@@ -21,7 +21,14 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 /**
  * Spring Security configuration.
- * Filter order: TraceIdFilter → RateLimitFilter → JwtAuthenticationFilter → Security chain
+ *
+ * <h3>Filter chain order</h3>
+ * <pre>
+ *   1. TraceIdFilter          – set traceId + clientIp in MDC and request attributes
+ *   2. RateLimitFilter        – IP blacklist, IP whitelist, IP-scope rate limiting
+ *   3. JwtAuthenticationFilter – validate JWT, set SecurityContext + authenticatedUserId
+ *   4. UserRateLimitFilter    – USER-scope rate limiting (needs authenticatedUserId)
+ * </pre>
  */
 @Configuration
 @EnableWebSecurity
@@ -31,6 +38,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final RateLimitFilter         rateLimitFilter;
+    private final UserRateLimitFilter     userRateLimitFilter;
     private final TraceIdFilter           traceIdFilter;
     private final JwtAuthEntryPoint       authEntryPoint;
     private final JwtAccessDeniedHandler  accessDeniedHandler;
@@ -48,10 +56,11 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
                 )
-                // Filter order: TraceId first → RateLimit → JWT
+                // Filter order: TraceId (1) → IP RateLimit (2) → JWT (3) → User RateLimit (4)
                 .addFilterBefore(traceIdFilter,           UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(rateLimitFilter,         UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(userRateLimitFilter,      jwtAuthenticationFilter.getClass())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler)

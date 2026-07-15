@@ -13,7 +13,7 @@ BEGIN
         gen_random_uuid(),
         'admin',
         'admin@erp.local',
-        '$2a$12$vqPrFbZJ4RqbTKR2e8IQ2.Ld6E5J5.oMFDsrlJITXOxVAd/fCYmkS',
+        '$2a$12$zUhsQTqnZs0KqpFHioEgpOXyJtVwLyWdwZsgaAl49LA5ocVTYwgqe',
         'ACTIVE'
     )
     ON CONFLICT (username) DO NOTHING

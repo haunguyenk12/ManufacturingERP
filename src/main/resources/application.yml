@@ -6,7 +6,7 @@ spring:
     name: manufacturing-erp
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/manufacturing_erp}
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/manufacturing_erp}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     hikari:

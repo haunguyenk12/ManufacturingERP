@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RACI Matrix – Manufacturing ERP System</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-dark:      #0d1117;
+      --bg-card:      #161b22;
+      --border:       #30363d;
+      --text-primary: #e6edf3;
+      --text-muted:   #8b949e;
+      --text-dim:     #484f58;
+
+      --r-color: #58a6ff;
+      --a-color: #3fb950;
+      --c-color: #d29922;
+      --i-color: #bc8cff;
+
+      --admin-accent:    #f78166;
+      --manager-accent:  #58a6ff;
+      --operator-accent: #3fb950;
+      --system-accent:   #79c0ff;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 36px 48px 28px;
+      position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 700px 350px at 15% -5%,  rgba(247,129,102,.07) 0%, transparent 60%),
+        radial-gradient(ellipse 500px 250px at 85% 110%, rgba(121,192,255,.06) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .header-inner { position: relative; max-width: 1100px; margin: 0 auto; }
+
+    .header-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(88,166,255,.1); border: 1px solid rgba(88,166,255,.25);
+      color: var(--r-color); border-radius: 20px;
+      padding: 3px 12px; font-size: 11px; font-weight: 600;
+      letter-spacing: .07em; text-transform: uppercase; margin-bottom: 14px;
+    }
+    .header-badge span { width: 6px; height: 6px; border-radius: 50%; background: var(--r-color); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    h1 {
+      font-size: clamp(20px, 2.8vw, 34px);
+      font-weight: 800; line-height: 1.15; letter-spacing: -.02em;
+      background: linear-gradient(135deg, #e6edf3 0%, #8b949e 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    h1 em { font-style: normal; background: linear-gradient(90deg, #f78166, #58a6ff, #3fb950, #79c0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .subtitle { margin-top: 6px; color: var(--text-muted); font-size: 12.5px; }
+
+    /* legend */
+    .legend-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .legend-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 12px; font-size: 12.5px;
+    }
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 6px;
+      font-weight: 700; font-size: 12px;
+      font-family: 'JetBrains Mono', monospace; flex-shrink: 0;
+    }
+    .badge.R { background: rgba(88,166,255,.18);  color: var(--r-color); border: 1px solid rgba(88,166,255,.4); }
+    .badge.A { background: rgba(63,185,80,.18);   color: var(--a-color); border: 1px solid rgba(63,185,80,.4); }
+    .badge.C { background: rgba(210,153,34,.18);  color: var(--c-color); border: 1px solid rgba(210,153,34,.4); }
+    .badge.I { background: rgba(188,140,255,.18); color: var(--i-color); border: 1px solid rgba(188,140,255,.4); }
+
+    /* ─── Roles bar ──────────────────────── */
+    .roles-bar {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+      padding: 16px 48px; background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+    .role-card {
+      display: flex; align-items: center; gap: 10px;
+      border-radius: 10px; padding: 12px 16px; border: 1px solid;
+    }
+    .role-card .ri { font-size: 20px; flex-shrink: 0; }
+    .role-card strong { display: block; font-size: 13px; font-weight: 700; }
+    .role-card span   { font-size: 11px; opacity: .65; margin-top: 1px; display: block; }
+
+    /* ─── Main ───────────────────────────── */
+    main { padding: 28px 48px 56px; max-width: 1100px; margin: 0 auto; }
+
+    /* table */
+    .table-wrapper {
+      overflow-x: auto; border-radius: 14px;
+      border: 1px solid var(--border);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+
+    thead tr {
+      background: linear-gradient(180deg, #1c2128 0%, #161b22 100%);
+      border-bottom: 2px solid var(--border);
+    }
+    thead th {
+      padding: 15px 10px; text-align: center;
+      font-weight: 700; font-size: 11.5px;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-muted); white-space: nowrap;
+    }
+    thead th.task-col {
+      text-align: left; padding-left: 22px;
+      min-width: 300px; color: var(--text-primary);
+    }
+    thead th.role-head { min-width: 120px; }
+    thead th[data-role="ADMIN"]    { color: var(--admin-accent); }
+    thead th[data-role="MANAGER"]  { color: var(--manager-accent); }
+    thead th[data-role="OPERATOR"] { color: var(--operator-accent); }
+    thead th[data-role="SYSTEM"]   { color: var(--system-accent); }
+    .role-sub { display: block; font-size: 10px; font-weight: 400; opacity: .55; margin-top: 2px; text-transform: none; letter-spacing: .02em; }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(48,54,61,.5);
+      transition: background .12s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(88,166,255,.03); }
+
+    tbody tr.group-header {
+      background: #1c2128;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid rgba(88,166,255,.1);
+    }
+    tbody tr.group-header td {
+      padding: 9px 22px; font-weight: 700; font-size: 11px;
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    td { padding: 12px 10px; text-align: center; vertical-align: middle; }
+    td.task-name {
+      text-align: left; padding-left: 22px; padding-right: 16px;
+      font-size: 13.5px; color: var(--text-primary); font-weight: 500;
+    }
+
+    /* cell */
+    .cell {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 38px; height: 38px; border-radius: 10px;
+      font-weight: 700; font-size: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      transition: transform .13s, box-shadow .13s; cursor: default;
+    }
+    .cell:hover { transform: scale(1.2); box-shadow: 0 0 16px currentColor; }
+    .cell.R { background: rgba(88,166,255,.18);  color: var(--r-color); border: 1px solid rgba(88,166,255,.4); }
+    .cell.A { background: rgba(63,185,80,.18);   color: var(--a-color); border: 1px solid rgba(63,185,80,.4); }
+    .cell.C { background: rgba(210,153,34,.18);  color: var(--c-color); border: 1px solid rgba(210,153,34,.4); }
+    .cell.I { background: rgba(188,140,255,.18); color: var(--i-color); border: 1px solid rgba(188,140,255,.4); }
+    .cell.none { color: var(--text-dim); font-size: 18px; }
+
+    /* tooltip */
+    [data-tip] { position: relative; }
+    [data-tip]:hover::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 8px); left: 50%;
+      transform: translateX(-50%);
+      background: #1c2128; border: 1px solid var(--border);
+      color: var(--text-primary); border-radius: 7px;
+      padding: 6px 11px; font-size: 11.5px; white-space: nowrap;
+      font-family: 'Inter', sans-serif; font-weight: 400;
+      pointer-events: none; z-index: 99;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+    }
+
+    footer {
+      text-align: center; color: var(--text-dim);
+      font-size: 11px; padding: 20px 48px 32px;
+      border-top: 1px solid var(--border);
+    }
+    footer strong { color: var(--text-muted); }
+
+    @media (max-width: 900px) {
+      header, main, footer { padding-left: 20px; padding-right: 20px; }
+      .roles-bar { padding-left: 20px; padding-right: 20px; grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="header-badge"><span></span> Tài liệu kỹ thuật – Đồ án tốt nghiệp</div>
+    <h1>RACI Matrix – <em>Manufacturing ERP</em></h1>
+    <p class="subtitle">Ma trận phân công trách nhiệm theo vai trò &nbsp;·&nbsp; Java 17 · Spring Boot 3 · PostgreSQL · Dynamic RBAC</p>
+    <div class="legend-bar">
+      <div class="legend-item"><span class="badge R">R</span><div><strong>Responsible</strong> – Người / Hệ thống thực thi trực tiếp</div></div>
+      <div class="legend-item"><span class="badge A">A</span><div><strong>Accountable</strong> – Người chịu trách nhiệm / phê duyệt</div></div>
+      <div class="legend-item"><span class="badge C">C</span><div><strong>Consulted</strong> – Được tham vấn trước khi quyết định</div></div>
+      <div class="legend-item"><span class="badge I">I</span><div><strong>Informed</strong> – Được thông báo kết quả sau đó</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="roles-bar">
+  <div class="role-card" style="color:var(--admin-accent);border-color:rgba(247,129,102,.3);background:rgba(247,129,102,.07);">
+    <span class="ri">🛡️</span>
+    <div><strong>ADMIN</strong><span>Cấu hình & Phân quyền</span></div>
+  </div>
+  <div class="role-card" style="color:var(--manager-accent);border-color:rgba(88,166,255,.3);background:rgba(88,166,255,.07);">
+    <span class="ri">📋</span>
+    <div><strong>MANAGER</strong><span>Quản lý & Phê duyệt</span></div>
+  </div>
+  <div class="role-card" style="color:var(--operator-accent);border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.07);">
+    <span class="ri">⚙️</span>
+    <div><strong>OPERATOR</strong><span>Thực thi nghiệp vụ</span></div>
+  </div>
+  <div class="role-card" style="color:var(--system-accent);border-color:rgba(121,192,255,.3);background:rgba(121,192,255,.07);">
+    <span class="ri">🤖</span>
+    <div><strong>SYSTEM</strong><span>Tự động hóa & Tính toán</span></div>
+  </div>
+</div>
+
+<main>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th class="task-col">Thao tác chính</th>
+          <th class="role-head" data-role="ADMIN">🛡️ ADMIN<span class="role-sub">Cấu hình</span></th>
+          <th class="role-head" data-role="MANAGER">📋 MANAGER<span class="role-sub">Quản lý</span></th>
+          <th class="role-head" data-role="OPERATOR">⚙️ OPERATOR<span class="role-sub">Thực thi</span></th>
+          <th class="role-head" data-role="SYSTEM">🤖 SYSTEM<span class="role-sub">Tự động</span></th>
+        </tr>
+      </thead>
+      <tbody id="raci-body"></tbody>
+    </table>
+  </div>
+  <p style="color:var(--text-dim);font-size:11px;margin-top:9px;margin-left:4px;">
+    * Di chuột vào ô RACI để xem giải thích &nbsp;·&nbsp;
+    Mỗi hàng có ít nhất 1 <strong style="color:var(--a-color)">A</strong> – người chịu trách nhiệm cuối cùng
+  </p>
+</main>
+
+<footer>
+  <strong>Manufacturing ERP – RACI Matrix</strong>
+  &nbsp;·&nbsp; Java 17 · Spring Boot 3 · PostgreSQL · Flyway · JWT &nbsp;·&nbsp; 2025
+</footer>
+
+<script>
+// Cột: [tên thao tác, ADMIN, MANAGER, OPERATOR, SYSTEM]
+const sections = [
+  {
+    group: '🔐  Xác thực & Phân quyền',
+    rows: [
+      ['Đăng nhập / Đăng xuất',          'A', 'I', 'R', 'R'],
+      ['Quản lý tài khoản & phân quyền', 'A', 'C', 'I', ''],
+    ]
+  },
+  {
+    group: '👤  Người dùng & Tổ chức',
+    rows: [
+      ['Quản lý User (tạo / sửa / vô hiệu)', 'A', 'C', '',  ''],
+      ['Cấu hình tổ chức (Company / Plant / Warehouse)', 'A', 'C', 'I', ''],
+    ]
+  },
+  {
+    group: '📦  Tồn kho (Inventory)',
+    rows: [
+      ['Quản lý Danh mục vật tư (Item Master)', 'R', 'A', 'I', ''],
+      ['Nhập kho (Receive)',                    'I', 'A', 'R', ''],
+      ['Xuất kho / Cấp vật tư (Issue)',         'I', 'A', 'R', ''],
+      ['Điều chỉnh & Kiểm kê (Adjust)',         'C', 'A', 'R', ''],
+      ['Cảnh báo tồn kho thấp',                 'I', 'I', '', 'R'],
+    ]
+  },
+  {
+    group: '🏗️  Công thức sản phẩm (BOM)',
+    rows: [
+      ['Tạo & Quản lý BOM',              'R', 'A', 'I', ''],
+      ['Kích hoạt BOM (Activate)',        'R', 'A', 'I', ''],
+      ['Phân rã BOM đa cấp (Explosion)', '',  'A', 'I', 'R'],
+    ]
+  },
+  {
+    group: '📅  Lập kế hoạch sản xuất (Planning)',
+    rows: [
+      ['Tạo & Duyệt kế hoạch sản xuất',        'I', 'A', '', 'C'],
+      ['Tính nhu cầu vật tư (MRP)',             '',  'A', 'I', 'R'],
+      ['Phát hiện & Xử lý thiếu hụt (Shortage)', '', 'A', 'C', 'R'],
+    ]
+  },
+  {
+    group: '🔧  Lệnh sản xuất (Work Order)',
+    rows: [
+      ['Tạo & Phát lệnh (Release) WO',        'I', 'A', 'R', ''],
+      ['Đặt trước vật tư (Reserve)',           'I', 'C', 'R', ''],
+      ['Cấp vật tư & Cập nhật WIP',           'I', 'C', 'R', ''],
+      ['Nhận thành phẩm (Production Receipt)', 'I', 'A', 'R', ''],
+      ['Tính sai lệch kế hoạch (Variance)',   '',  'A', 'I', 'R'],
+    ]
+  },
+  {
+    group: '🛒  Mua hàng (Purchasing)',
+    rows: [
+      ['Quản lý Nhà cung cấp (Supplier)',  'R', 'A', 'I', ''],
+      ['Yêu cầu mua hàng (PR) & Duyệt',   'I', 'A', 'C', ''],
+      ['Đặt hàng (PO) & Nhận hàng (GR)',   'I', 'A', 'R', ''],
+    ]
+  },
+  {
+    group: '📊  Báo cáo & Audit',
+    rows: [
+      ['Báo cáo tồn kho, WO, mua hàng', 'I', 'A', 'C', 'R'],
+      ['Ghi & Xem Audit Log',           'A', 'C', '',  'R'],
+    ]
+  },
+];
+
+const tips = {
+  R: 'Responsible – Thực thi / tự động tính toán',
+  A: 'Accountable – Chịu trách nhiệm / phê duyệt cuối cùng',
+  C: 'Consulted – Được tham khảo ý kiến',
+  I: 'Informed – Được thông báo kết quả',
+};
+
+const tbody = document.getElementById('raci-body');
+sections.forEach(sec => {
+  const gh = document.createElement('tr');
+  gh.className = 'group-header';
+  gh.innerHTML = `<td colspan="5">${sec.group}</td>`;
+  tbody.appendChild(gh);
+
+  sec.rows.forEach(([task, ...cells]) => {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td');
+    td0.className = 'task-name';
+    td0.textContent = task;
+    tr.appendChild(td0);
+
+    cells.forEach(val => {
+      const td = document.createElement('td');
+      if (val) {
+        td.setAttribute('data-tip', tips[val]);
+        td.innerHTML = `<span class="cell ${val}">${val}</span>`;
+      } else {
+        td.innerHTML = `<span class="cell none">·</span>`;
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+});
+</script>
+</body>
+</html>
