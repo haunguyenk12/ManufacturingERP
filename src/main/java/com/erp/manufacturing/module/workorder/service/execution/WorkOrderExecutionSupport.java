@@ -24,7 +24,6 @@ import java.util.UUID;
 class WorkOrderExecutionSupport {
 
     static final String WORK_ORDER_REFERENCE_TYPE = "WORK_ORDER";
-    private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 120;
 
     private final WorkOrderRepository workOrderRepository;
     private final OrganizationLookupService organizationLookupService;
@@ -38,14 +37,37 @@ class WorkOrderExecutionSupport {
 
     void ensureExecutable(WorkOrder workOrder) {
         if (!workOrder.canExecute()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Work order is not released for execution");
+        }
+    }
+
+    /**
+     * Looser than {@link #ensureExecutable} on purpose — see {@link WorkOrder#canReserve()}.
+     * Material may be reserved before the work order is released; issuing it may not.
+     */
+    void ensureReservable(WorkOrder workOrder) {
+        if (!workOrder.canReserve()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Work order is closed for reservation");
+        }
+    }
+
+    /**
+     * Looser than {@link #ensureExecutable} on purpose — see {@link WorkOrder#canReceipt()}.
+     * Output the shop floor already made may still be warehoused after the work order completed;
+     * issuing material into it may not.
+     */
+    void ensureReceiptable(WorkOrder workOrder) {
+        if (!workOrder.canReceipt()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Work order is not open for production receipts");
         }
     }
 
     void ensureNotClosedForWip(WorkOrder workOrder) {
         if (!workOrder.canExecute()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "WIP transaction can only be recorded for released or in-progress work orders");
         }
     }
@@ -76,7 +98,7 @@ class WorkOrderExecutionSupport {
 
     void ensureAvailableForReservation(StockBalance balance, BigDecimal quantity) {
         if (balance.getLot() != null && !balance.getLot().canIssue()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot cannot be reserved in status: " + balance.getLot().getStatus());
         }
         if (balance.availableQuantity().compareTo(quantity) < 0) {
@@ -94,26 +116,8 @@ class WorkOrderExecutionSupport {
 
     void ensureDoesNotExceed(BigDecimal quantity, BigDecimal remaining, String message) {
         if (quantity.compareTo(remaining) > 0) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED, message);
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT, message);
         }
-    }
-
-    String normalizeIdempotencyKey(String idempotencyKey) {
-        if (!StringUtils.hasText(idempotencyKey)) {
-            throw ExceptionFactory.custom(ValidationErrorCode.MISSING_REQUIRED_FIELD,
-                    "Idempotency-Key header is required");
-        }
-        String normalized = idempotencyKey.trim();
-        if (normalized.length() > IDEMPOTENCY_KEY_MAX_LENGTH) {
-            throw ExceptionFactory.custom(ValidationErrorCode.FIELD_TOO_LONG,
-                    "Idempotency-Key must be at most " + IDEMPOTENCY_KEY_MAX_LENGTH + " characters");
-        }
-        return normalized;
-    }
-
-    String childIdempotencyKey(String parentKey, int index) {
-        String prefix = parentKey.length() > 112 ? parentKey.substring(0, 112) : parentKey;
-        return prefix + ":L" + index;
     }
 
     String trimToNull(String value) {

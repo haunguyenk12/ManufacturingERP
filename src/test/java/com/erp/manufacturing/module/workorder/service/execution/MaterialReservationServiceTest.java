@@ -18,6 +18,8 @@ import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -51,8 +53,67 @@ class MaterialReservationServiceTest {
         service = new MaterialReservationService(
                 reservationRepository,
                 stockBalanceRepository,
+                organizationLookupService,
                 support,
                 new ManufacturingExecutionMapper());
+    }
+
+    /**
+     * Rewritten in D9 (debt #22). This case used to assert that reserving on a {@code BLOCKED} work
+     * order throws — the rule that deadlocked the system: reserving demanded {@code RELEASED} while
+     * releasing demanded a full reservation, so a work order created from MRP could never be released
+     * at all. {@code BLOCKED} is now exactly the state a planner reserves <em>out of</em>.
+     */
+    @ParameterizedTest
+    @EnumSource(value = WorkOrderStatus.class, names = {"DRAFT", "PLANNED", "BLOCKED"})
+    void reserve_isAllowedBeforeRelease(WorkOrderStatus status) {
+        WorkOrder workOrder = workOrder(status, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        StockBalance balance = StockBalance.builder()
+                .item(line.getComponentItem())
+                .warehouse(warehouse)
+                .quantity(new BigDecimal("10"))
+                .reservedQuantity(BigDecimal.ZERO)
+                .build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(
+                warehouse.getWarehouseId(), workOrder.getPlant().getPlantId())).thenReturn(warehouse);
+        when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId()))
+                .thenReturn(BigDecimal.ZERO);
+        when(inventoryAvailabilityService.getStockBalanceForIssue(
+                line.getComponentItem(), warehouse.getWarehouseId(), null)).thenReturn(balance);
+        when(reservationRepository.save(any(MaterialReservation.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4")));
+
+        assertThat(balance.getReservedQuantity()).isEqualByComparingTo("4");
+        verify(reservationRepository).save(any(MaterialReservation.class));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WorkOrderStatus.class, names = {"COMPLETED", "CANCELLED"})
+    void reserve_onClosedWorkOrder_shouldThrowBeforeTouchingStock(WorkOrderStatus status) {
+        WorkOrder workOrder = workOrder(status, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        MaterialReservationCreateRequest request = new MaterialReservationCreateRequest(
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> service.reserve(workOrderId, request))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(stockBalanceRepository);
+        verify(reservationRepository, never()).save(any());
     }
 
     @Test

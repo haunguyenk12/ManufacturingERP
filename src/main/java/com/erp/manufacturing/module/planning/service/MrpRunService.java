@@ -4,6 +4,7 @@ import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.context.RequestContext;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
@@ -28,11 +29,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -63,6 +66,10 @@ public class MrpRunService {
             ensureWarehouseBelongsToPlant(warehouse, plant);
         }
 
+        // Resolved before the run row exists so an unusable selection fails as 404/409 instead of
+        // leaving a FAILED run behind (rule C9).
+        List<PlanningDemand> demands = resolveDemands(request, company, plant, warehouse);
+
         List<UUID> scopeWarehouseIds = resolveScopeWarehouseIds(plant, warehouse);
         MrpRun run = MrpRun.builder()
                 .company(company)
@@ -75,12 +82,6 @@ public class MrpRunService {
         run = mrpRunRepository.save(run);
         MrpRun persistedRun = run;
 
-        List<PlanningDemand> demands = planningDemandRepository.findOpenDemandsForRun(
-                company.getCompanyId(),
-                plant.getPlantId(),
-                warehouse == null ? null : warehouse.getWarehouseId(),
-                request.horizonStartDate(),
-                request.horizonEndDate());
         mrpRunDemandRepository.saveAll(demands.stream()
                 .map(demand -> snapshotDemand(persistedRun, demand))
                 .toList());
@@ -91,7 +92,16 @@ public class MrpRunService {
             Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> savedRequirements =
                     persistRequirements(persistedRun, result.requirements());
             persistSuggestions(persistedRun, result.suggestions(), savedRequirements);
-            persistedRun.complete(Instant.now(), demands.size(), result.requirements().size(), result.suggestions().size());
+            persistedRun.complete(
+                    Instant.now(),
+                    demands.size(),
+                    result.requirements().size(),
+                    result.suggestions().size(),
+                    sumGrossDemand(result),
+                    countShortageLines(result),
+                    countSuggestions(result, SupplySuggestionType.WORK_ORDER),
+                    countSuggestions(result, SupplySuggestionType.PURCHASE_REQUISITION),
+                    countBlockedProposals(result));
             auditRunOutcome(AuditAction.MRP_RUN_COMPLETED, persistedRun, null);
         } catch (RuntimeException e) {
             persistedRun.fail(Instant.now(), e.getMessage());
@@ -140,6 +150,59 @@ public class MrpRunService {
                 .map(mapper::toResponse));
     }
 
+    /**
+     * The demands that go into this run. An explicit {@code demandLineIds} selection (spec §2.3)
+     * wins over the horizon sweep: the planner already filtered by due date on the demand screen, so
+     * re-applying the horizon here would silently drop lines they deliberately picked. Omitting the
+     * field keeps the pre-F5-B sweep so existing clients are unaffected (debt #13).
+     */
+    private List<PlanningDemand> resolveDemands(MrpRunCreateRequest request,
+                                                Company company,
+                                                Plant plant,
+                                                Warehouse warehouse) {
+        if (request.demandLineIds() == null || request.demandLineIds().isEmpty()) {
+            return planningDemandRepository.findOpenDemandsForRun(
+                    company.getCompanyId(),
+                    plant.getPlantId(),
+                    warehouse == null ? null : warehouse.getWarehouseId(),
+                    request.horizonStartDate(),
+                    request.horizonEndDate());
+        }
+
+        List<UUID> requestedIds = request.demandLineIds().stream().distinct().toList();
+        List<PlanningDemand> selected = planningDemandRepository.findSelectedDemandsForRun(requestedIds);
+        Map<UUID, PlanningDemand> byId = selected.stream()
+                .collect(Collectors.toMap(PlanningDemand::getPlanningDemandId, demand -> demand));
+        for (UUID demandId : requestedIds) {
+            ensureDemandEligible(byId.get(demandId), demandId, company, plant, warehouse);
+        }
+        return selected;
+    }
+
+    private void ensureDemandEligible(PlanningDemand demand,
+                                      UUID demandId,
+                                      Company company,
+                                      Plant plant,
+                                      Warehouse warehouse) {
+        // Out-of-scope demands are reported as "not found" rather than "forbidden" (spec §8.2:
+        // ENTITY_NOT_FOUND covers "không tìm thấy hoặc khác plant") so a planner cannot probe for
+        // the existence of another plant's demand.
+        boolean outOfScope = demand == null
+                || !demand.getCompany().getCompanyId().equals(company.getCompanyId())
+                || !demand.getPlant().getPlantId().equals(plant.getPlantId())
+                || (warehouse != null
+                    && demand.getWarehouse() != null
+                    && !demand.getWarehouse().getWarehouseId().equals(warehouse.getWarehouseId()));
+        if (outOfScope) {
+            throw ExceptionFactory.notFound(
+                    ValidationErrorCode.RESOURCE_NOT_FOUND, "Planning demand", demandId);
+        }
+        if (demand.getStatus() != PlanningDemandStatus.OPEN) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
+                    "Planning demand " + demandId + " is " + demand.getStatus() + ", only OPEN demands can be planned");
+        }
+    }
+
     private MrpRunDemand snapshotDemand(MrpRun run, PlanningDemand demand) {
         return MrpRunDemand.builder()
                 .mrpRun(run)
@@ -169,10 +232,13 @@ public class MrpRunService {
                     .reservedQuantity(draft.reservedQuantity())
                     .openSupplyQuantity(draft.openSupplyQuantity())
                     .safetyStockQuantity(draft.safetyStockQuantity())
+                    .projectedAvailableQuantity(draft.projectedAvailableQuantity())
                     .netRequiredQuantity(draft.netRequiredQuantity())
                     .dueDate(draft.dueDate())
                     .requirementStatus(draft.status())
                     .note(draft.note())
+                    .settingSource(draft.settingSource())
+                    .excludedLotCount(draft.excludedLotCount())
                     .build();
             saved.put(draft, requirementLineRepository.save(line));
         }
@@ -197,9 +263,50 @@ public class MrpRunService {
                             .suggestedQuantity(requirement.netRequiredQuantity())
                             .neededByDate(requirement.dueDate())
                             .suggestedOrderDate(requirement.suggestedOrderDate())
+                            .sourceRoutingCode(draft.sourceRoutingCode())
+                            .sourceRoutingVersion(draft.sourceRoutingVersion())
+                            .exceptionState(draft.exceptionState())
+                            .messageCodes(draft.messages().stream()
+                                    .map(Enum::name)
+                                    .collect(Collectors.joining(",")))
                             .build();
                 })
                 .toList());
+    }
+
+    // The four Run-header cells of spec §2.4 are counted off the calculation result already in hand,
+    // not re-queried: the run row is a cache of numbers this transaction just produced.
+
+    /**
+     * Total gross demand the run started from (spec §2.4). Only {@code level == 0} requirements
+     * count: every deeper level is <em>derived</em> from those through the BOM, so summing all
+     * levels would report the same demand once per BOM level and make a two-level product look
+     * twice as demanded as a single-level one.
+     */
+    private BigDecimal sumGrossDemand(MrpCalculationService.MrpCalculationResult result) {
+        return result.requirements().stream()
+                .filter(requirement -> requirement.level() == 0)
+                .map(MrpCalculationService.RequirementDraft::grossRequiredQuantity)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private int countShortageLines(MrpCalculationService.MrpCalculationResult result) {
+        return (int) result.requirements().stream()
+                .filter(requirement -> requirement.netRequiredQuantity().compareTo(BigDecimal.ZERO) > 0)
+                .count();
+    }
+
+    private int countSuggestions(MrpCalculationService.MrpCalculationResult result,
+                                 SupplySuggestionType suggestionType) {
+        return (int) result.suggestions().stream()
+                .filter(suggestion -> suggestion.suggestionType() == suggestionType)
+                .count();
+    }
+
+    private int countBlockedProposals(MrpCalculationService.MrpCalculationResult result) {
+        return (int) result.suggestions().stream()
+                .filter(suggestion -> suggestion.exceptionState() == SupplySuggestionExceptionState.BLOCKED)
+                .count();
     }
 
     private MrpRun findRun(UUID runId) {

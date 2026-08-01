@@ -1,7 +1,9 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
@@ -24,31 +26,42 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class InventoryMovementService {
 
-    private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 120;
-
     private final ItemRepository itemRepository;
     private final WarehouseRepository warehouseRepository;
     private final InventoryLotRepository lotRepository;
     private final StockBalanceRepository balanceRepository;
     private final StockMovementRepository movementRepository;
-
-    @Transactional(readOnly = true)
-    public boolean hasMovementForIdempotencyKey(String idempotencyKey) {
-        return movementRepository.findByIdempotencyKey(normalizeIdempotencyKey(idempotencyKey)).isPresent();
-    }
+    private final IdempotencySupport idempotency;
+    private final TraceIdProvider traceIdProvider;
 
     @Transactional
     public InventoryMovementResult receive(InventoryReceiveCommand command, String idempotencyKey) {
+        return receive(command, idempotencyKey, LotStatus.AVAILABLE);
+    }
+
+    /**
+     * Receives stock and, when a new lot has to be created, opens it in {@code initialStatusForNewLot}
+     * instead of {@code AVAILABLE}. Production receipt approval uses {@link LotStatus#HOLD} so the
+     * output is not usable until quality releases it.
+     * <p>
+     * The status applies to <b>newly created lots only</b> — an existing lot keeps its current status.
+     */
+    @Transactional
+    public InventoryMovementResult receive(InventoryReceiveCommand command,
+                                           String idempotencyKey,
+                                           LotStatus initialStatusForNewLot) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        Optional<StockMovement> existing = movementRepository.findByIdempotencyKey(normalizedKey);
+        Optional<StockMovement> existing =
+                findReplay(normalizedKey, MovementType.RECEIVE);
         if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), command);
             return new InventoryMovementResult(existing.get(), false);
         }
 
         Item item = findActiveItem(command.itemId());
         Warehouse warehouse = findActiveWarehouse(command.warehouseId());
         ensureSameCompany(item, warehouse);
-        InventoryLot lot = resolveReceiveLot(item, command.lotId(), command.lotCode());
+        InventoryLot lot = resolveReceiveLot(item, command.lotId(), command.lotCode(), initialStatusForNewLot);
         BigDecimal quantity = requirePositive(command.quantity());
 
         StockBalance balance = findOrCreateBalance(item, warehouse, lot);
@@ -56,6 +69,7 @@ public class InventoryMovementService {
         balanceRepository.save(balance);
 
         StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
@@ -66,6 +80,7 @@ public class InventoryMovementService {
                 .referenceType(trimToNull(command.referenceType()))
                 .referenceId(trimToNull(command.referenceId()))
                 .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(command))
                 .createdAt(Instant.now())
                 .build();
         return new InventoryMovementResult(movementRepository.save(movement), true);
@@ -94,7 +109,8 @@ public class InventoryMovementService {
                                                    String referenceType, String referenceId,
                                                    String idempotencyKey) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        Optional<StockMovement> existing = movementRepository.findByIdempotencyKey(normalizedKey);
+        Optional<StockMovement> existing =
+                findReplay(normalizedKey, MovementType.REVERSAL);
         if (existing.isPresent()) {
             return new InventoryMovementResult(existing.get(), false);
         }
@@ -123,6 +139,7 @@ public class InventoryMovementService {
         balanceRepository.save(balance);
 
         StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
@@ -137,17 +154,74 @@ public class InventoryMovementService {
         return new InventoryMovementResult(movementRepository.save(movement), true);
     }
 
+    /**
+     * Applies a QC disposition to a lot: the lot moves to {@code newStatus} and a
+     * {@link MovementType#LOT_STATUS_CHANGE} row is appended to the ledger for traceability.
+     * <p>
+     * Deliberately does <b>not</b> touch {@link StockBalance}: the goods are already on hand, QC only
+     * decides whether they may be used. Availability follows automatically because the availability
+     * queries filter on lot status. The movement therefore carries
+     * {@link MovementDirection#NONE} — it belongs to neither the inbound nor the outbound side.
+     */
+    @Transactional
+    public InventoryMovementResult changeLotStatus(LotStatusChangeCommand command, String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        Optional<StockMovement> existing =
+                findReplay(normalizedKey, MovementType.LOT_STATUS_CHANGE);
+        if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), command);
+            return new InventoryMovementResult(existing.get(), false);
+        }
+
+        Item item = findActiveItem(command.itemId());
+        Warehouse warehouse = findActiveWarehouse(command.warehouseId());
+        ensureSameCompany(item, warehouse);
+        if (command.lotId() == null) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "A lot is required to change lot status");
+        }
+        InventoryLot lot = findLotForItem(item, command.lotId());
+        BigDecimal quantity = requirePositive(command.quantity());
+
+        lot.setStatus(command.newStatus());
+        lotRepository.save(lot);
+
+        StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
+                .item(item)
+                .warehouse(warehouse)
+                .lot(lot)
+                .movementType(MovementType.LOT_STATUS_CHANGE)
+                .direction(MovementDirection.NONE)
+                .quantity(quantity)
+                .reason(trimToNull(command.reason()))
+                .referenceType(trimToNull(command.referenceType()))
+                .referenceId(trimToNull(command.referenceId()))
+                .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(command))
+                .createdAt(Instant.now())
+                .build();
+        return new InventoryMovementResult(movementRepository.save(movement), true);
+    }
+
     @Transactional
     public InventoryMovementResult issueReserved(InventoryIssueCommand command, String idempotencyKey) {
         return issueInternal(command, idempotencyKey, true);
     }
 
+    /**
+     * Both {@link #issue} and {@link #issueReserved} write {@link MovementType#ISSUE}, so they share a
+     * single replay scope on purpose: both are "goods leaving the warehouse", and inventing a second
+     * movement type just to separate two entry points would put an implementation detail in the ledger.
+     */
     private InventoryMovementResult issueInternal(InventoryIssueCommand command,
                                                   String idempotencyKey,
                                                   boolean consumeReserved) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        Optional<StockMovement> existing = movementRepository.findByIdempotencyKey(normalizedKey);
+        Optional<StockMovement> existing =
+                findReplay(normalizedKey, MovementType.ISSUE);
         if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), command);
             return new InventoryMovementResult(existing.get(), false);
         }
 
@@ -168,6 +242,7 @@ public class InventoryMovementService {
         balanceRepository.save(balance);
 
         StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
@@ -178,16 +253,37 @@ public class InventoryMovementService {
                 .referenceType(trimToNull(command.referenceType()))
                 .referenceId(trimToNull(command.referenceId()))
                 .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(command))
                 .createdAt(Instant.now())
                 .build();
         return new InventoryMovementResult(movementRepository.save(movement), true);
     }
 
+    /**
+     * An adjustment writes {@link MovementType#ADJUST_IN} <em>or</em> {@link MovementType#ADJUST_OUT}
+     * depending on the sign of the delta, so the sign has to be known <b>before</b> the replay lookup —
+     * that is why {@code quantityDelta} is read first here and not next to the balance update.
+     * <p>
+     * Consequence: a zero/absent delta now fails with {@code NEGATIVE_QUANTITY} <em>before</em> an
+     * unknown item or warehouse fails with {@code RESOURCE_NOT_FOUND}. Reading both types instead
+     * would keep the old ordering but leave the same key usable once as {@code ADJUST_IN} and once as
+     * {@code ADJUST_OUT} — the exact hole this change closes.
+     */
     @Transactional
     public InventoryMovementResult adjust(InventoryAdjustCommand command, String idempotencyKey) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-        Optional<StockMovement> existing = movementRepository.findByIdempotencyKey(normalizedKey);
+
+        BigDecimal delta = command.quantityDelta();
+        if (delta == null || delta.compareTo(BigDecimal.ZERO) == 0) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.NEGATIVE_QUANTITY,
+                    "Adjustment quantity must be non-zero");
+        }
+        boolean inbound = delta.compareTo(BigDecimal.ZERO) > 0;
+        MovementType movementType = inbound ? MovementType.ADJUST_IN : MovementType.ADJUST_OUT;
+
+        Optional<StockMovement> existing = findReplay(normalizedKey, movementType);
         if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), command);
             return new InventoryMovementResult(existing.get(), false);
         }
 
@@ -196,13 +292,6 @@ public class InventoryMovementService {
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveExistingLotForAdjustment(item, command.lotId(), command.lotCode());
 
-        BigDecimal delta = command.quantityDelta();
-        if (delta == null || delta.compareTo(BigDecimal.ZERO) == 0) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.NEGATIVE_QUANTITY,
-                    "Adjustment quantity must be non-zero");
-        }
-
-        boolean inbound = delta.compareTo(BigDecimal.ZERO) > 0;
         BigDecimal quantity = delta.abs();
         StockBalance balance = inbound
                 ? findOrCreateBalance(item, warehouse, lot)
@@ -216,16 +305,18 @@ public class InventoryMovementService {
         balanceRepository.save(balance);
 
         StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
-                .movementType(inbound ? MovementType.ADJUST_IN : MovementType.ADJUST_OUT)
+                .movementType(movementType)
                 .direction(inbound ? MovementDirection.IN : MovementDirection.OUT)
                 .quantity(quantity)
                 .reason(trimToNull(command.reason()))
                 .referenceType(trimToNull(command.referenceType()))
                 .referenceId(trimToNull(command.referenceId()))
                 .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(command))
                 .createdAt(Instant.now())
                 .build();
         return new InventoryMovementResult(movementRepository.save(movement), true);
@@ -260,7 +351,7 @@ public class InventoryMovementService {
         }
     }
 
-    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode) {
+    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode, LotStatus initialStatusForNewLot) {
         if (!item.isLotTracked()) {
             ensureNoLotProvided(lotId, lotCode);
             return null;
@@ -273,7 +364,7 @@ public class InventoryMovementService {
                 .orElseGet(() -> lotRepository.save(InventoryLot.builder()
                         .item(item)
                         .lotCode(normalizedLotCode)
-                        .status(LotStatus.AVAILABLE)
+                        .status(initialStatusForNewLot)
                         .receivedAt(Instant.now())
                         .build()));
     }
@@ -281,7 +372,7 @@ public class InventoryMovementService {
     private InventoryLot resolveExistingLotForOutbound(Item item, UUID lotId, String lotCode) {
         InventoryLot lot = resolveExistingLot(item, lotId, lotCode);
         if (lot != null && !lot.canIssue()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot cannot be issued in status: " + lot.getStatus());
         }
         return lot;
@@ -381,16 +472,17 @@ public class InventoryMovementService {
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {
-        if (!StringUtils.hasText(idempotencyKey)) {
-            throw ExceptionFactory.custom(ValidationErrorCode.MISSING_REQUIRED_FIELD,
-                    "Idempotency-Key header is required");
-        }
-        String normalized = idempotencyKey.trim();
-        if (normalized.length() > IDEMPOTENCY_KEY_MAX_LENGTH) {
-            throw ExceptionFactory.custom(ValidationErrorCode.FIELD_TOO_LONG,
-                    "Idempotency-Key must be at most " + IDEMPOTENCY_KEY_MAX_LENGTH + " characters");
-        }
-        return normalized;
+        return idempotency.normalizeKey(idempotencyKey);
+    }
+
+    /**
+     * Looks up a previous movement for this key <b>within the same operation</b> (B5). The type
+     * argument is what makes the same key reusable across different operations, and it must match the
+     * scope of {@code uk_stock_movements_idempotency_key} (V37) — dropping it here would make the
+     * replay return whichever of several same-key rows the database happens to hand back first.
+     */
+    private Optional<StockMovement> findReplay(String normalizedKey, MovementType movementType) {
+        return movementRepository.findByIdempotencyKeyAndMovementType(normalizedKey, movementType);
     }
 
     private String trimToNull(String value) {

@@ -57,6 +57,15 @@ public class MaterialIssueLine extends BaseEntity {
     @Column(name = "quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantity;
 
+    /** True when this line issued more than the component's remaining BOM requirement. */
+    @Column(name = "over_issue", nullable = false)
+    @Builder.Default
+    private boolean overIssue = false;
+
+    /** Justification captured from the user holding {@code PERM_MATERIAL_ISSUE_OVERRIDE}. */
+    @Column(name = "override_reason", columnDefinition = "TEXT")
+    private String overrideReason;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "stock_movement_id", nullable = false)
     private StockMovement stockMovement;

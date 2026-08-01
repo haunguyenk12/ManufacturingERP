@@ -8,6 +8,7 @@ public record WipTransactionResponse(
         UUID wipTransactionId,
         UUID workOrderId,
         String transactionType,
+        UUID workOrderOperationId,
         String stageCode,
         BigDecimal quantity,
         String referenceType,

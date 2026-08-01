@@ -1,5 +1,10 @@
 You are an expert in Java programming, Spring Boot, Spring Framework, Maven, JUnit, and related Java technologies.
 
+> **Lưu ý:** Đây là style-guide Java/Spring Boot chung, KHÔNG viết riêng cho repo này. Khi mục dưới
+> đây mâu thuẫn với quyết định cụ thể của project (đã ghi trong `CLAUDE.md` hoặc các file khác trong
+> `.claude/rules/*.md`), **luôn ưu tiên quyết định của project**. Các điểm mâu thuẫn đã biết được sửa
+> trực tiếp bên dưới (Testing, Data Access, Async).
+
 Code Style and Structure
 - Write clean, efficient, and well-documented Java code with accurate Spring Boot examples.
 - Use Spring Boot best practices and conventions throughout your code.
@@ -13,10 +18,7 @@ Spring Boot Specifics
 - Utilize Spring Boot's auto-configuration features effectively.
 - Implement proper exception handling using @ControllerAdvice and @ExceptionHandler.
 
-Naming Conventions
-- Use PascalCase for class names (e.g., UserController, OrderService).
-- Use camelCase for method and variable names (e.g., findUserById, isOrderValid).
-- Use ALL_CAPS for constants (e.g., MAX_RETRY_ATTEMPTS, DEFAULT_PAGE_SIZE).
+Naming Conventions — xem `CLAUDE.md` §3.1 (đã tách ra đó, không lặp lại ở đây để tránh 2 nơi phải sửa).
 
 Java and Spring Boot Usage
 - Use Java 17 or later features when applicable (e.g., records, sealed classes, pattern matching).
@@ -34,10 +36,10 @@ Dependency Injection and IoC
 - Leverage Spring's IoC container for managing bean lifecycles.
 
 Testing
-- Write unit tests using JUnit 5 and Spring Boot Test.
-- Use MockMvc for testing web layers.
-- Implement integration tests using @SpringBootTest.
-- Use @DataJpaTest for repository layer tests.
+- Write unit tests using JUnit 5 and Spring Boot Test (Mockito, MockMvc).
+- **Trong repo này**: hạn chế `@SpringBootTest` (chậm, chưa dùng lần nào — xem
+  `.claude/rules/best-practices.md` §8.6 T1). Ưu tiên unit test + `@WebMvcTest`/`@DataJpaTest` có mục
+  tiêu rõ, không dựng full context trừ khi thực sự cần integration test.
 
 Performance and Scalability
 - Implement caching strategies using Spring Cache abstraction.
@@ -60,15 +62,17 @@ API Documentation
 Data Access and ORM
 - Use Spring Data JPA for database operations.
 - Implement proper entity relationships and cascading.
-- Use database migrations with tools like Flyway or Liquibase.
+- Database migration: **Flyway** (project đã chọn, xem `.claude/rules/coding-rules.md` C5 — không dùng
+  Liquibase, tránh 2 công cụ migration trong 1 repo).
 
 Build and Deployment
 - Use Maven for dependency management and build processes.
 - Implement proper profiles for different environments (dev, test, prod).
-- Use Docker for containerization if applicable.
+- Docker + Docker Compose (đã dùng cho local dev, xem `CLAUDE.md` §2).
 
 Follow best practices for:
 - RESTful API design (proper use of HTTP methods, status codes, etc.).
-- Asynchronous processing using Spring's @Async or reactive programming with Spring WebFlux.
+- Asynchronous processing using Spring's @Async. **Không** dùng Spring WebFlux — stack repo này là
+  Servlet/Spring MVC, không phải reactive.
 
 Adhere to SOLID principles and maintain high cohesion and low coupling in your Spring Boot application design.

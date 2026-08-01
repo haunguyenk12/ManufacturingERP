@@ -5,5 +5,7 @@ public enum MovementType {
     ISSUE,
     ADJUST_IN,
     ADJUST_OUT,
-    REVERSAL
+    REVERSAL,
+    /** QC disposition of a lot. Traceability only — on-hand, reserved and balances are unchanged. */
+    LOT_STATUS_CHANGE
 }

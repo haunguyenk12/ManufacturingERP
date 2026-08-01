@@ -7,8 +7,10 @@ import com.erp.manufacturing.module.organization.domain.Warehouse;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Locale;
 import java.util.UUID;
 
 @Entity
@@ -27,6 +29,9 @@ public class MrpRun extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "mrp_run_id", updatable = false, nullable = false)
     private UUID mrpRunId;
+
+    @Column(name = "code", nullable = false, length = 40)
+    private String code;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "company_id", nullable = false)
@@ -69,8 +74,54 @@ public class MrpRun extends BaseEntity {
     @Builder.Default
     private Integer totalSuggestionLines = 0;
 
+    /**
+     * Total gross demand this run started from (spec §2.4 Run header, V39) — the sum of
+     * {@code grossRequiredQuantity} across the <em>level-0</em> requirements only. Deeper levels are
+     * derived from those, so summing every level would count the same demand once per BOM level.
+     *
+     * <p>Like the four counters below, this is a cache of a number the run transaction already
+     * produced (D4 precedent); it is never recomputed on read. Runs from before F8 carry 0.
+     */
+    @Column(name = "gross_demand_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal grossDemandQuantity = BigDecimal.ZERO;
+
+    @Column(name = "shortage_lines", nullable = false)
+    @Builder.Default
+    private Integer shortageLines = 0;
+
+    @Column(name = "planned_work_orders", nullable = false)
+    @Builder.Default
+    private Integer plannedWorkOrders = 0;
+
+    @Column(name = "planned_purchase_recommendations", nullable = false)
+    @Builder.Default
+    private Integer plannedPurchaseRecommendations = 0;
+
+    @Column(name = "blocked_proposals", nullable = false)
+    @Builder.Default
+    private Integer blockedProposals = 0;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
+
+    /**
+     * Derives the human-facing run code (spec §2.4) from the identifier.
+     *
+     * <p>Must run as {@code @PrePersist} and not after {@code save()}: Hibernate snapshots the
+     * entity when it queues the insert, so a field set afterwards is simply absent from the INSERT
+     * and the NOT NULL column blows up. {@code GenerationType.UUID} is a before-execution generator,
+     * so {@code mrpRunId} is already assigned by the time this callback fires.
+     *
+     * <p>Must stay the same formula as the {@code V36} backfill
+     * ({@code 'RUN-' || upper(substring(mrp_run_id::text, 1, 8))}).
+     */
+    @PrePersist
+    public void assignCode() {
+        if (code == null) {
+            code = "RUN-" + mrpRunId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        }
+    }
 
     public void start(Instant now) {
         status = MrpRunStatus.RUNNING;
@@ -78,12 +129,25 @@ public class MrpRun extends BaseEntity {
         errorMessage = null;
     }
 
-    public void complete(Instant now, int demandCount, int requirementCount, int suggestionCount) {
+    public void complete(Instant now,
+                         int demandCount,
+                         int requirementCount,
+                         int suggestionCount,
+                         BigDecimal grossDemand,
+                         int shortageLineCount,
+                         int plannedWorkOrderCount,
+                         int plannedPurchaseRecommendationCount,
+                         int blockedProposalCount) {
         status = MrpRunStatus.COMPLETED;
         completedAt = now;
         totalDemandLines = demandCount;
         totalRequirementLines = requirementCount;
         totalSuggestionLines = suggestionCount;
+        grossDemandQuantity = grossDemand;
+        shortageLines = shortageLineCount;
+        plannedWorkOrders = plannedWorkOrderCount;
+        plannedPurchaseRecommendations = plannedPurchaseRecommendationCount;
+        blockedProposals = blockedProposalCount;
     }
 
     public void fail(Instant now, String message) {

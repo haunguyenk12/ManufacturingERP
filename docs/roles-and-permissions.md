@@ -71,6 +71,21 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `SUPPLIER_READ` | Xem danh sách nhà cung cấp |
 | `ORG_READ` | Xem cấu trúc tổ chức (Company / Plant / Warehouse) |
 
+### Sales
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_SALES_ORDER_READ` | Xem Sales Order và các dòng đơn hàng (`F3`, `V29`) |
+| `PERM_SALES_ORDER_MANAGE` | Tạo / Confirm / Cancel Sales Order. **Confirm sinh independent demand cho MRP**, Cancel huỷ luôn demand còn `OPEN` (`F3`, `V29`) |
+
+### Routing
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_ROUTING_READ` | Xem routing và danh sách công đoạn (`F4`, `V31`) |
+| `PERM_ROUTING_MANAGE` | Tạo / Activate / Deactivate routing. **Activate deactivate bản `ACTIVE` cũ của cùng item**; routing `ACTIVE` là điều kiện bắt buộc để convert proposal MAKE thành Work Order (`F4`, `V31`) |
+
+> Endpoint `GET /sales-orders/planning-demands` **không** dùng quyền sales — nó là màn hình của
+> planner nên gác bằng `PERM_MRP_RUN` (spec §2.2 gán `PLANNING_RUN` cho endpoint này).
+
 ### Planning & MRP
 | Quyền | Mô tả |
 |-------|-------|
@@ -80,6 +95,11 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `SUPPLY_SUGGESTION_APPROVE` | Duyệt / Từ chối gợi ý cung ứng từ MRP |
 | `SUGGESTION_TO_WO` | Chuyển gợi ý MRP → Work Order |
 | `SUGGESTION_TO_PR` | Chuyển gợi ý MRP → Purchase Requisition |
+
+> **`F5-B` (2026-07-28) đổi đường dẫn, không đổi permission.** `/api/v1/mrp/runs**` →
+> `/api/v1/planning-runs**`; `/api/v1/mrp/suggestions/{id}/**` → `/api/v1/supply-suggestions/{id}/**`
+> (kể cả `convert-to-purchase-requisition` của module `purchasing`). Chuỗi `PERM_MRP_RUN` /
+> `PERM_MRP_READ` / `PERM_SUPPLY_SUGGESTION_MANAGE` giữ nguyên — **không** có migration permission mới.
 
 ### Purchasing
 | Quyền | Mô tả |
@@ -93,6 +113,15 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `WO_WRITE` | Tạo / Cập nhật Work Order |
 | `WO_RELEASE` | Phát lệnh (RELEASED) / Huỷ Work Order |
 | `WO_VARIANCE_READ` | Xem sai lệch kế hoạch vs thực tế (Variance) |
+| `PERM_MATERIAL_ISSUE_OVERRIDE` | Cấp vật tư **vượt định mức BOM** kèm lý do bắt buộc (Gate 1b) |
+| `PERM_PRODUCTION_RECEIPT_APPROVE` | Duyệt / Từ chối Production Receipt đang chờ (Gate 1c) |
+| `PERM_PRODUCTION_EXECUTION_MANAGE` | Báo cáo sản lượng xưởng (`F5`, `V33`) – MANAGER cũng có để sửa/bổ sung thay ca |
+| `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng (`F5`, `V33`) |
+
+### Quality Control
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_QUALITY_DISPOSITION` | QC disposition: giải phóng lot thành phẩm khỏi `HOLD` sang `AVAILABLE` hoặc `REJECTED` (`F2`, `V27`). **[F6]** Nhánh `AVAILABLE` còn tăng `fulfilledQuantity` của Sales Order line được allocate — fulfillment là **hệ quả** của quyền này, `F6` **không** thêm permission mới (spec §7.1). **[D5]** Áp dụng cho **cả** output không lot-tracked (phán quyết trên receipt thay vì trên lot; `REJECTED` rút hàng bằng `ADJUST_OUT`) — `D5` cũng **không** thêm permission mới |
 
 ### Reports
 | Quyền | Mô tả |
@@ -110,6 +139,16 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 | Quyền | Mô tả |
 |-------|-------|
 | `AUTH_LOGIN` | Đăng nhập / Đăng xuất / Refresh token |
+
+### Sales
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_SALES_ORDER_READ` | Xem Sales Order để truy nguồn gốc Work Order (`F3`, `V29`). **Không** có `PERM_SALES_ORDER_MANAGE` — confirm/cancel đơn hàng là cam kết thương mại, thuộc MANAGER |
+
+### Routing
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_ROUTING_READ` | Xem công đoạn của routing đang chạy trên Work Order (`F4`, `V31`). **Không** có `PERM_ROUTING_MANAGE` — routing là master data ràng buộc thứ được phép sản xuất, thuộc MANAGER |
 
 ### Inventory
 | Quyền | Mô tả |
@@ -130,8 +169,15 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 | `MATERIAL_RESERVE` | Đặt trước vật tư cho Work Order (reservation) |
 | `MATERIAL_ISSUE_POST` | Cấp vật tư (Material Issue) → tự động ISSUE movement |
 | `WIP_RECORD` | Ghi nhận WIP, phế liệu, làm lại (scrap / rework) |
-| `PRODUCTION_RECEIPT_POST` | Nhận thành phẩm (Production Receipt) → tự động RECEIVE movement |
+| `PRODUCTION_RECEIPT_POST` | Tạo Production Receipt (`DRAFT`) và `submit` sang `PENDING_APPROVAL` – chưa vào tồn kho |
+| `PERM_PRODUCTION_EXECUTION_MANAGE` | **Báo cáo sản lượng xưởng** (good / scrap / rework) – đây là thao tác làm Work Order tiến triển và `COMPLETED` (`F5`, `V33`) |
+| `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng của Work Order (`F5`, `V33`) |
 | `WO_VARIANCE_READ` | Xem sai lệch kế hoạch vs thực tế (Variance) |
+
+> **Separation of duties (P1 + F2):** OPERATOR **KHÔNG** có `PERM_MATERIAL_ISSUE_OVERRIDE`,
+> `PERM_PRODUCTION_RECEIPT_APPROVE` và `PERM_QUALITY_DISPOSITION`. Người xuất/nhập không được tự
+> duyệt phần vượt định mức hoặc thành phẩm của chính mình, và người sản xuất không được tự cho
+> hàng của mình qua QC — cả ba quyền này chỉ cấp cho ADMIN và MANAGER (`V24`, `V27`).
 
 ### Reports
 | Quyền | Mô tả |
@@ -175,12 +221,17 @@ Không phải người dùng – là các **luồng xử lý nội bộ** đư�
 | **Tạo & Quản lý BOM**              |   I   |    A    |    R     |        |
 | **Activate BOM**                   |   I   |    A    |    C     |        |
 | **BOM Explosion**                  |       |    A    |    I     |   R    |
+| **Tạo & Quản lý Routing**          |   I   |    A    |    I     |        |
+| **Activate Routing**               |   I   |    A    |    C     |        |
 | **Tạo & Duyệt kế hoạch SX**        |   I   |    A    |    R     |        |
 | **Tính nhu cầu vật tư (MRP)**      |       |    A    |    I     |   R    |
 | **Phát hiện Shortage**             |       |    A    |    C     |   R    |
 | **Tạo & Release Work Order**       |   I   |    A    |    R     |        |
 | **Cấp vật tư & Cập nhật WIP**      |   I   |    C    |    R     |        |
-| **Nhận thành phẩm (Receipt)**      |   I   |    A    |    R     |        |
+| **Báo cáo sản lượng xưởng**        |   I   |    C    |    R     |        |
+| **Duyệt xuất vượt định mức**       |   I   |    A    |          |        |
+| **Gửi Receipt chờ duyệt**          |   I   |    C    |    R     |        |
+| **Duyệt / Từ chối Receipt**        |   I   |    A    |          |        |
 | **Tính Variance**                  |       |    A    |    I     |   R    |
 | **Quản lý Supplier**               |   C   |    A    |    R     |        |
 | **PR & Duyệt mua hàng**            |   I   |    A    |    R     |        |
@@ -200,4 +251,6 @@ Không phải người dùng – là các **luồng xử lý nội bộ** đư�
 ✅ Mọi movement (RECEIVE / ISSUE / ADJUST) phải có Idempotency-Key.
 ✅ Lot HOLD / REJECTED / EXPIRED không được dùng cho sản xuất.
 ✅ Chỉ BOM ACTIVE mới được dùng cho Planning / Work Order.
+✅ Mỗi item chỉ có ĐÚNG 1 Routing ACTIVE; convert proposal MAKE bắt buộc phải có nó.
+✅ Người gửi chứng từ không được là người duyệt chính chứng từ đó.
 ```

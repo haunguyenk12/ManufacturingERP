@@ -14,4 +14,16 @@ public record RefreshRequest(
         /** Must match the deviceId used at login. */
         @Size(max = 128, message = "deviceId must not exceed 128 characters")
         String deviceId
-) {}
+) {
+    /**
+     * Masks {@code refreshToken} only. {@code tokenId} is an identifier used to look the session up
+     * in Redis, not a credential on its own, so it stays visible — masking it would cost the log its
+     * debugging value for nothing.
+     */
+    @Override
+    public String toString() {
+        return "RefreshRequest[refreshToken=" + (refreshToken == null ? "null" : "***")
+                + ", tokenId=" + tokenId
+                + ", deviceId=" + deviceId + "]";
+    }
+}

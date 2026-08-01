@@ -202,6 +202,32 @@
               Adding main sources as test sources keeps mvn test deterministic
               without changing the production jar output.
             -->
+            <!--
+              Coverage measurement only (T0). Deliberately no `check` execution and no
+              coverage threshold: the goal of this phase is to be able to measure, not to
+              gate the build (see NEXT_PHASE_PLAN.md decision D2).
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>build-helper-maven-plugin</artifactId>
@@ -218,6 +244,25 @@
                                 <source>${project.basedir}/src/main/java</source>
                             </sources>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+              T4: runs *IT.java integration tests (Testcontainers) separately from `mvn test`.
+              Default Surefire include patterns already exclude *IT.java, and Failsafe's default
+              include patterns already match *IT.java, so no include/exclude override is needed
+              (see NEXT_PHASE_PLAN.md decision D5).
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>

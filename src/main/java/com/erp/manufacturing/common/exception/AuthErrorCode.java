@@ -4,26 +4,27 @@ import org.springframework.http.HttpStatus;
 
 /**
  * Error codes for all authentication and token-related failures.
- * Format: {@code AUTH_XXX}
+ * The wire value is the enum constant name so clients branch on a stable, readable code
+ * (see {@code .claude/rules/error-handling.md} §5.3).
  */
 public enum AuthErrorCode implements ErrorCode {
 
     // ── Credentials ────────────────────────────────────────────────────────
-    INVALID_CREDENTIALS     ("AUTH_001", "Invalid username or password",              HttpStatus.UNAUTHORIZED),
-    ACCOUNT_LOCKED          ("AUTH_002", "Account is temporarily locked",             HttpStatus.LOCKED),
-    ACCOUNT_INACTIVE        ("AUTH_003", "Account is inactive",                       HttpStatus.FORBIDDEN),
+    INVALID_CREDENTIALS     ("INVALID_CREDENTIALS",    "Invalid username or password",              HttpStatus.UNAUTHORIZED),
+    ACCOUNT_LOCKED          ("ACCOUNT_LOCKED",         "Account is temporarily locked",             HttpStatus.LOCKED),
+    ACCOUNT_INACTIVE        ("ACCOUNT_INACTIVE",       "Account is inactive",                       HttpStatus.FORBIDDEN),
 
     // ── Token ──────────────────────────────────────────────────────────────
-    TOKEN_EXPIRED           ("AUTH_010", "Access token has expired",                  HttpStatus.UNAUTHORIZED),
-    TOKEN_REVOKED           ("AUTH_011", "Token has been revoked",                    HttpStatus.UNAUTHORIZED),
-    TOKEN_MALFORMED         ("AUTH_012", "Token is malformed or invalid",             HttpStatus.UNAUTHORIZED),
-    REFRESH_TOKEN_EXPIRED   ("AUTH_013", "Refresh token has expired or is invalid",   HttpStatus.UNAUTHORIZED),
+    TOKEN_EXPIRED           ("TOKEN_EXPIRED",          "Access token has expired",                  HttpStatus.UNAUTHORIZED),
+    TOKEN_REVOKED           ("TOKEN_REVOKED",          "Token has been revoked",                    HttpStatus.UNAUTHORIZED),
+    TOKEN_MALFORMED         ("TOKEN_MALFORMED",        "Token is malformed or invalid",             HttpStatus.UNAUTHORIZED),
+    REFRESH_TOKEN_EXPIRED   ("REFRESH_TOKEN_EXPIRED",  "Refresh token has expired or is invalid",   HttpStatus.UNAUTHORIZED),
 
     // ── Session ────────────────────────────────────────────────────────────
-    SESSION_CONFLICT        ("AUTH_020", "Session conflict detected",                 HttpStatus.CONFLICT),
+    SESSION_CONFLICT        ("SESSION_CONFLICT",       "Session conflict detected",                 HttpStatus.CONFLICT),
 
     // ── Authorization ──────────────────────────────────────────────────────
-    ACCESS_DENIED           ("AUTH_030", "Insufficient permissions",                  HttpStatus.FORBIDDEN);
+    ACCESS_DENIED           ("PERMISSION_DENIED",      "Insufficient permissions",                  HttpStatus.FORBIDDEN);
 
     private final String     code;
     private final String     message;

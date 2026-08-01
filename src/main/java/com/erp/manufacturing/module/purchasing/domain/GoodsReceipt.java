@@ -48,6 +48,10 @@ public class GoodsReceipt extends BaseEntity {
     @Column(name = "idempotency_key", nullable = false, length = 120)
     private String idempotencyKey;
 
+    /** SHA-256 of the request payload; null for documents written before V25. */
+    @Column(name = "payload_hash", length = 64)
+    private String payloadHash;
+
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 

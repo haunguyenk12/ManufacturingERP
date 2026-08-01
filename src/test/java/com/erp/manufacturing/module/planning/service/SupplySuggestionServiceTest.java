@@ -63,6 +63,7 @@ class SupplySuggestionServiceTest {
         assertThat(response.decisionNote()).isEqualTo("Looks good");
     }
 
+    /** {@code ensureDraft} reads the document status, so 409 per §5.3 (D11, debt #26). */
     @Test
     void reject_convertedSuggestion_fails() {
         SupplySuggestion suggestion = suggestion(SupplySuggestionType.PURCHASE_REQUISITION, SupplySuggestionStatus.CONVERTED);
@@ -74,8 +75,30 @@ class SupplySuggestionServiceTest {
                 new SupplySuggestionDecisionRequest("No")))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
+        verify(supplySuggestionRepository, never()).save(any());
+    }
+
+    /**
+     * The site debt #26 was really about: {@code convert-to-work-order} used to answer 422 while
+     * {@code convert-to-purchase-requisition} answered 409 (D7) for the very same rule — one business
+     * condition with two codes depending on which fork the planner took.
+     */
+    @Test
+    void convertToWorkOrder_suggestionNotApproved_failsWithStateConflict() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.DRAFT);
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+
+        assertThatThrownBy(() -> service.convertToWorkOrder(
+                suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(workOrderService);
         verify(supplySuggestionRepository, never()).save(any());
     }
 
@@ -85,7 +108,7 @@ class SupplySuggestionServiceTest {
         UUID workOrderId = UUID.randomUUID();
         when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
                 .thenReturn(Optional.of(suggestion));
-        when(workOrderService.createFromMrp(eq(suggestion.getPlant().getPlantId()), any(WorkOrderCreateRequest.class)))
+        when(workOrderService.createFromMrp(eq(suggestion.getPlant().getPlantId()), any(WorkOrderCreateRequest.class), any(), any()))
                 .thenReturn(workOrderResponse(workOrderId, suggestion));
         when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);
 
@@ -99,13 +122,119 @@ class SupplySuggestionServiceTest {
                         "Create from MRP"));
 
         assertThat(response.status()).isEqualTo(SupplySuggestionStatus.CONVERTED.name());
+        assertThat(response.supplyType()).isEqualTo("MAKE");
         assertThat(response.convertedReferenceType()).isEqualTo("WORK_ORDER");
         assertThat(response.convertedReferenceId()).isEqualTo(workOrderId);
+        assertThat(response.convertedWorkOrderId()).isEqualTo(workOrderId);
         verify(workOrderService).createFromMrp(eq(suggestion.getPlant().getPlantId()), argThat(request ->
                 request.workOrderNo().equals("WO-MRP-001")
                         && request.productItemId().equals(suggestion.getItem().getItemId())
                         && request.outputWarehouseId().equals(suggestion.getWarehouse().getWarehouseId())
-                        && request.plannedQuantity().compareTo(suggestion.getSuggestedQuantity()) == 0));
+                        && request.plannedQuantity().compareTo(suggestion.getSuggestedQuantity()) == 0),
+                isNull(),
+                // Planning lineage (spec §3.3, F8): converting is the only moment a work order can
+                // learn which run and proposal produced it, so it has to be carried here.
+                eq(new WorkOrderService.PlanningLineage(
+                        suggestion.getMrpRun().getMrpRunId(),
+                        suggestion.getMrpRun().getCode(),
+                        suggestion.getSupplySuggestionId())));
+    }
+
+    /**
+     * F6, spec §2.4: the demand lineage suggestion → requirement line → planning demand →
+     * {@code SALES_ORDER_LINE} is what the work order gets allocated against. This module owns the
+     * lineage, so it is the one that resolves it (rule C7).
+     */
+    @Test
+    void convertToWorkOrder_demandFromASalesOrderLine_passesThatLineToTheWorkOrder() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        UUID salesOrderLineId = UUID.randomUUID();
+        suggestion.getRequirementLine().setSourceDemand(salesOrderDemand(salesOrderLineId.toString()));
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+        when(workOrderService.createFromMrp(any(), any(WorkOrderCreateRequest.class), any(), any()))
+                .thenReturn(workOrderResponse(UUID.randomUUID(), suggestion));
+        when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);
+
+        service.convertToWorkOrder(suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null));
+
+        verify(workOrderService).createFromMrp(any(), any(WorkOrderCreateRequest.class), eq(salesOrderLineId), any());
+    }
+
+    /** {@code MANUAL}/{@code FORECAST} demand has no customer behind it — no allocation, no error. */
+    @Test
+    void convertToWorkOrder_demandNotFromSales_allocatesNothingAndStillConverts() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        PlanningDemand manualDemand = salesOrderDemand(UUID.randomUUID().toString());
+        manualDemand.setDemandType(PlanningDemandType.MANUAL);
+        manualDemand.setReferenceType(null);
+        manualDemand.setReferenceId(null);
+        suggestion.getRequirementLine().setSourceDemand(manualDemand);
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+        when(workOrderService.createFromMrp(any(), any(WorkOrderCreateRequest.class), any(), any()))
+                .thenReturn(workOrderResponse(UUID.randomUUID(), suggestion));
+        when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);
+
+        SupplySuggestionResponse response = service.convertToWorkOrder(
+                suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null));
+
+        assertThat(response.status()).isEqualTo(SupplySuggestionStatus.CONVERTED.name());
+        verify(workOrderService).createFromMrp(any(), any(WorkOrderCreateRequest.class), isNull(), any());
+    }
+
+    /**
+     * {@code expandChildren} copies the level-0 demand down every BOM level, so a sub-assembly
+     * proposal carries the same {@code sourceDemand} as the finished good. Only the finished-good
+     * work order may be allocated — allocating the sub-assembly too would fulfil the line twice.
+     */
+    @Test
+    void convertToWorkOrder_componentLevelProposal_isNotAllocatedToTheInheritedSalesOrderLine() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        suggestion.getRequirementLine().setRequirementLevel(1);
+        suggestion.getRequirementLine().setSourceDemand(salesOrderDemand(UUID.randomUUID().toString()));
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+        when(workOrderService.createFromMrp(any(), any(WorkOrderCreateRequest.class), any(), any()))
+                .thenReturn(workOrderResponse(UUID.randomUUID(), suggestion));
+        when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);
+
+        service.convertToWorkOrder(suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null));
+
+        verify(workOrderService).createFromMrp(any(), any(WorkOrderCreateRequest.class), isNull(), any());
+    }
+
+    /** A reference id that is not a UUID is stale planning data, not a reason to refuse the work order. */
+    @Test
+    void convertToWorkOrder_unparsableDemandReference_allocatesNothingAndStillConverts() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        suggestion.getRequirementLine().setSourceDemand(salesOrderDemand("not-a-uuid"));
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+        when(workOrderService.createFromMrp(any(), any(WorkOrderCreateRequest.class), any(), any()))
+                .thenReturn(workOrderResponse(UUID.randomUUID(), suggestion));
+        when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);
+
+        SupplySuggestionResponse response = service.convertToWorkOrder(
+                suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null));
+
+        assertThat(response.status()).isEqualTo(SupplySuggestionStatus.CONVERTED.name());
+        verify(workOrderService).createFromMrp(any(), any(WorkOrderCreateRequest.class), isNull(), any());
+    }
+
+    private PlanningDemand salesOrderDemand(String referenceId) {
+        return PlanningDemand.builder()
+                .planningDemandId(UUID.randomUUID())
+                .demandType(PlanningDemandType.SALES_ORDER)
+                .requiredQuantity(new BigDecimal("10"))
+                .dueDate(LocalDate.now().plusDays(10))
+                .referenceType(PlanningDemandService.REFERENCE_TYPE_SALES_ORDER_LINE)
+                .referenceId(referenceId)
+                .build();
     }
 
     @Test
@@ -124,6 +253,43 @@ class SupplySuggestionServiceTest {
         verifyNoInteractions(workOrderService);
     }
 
+    @Test
+    void convertToWorkOrder_blockedSuggestion_failsWithTheMessageCodeThatBlockedIt() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        suggestion.setExceptionState(SupplySuggestionExceptionState.BLOCKED);
+        suggestion.setMessageCodes("MATERIAL_SHORTAGE,MISSING_ROUTING");
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+
+        assertThatThrownBy(() -> service.convertToWorkOrder(
+                suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.MISSING_ROUTING));
+
+        verifyNoInteractions(workOrderService);
+        verify(supplySuggestionRepository, never()).save(any());
+    }
+
+    @Test
+    void convertToWorkOrder_blockedByMissingBom_reportsMissingBomNotMissingRouting() {
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.APPROVED);
+        suggestion.setExceptionState(SupplySuggestionExceptionState.BLOCKED);
+        suggestion.setMessageCodes("MATERIAL_SHORTAGE,MISSING_BOM");
+        when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
+                .thenReturn(Optional.of(suggestion));
+
+        assertThatThrownBy(() -> service.convertToWorkOrder(
+                suggestion.getSupplySuggestionId(),
+                new SupplySuggestionConvertWorkOrderRequest(null, null, null, null, null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.MISSING_BOM));
+
+        verifyNoInteractions(workOrderService);
+    }
+
     private WorkOrderResponse workOrderResponse(UUID workOrderId, SupplySuggestion suggestion) {
         return new WorkOrderResponse(
                 workOrderId,
@@ -134,22 +300,42 @@ class SupplySuggestionServiceTest {
                 suggestion.getItem().getItemId(),
                 suggestion.getItem().getCode(),
                 suggestion.getItem().getName(),
+                suggestion.getItem().getUnit(), // outputUom (F8)
                 UUID.randomUUID(),
                 "R1",
+                null, // bomCapturedAt (F8)
+                null,
+                null,
+                null,
+                null,
+                null, // planningRunId (F8)
+                null, // planningRunCode (F8)
+                null, // planningProposalId (F8)
                 suggestion.getWarehouse().getWarehouseId(),
                 suggestion.getWarehouse().getCode(),
                 suggestion.getSuggestedQuantity(),
                 BigDecimal.ZERO,
                 suggestion.getSuggestedQuantity(),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
                 "DRAFT",
                 null,
                 null,
                 null,
+                null, // executionStartedAt (F8)
+                null, // executionCompletedAt (F8)
+                null,
+                null,
+                null, // cancelReason (F7)
                 null,
                 null,
                 null,
                 null,
                 null,
+                List.of(),
+                List.of(),
                 List.of());
     }
 

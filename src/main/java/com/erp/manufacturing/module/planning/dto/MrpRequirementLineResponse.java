@@ -11,8 +11,10 @@ public record MrpRequirementLineResponse(
         UUID parentRequirementLineId,
         UUID sourceDemandId,
         UUID itemId,
-        String itemCode,
+        String itemSku,
         String itemName,
+        /** Unit of measure of the item (spec §2.4 "Requirement"). */
+        String uom,
         UUID warehouseId,
         String warehouseCode,
         Integer requirementLevel,
@@ -21,9 +23,17 @@ public record MrpRequirementLineResponse(
         BigDecimal reservedQuantity,
         BigDecimal openSupplyQuantity,
         BigDecimal safetyStockQuantity,
+        /**
+         * Coverage still unclaimed when this line was netted (spec §2.4). Null for runs executed
+         * before {@code V40}. Cannot be derived client-side from {@code availableQuantity +
+         * openSupplyQuantity} — see {@code MrpRequirementLine#projectedAvailableQuantity}.
+         */
+        BigDecimal projectedAvailableQuantity,
         BigDecimal netRequiredQuantity,
         LocalDate dueDate,
         String requirementStatus,
+        String settingSource,
+        Integer excludedLotCount,
         String note,
         Instant createdAt
 ) {}

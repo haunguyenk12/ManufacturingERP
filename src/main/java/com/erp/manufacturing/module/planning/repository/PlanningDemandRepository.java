@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,6 +37,21 @@ public interface PlanningDemandRepository extends JpaRepository<PlanningDemand, 
                                 @Param("status") PlanningDemandStatus status,
                                 Pageable pageable);
 
+    /**
+     * Demands generated from another document, looked up by the {@code referenceType}/{@code referenceId}
+     * pair. Used to cancel the demand of a sales order whose own status is being cancelled (F3),
+     * in one query rather than one per line.
+     */
+    @Query("""
+            select d
+            from PlanningDemand d
+            where d.referenceType = :referenceType
+              and d.referenceId in :referenceIds
+              and d.status = com.erp.manufacturing.module.planning.domain.PlanningDemandStatus.OPEN
+            """)
+    List<PlanningDemand> findOpenByReference(@Param("referenceType") String referenceType,
+                                             @Param("referenceIds") Collection<String> referenceIds);
+
     @EntityGraph(attributePaths = {"company", "plant", "item", "warehouse"})
     @Query("""
             select d
@@ -52,4 +68,20 @@ public interface PlanningDemandRepository extends JpaRepository<PlanningDemand, 
                                                @Param("warehouseId") UUID warehouseId,
                                                @Param("horizonStart") LocalDate horizonStart,
                                                @Param("horizonEnd") LocalDate horizonEnd);
+
+    /**
+     * The demands a planner explicitly picked for a run (spec §2.3 {@code demandLineIds}). Loaded
+     * without any company/plant/status filter on purpose — {@code MrpRunService} has to tell
+     * "not yours" from "not eligible" apart to answer 404 vs 409, which a filtering query cannot.
+     * Same ordering as {@link #findOpenDemandsForRun} so both entry points net stock in the same
+     * sequence.
+     */
+    @EntityGraph(attributePaths = {"company", "plant", "item", "warehouse"})
+    @Query("""
+            select d
+            from PlanningDemand d
+            where d.planningDemandId in :demandIds
+            order by d.priority asc, d.dueDate asc, d.createdAt asc
+            """)
+    List<PlanningDemand> findSelectedDemandsForRun(@Param("demandIds") Collection<UUID> demandIds);
 }

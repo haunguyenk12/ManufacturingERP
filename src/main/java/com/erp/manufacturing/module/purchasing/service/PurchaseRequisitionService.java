@@ -74,7 +74,7 @@ public class PurchaseRequisitionService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Supply suggestion", suggestionId));
         if (suggestion.getStatus() != SupplySuggestionStatus.APPROVED) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only APPROVED supply suggestions can be converted");
         }
         if (suggestion.getSuggestionType() != SupplySuggestionType.PURCHASE_REQUISITION) {
@@ -153,7 +153,9 @@ public class PurchaseRequisitionService {
             BigDecimal approved = overrides.getOrDefault(
                     line.getPurchaseRequisitionLineId(), line.getRequestedQuantity());
             if (approved.compareTo(line.getRequestedQuantity()) > 0) {
-                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                // Quantity-vs-document conflict (409), same family as PLANNED_QUANTITY_EXCEEDED in
+                // workorder / goods receipt. Retagged in D7.
+                throw ExceptionFactory.custom(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         "Approved quantity cannot exceed requested quantity");
             }
             line.setApprovedQuantity(requirePositive(approved, "Approved quantity"));
@@ -189,7 +191,7 @@ public class PurchaseRequisitionService {
                                                         PurchaseRequisitionConvertToOrderRequest request) {
         PurchaseRequisition requisition = findRequisition(requisitionId);
         if (!requisition.isApproved()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only APPROVED purchase requisitions can be converted to purchase orders");
         }
         Supplier supplier = resolveSupplierForConversion(requisition, request.supplierId());
@@ -283,7 +285,7 @@ public class PurchaseRequisitionService {
 
     private void ensureDraft(PurchaseRequisition requisition) {
         if (!requisition.isDraft()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only DRAFT purchase requisitions can be changed");
         }
     }

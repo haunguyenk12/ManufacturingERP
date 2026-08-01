@@ -121,6 +121,7 @@ class PlanningDemandServiceTest {
         verify(planningDemandRepository, never()).save(any());
     }
 
+    /** Reads the document status, so 409 {@code STATE_CONFLICT} per §5.3 (D11, debt #26). */
     @Test
     void cancel_nonOpenDemand_fails() {
         UUID demandId = UUID.randomUUID();
@@ -130,7 +131,7 @@ class PlanningDemandServiceTest {
         assertThatThrownBy(() -> service.cancel(demandId))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verify(planningDemandRepository, never()).save(any());
     }

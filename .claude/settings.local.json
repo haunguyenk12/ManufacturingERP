@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn -o -q test)",
+      "Bash(awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7; s+=$9} END {print \"tests=\"t, \"failures=\"f, \"errors=\"e, \"skipped=\"s}')",
+      "Bash(mvn -o -q compile)",
+      "Bash(mvn -o -q test-compile)"
+    ]
+  }
+}

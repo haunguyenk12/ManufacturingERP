@@ -34,6 +34,15 @@ public class WipTransaction extends BaseEntity {
     @Column(name = "transaction_type", nullable = false, length = 40)
     private WipTransactionType transactionType;
 
+    /**
+     * Operation this transaction was reported against (F5). Authoritative when present;
+     * {@link #stageCode} is then derived from it. Null for work orders created without a routing,
+     * where {@code stageCode} remains free text.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "work_order_operation_id")
+    private WorkOrderOperation operation;
+
     @Column(name = "stage_code", length = 80)
     private String stageCode;
 

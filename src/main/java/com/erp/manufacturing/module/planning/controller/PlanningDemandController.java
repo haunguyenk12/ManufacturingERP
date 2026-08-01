@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.planning.controller;
 
+import com.erp.manufacturing.common.web.PlantContextResolver;
+import org.springframework.web.bind.annotation.RequestHeader;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.planning.domain.PlanningDemandStatus;
@@ -23,11 +25,14 @@ import java.util.UUID;
 public class PlanningDemandController {
 
     private final PlanningDemandService planningDemandService;
+    private final PlantContextResolver plantContextResolver;
 
     @PostMapping("/api/v1/planning/demands")
     @Operation(summary = "Create planning demand")
     public ResponseEntity<ApiResponse<PlanningDemandResponse>> create(
+            @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @Valid @RequestBody PlanningDemandCreateRequest request) {
+        plantContextResolver.ensureMatches(plantHeader, request.plantId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(planningDemandService.create(request)));
     }
@@ -35,6 +40,7 @@ public class PlanningDemandController {
     @GetMapping("/api/v1/planning/demands")
     @Operation(summary = "List planning demands")
     public ResponseEntity<ApiResponse<PageResult<PlanningDemandResponse>>> list(
+            @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @RequestParam UUID companyId,
             @RequestParam UUID plantId,
             @RequestParam(required = false) UUID warehouseId,
@@ -44,6 +50,7 @@ public class PlanningDemandController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "dueDate") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir) {
+        plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(planningDemandService.list(
                 companyId, plantId, warehouseId, itemId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }

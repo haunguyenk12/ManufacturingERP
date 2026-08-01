@@ -44,10 +44,18 @@ public class ProductionReceiptLine extends BaseEntity {
     @JoinColumn(name = "lot_id")
     private InventoryLot lot;
 
+    /** Lot code requested at post time; used to resolve/create the real lot on approval. */
+    @Column(name = "requested_lot_code", length = 120)
+    private String requestedLotCode;
+
     @Column(name = "quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantity;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "stock_movement_id", nullable = false)
+    @Column(name = "reason", columnDefinition = "TEXT")
+    private String reason;
+
+    /** Null while the receipt is {@code PENDING_APPROVAL}; set when the receipt is approved. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "stock_movement_id")
     private StockMovement stockMovement;
 }

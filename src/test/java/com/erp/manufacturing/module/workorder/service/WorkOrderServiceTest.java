@@ -2,6 +2,8 @@ package com.erp.manufacturing.module.workorder.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
@@ -10,12 +12,18 @@ import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.routing.domain.RoutingHeader;
+import com.erp.manufacturing.module.routing.domain.RoutingOperation;
+import com.erp.manufacturing.module.routing.domain.RoutingStatus;
+import com.erp.manufacturing.module.routing.service.RoutingLookupService;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderComponentLine;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
 import com.erp.manufacturing.module.workorder.mapper.WorkOrderMapper;
+import com.erp.manufacturing.module.workorder.repository.ComponentQuantityProjection;
+import com.erp.manufacturing.module.workorder.repository.MaterialReservationRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
@@ -24,12 +32,18 @@ import com.erp.manufacturing.module.workorder.service.execution.WipTransactionSe
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,10 +60,14 @@ class WorkOrderServiceTest {
     @Mock OrganizationLookupService organizationLookupService;
     @Mock ItemLookupService itemLookupService;
     @Mock BomLookupService bomLookupService;
+    @Mock RoutingLookupService routingLookupService;
     @Mock MaterialReservationService materialReservationService;
     @Mock MaterialIssueService materialIssueService;
     @Mock WipTransactionService wipTransactionService;
     @Mock ProductionReceiptService productionReceiptService;
+    @Mock WorkOrderDemandAllocationService allocationService;
+    @Mock MaterialReservationRepository reservationRepository;
+    @Mock WorkOrderReleaseGate releaseGate;
 
     WorkOrderService service;
 
@@ -60,11 +78,85 @@ class WorkOrderServiceTest {
                 organizationLookupService,
                 itemLookupService,
                 bomLookupService,
+                routingLookupService,
                 materialReservationService,
                 materialIssueService,
                 wipTransactionService,
                 productionReceiptService,
+                allocationService,
+                reservationRepository,
+                releaseGate,
                 new WorkOrderMapper());
+    }
+
+    /**
+     * Spec §3.3 "Requirement" wants {@code reservedQuantity} on the work order itself, not only on
+     * {@code /material-readiness}. Asserted here is the Java half: the batch result lands on the
+     * matching line. That the query counts only {@code ACTIVE} reservations is JPQL and lives in
+     * {@code MaterialReservationRepositoryIT} (rule R7).
+     */
+    @Test
+    void get_mapsReservedQuantityOntoTheMatchingComponentLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        UUID componentLineId = workOrder.getComponentLines().get(0).getComponentLineId();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(reservationRepository.sumActiveRemainingByWorkOrderIds(any()))
+                .thenReturn(List.of(componentQuantity(componentLineId, new BigDecimal("6"))));
+
+        WorkOrderResponse response = service.get(workOrder.getWorkOrderId());
+
+        assertThat(response.componentLines()).hasSize(1);
+        assertThat(response.componentLines().get(0).reservedQuantity()).isEqualByComparingTo("6");
+    }
+
+    /**
+     * A component line the aggregate returned no row for has nothing reserved — it must render as
+     * {@code 0}, not {@code null}. {@code group by} never emits a zero row, so this is the default the
+     * mapper has to supply.
+     */
+    @Test
+    void get_componentLineWithoutAnyReservation_readsAsZeroNotNull() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(reservationRepository.sumActiveRemainingByWorkOrderIds(any())).thenReturn(List.of());
+
+        WorkOrderResponse response = service.get(workOrder.getWorkOrderId());
+
+        assertThat(response.componentLines().get(0).reservedQuantity()).isEqualByComparingTo("0");
+    }
+
+    /**
+     * Rule C15: one aggregate for the whole page, never one per row. Getting this wrong produces
+     * byte-identical output and only shows up as query load, which is why it has to be asserted
+     * rather than eyeballed.
+     */
+    @Test
+    void list_resolvesReservedQuantityInOneBatchQueryForThePage() {
+        WorkOrder first = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrder second = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("20"));
+        UUID plantId = first.getPlant().getPlantId();
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(first.getPlant());
+        when(workOrderRepository.search(eq(plantId), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(first, second)));
+        when(allocationService.findByWorkOrderIds(any())).thenReturn(Map.of());
+        when(reservationRepository.sumActiveRemainingByWorkOrderIds(any())).thenReturn(List.of(
+                componentQuantity(first.getComponentLines().get(0).getComponentLineId(), new BigDecimal("4"))));
+
+        var page = service.list(plantId, null, null, null, PageRequest.of(0, 20));
+
+        assertThat(page.content()).hasSize(2);
+        assertThat(page.content().get(0).componentLines().get(0).reservedQuantity()).isEqualByComparingTo("4");
+        assertThat(page.content().get(1).componentLines().get(0).reservedQuantity()).isEqualByComparingTo("0");
+        verify(reservationRepository, times(1)).sumActiveRemainingByWorkOrderIds(any());
+    }
+
+    private ComponentQuantityProjection componentQuantity(UUID componentLineId, BigDecimal quantity) {
+        return new ComponentQuantityProjection() {
+            @Override public UUID getComponentLineId() { return componentLineId; }
+            @Override public BigDecimal getQuantity() { return quantity; }
+        };
     }
 
     @Test
@@ -86,7 +178,7 @@ class WorkOrderServiceTest {
         when(itemLookupService.getActiveItem(productId)).thenReturn(product);
         when(organizationLookupService.getActiveWarehouseInPlant(warehouseId, plantId)).thenReturn(warehouse);
         when(bomLookupService.getActiveBom(companyId, productId)).thenReturn(bom);
-        when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        stubSaveReturningArgument();
 
         WorkOrderResponse response = service.create(plantId, new WorkOrderCreateRequest(
                 " WO-001 ", productId, warehouseId, new BigDecimal("10"), null, null, " First run "));
@@ -96,6 +188,100 @@ class WorkOrderServiceTest {
         assertThat(response.componentLines()).hasSize(1);
         assertThat(response.componentLines().get(0).requiredQuantity()).isEqualByComparingTo("22");
         assertThat(response.notes()).isEqualTo("First run");
+    }
+
+    // ── routing snapshot (F4) ──────────────────────────────────────────────
+
+    @Test
+    void createFromMrp_snapshotsActiveRoutingHeaderOntoWorkOrder() {
+        Fixture fixture = fixtureWithBom();
+        RoutingHeader routing = activeRouting(fixture.product(), "RT-FG100", "V1");
+        when(routingLookupService.getActiveRouting(fixture.companyId(), fixture.productId()))
+                .thenReturn(routing);
+        stubSaveReturningArgument();
+
+        WorkOrderResponse response = service.createFromMrp(fixture.plantId(), createRequest(fixture), null, null);
+
+        assertThat(response.sourceRoutingId()).isEqualTo(routing.getRoutingId());
+        assertThat(response.sourceRoutingCode()).isEqualTo("RT-FG100");
+        assertThat(response.sourceRoutingVersion()).isEqualTo("V1");
+        assertThat(response.routingCapturedAt()).isNotNull();
+    }
+
+    /**
+     * Invariant B49: the snapshot is a copy. Revising the routing master after the work order
+     * exists must not retroactively change what the shop floor was told to build.
+     */
+    @Test
+    void createFromMrp_routingMasterRevisedAfterwards_workOrderSnapshotStaysFrozen() {
+        Fixture fixture = fixtureWithBom();
+        RoutingHeader routing = activeRouting(fixture.product(), "RT-FG100", "V1");
+        when(routingLookupService.getActiveRouting(fixture.companyId(), fixture.productId()))
+                .thenReturn(routing);
+        stubSaveReturningArgument();
+
+        service.createFromMrp(fixture.plantId(), createRequest(fixture), null, null);
+
+        ArgumentCaptor<WorkOrder> captor = ArgumentCaptor.forClass(WorkOrder.class);
+        verify(workOrderRepository).save(captor.capture());
+        WorkOrder saved = captor.getValue();
+
+        routing.setCode("RT-FG100-REVISED");
+        routing.setRoutingVersion("V2");
+        routing.getOperations().clear();
+
+        assertThat(saved.getSourceRoutingCode()).isEqualTo("RT-FG100");
+        assertThat(saved.getSourceRoutingVersion()).isEqualTo("V1");
+        assertThat(saved.getSourceRoutingId()).isEqualTo(routing.getRoutingId());
+    }
+
+    @Test
+    void createFromMrp_itemWithoutActiveRouting_failsWithMissingRouting() {
+        Fixture fixture = fixtureWithBom();
+        when(routingLookupService.getActiveRouting(fixture.companyId(), fixture.productId()))
+                .thenThrow(ExceptionFactory.businessRule(BusinessErrorCode.MISSING_ROUTING,
+                        "No ACTIVE routing for item " + fixture.productId()));
+
+        assertThatThrownBy(() -> service.createFromMrp(fixture.plantId(), createRequest(fixture), null, null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.MISSING_ROUTING));
+
+        verify(workOrderRepository, never()).save(any());
+    }
+
+    /**
+     * F4 only blocks the MRP proposal path (NEXT_PHASE_PLAN F4 §1.3): manual creation still works
+     * for items that have no routing yet, and simply carries an empty snapshot.
+     */
+    @Test
+    void create_manualWithoutActiveRouting_succeedsWithEmptyRoutingSnapshot() {
+        Fixture fixture = fixtureWithBom();
+        when(routingLookupService.findActiveRouting(fixture.companyId(), fixture.productId()))
+                .thenReturn(Optional.empty());
+        stubSaveReturningArgument();
+
+        WorkOrderResponse response = service.create(fixture.plantId(), createRequest(fixture));
+
+        assertThat(response.sourceRoutingId()).isNull();
+        assertThat(response.sourceRoutingCode()).isNull();
+        assertThat(response.sourceRoutingVersion()).isNull();
+        assertThat(response.routingCapturedAt()).isNull();
+        verify(routingLookupService, never()).getActiveRouting(any(), any());
+    }
+
+    @Test
+    void create_manualWithActiveRouting_snapshotsItAnyway() {
+        Fixture fixture = fixtureWithBom();
+        RoutingHeader routing = activeRouting(fixture.product(), "RT-FG100", "V3");
+        when(routingLookupService.findActiveRouting(fixture.companyId(), fixture.productId()))
+                .thenReturn(Optional.of(routing));
+        stubSaveReturningArgument();
+
+        WorkOrderResponse response = service.create(fixture.plantId(), createRequest(fixture));
+
+        assertThat(response.sourceRoutingCode()).isEqualTo("RT-FG100");
+        assertThat(response.sourceRoutingVersion()).isEqualTo("V3");
     }
 
     @Test
@@ -110,6 +296,8 @@ class WorkOrderServiceTest {
         when(itemLookupService.getActiveItem(productId))
                 .thenReturn(item(productId, companyId, "RM-001", ItemType.RAW_MATERIAL, false));
 
+        // Master-data validation, not a state machine transition — deliberately left at 422 when
+        // F5 moved the work order state errors to STATE_CONFLICT (409).
         assertThatThrownBy(() -> service.create(plantId, new WorkOrderCreateRequest(
                 "WO-001", productId, warehouseId, BigDecimal.ONE, null, null, null)))
                 .isInstanceOf(AppException.class)
@@ -129,11 +317,11 @@ class WorkOrderServiceTest {
                 new WorkOrderUpdateRequest(null, new BigDecimal("12"), null, null, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     @Test
-    void release_draftWorkOrder_setsReleasedStatus() {
+    void release_allComponentsFullyReserved_shouldRelease() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
@@ -143,7 +331,96 @@ class WorkOrderServiceTest {
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
         assertThat(workOrder.getReleasedAt()).isNotNull();
+        verify(releaseGate).ensureMaterialReady(workOrder.getWorkOrderId());
         verify(wipTransactionService).recordStart(workOrder);
+    }
+
+    @Test
+    void release_partialReservation_shouldBlockAndThrow() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        // The gate persists BLOCKED in its own transaction, then refuses the release.
+        doAnswer(invocation -> {
+            workOrder.block(Instant.now(), "1/1 components short on reservation");
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Cannot release: 1 component(s) not fully reserved");
+        }).when(releaseGate).ensureMaterialReady(workOrder.getWorkOrderId());
+
+        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId()))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.BLOCKED);
+        assertThat(workOrder.getBlockReason()).isNotBlank();
+        verify(wipTransactionService, never()).recordStart(any());
+    }
+
+    @Test
+    void release_fromBlockedAfterReservationCompleted_shouldRelease() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.block(Instant.now(), "1/1 components short on reservation");
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        service.release(workOrder.getWorkOrderId());
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
+        assertThat(workOrder.getBlockedAt()).isNull();
+        assertThat(workOrder.getBlockReason()).isNull();
+    }
+
+    @Test
+    void release_completedWorkOrder_shouldThrowBeforeGate() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.COMPLETED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId()))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(releaseGate);
+    }
+
+    @Test
+    void cancel_blockedWorkOrder_shouldCancel() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.block(Instant.now(), "1/1 components short on reservation");
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        service.cancel(workOrder.getWorkOrderId(), new WorkOrderCancelRequest("Customer withdrew the order"));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CANCELLED);
+        assertThat(workOrder.getCancelledAt()).isNotNull();
+        // Spec §3.2 (F7): the reason is persisted, not just accepted and dropped.
+        assertThat(workOrder.getCancelReason()).isEqualTo("Customer withdrew the order");
+    }
+
+    /**
+     * Spec §3.2 requires a reason. It is checked before the status gate on purpose (C9), so a caller
+     * who forgot it is told that rather than being told the work order is in the wrong state.
+     */
+    @Test
+    void cancel_withoutReason_failsBeforeTouchingAnything() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("   ")))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.APPROVAL_REASON_REQUIRED));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.DRAFT);
+        verify(workOrderRepository, never()).save(any());
+        verifyNoInteractions(materialReservationService);
     }
 
     @Test
@@ -180,10 +457,11 @@ class WorkOrderServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
 
-        assertThatThrownBy(() -> service.cancel(workOrder.getWorkOrderId()))
+        UUID workOrderId = workOrder.getWorkOrderId();
+        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("Scrapped")))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     private WorkOrder workOrder(WorkOrderStatus status, BigDecimal plannedQuantity) {
@@ -277,6 +555,71 @@ class WorkOrderServiceTest {
                 .type(WarehouseType.RAW_MATERIAL)
                 .status(status)
                 .build();
+    }
+
+    /** The lookups {@code createInternal} performs before it reaches the routing snapshot. */
+    private record Fixture(UUID companyId, UUID plantId, UUID productId, UUID warehouseId, Item product) {}
+
+    private Fixture fixtureWithBom() {
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Plant plant = plant(plantId, companyId, OrganizationStatus.ACTIVE);
+        Item product = item(productId, companyId, "FG-100", ItemType.FINISHED_GOOD, false);
+        BomHeader bom = activeBom(product);
+        bom.getLines().add(bomLine(bom, item(UUID.randomUUID(), companyId, "RM-001", ItemType.RAW_MATERIAL, false),
+                10, "2", "0.100000"));
+
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
+        when(workOrderRepository.existsByPlantPlantIdAndWorkOrderNo(plantId, "WO-001")).thenReturn(false);
+        when(itemLookupService.getActiveItem(productId)).thenReturn(product);
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouseId, plantId))
+                .thenReturn(warehouse(warehouseId, plant, OrganizationStatus.ACTIVE));
+        when(bomLookupService.getActiveBom(companyId, productId)).thenReturn(bom);
+        return new Fixture(companyId, plantId, productId, warehouseId, product);
+    }
+
+    private WorkOrderCreateRequest createRequest(Fixture fixture) {
+        return new WorkOrderCreateRequest("WO-001", fixture.productId(), fixture.warehouseId(),
+                new BigDecimal("10"), null, null, null);
+    }
+
+    /**
+     * Mirrors what the real repository does on insert: the entity comes back with an id. The
+     * service reads that id straight afterwards to look up the work order's demand allocations
+     * (F6), so a stub that left it null would test a state that cannot occur.
+     */
+    private void stubSaveReturningArgument() {
+        when(workOrderRepository.save(any(WorkOrder.class))).thenAnswer(invocation -> {
+            WorkOrder workOrder = invocation.getArgument(0);
+            if (workOrder.getWorkOrderId() == null) {
+                workOrder.setWorkOrderId(UUID.randomUUID());
+            }
+            return workOrder;
+        });
+    }
+
+    private RoutingHeader activeRouting(Item product, String code, String version) {
+        RoutingHeader routing = RoutingHeader.builder()
+                .routingId(UUID.randomUUID())
+                .company(product.getCompany())
+                .item(product)
+                .code(code)
+                .routingVersion(version)
+                .status(RoutingStatus.ACTIVE)
+                .operations(new ArrayList<>())
+                .build();
+        routing.getOperations().add(RoutingOperation.builder()
+                .routingOperationId(UUID.randomUUID())
+                .routing(routing)
+                .sequence(10)
+                .name("Assembly")
+                .workCenterCode("WC-01")
+                .setupMinutes(new BigDecimal("15"))
+                .runMinutesPerUnit(new BigDecimal("2.5"))
+                .build());
+        return routing;
     }
 
     private Company company(UUID companyId) {

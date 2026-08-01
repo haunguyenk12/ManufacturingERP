@@ -11,7 +11,13 @@ import java.util.UUID;
 
 public interface SupplySuggestionRepository extends JpaRepository<SupplySuggestion, UUID> {
 
-    @EntityGraph(attributePaths = {"mrpRun", "requirementLine", "company", "plant", "warehouse", "item"})
+    /**
+     * {@code requirementLine.sourceDemand} is fetched because converting a MAKE proposal has to walk
+     * it to find the sales order line the work order should be allocated to (F6, spec §2.4).
+     */
+    @EntityGraph(attributePaths = {
+            "mrpRun", "requirementLine", "requirementLine.sourceDemand",
+            "company", "plant", "warehouse", "item"})
     Optional<SupplySuggestion> findWithDetailsBySupplySuggestionId(UUID supplySuggestionId);
 
     @EntityGraph(attributePaths = {"mrpRun", "requirementLine", "company", "plant", "warehouse", "item"})

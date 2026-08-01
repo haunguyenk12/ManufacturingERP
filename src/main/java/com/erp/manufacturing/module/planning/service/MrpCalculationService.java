@@ -11,6 +11,8 @@ import com.erp.manufacturing.module.inventory.service.InventoryAvailabilityServi
 import com.erp.manufacturing.module.inventory.service.InventoryAvailabilityService.PlanningInventoryQuantity;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.planning.domain.*;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseOrderSupplyService;
+import com.erp.manufacturing.module.routing.service.RoutingLookupService;
 import com.erp.manufacturing.module.workorder.service.query.WorkOrderSupplyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,8 @@ public class MrpCalculationService {
     private final BomLookupService bomLookupService;
     private final InventoryAvailabilityService inventoryAvailabilityService;
     private final WorkOrderSupplyService workOrderSupplyService;
+    private final PurchaseOrderSupplyService purchaseOrderSupplyService;
+    private final RoutingLookupService routingLookupService;
 
     public MrpCalculationResult calculate(MrpRun run,
                                           List<PlanningDemand> demands,
@@ -58,6 +62,13 @@ public class MrpCalculationService {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
             Map<UUID, BomHeader> activeBoms = bomLookupService.findActiveBoms(
                     run.getCompany().getCompanyId(), manufacturableItemIds);
+            // One query per BOM level (C14). The map replaces the old id-set lookup: the proposal
+            // needs the routing code and version (spec §2.4), and keySet() answers the "does an
+            // ACTIVE routing exist?" question the blocking rules ask, so asking twice would be two
+            // queries for the same rows.
+            Map<UUID, RoutingLookupService.RoutingSummary> activeRoutings =
+                    routingLookupService.findActiveRoutingSummaries(
+                            run.getCompany().getCompanyId(), manufacturableItemIds);
             LevelSupplySnapshot supplySnapshot = loadLevelSupplySnapshot(run, currentLevel, scopeWarehouseIds);
 
             List<RequirementSeed> nextLevel = new ArrayList<>();
@@ -84,6 +95,9 @@ public class MrpCalculationService {
                 BomHeader activeBom = activeBoms.get(seed.item().getItemId());
                 MrpRequirementStatus status = determineStatus(seed.item(), activeBom, netRequiredQuantity);
                 LocalDate suggestedOrderDate = seed.dueDate().minusDays(inventory.leadTimeDays());
+                PlanningSettingSource settingSource = inventory.hasItemWarehouseSetting()
+                        ? PlanningSettingSource.ITEM_WAREHOUSE
+                        : PlanningSettingSource.SYSTEM_DEFAULT;
                 RequirementDraft requirement = new RequirementDraft(
                         seed.parent(),
                         seed.sourceDemand(),
@@ -95,18 +109,20 @@ public class MrpCalculationService {
                         inventory.reservedQuantity(),
                         openSupplyQuantity,
                         stockTargetQuantity,
+                        remainingCoverage,
                         netRequiredQuantity,
                         seed.dueDate(),
                         status,
                         noteFor(status, seed.item()),
-                        suggestedOrderDate);
+                        suggestedOrderDate,
+                        settingSource,
+                        inventory.excludedLotCount());
                 allRequirements.add(requirement);
 
-                if (netRequiredQuantity.compareTo(BigDecimal.ZERO) > 0 && status == MrpRequirementStatus.SHORTAGE) {
-                    SupplySuggestionType suggestionType = activeBom == null
-                            ? SupplySuggestionType.PURCHASE_REQUISITION
-                            : SupplySuggestionType.WORK_ORDER;
-                    allSuggestions.add(new SuggestionDraft(requirement, suggestionType));
+                if (netRequiredQuantity.compareTo(BigDecimal.ZERO) > 0
+                        && (status == MrpRequirementStatus.SHORTAGE || status == MrpRequirementStatus.BOM_MISSING)) {
+                    allSuggestions.add(suggestionFor(
+                            requirement, activeBom, activeRoutings, settingSource));
                 }
 
                 if (netRequiredQuantity.compareTo(BigDecimal.ZERO) > 0 && activeBom != null) {
@@ -137,11 +153,20 @@ public class MrpCalculationService {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
             Map<UUID, PlanningInventoryQuantity> inventoryByItem = inventoryAvailabilityService
                     .getPlanningQuantities(itemIds, warehouseIds);
-            Map<UUID, BigDecimal> openSupplyByItem = workOrderSupplyService.getOpenSupplyQuantities(
-                    run.getCompany().getCompanyId(),
-                    run.getPlant().getPlantId(),
-                    warehouseIds,
-                    itemIds);
+            // scheduledReceipts (spec §2.1) = open work orders + open purchase orders. Both are
+            // read once per warehouse scope of the level, never per seed (rule C14).
+            Map<UUID, BigDecimal> openSupplyByItem = new HashMap<>(
+                    workOrderSupplyService.getOpenSupplyQuantities(
+                            run.getCompany().getCompanyId(),
+                            run.getPlant().getPlantId(),
+                            warehouseIds,
+                            itemIds));
+            purchaseOrderSupplyService.getOpenSupplyQuantities(
+                            run.getCompany().getCompanyId(),
+                            run.getPlant().getPlantId(),
+                            warehouseIds,
+                            itemIds)
+                    .forEach((itemId, quantity) -> openSupplyByItem.merge(itemId, quantity, BigDecimal::add));
             for (RequirementSeed seed : entry.getValue()) {
                 UUID itemId = seed.item().getItemId();
                 inventoryBySeed.put(seed, inventoryByItem.getOrDefault(itemId, PlanningInventoryQuantity.empty()));
@@ -192,6 +217,59 @@ public class MrpCalculationService {
         return new ItemScopeKey(seed.item().getItemId(), seed.warehouse() == null ? null : seed.warehouse().getWarehouseId());
     }
 
+    /**
+     * Builds the proposal for a shortage and classifies it (spec §2.4 / §8.1).
+     *
+     * <p>A manufacturable item is always a MAKE proposal, even when its BOM or routing is missing:
+     * the planner has to see the blocked line to know what master data to fix. {@code BLOCKED} is
+     * what stops it from becoming a work order (B58), not the absence of a proposal.
+     */
+    private SuggestionDraft suggestionFor(RequirementDraft requirement,
+                                          BomHeader activeBom,
+                                          Map<UUID, RoutingLookupService.RoutingSummary> activeRoutings,
+                                          PlanningSettingSource settingSource) {
+        SupplySuggestionType suggestionType = canHaveBom(requirement.item())
+                ? SupplySuggestionType.WORK_ORDER
+                : SupplySuggestionType.PURCHASE_REQUISITION;
+        RoutingLookupService.RoutingSummary routing = activeRoutings.get(requirement.item().getItemId());
+
+        List<PlanningMessageCode> messages = new ArrayList<>();
+        messages.add(PlanningMessageCode.MATERIAL_SHORTAGE);
+        if (suggestionType == SupplySuggestionType.WORK_ORDER) {
+            if (activeBom == null) {
+                messages.add(PlanningMessageCode.MISSING_BOM);
+            }
+            if (routing == null) {
+                messages.add(PlanningMessageCode.MISSING_ROUTING);
+            }
+        }
+        if (settingSource == PlanningSettingSource.SYSTEM_DEFAULT) {
+            messages.add(PlanningMessageCode.SYSTEM_FALLBACK_USED);
+        }
+
+        // BUY proposals carry no routing at all, and a MAKE proposal without one is exactly the
+        // BLOCKED/MISSING_ROUTING case above — null here is information, not a gap (spec §2.4).
+        boolean carriesRouting = suggestionType == SupplySuggestionType.WORK_ORDER && routing != null;
+        return new SuggestionDraft(
+                requirement,
+                suggestionType,
+                exceptionStateOf(messages),
+                messages,
+                carriesRouting ? routing.code() : null,
+                carriesRouting ? routing.version() : null);
+    }
+
+    private SupplySuggestionExceptionState exceptionStateOf(List<PlanningMessageCode> messages) {
+        if (messages.contains(PlanningMessageCode.MISSING_BOM)
+                || messages.contains(PlanningMessageCode.MISSING_ROUTING)) {
+            return SupplySuggestionExceptionState.BLOCKED;
+        }
+        if (messages.contains(PlanningMessageCode.SYSTEM_FALLBACK_USED)) {
+            return SupplySuggestionExceptionState.WARNING;
+        }
+        return SupplySuggestionExceptionState.READY;
+    }
+
     private MrpRequirementStatus determineStatus(Item item, BomHeader activeBom, BigDecimal netRequiredQuantity) {
         if (netRequiredQuantity.compareTo(BigDecimal.ZERO) == 0) {
             return MrpRequirementStatus.COVERED;
@@ -238,16 +316,25 @@ public class MrpCalculationService {
             BigDecimal reservedQuantity,
             BigDecimal openSupplyQuantity,
             BigDecimal safetyStockQuantity,
+            /** Coverage left for this line after earlier lines took theirs — see B77. */
+            BigDecimal projectedAvailableQuantity,
             BigDecimal netRequiredQuantity,
             LocalDate dueDate,
             MrpRequirementStatus status,
             String note,
-            LocalDate suggestedOrderDate
+            LocalDate suggestedOrderDate,
+            PlanningSettingSource settingSource,
+            int excludedLotCount
     ) {}
 
     public record SuggestionDraft(
             RequirementDraft requirement,
-            SupplySuggestionType suggestionType
+            SupplySuggestionType suggestionType,
+            SupplySuggestionExceptionState exceptionState,
+            List<PlanningMessageCode> messages,
+            /** Frozen routing snapshot (spec §2.4); null for BUY and for blocked MAKE proposals. */
+            String sourceRoutingCode,
+            String sourceRoutingVersion
     ) {}
 
     private record RequirementSeed(

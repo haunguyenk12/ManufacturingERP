@@ -1,7 +1,11 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.common.context.TraceIdProvider;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
@@ -12,24 +16,35 @@ import com.erp.manufacturing.module.inventory.service.InventoryMovementResult;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssuePostRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueResponse;
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
+import com.erp.manufacturing.module.workorder.service.WorkOrderPermissionGuard;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +65,8 @@ class MaterialIssueServiceTest {
     @Mock WorkOrderRepository workOrderRepository;
     @Mock OrganizationLookupService organizationLookupService;
     @Mock InventoryAvailabilityService inventoryAvailabilityService;
+    @Mock WorkOrderPermissionGuard workOrderPermissionGuard;
+    @Mock UserLookupService userLookupService;
 
     MaterialIssueService service;
 
@@ -63,8 +80,56 @@ class MaterialIssueServiceTest {
                 reservationService,
                 movementService,
                 wipTransactionService,
+                workOrderPermissionGuard,
                 support,
-                new ManufacturingExecutionMapper());
+                new IdempotencySupport(new ObjectMapper()),
+                new ManufacturingExecutionMapper(),
+                new TraceIdProvider(),
+                userLookupService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    /**
+     * Spec §4.2 "History: createdBy". Rule C14 requires the whole page to resolve in one query, and
+     * rule C15 requires that to be asserted — a per-row lookup would still render correctly and only
+     * show up as load.
+     */
+    @Test
+    void list_resolvesTheAuthorUsernameInOneBatchQuery() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        UUID authorId = UUID.randomUUID();
+        MaterialIssue first = issue(workOrder, authorId);
+        MaterialIssue second = issue(workOrder, authorId);
+
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(issueRepository.findByWorkOrderWorkOrderId(eq(workOrder.getWorkOrderId()), any()))
+                .thenReturn(new PageImpl<>(List.of(first, second)));
+        when(issueLineRepository.findByIssueIssueIdIn(any())).thenReturn(List.of());
+        when(userLookupService.findUsernames(any())).thenReturn(Map.of(authorId, "storekeeper1"));
+
+        var page = service.list(workOrder.getWorkOrderId(), PageRequest.of(0, 20));
+
+        assertThat(page.content()).extracting(MaterialIssueResponse::createdByUsername)
+                .containsExactly("storekeeper1", "storekeeper1");
+        assertThat(page.content().get(0).workOrderCode()).isEqualTo(workOrder.getWorkOrderNo());
+        verify(userLookupService, times(1)).findUsernames(any());
+    }
+
+    private MaterialIssue issue(WorkOrder workOrder, UUID createdBy) {
+        MaterialIssue issue = MaterialIssue.builder()
+                .issueId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .status(MaterialIssueStatus.POSTED)
+                .idempotencyKey(UUID.randomUUID().toString())
+                .lines(new ArrayList<>())
+                .build();
+        issue.setCreatedBy(createdBy);
+        return issue;
     }
 
     @Test
@@ -102,7 +167,8 @@ class MaterialIssueServiceTest {
                         null,
                         null,
                         new BigDecimal("4"),
-                        "Issue reserved"))), "KEY-ISSUE");
+                        "Issue reserved",
+                        null))), "KEY-ISSUE");
 
         assertThat(reservation.getConsumedQuantity()).isEqualByComparingTo("4");
         assertThat(reservation.getStatus()).isEqualTo(MaterialReservationStatus.ACTIVE);
@@ -112,31 +178,153 @@ class MaterialIssueServiceTest {
     }
 
     @Test
-    void post_overIssue_failsBeforeStockMovement() {
+    void post_onBlockedWorkOrder_shouldThrow() {
+        // B13: a BLOCKED work order must not be able to issue material.
+        WorkOrder workOrder = workOrder(WorkOrderStatus.BLOCKED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-BLOCKED")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, BigDecimal.ONE, null)));
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-BLOCKED"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(movementService);
+        verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void issue_withinRemaining_noOverrideNeeded() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
         WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
         Warehouse warehouse = workOrder.getOutputWarehouse();
+        StockMovement movement = movement(line.getComponentItem(), warehouse);
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-WITHIN")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-WITHIN:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("10"), null))), "KEY-WITHIN");
+
+        ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertThat(captor.getValue().getLines().get(0).isOverIssue()).isFalse();
+        verifyNoInteractions(workOrderPermissionGuard);
+    }
+
+    @Test
+    void issue_exceedRemaining_withoutPermission_shouldThrowAccessDenied() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        authenticate();
 
         when(issueRepository.findWithLinesByIdempotencyKey("KEY-OVER")).thenReturn(Optional.empty());
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
+                .thenReturn(false);
 
-        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
-                new MaterialIssueLineRequest(
-                        line.getComponentLineId(),
-                        null,
-                        warehouse.getWarehouseId(),
-                        null,
-                        null,
-                        new BigDecimal("99"),
-                        null))), "KEY-OVER"))
-                .isInstanceOf(AppException.class)
-                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+        MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("99"), null)));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-OVER"))
+                .isInstanceOf(AccessDeniedException.class);
 
         verify(movementService, never()).issue(any(), anyString());
         verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void issue_exceedRemaining_withPermissionButBlankReason_shouldThrow() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        authenticate();
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-BLANK")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
+                .thenReturn(true);
+
+        MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("12"), "   ")));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-BLANK"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.MISSING_REQUIRED_FIELD));
+
+        verify(movementService, never()).issue(any(), anyString());
+        verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void issue_exceedRemaining_withPermissionAndReason_shouldSucceed() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        StockMovement movement = movement(line.getComponentItem(), warehouse);
+        authenticate();
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-APPROVED")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
+                .thenReturn(true);
+        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-APPROVED:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("12"), " Scrap rework "))), "KEY-APPROVED");
+
+        ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
+        verify(issueRepository).save(captor.capture());
+        MaterialIssueLine savedLine = captor.getValue().getLines().get(0);
+        assertThat(savedLine.isOverIssue()).isTrue();
+        assertThat(savedLine.getOverrideReason()).isEqualTo("Scrap rework");
+        // DB constraint has been relaxed to issued_quantity >= 0, so this is now persistable.
+        assertThat(line.getIssuedQuantity()).isEqualByComparingTo("12");
+        assertThat(line.getIssuedQuantity()).isGreaterThan(line.getRequiredQuantity());
+    }
+
+    private void authenticate() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user", null, List.of()));
+    }
+
+    private MaterialIssueLineRequest issueLine(WorkOrderComponentLine line,
+                                               Warehouse warehouse,
+                                               BigDecimal quantity,
+                                               String overrideReason) {
+        return new MaterialIssueLineRequest(
+                line.getComponentLineId(),
+                null,
+                warehouse.getWarehouseId(),
+                null,
+                null,
+                quantity,
+                null,
+                overrideReason);
     }
 
     private StockMovement movement(Item item, Warehouse warehouse) {

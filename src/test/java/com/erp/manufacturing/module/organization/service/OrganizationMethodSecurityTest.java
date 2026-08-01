@@ -58,6 +58,20 @@ class OrganizationMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(companyRepository);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_ORG_READ"), eq("COMPANY"), eq(companyId));
+    }
+
+    @Test
+    void deactivateCompany_deniedWhenOrgManageScopeMissing() {
+        UUID companyId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_ORG_MANAGE"), eq("COMPANY"), eq(companyId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> organizationService.deactivateCompany(companyId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(companyRepository);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_ORG_MANAGE"), eq("COMPANY"), eq(companyId));
     }
 
     @Test

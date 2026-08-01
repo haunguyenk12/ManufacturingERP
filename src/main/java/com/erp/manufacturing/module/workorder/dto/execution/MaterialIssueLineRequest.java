@@ -12,7 +12,9 @@ public record MaterialIssueLineRequest(
         UUID reservationId,
         @NotNull UUID warehouseId,
         UUID lotId,
-        @Size(max = 120) String lotCode,
+        @Size(max = 120) String lotNumber,
         @NotNull @Positive BigDecimal quantity,
-        @Size(max = 1000) String reason
+        @Size(max = 1000) String reason,
+        /** Required when quantity exceeds the component's remaining BOM requirement. */
+        @Size(max = 1000) String overrideReason
 ) {}

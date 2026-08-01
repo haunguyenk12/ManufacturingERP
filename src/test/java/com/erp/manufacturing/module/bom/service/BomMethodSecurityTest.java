@@ -1,11 +1,18 @@
 package com.erp.manufacturing.module.bom.service;
 
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
+import com.erp.manufacturing.module.bom.domain.BomHeader;
+import com.erp.manufacturing.module.bom.domain.BomStatus;
 import com.erp.manufacturing.module.bom.dto.BomCreateRequest;
 import com.erp.manufacturing.module.bom.mapper.BomMapper;
 import com.erp.manufacturing.module.bom.repository.BomHeaderRepository;
 import com.erp.manufacturing.module.bom.repository.BomLineRepository;
+import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.ItemStatus;
+import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import com.erp.manufacturing.module.organization.domain.Company;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,8 +26,11 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+import java.util.ArrayList;
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -56,6 +66,16 @@ class BomMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(bomHeaderRepository);
+        verify(bomPermissionGuard).hasBomAccess(any(), eq("PERM_BOM_READ"), eq(bomId));
+    }
+
+    @Test
+    void getBom_allowedWhenGuardAllows() {
+        UUID bomId = UUID.randomUUID();
+        when(bomPermissionGuard.hasBomAccess(any(), eq("PERM_BOM_READ"), eq(bomId))).thenReturn(true);
+        when(bomHeaderRepository.findWithLinesByBomId(bomId)).thenReturn(Optional.of(bom(bomId)));
+
+        assertThatCode(() -> bomService.getBom(bomId)).doesNotThrowAnyException();
     }
 
     @Test
@@ -69,6 +89,33 @@ class BomMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(itemLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_BOM_MANAGE"), eq("COMPANY"), eq(companyId));
+    }
+
+    private BomHeader bom(UUID bomId) {
+        Company company = Company.builder()
+                .companyId(UUID.randomUUID())
+                .code("ACME")
+                .name("ACME")
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        Item parent = Item.builder()
+                .itemId(UUID.randomUUID())
+                .company(company)
+                .code("FG-100")
+                .name("Finished Good")
+                .type(ItemType.FINISHED_GOOD)
+                .unit("EA")
+                .status(ItemStatus.ACTIVE)
+                .build();
+        return BomHeader.builder()
+                .bomId(bomId)
+                .company(company)
+                .parentItem(parent)
+                .revision("R1")
+                .status(BomStatus.DRAFT)
+                .lines(new ArrayList<>())
+                .build();
     }
 
     @Configuration

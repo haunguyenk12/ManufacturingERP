@@ -112,8 +112,9 @@ class PurchaseOrderServiceTest {
 
         assertThatThrownBy(() -> service.cancel(order.getPurchaseOrderId()))
                 .isInstanceOf(AppException.class)
+                // D7: purchase order status conflict is 409 STATE_CONFLICT, not 422
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     private PurchaseOrder purchaseOrder(PurchaseOrderStatus status) {

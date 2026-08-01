@@ -82,7 +82,19 @@ public class InventoryAvailabilityService {
                         defaultZero(projection.getAvailableQuantity()),
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
+                        0,
+                        false,
                         0)));
+
+        stockBalanceRepository.aggregateExcludedLotCounts(itemIds, warehouseIds, LotStatus.AVAILABLE)
+                .forEach(projection -> {
+                    PlanningInventoryQuantity current = quantities.getOrDefault(
+                            projection.getItemId(), PlanningInventoryQuantity.empty());
+                    quantities.put(projection.getItemId(), current.withExcludedLotCount(
+                            projection.getExcludedLotCount() == null
+                                    ? 0
+                                    : projection.getExcludedLotCount().intValue()));
+                });
 
         itemWarehouseSettingRepository.aggregatePlanningSettings(
                         itemIds, warehouseIds, ItemWarehouseSettingStatus.ACTIVE)
@@ -104,13 +116,22 @@ public class InventoryAvailabilityService {
 
     public record ItemWarehouseAvailabilityKey(UUID itemId, UUID warehouseId) {}
 
+    /**
+     * @param hasItemWarehouseSetting whether an {@code ACTIVE} item-warehouse setting supplied the
+     *        safety stock / reorder point / lead time, or those fell back to zero. Planning turns
+     *        this into {@code settingSource} and the {@code SYSTEM_FALLBACK_USED} message (spec §8.1).
+     * @param excludedLotCount distinct lots holding stock that were skipped because their status is
+     *        not {@code AVAILABLE} (B3).
+     */
     public record PlanningInventoryQuantity(
             BigDecimal onHandQuantity,
             BigDecimal reservedQuantity,
             BigDecimal availableQuantity,
             BigDecimal safetyStockQuantity,
             BigDecimal reorderPointQuantity,
-            int leadTimeDays
+            int leadTimeDays,
+            boolean hasItemWarehouseSetting,
+            int excludedLotCount
     ) {
         public static PlanningInventoryQuantity empty() {
             return new PlanningInventoryQuantity(
@@ -119,6 +140,8 @@ public class InventoryAvailabilityService {
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
+                    0,
+                    false,
                     0);
         }
 
@@ -131,7 +154,21 @@ public class InventoryAvailabilityService {
                     availableQuantity,
                     safetyStockQuantity,
                     reorderPointQuantity,
-                    leadTimeDays);
+                    leadTimeDays,
+                    true,
+                    excludedLotCount);
+        }
+
+        public PlanningInventoryQuantity withExcludedLotCount(int excludedLotCount) {
+            return new PlanningInventoryQuantity(
+                    onHandQuantity,
+                    reservedQuantity,
+                    availableQuantity,
+                    safetyStockQuantity,
+                    reorderPointQuantity,
+                    leadTimeDays,
+                    hasItemWarehouseSetting,
+                    excludedLotCount);
         }
     }
 }

@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,4 +46,24 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
             "lines.purchaseRequisitionLine"
     })
     Optional<PurchaseOrder> findWithDetailsByPurchaseOrderId(UUID purchaseOrderId);
+
+    @Query("""
+            select l.item.itemId as itemId,
+                   coalesce(sum(l.orderedQuantity - l.receivedQuantity), 0) as openSupplyQuantity
+            from PurchaseOrderLine l
+            join l.purchaseOrder o
+            where o.company.companyId = :companyId
+              and o.plant.plantId = :plantId
+              and l.item.itemId in :itemIds
+              and o.warehouse.warehouseId in :warehouseIds
+              and o.status in :statuses
+              and l.orderedQuantity - l.receivedQuantity > 0
+            group by l.item.itemId
+            """)
+    List<PurchaseOrderSupplyProjection> aggregateOpenSupply(
+            @Param("companyId") UUID companyId,
+            @Param("plantId") UUID plantId,
+            @Param("warehouseIds") Collection<UUID> warehouseIds,
+            @Param("itemIds") Collection<UUID> itemIds,
+            @Param("statuses") Collection<PurchaseOrderStatus> statuses);
 }

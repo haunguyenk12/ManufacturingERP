@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.purchasing.service;
 
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.module.inventory.domain.*;
@@ -48,7 +50,8 @@ class GoodsReceiptServiceTest {
                 goodsReceiptRepository,
                 purchaseOrderRepository,
                 inventoryMovementService,
-                new PurchasingMapper());
+                new PurchasingMapper(),
+                new IdempotencySupport(new ObjectMapper()));
     }
 
     @Test
@@ -130,8 +133,9 @@ class GoodsReceiptServiceTest {
                 "GR-001", null, List.of(new GoodsReceiptLineRequest(
                 line.getPurchaseOrderLineId(), null, null, new BigDecimal("3")))), "GR-KEY"))
                 .isInstanceOf(AppException.class)
+                // D7: B27 over-receipt is 409 PLANNED_QUANTITY_EXCEEDED, not 422
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED));
 
         verifyNoInteractions(inventoryMovementService);
     }
@@ -233,8 +237,9 @@ class GoodsReceiptServiceTest {
 
         assertThatThrownBy(() -> service.cancel(grId, null))
                 .isInstanceOf(AppException.class)
+                // D7: receipt status conflict is 409 STATE_CONFLICT, not 422
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(inventoryMovementService, purchaseOrderRepository);
     }

@@ -144,6 +144,7 @@ module/<name>/
 |---|---|---|
 | `module/user` | `users`, `roles`, `user_roles` tables | `UserService`, `UserDetailsServiceImpl` |
 | `module/auth` | Session logic (Redis) | `AuthService` |
+| `module/sales` | `sales_orders`, `sales_order_lines` | `SalesOrderService` (consumes `PlanningDemandService`; nothing consumes `sales` yet — see `module/sales/CLAUDE.md`) |
 | `common/audit` | `audit_logs` table | `AuditLogService` |
 | `common/security` | JWT, rate-limit, token store | `TokenStoreService`, `JwtTokenProvider` |
 
@@ -408,11 +409,56 @@ stock_balances   -- projection: SUM(movements) by item/warehouse/lot
 > **ADR-003**: Heavy async operations (MRP run, cost roll) use a Job model.
 
 ```
-POST /api/v1/mrp/run   → create job row → return { jobId }
-GET  /api/v1/jobs/{jobId} → return { status: PENDING|RUNNING|DONE|FAILED, result }
+POST /api/v1/planning-runs → create job row → return { jobId }
+GET  /api/v1/jobs/{jobId}  → return { status: PENDING|RUNNING|DONE|FAILED, result }
 ```
 
+> ⚠️ **ADR-003 chưa được implement.** Hiện `POST /api/v1/planning-runs` chạy **đồng bộ** và trả
+> `MrpRunResponse` ngay (`MrpRunService.run`); không có bảng job, không có `/api/v1/jobs`. Đường dẫn
+> ở trên đã đổi tên theo `F5-B` để không còn trỏ tới `/api/v1/mrp/**` đã bị xoá.
+
 Idempotency key required: client sends `Idempotency-Key` header → server stores result in Redis TTL 24h.
+
+### 9.4.1 Manufacturing Business Gates (Phase P1 – implemented)
+
+> **ADR-004**: Three control points sit inside the work order execution flow. Each one is a
+> *business gate* — it refuses the operation rather than silently correcting it.
+
+| Gate | Where | Rule | Failure mode |
+|---|---|---|---|
+| **1a – Release readiness** | `WorkOrderReleaseGate.ensureMaterialReady` | Every component must satisfy `reserved ≥ required − issued` | **`409 STATE_CONFLICT`** (`F5` moved it off 422 — debt #9), work order persisted as `BLOCKED` by `WorkOrderBlockRecorder` (`D9`) |
+| **1b – Over-issue** | `MaterialIssueService.postNew` | Issuing beyond the remaining BOM requirement needs `PERM_MATERIAL_ISSUE_OVERRIDE` + `overrideReason` | `403` without the permission, **`400 VALIDATION_ERROR`** (`MISSING_REQUIRED_FIELD`) without a reason |
+| **1c – Receipt approval** | `ProductionReceiptService` | `post` creates a `DRAFT` receipt (`F2` added `submit` → `PENDING_APPROVAL`); `approve` creates the stock movement | **`409 STATE_CONFLICT`** when the receipt is in the wrong status (`F2`) |
+
+**Gate 1a runs in its own transaction.** `ensureMaterialReady` is annotated
+`@Transactional(propagation = REQUIRES_NEW)` because two things must both happen: the release
+must fail (so the caller's transaction rolls back and the client gets an error), *and* the
+`BLOCKED` state must survive so planners can query which work orders are waiting on material.
+A single transaction can only deliver one of the two.
+
+**Gate 1c splits the receipt into two steps.** Posting a receipt no longer touches inventory:
+
+```
+POST /work-orders/{id}/production-receipts              → PENDING_APPROVAL, no movement
+POST /work-orders/{id}/production-receipts/{rid}/approve → POSTED + RECEIVE movement, new lot = HOLD
+POST /work-orders/{id}/production-receipts/{rid}/reject  → REJECTED, no inventory impact
+```
+
+`POSTED` is deliberately reused as the post-approval state (rather than adding `APPROVED`):
+existing `POSTED` rows already mean "written to stock", so no data backfill is needed.
+
+Output lots created by approval open in `LotStatus.HOLD`, which is what unlocks Phase P2
+(Quality Control): QC only has to add the `HOLD → AVAILABLE / REJECTED` workflow.
+
+**Known limitations (P1, accepted):**
+1. An item that is not lot-tracked has nowhere to carry `HOLD`, so its output is immediately
+   usable. ~~P2 quality control therefore applies to lot-tracked output only.~~ **Superseded by `D5`
+   (2026-07-30):** QC now runs on that output too, ruling on the *receipt* instead of on a lot —
+   `AVAILABLE` changes no stock (it was already usable) and only unlocks fulfilment, while `REJECTED`
+   withdraws the goods with an `ADJUST_OUT` movement. Restricting QC to lot-tracked output left every
+   non-lot-tracked finished good unable to fulfil a sales order (debt #17). See `CLAUDE.md §0.13`.
+2. An already-existing lot (same `lotCode`) keeps its current status — only newly created lots
+   receive `HOLD`. Business recommendation: use a fresh `lotCode` per production receipt.
 
 ### 9.5 Transactional Outbox (Phase 2+)
 

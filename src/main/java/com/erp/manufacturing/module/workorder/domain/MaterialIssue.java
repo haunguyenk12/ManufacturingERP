@@ -7,6 +7,7 @@ import lombok.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Entity
@@ -27,6 +28,10 @@ public class MaterialIssue extends BaseEntity {
     @Column(name = "issue_id", updatable = false, nullable = false)
     private UUID issueId;
 
+    /** Human-facing document number (spec §4.2 "History"), {@code MI-} + 8 hex of the id. */
+    @Column(name = "code", nullable = false, length = 40)
+    private String code;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "work_order_id", nullable = false)
     private WorkOrder workOrder;
@@ -39,9 +44,20 @@ public class MaterialIssue extends BaseEntity {
     @Column(name = "idempotency_key", nullable = false, length = 120)
     private String idempotencyKey;
 
+    /** SHA-256 of the request payload; null for documents written before V25. */
+    @Column(name = "payload_hash", length = 64)
+    private String payloadHash;
+
     @Column(name = "posted_at", nullable = false)
     @Builder.Default
     private Instant postedAt = Instant.now();
+
+    /**
+     * Business traceability, persisted on the document (spec §4). Not the {@code X-Trace-Id}
+     * response header — see {@code .claude/rules/error-handling.md} §5.1.
+     */
+    @Column(name = "trace_id", length = 64)
+    private String traceId;
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
@@ -49,4 +65,23 @@ public class MaterialIssue extends BaseEntity {
     @OneToMany(mappedBy = "issue", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<MaterialIssueLine> lines = new ArrayList<>();
+
+    /**
+     * Derives the document number from the row's own id.
+     *
+     * <p>Must run as {@code @PrePersist} and not after {@code save()}: Hibernate snapshots the
+     * entity when it queues the insert, so a field set afterwards is simply absent from the INSERT
+     * and the NOT NULL column blows up. {@code GenerationType.UUID} is a before-execution generator,
+     * so {@code issueId} is already assigned by the time this callback fires. Same lesson as
+     * {@code MrpRun.assignCode()} (CLAUDE.md §0.12 #5).
+     *
+     * <p>Must stay the same formula as the {@code V40} backfill
+     * ({@code 'MI-' || upper(substring(issue_id::text, 1, 8))}).
+     */
+    @PrePersist
+    public void assignCode() {
+        if (code == null) {
+            code = "MI-" + issueId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        }
+    }
 }

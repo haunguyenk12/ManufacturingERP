@@ -1,0 +1,165 @@
+package com.erp.manufacturing.module.auth.controller;
+
+import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.security.IpExtractor;
+import com.erp.manufacturing.common.security.JwtTokenProvider;
+import com.erp.manufacturing.common.security.TokenStoreService;
+import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.auth.dto.AuthResponse;
+import com.erp.manufacturing.module.auth.dto.LoginRequest;
+import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.service.AuthService;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Contract test for {@link AuthController} – locks the {@code {code,result,message}} envelope
+ * for the permitAll auth endpoints (`.claude/rules/error-handling.md` §5.1).
+ *
+ * <p>{@code AuthService} is mocked; {@code @PreAuthorize}/permission checks don't apply here
+ * (AuthController is permitAll) — that's already covered by service-level method-security tests.
+ */
+@WebMvcTest(controllers = AuthController.class)
+@AutoConfigureMockMvc(addFilters = false)
+@DisplayName("AuthController – response envelope contract")
+class AuthControllerTest {
+
+    @Autowired
+    MockMvc mockMvc;
+
+    @MockBean
+    AuthService authService;
+
+    // Unused directly by these tests – required only so the auto-detected security filters
+    // (JwtAuthenticationFilter, RateLimitFilter, UserRateLimitFilter, TraceIdFilter) can be
+    // constructed by the @WebMvcTest slice, even with addFilters = false.
+    @MockBean
+    IpExtractor ipExtractor;
+    @MockBean
+    JwtTokenProvider jwtTokenProvider;
+    @MockBean
+    TokenStoreService tokenStoreService;
+    @MockBean
+    UserDetailsService userDetailsService;
+    @MockBean
+    RedisTemplate<String, String> redisTemplate;
+    @MockBean
+    RateLimitProperties rateLimitProperties;
+
+    @Test
+    @DisplayName("login: valid credentials returns 200 with AuthResponse payload")
+    void login_validCredentials_returns200WithAuthResponse() throws Exception {
+        AuthResponse response = new AuthResponse("access.jwt", "refresh-uuid", "tid-1", 900L, "device-1", false);
+        when(authService.login(any(LoginRequest.class), any())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"alice","password":"secret123","deviceId":"device-1"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.accessToken").value("access.jwt"))
+                .andExpect(jsonPath("$.result.tokenId").value("tid-1"));
+    }
+
+    @Test
+    @DisplayName("login: blank username fails @Valid before reaching the service")
+    void login_blankUsername_returns400ValidationFailed() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"","password":"secret123"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    @DisplayName("login: invalid credentials returns 401 INVALID_CREDENTIALS")
+    void login_invalidCredentials_returns401InvalidCredentials() throws Exception {
+        when(authService.login(any(LoginRequest.class), any()))
+                .thenThrow(new AppException(AuthErrorCode.INVALID_CREDENTIALS));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"alice","password":"wrong"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(AuthErrorCode.INVALID_CREDENTIALS.code()));
+    }
+
+    @Test
+    @DisplayName("login: account locked returns 423 ACCOUNT_LOCKED")
+    void login_accountLocked_returns423AccountLocked() throws Exception {
+        when(authService.login(any(LoginRequest.class), any()))
+                .thenThrow(new AppException(AuthErrorCode.ACCOUNT_LOCKED));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"alice","password":"secret123"}
+                                """))
+                .andExpect(status().isLocked())
+                .andExpect(jsonPath("$.code").value(AuthErrorCode.ACCOUNT_LOCKED.code()));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("logout: valid request returns 200 with null result (noContent envelope)")
+    void logout_validRequest_returns200NoContent() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"refreshToken":"refresh-uuid","tokenId":"tid-1"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("refresh: expired/invalid refresh token returns 401 REFRESH_TOKEN_EXPIRED")
+    void refresh_expiredToken_returns401RefreshTokenExpired() throws Exception {
+        when(authService.refresh(any(RefreshRequest.class), any()))
+                .thenThrow(new AppException(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"refreshToken":"old-refresh","tokenId":"old-tid"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(AuthErrorCode.REFRESH_TOKEN_EXPIRED.code()));
+    }
+
+    @Test
+    @DisplayName("logout-all: returns 200 with SUCCESS envelope")
+    void logoutAll_returns200() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout-all"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+}

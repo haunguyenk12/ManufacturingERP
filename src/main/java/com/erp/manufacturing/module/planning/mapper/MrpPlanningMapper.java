@@ -36,6 +36,7 @@ public class MrpPlanningMapper {
         Warehouse warehouse = run.getWarehouse();
         return new MrpRunResponse(
                 run.getMrpRunId(),
+                run.getCode(),
                 run.getCompany().getCompanyId(),
                 run.getCompany().getCode(),
                 run.getPlant().getPlantId(),
@@ -50,6 +51,11 @@ public class MrpPlanningMapper {
                 run.getTotalDemandLines(),
                 run.getTotalRequirementLines(),
                 run.getTotalSuggestionLines(),
+                run.getGrossDemandQuantity(),
+                run.getShortageLines(),
+                run.getPlannedWorkOrders(),
+                run.getPlannedPurchaseRecommendations(),
+                run.getBlockedProposals(),
                 run.getErrorMessage(),
                 run.getCreatedAt(),
                 run.getUpdatedAt());
@@ -65,6 +71,7 @@ public class MrpPlanningMapper {
                 line.getItem().getItemId(),
                 line.getItem().getCode(),
                 line.getItem().getName(),
+                line.getItem().getUnit(),
                 warehouse == null ? null : warehouse.getWarehouseId(),
                 warehouse == null ? null : warehouse.getCode(),
                 line.getRequirementLevel(),
@@ -73,9 +80,12 @@ public class MrpPlanningMapper {
                 line.getReservedQuantity(),
                 line.getOpenSupplyQuantity(),
                 line.getSafetyStockQuantity(),
+                line.getProjectedAvailableQuantity(),
                 line.getNetRequiredQuantity(),
                 line.getDueDate(),
                 line.getRequirementStatus().name(),
+                line.getSettingSource().name(),
+                line.getExcludedLotCount(),
                 line.getNote(),
                 line.getCreatedAt());
     }
@@ -95,14 +105,20 @@ public class MrpPlanningMapper {
                 suggestion.getItem().getItemId(),
                 suggestion.getItem().getCode(),
                 suggestion.getItem().getName(),
-                suggestion.getSuggestionType().name(),
+                suggestion.getItem().getUnit(),
+                suggestion.getSuggestionType().supplyType(),
                 suggestion.getSuggestedQuantity(),
                 suggestion.getNeededByDate(),
                 suggestion.getSuggestedOrderDate(),
+                suggestion.getSourceRoutingCode(),
+                suggestion.getSourceRoutingVersion(),
                 suggestion.getStatus().name(),
+                suggestion.getExceptionState().name(),
+                suggestion.messages(),
                 suggestion.getDecisionNote(),
                 suggestion.getConvertedReferenceType(),
                 suggestion.getConvertedReferenceId(),
+                suggestion.convertedWorkOrderId(),
                 suggestion.getCreatedAt(),
                 suggestion.getUpdatedAt());
     }

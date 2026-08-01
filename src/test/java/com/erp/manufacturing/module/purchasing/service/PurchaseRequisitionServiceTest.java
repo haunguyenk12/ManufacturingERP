@@ -128,8 +128,9 @@ class PurchaseRequisitionServiceTest {
                 suggestion.getSupplySuggestionId(),
                 new PurchaseRequisitionFromSuggestionRequest("PR-001", UUID.randomUUID(), null, null)))
                 .isInstanceOf(AppException.class)
+                // D7: suggestion status conflict is 409 STATE_CONFLICT, not 422
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     @Test
@@ -148,8 +149,9 @@ class PurchaseRequisitionServiceTest {
                 suggestion.getSupplySuggestionId(),
                 new PurchaseRequisitionFromSuggestionRequest("PR-001", UUID.randomUUID(), null, null)))
                 .isInstanceOf(AppException.class)
+                // D7: suggestion status conflict is 409 STATE_CONFLICT, not 422
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     @Test

@@ -261,7 +261,9 @@ public class BomService {
 
     private void ensureDraft(BomHeader bom) {
         if (!bom.isDraft()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            // D7: document status conflict → STATE_CONFLICT (409), same criterion as
+            // RoutingService.activate. OPERATION_NOT_ALLOWED (422) stays for master-data validation.
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only draft BOM can be changed");
         }
     }

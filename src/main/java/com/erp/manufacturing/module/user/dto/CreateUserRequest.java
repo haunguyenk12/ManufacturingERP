@@ -21,4 +21,12 @@ public record CreateUserRequest(
         @NotBlank(message = "Password is required")
         @Size(min = 8, message = "Password must be at least 8 characters")
         String password
-) {}
+) {
+    /** Masks {@code password} — see {@code LoginRequest#toString()} for the rationale. */
+    @Override
+    public String toString() {
+        return "CreateUserRequest[username=" + username
+                + ", email=" + email
+                + ", password=" + (password == null ? "null" : "***") + "]";
+    }
+}

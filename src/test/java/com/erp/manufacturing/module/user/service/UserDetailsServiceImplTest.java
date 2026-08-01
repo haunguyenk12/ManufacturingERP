@@ -72,8 +72,15 @@ class UserDetailsServiceImplTest {
                 .contains("ROLE_ADMIN", "ROLE_PLANNER", "PERM_ORG_READ", "PERM_ORG_MANAGE");
     }
 
+    /**
+     * NOTE (T5.2): this only proves {@code UserDetailsServiceImpl} passes the fixed-status
+     * arguments through to the repository and produces zero authorities when the (mocked)
+     * repository returns empty sets. The actual inactive/expired-assignment filtering logic
+     * lives entirely inside the JPQL in {@code UserRoleAssignmentRepository} and is exercised
+     * against a real database by {@code UserRoleAssignmentRepositoryIT} (T4.3), not here.
+     */
     @Test
-    void loadUser_usesRepositoryFilteringForInactiveOrExpiredAssignments() {
+    void loadUser_returnsEmptyAuthoritiesWhenRepositoryReturnsNoActiveRolesOrPermissions() {
         UUID userId = UUID.randomUUID();
         User user = User.builder()
                 .userId(userId)

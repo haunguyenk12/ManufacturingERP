@@ -2,6 +2,9 @@ package com.erp.manufacturing.module.planning.service;
 
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.module.organization.domain.Company;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
+import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
@@ -13,6 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -22,6 +28,7 @@ import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -33,10 +40,11 @@ class MrpPlanningMethodSecurityTest {
     @Autowired MrpRunService mrpRunService;
     @Autowired PermissionGuard permissionGuard;
     @Autowired MrpRunRepository mrpRunRepository;
+    @Autowired OrganizationLookupService organizationLookupService;
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, mrpRunRepository);
+        reset(permissionGuard, mrpRunRepository, organizationLookupService);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, java.util.List.of()));
     }
@@ -54,7 +62,8 @@ class MrpPlanningMethodSecurityTest {
                 plantId,
                 null,
                 LocalDate.now(),
-                LocalDate.now().plusDays(30));
+                LocalDate.now().plusDays(30),
+                null);
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_MRP_RUN"), eq("PLANT"), eq(plantId)))
                 .thenReturn(false);
 
@@ -62,6 +71,34 @@ class MrpPlanningMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(mrpRunRepository);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_MRP_RUN"), eq("PLANT"), eq(plantId));
+    }
+
+    @Test
+    void list_allowedWhenMrpReadScopePresent() {
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        Company company = Company.builder()
+                .companyId(companyId)
+                .code("ACME")
+                .name("ACME")
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_MRP_READ"), eq("PLANT"), eq(plantId)))
+                .thenReturn(true);
+        when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(Plant.builder()
+                .plantId(plantId)
+                .company(company)
+                .code("P1")
+                .name("Plant 1")
+                .status(OrganizationStatus.ACTIVE)
+                .build());
+        when(mrpRunRepository.search(eq(companyId), eq(plantId), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        assertThatCode(() -> mrpRunService.list(companyId, plantId, null, null, PageRequest.of(0, 20)))
+                .doesNotThrowAnyException();
     }
 
     @Configuration

@@ -12,7 +12,7 @@ public record PlanningDemandResponse(
         UUID plantId,
         String plantCode,
         UUID itemId,
-        String itemCode,
+        String itemSku,
         String itemName,
         UUID warehouseId,
         String warehouseCode,

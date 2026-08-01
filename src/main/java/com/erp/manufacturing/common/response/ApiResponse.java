@@ -11,7 +11,7 @@ import java.util.Map;
  *
  * <p>Contract: {@code { code, result, message, errors }}
  * <ul>
- *   <li>{@code code}    – Always present. Machine-readable error code (e.g. {@code "AUTH_001"}). Frontend branches on this.</li>
+ *   <li>{@code code}    – Always present. Machine-readable error code (e.g. {@code "INVALID_CREDENTIALS"}). Frontend branches on this.</li>
  *   <li>{@code result}  – Data payload on success; {@code null} on error.</li>
  *   <li>{@code message} – Human-readable text. Always present.</li>
  *   <li>{@code errors}  – Present only for multi-error responses (field-level validation).</li>
@@ -19,10 +19,10 @@ import java.util.Map;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ApiResponse<T>(
-        String              code,
-        T                   result,
-        String              message,
-        Map<String, String> errors
+        String                   code,
+        T                        result,
+        String                   message,
+        List<FieldErrorResponse> errors
 ) {
     private static final String SUCCESS_CODE = "SUCCESS";
 
@@ -58,8 +58,20 @@ public record ApiResponse<T>(
 
     /** Multi-field error (for validation aggregation). */
     public static <T> ApiResponse<T> fieldErrors(ErrorCode code, String message,
-                                                  Map<String, String> fieldErrors) {
+                                                  List<FieldErrorResponse> fieldErrors) {
         return new ApiResponse<>(code.code(), null, message, fieldErrors);
+    }
+
+    /**
+     * Multi-field error from a {@code field → message} map. Iteration order of the supplied
+     * map is preserved, so pass a {@link java.util.LinkedHashMap} when order matters.
+     */
+    public static <T> ApiResponse<T> fieldErrors(ErrorCode code, String message,
+                                                  Map<String, String> fieldErrors) {
+        List<FieldErrorResponse> errorList = fieldErrors.entrySet().stream()
+                .map(e -> new FieldErrorResponse(e.getKey(), e.getValue()))
+                .toList();
+        return new ApiResponse<>(code.code(), null, message, errorList);
     }
 
     /** Multi-error using a list of plain messages (joined). */

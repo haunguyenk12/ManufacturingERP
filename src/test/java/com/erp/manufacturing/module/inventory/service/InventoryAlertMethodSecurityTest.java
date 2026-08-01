@@ -7,6 +7,7 @@ import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRep
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.service.OrganizationScopeResolution;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,8 +21,10 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -57,6 +60,7 @@ class InventoryAlertMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(organizationLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("WAREHOUSE"), eq(warehouseId));
     }
 
     @Test
@@ -69,6 +73,20 @@ class InventoryAlertMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(organizationLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("COMPANY"), eq(companyId));
+    }
+
+    @Test
+    void getDashboard_allowedWhenReadScopePresent() {
+        UUID companyId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("COMPANY"), eq(companyId)))
+                .thenReturn(true);
+        when(organizationLookupService.resolveScope(ScopeResourceType.COMPANY, companyId))
+                .thenReturn(new OrganizationScopeResolution(
+                        ScopeResourceType.COMPANY, companyId, companyId, List.of()));
+
+        assertThatCode(() -> alertService.getDashboard(ScopeResourceType.COMPANY, companyId))
+                .doesNotThrowAnyException();
     }
 
     @Configuration

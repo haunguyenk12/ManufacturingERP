@@ -1,6 +1,7 @@
 package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.config.RateLimitProperties.Action;
 import com.erp.manufacturing.config.RateLimitProperties.RateLimitRule;
@@ -207,7 +208,7 @@ class SecurityFilterChainTest {
                .andExpect(header().exists("X-RateLimit-Limit"))
                .andExpect(header().exists("X-RateLimit-Remaining"))
                .andExpect(header().exists("Retry-After"))
-               .andExpect(jsonPath("$.code").value("BIZ_100")); // BusinessErrorCode.RATE_LIMIT_EXCEEDED
+               .andExpect(jsonPath("$.code").value(BusinessErrorCode.RATE_LIMIT_EXCEEDED.code()));
     }
 
     // ── Test helpers ──────────────────────────────────────────────────────

@@ -64,6 +64,18 @@ public class StockMovement {
     @Column(name = "idempotency_key", nullable = false, length = 120)
     private String idempotencyKey;
 
+    /** SHA-256 of the movement command; null for movements written before V25. */
+    @Column(name = "payload_hash", length = 64)
+    private String payloadHash;
+
+    /**
+     * Business traceability (F5): links this ledger row back to the shop-floor document that caused
+     * it. Not the {@code X-Trace-Id} response header, which only correlates logs — see
+     * {@code .claude/rules/error-handling.md} §5.1.
+     */
+    @Column(name = "trace_id", length = 64)
+    private String traceId;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default

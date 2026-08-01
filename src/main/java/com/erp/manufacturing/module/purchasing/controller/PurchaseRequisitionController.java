@@ -23,8 +23,8 @@ public class PurchaseRequisitionController {
 
     private final PurchaseRequisitionService purchaseRequisitionService;
 
-    @PostMapping("/api/v1/mrp/suggestions/{suggestionId}/convert-to-purchase-requisition")
-    @Operation(summary = "Convert approved MRP purchase suggestion to purchase requisition")
+    @PostMapping("/api/v1/supply-suggestions/{suggestionId}/convert-to-purchase-requisition")
+    @Operation(summary = "Convert approved BUY supply suggestion to purchase requisition")
     public ResponseEntity<ApiResponse<PurchaseRequisitionResponse>> convertSuggestion(
             @PathVariable UUID suggestionId,
             @Valid @RequestBody PurchaseRequisitionFromSuggestionRequest request) {

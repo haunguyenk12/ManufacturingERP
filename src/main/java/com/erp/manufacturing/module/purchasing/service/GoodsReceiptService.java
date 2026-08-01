@@ -4,6 +4,7 @@ import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
@@ -38,6 +39,7 @@ public class GoodsReceiptService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final InventoryMovementService inventoryMovementService;
     private final PurchasingMapper mapper;
+    private final IdempotencySupport idempotency;
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasOrderAccess(authentication, 'PERM_GOODS_RECEIPT_POST', #purchaseOrderId)")
@@ -47,12 +49,13 @@ public class GoodsReceiptService {
         Optional<GoodsReceipt> existing = goodsReceiptRepository
                 .findWithDetailsByPurchaseOrderPurchaseOrderIdAndIdempotencyKey(purchaseOrderId, normalizedKey);
         if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), request);
             return mapper.toResponse(existing.get(), true);
         }
 
         PurchaseOrder order = findOrder(purchaseOrderId);
         if (!order.canReceive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only SENT or PARTIALLY_RECEIVED purchase orders can receive goods");
         }
         Map<UUID, PurchaseOrderLine> orderLines = order.getLines().stream()
@@ -64,6 +67,7 @@ public class GoodsReceiptService {
                 .status(GoodsReceiptStatus.POSTED)
                 .postedAt(Instant.now())
                 .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(request))
                 .note(trimToNull(request.note()))
                 .build();
         receipt = goodsReceiptRepository.save(receipt);
@@ -78,7 +82,9 @@ public class GoodsReceiptService {
             }
             BigDecimal receivedQuantity = requirePositive(lineRequest.receivedQuantity(), "Received quantity");
             if (receivedQuantity.compareTo(orderLine.remainingQuantity()) > 0) {
-                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                // B27 – over-receipt is a quantity-vs-document conflict (409), the purchasing analog
+                // of ProductionReceiptService's PLANNED_QUANTITY_EXCEEDED. Retagged in D7.
+                throw ExceptionFactory.custom(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         "Received quantity cannot exceed remaining ordered quantity");
             }
 
@@ -143,7 +149,7 @@ public class GoodsReceiptService {
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Goods receipt", goodsReceiptId));
 
         if (!receipt.isPosted()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only POSTED goods receipts can be cancelled");
         }
 
@@ -242,16 +248,7 @@ public class GoodsReceiptService {
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {
-        if (!StringUtils.hasText(idempotencyKey)) {
-            throw ExceptionFactory.custom(ValidationErrorCode.MISSING_REQUIRED_FIELD,
-                    "Idempotency-Key header is required");
-        }
-        String normalized = idempotencyKey.trim();
-        if (normalized.length() > IDEMPOTENCY_KEY_MAX_LENGTH) {
-            throw ExceptionFactory.custom(ValidationErrorCode.FIELD_TOO_LONG,
-                    "Idempotency-Key must be at most " + IDEMPOTENCY_KEY_MAX_LENGTH + " characters");
-        }
-        return normalized;
+        return idempotency.normalizeKey(idempotencyKey);
     }
 
     private String normalizeCode(String value, String fieldName) {

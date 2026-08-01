@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7} END {print \"tests=\"t, \"failures=\"f, \"errors=\"e}')",
+      "Bash(mvn -o verify -DskipTests=false)",
+      "Bash(awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7} END {print \"IT tests=\"t, \"failures=\"f, \"errors=\"e}')",
+      "Bash(docker info *)",
+      "PowerShell($p = \"$env:ProgramFiles\\\\Docker\\\\Docker\\\\Docker Desktop.exe\"; if \\(Test-Path $p\\) { Start-Process $p; \"started\" } else { \"not found: $p\" })",
+      "Bash(mvn -o verify)",
+      "Bash(awk '/### `F6`/,0' FRONTEND_ALIGNMENT_ROADMAP.md)",
+      "Bash(awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7} END {print \" tests=\"t, \"failures=\"f, \"errors=\"e, \"classes=\"NR}')",
+      "Bash(python -)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(mvn -o verify -Dit.test=ProductionFlowE2EIT -Dtest=SensitiveRequestToStringTest -DfailIfNoSpecifiedTests=false)",
+      "Bash([ -s \"$f\" ])",
+      "Bash(awk -F, 'NR>1{lm+=$8;lc+=$9;bm+=$6;bc+=$7} END{printf \"line=%.1f%% branch=%.1f%%\\\\n\", 100*lc/\\(lc+lm\\), 100*bc/\\(bc+bm\\)}' target/site/jacoco/jacoco.csv)",
+      "Bash(echo \"COMPILE_EXIT=$?\")",
+      "Bash(mvn -o clean verify)",
+      "Bash(echo \"exit=$?\")"
+    ]
+  }
+}

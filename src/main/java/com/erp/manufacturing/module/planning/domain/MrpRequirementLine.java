@@ -71,6 +71,23 @@ public class MrpRequirementLine extends BaseEntity {
     @Builder.Default
     private BigDecimal safetyStockQuantity = BigDecimal.ZERO;
 
+    /**
+     * Coverage still unclaimed when this line was netted (spec §2.4):
+     * {@code max(0, availableQuantity + openSupplyQuantity - coverage consumed by earlier lines)}.
+     *
+     * <p>Cannot be derived from the other columns. The subtrahend is the coverage already eaten by
+     * <em>earlier</em> requirement lines for the same (item, warehouse), which lives only inside one
+     * MRP calculation; {@code availableQuantity + openSupplyQuantity} therefore over-reports as soon
+     * as an item appears on more than one line. The frontend checks
+     * {@code netRequired = max(0, gross + safetyStock - projectedAvailable)}, so this must be the
+     * exact figure the netting used — including its clamp at zero (invariant B77).
+     *
+     * <p>Nullable, with no default: {@code null} means "run executed before V40", not "nothing
+     * available". V40 deliberately does not backfill.
+     */
+    @Column(name = "projected_available_quantity", precision = 19, scale = 6)
+    private BigDecimal projectedAvailableQuantity;
+
     @Column(name = "net_required_quantity", nullable = false, precision = 19, scale = 6)
     @Builder.Default
     private BigDecimal netRequiredQuantity = BigDecimal.ZERO;
@@ -84,4 +101,13 @@ public class MrpRequirementLine extends BaseEntity {
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "setting_source", nullable = false, length = 30)
+    @Builder.Default
+    private PlanningSettingSource settingSource = PlanningSettingSource.SYSTEM_DEFAULT;
+
+    @Column(name = "excluded_lot_count", nullable = false)
+    @Builder.Default
+    private Integer excludedLotCount = 0;
 }

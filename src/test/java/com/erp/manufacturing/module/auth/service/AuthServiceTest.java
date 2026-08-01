@@ -6,6 +6,8 @@ import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
+import com.erp.manufacturing.module.auth.dto.LogoutRequest;
+import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.organization.domain.Role;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
@@ -199,5 +201,146 @@ class AuthServiceTest {
                     AppException ae = (AppException) ex;
                     assertThat(ae.getErrorCode()).isEqualTo(AuthErrorCode.ACCOUNT_INACTIVE);
                 });
+    }
+
+    // ── Refresh ────────────────────────────────────────────────────────────
+    //
+    // Note: the request attribute is named "authenticatedUserId" but actually carries the
+    // JWT *subject*, i.e. the username – the service feeds it into loadUserByUsername().
+
+    @Test
+    @DisplayName("Refresh success – rotates the token pair and extends the device session")
+    void refresh_validToken_rotatesAndReturnsNewPair() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("new-refresh");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        assertThat(response.accessToken()).isEqualTo("new.access");
+        assertThat(response.refreshToken()).isEqualTo("new-refresh");
+        assertThat(response.tokenId()).isNotEqualTo("old-tid");
+        assertThat(response.expiresIn()).isEqualTo(900L);
+
+        // Rotation must both revoke the old tokenId AND persist the new one
+        verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
+        verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
+        verify(tokenStore).extendDeviceSession(testUser.getUserId(), response.deviceId());
+    }
+
+    @Test
+    @DisplayName("Refresh without authenticated subject – REFRESH_TOKEN_EXPIRED, token store untouched")
+    void refresh_missingUserIdAttribute_throwsRefreshTokenExpired() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn(null);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+
+        verifyNoInteractions(tokenStore, userDetailsService);
+    }
+
+    @Test
+    @DisplayName("Refresh with unknown tokenId – REFRESH_TOKEN_EXPIRED, nothing is rotated")
+    void refresh_storedTokenNull_throwsRefreshTokenExpired() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+
+        verify(tokenStore, never()).deleteRefreshToken(any(), any());
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Refresh with mismatched refresh token – REFRESH_TOKEN_EXPIRED, no new token issued")
+    void refresh_storedTokenMismatch_throwsRefreshTokenExpired() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("other-refresh");
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+
+        verify(tokenStore, never()).deleteRefreshToken(any(), any());
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
+        verifyNoInteractions(jwtTokenProvider);
+    }
+
+    // ── Logout ─────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Logout – blacklists the current access token and deletes its refresh token")
+    void logout_withJtiAndBearer_blacklistsAndDeletesRefresh() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(httpRequest.getAttribute("authenticatedJti")).thenReturn("jti-1");
+        when(httpRequest.getHeader("Authorization")).thenReturn("Bearer abc");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(jwtTokenProvider.getRemainingTtlMs("abc")).thenReturn(120_000L);
+
+        authService.logout(new LogoutRequest("refresh-token", "tid"), httpRequest);
+
+        verify(tokenStore).blacklistAccessToken("jti-1", 120_000L);
+        verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "tid");
+    }
+
+    @Test
+    @DisplayName("Logout without authenticated subject – returns silently, touches nothing")
+    void logout_nullUserId_returnsSilently() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn(null);
+
+        authService.logout(new LogoutRequest("refresh-token", "tid"), httpRequest);
+
+        verifyNoInteractions(tokenStore, userDetailsService, jwtTokenProvider, auditLogService);
+    }
+
+    @Test
+    @DisplayName("Logout without jti – skips blacklisting but still deletes the refresh token")
+    void logout_nullJti_skipsBlacklist_stillDeletesRefresh() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(httpRequest.getAttribute("authenticatedJti")).thenReturn(null);
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+
+        authService.logout(new LogoutRequest("refresh-token", "tid"), httpRequest);
+
+        verify(tokenStore, never()).blacklistAccessToken(any(), anyLong());
+        verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "tid");
+    }
+
+    // ── Logout all devices ─────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Logout-all – drops every refresh token and every device session")
+    void logoutAll_deletesAllTokensAndSessions() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+
+        authService.logoutAll(httpRequest);
+
+        verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
+        verify(tokenStore).deleteAllDeviceSessions(testUser.getUserId());
+    }
+
+    @Test
+    @DisplayName("Logout-all without authenticated subject – returns silently, touches nothing")
+    void logoutAll_nullUserId_returnsSilently() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn(null);
+
+        authService.logoutAll(httpRequest);
+
+        verifyNoInteractions(tokenStore, userDetailsService, auditLogService);
     }
 }

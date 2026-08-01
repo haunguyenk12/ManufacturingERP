@@ -197,7 +197,7 @@ public class PurchaseOrderService {
 
     private void ensureDraft(PurchaseOrder order, String message) {
         if (!order.isDraft()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED, message);
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT, message);
         }
     }
 

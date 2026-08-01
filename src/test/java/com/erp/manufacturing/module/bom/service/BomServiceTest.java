@@ -168,8 +168,9 @@ class BomServiceTest {
         assertThatThrownBy(() -> service.updateLine(lineId, new BomLineUpdateRequest(
                 componentId, 10, BigDecimal.ONE, BigDecimal.ZERO)))
                 .isInstanceOf(AppException.class)
+                // D7: BOM status conflict is 409 STATE_CONFLICT, not 422 OPERATION_NOT_ALLOWED
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
     @Test

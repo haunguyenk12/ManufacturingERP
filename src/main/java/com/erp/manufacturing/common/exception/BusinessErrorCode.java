@@ -4,30 +4,44 @@ import org.springframework.http.HttpStatus;
 
 /**
  * Error codes for domain / business rule violations.
- * Format: {@code BIZ_XXX}
+ * The wire value is the enum constant name so clients branch on a stable, readable code
+ * (see {@code .claude/rules/error-handling.md} §5.3).
  */
 public enum BusinessErrorCode implements ErrorCode {
 
     // ── Generic ────────────────────────────────────────────────────────────
-    BUSINESS_RULE_VIOLATION ("BIZ_001", "Business rule violated",                        HttpStatus.UNPROCESSABLE_ENTITY),
-    OPERATION_NOT_ALLOWED   ("BIZ_002", "Operation is not allowed in the current state", HttpStatus.UNPROCESSABLE_ENTITY),
+    BUSINESS_RULE_VIOLATION   ("BUSINESS_RULE_VIOLATION",   "Business rule violated",                        HttpStatus.UNPROCESSABLE_ENTITY),
+    OPERATION_NOT_ALLOWED     ("OPERATION_NOT_ALLOWED",     "Operation is not allowed in the current state", HttpStatus.UNPROCESSABLE_ENTITY),
+    STATE_CONFLICT            ("STATE_CONFLICT",            "Action is not valid for the current state",     HttpStatus.CONFLICT),
+    CONCURRENT_MODIFICATION   ("CONCURRENT_MODIFICATION",   "Record was modified by another request",        HttpStatus.CONFLICT),
+    IDEMPOTENCY_CONFLICT      ("IDEMPOTENCY_CONFLICT",      "Idempotency key was reused with a different payload", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
-    INSUFFICIENT_STOCK      ("BIZ_010", "Insufficient stock for this operation",         HttpStatus.UNPROCESSABLE_ENTITY),
-    NEGATIVE_QUANTITY       ("BIZ_011", "Quantity cannot be negative",                   HttpStatus.UNPROCESSABLE_ENTITY),
-    ITEM_ALREADY_ISSUED     ("BIZ_012", "Item has already been issued",                  HttpStatus.CONFLICT),
+    /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */
+    INSUFFICIENT_STOCK        ("INSUFFICIENT_AVAILABLE_STOCK", "Insufficient stock for this operation",      HttpStatus.CONFLICT),
+    NEGATIVE_QUANTITY         ("NEGATIVE_QUANTITY",         "Quantity cannot be negative",                   HttpStatus.UNPROCESSABLE_ENTITY),
+    ITEM_ALREADY_ISSUED       ("ITEM_ALREADY_ISSUED",       "Item has already been issued",                  HttpStatus.CONFLICT),
+    LOT_NOT_ELIGIBLE          ("LOT_NOT_ELIGIBLE",          "Lot status does not allow this operation",      HttpStatus.CONFLICT),
 
     // ── BOM / Manufacturing ────────────────────────────────────────────────
-    BOM_CIRCULAR_REFERENCE  ("BIZ_020", "Circular reference detected in Bill of Materials", HttpStatus.UNPROCESSABLE_ENTITY),
-    MRP_CALCULATION_ERROR   ("BIZ_021", "MRP calculation failed",                        HttpStatus.INTERNAL_SERVER_ERROR),
-    PRODUCTION_ORDER_CLOSED ("BIZ_022", "Production order is already closed",            HttpStatus.CONFLICT),
+    BOM_CIRCULAR_REFERENCE    ("BOM_CIRCULAR_REFERENCE",    "Circular reference detected in Bill of Materials", HttpStatus.UNPROCESSABLE_ENTITY),
+    /** Spec §8.1 planning message code: a MAKE item without an ACTIVE routing cannot become a work
+     *  order. 409 follows the §8.2 "action not valid for the current master data state" family. */
+    MISSING_ROUTING           ("MISSING_ROUTING",           "No active routing for this item",               HttpStatus.CONFLICT),
+    /** Sibling of {@link #MISSING_ROUTING}. Until F5 this surfaced as a 404 from the BOM lookup,
+     *  which spec §8.1 treats as the same class of planning block (debt #14). */
+    MISSING_BOM               ("MISSING_BOM",               "No active BOM for this item",                   HttpStatus.CONFLICT),
+    MRP_CALCULATION_ERROR     ("MRP_CALCULATION_ERROR",     "MRP calculation failed",                        HttpStatus.INTERNAL_SERVER_ERROR),
+    PRODUCTION_ORDER_CLOSED   ("PRODUCTION_ORDER_CLOSED",   "Production order is already closed",            HttpStatus.CONFLICT),
+    RESERVATION_EXCEEDED      ("RESERVATION_EXCEEDED",      "Quantity exceeds the remaining reservation",    HttpStatus.CONFLICT),
+    PLANNED_QUANTITY_EXCEEDED ("PLANNED_QUANTITY_EXCEEDED", "Quantity exceeds the planned limit",            HttpStatus.CONFLICT),
 
     // ── System ─────────────────────────────────────────────────────────────
-    EXTERNAL_SERVICE_ERROR  ("BIZ_090", "External service returned an error",            HttpStatus.BAD_GATEWAY),
-    INTERNAL_SERVER_ERROR   ("BIZ_099", "An unexpected internal error occurred",         HttpStatus.INTERNAL_SERVER_ERROR),
+    EXTERNAL_SERVICE_ERROR    ("EXTERNAL_SERVICE_ERROR",    "External service returned an error",            HttpStatus.BAD_GATEWAY),
+    INTERNAL_SERVER_ERROR     ("INTERNAL_SERVER_ERROR",     "An unexpected internal error occurred",         HttpStatus.INTERNAL_SERVER_ERROR),
 
     // ── Rate Limit ─────────────────────────────────────────────────────────
-    RATE_LIMIT_EXCEEDED     ("BIZ_100", "Too many requests, please slow down",           HttpStatus.TOO_MANY_REQUESTS);
+    RATE_LIMIT_EXCEEDED       ("RATE_LIMIT_EXCEEDED",       "Too many requests, please slow down",           HttpStatus.TOO_MANY_REQUESTS);
 
     private final String     code;
     private final String     message;

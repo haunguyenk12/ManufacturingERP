@@ -12,4 +12,14 @@ public record UpdateUserRequest(
 
         @Size(min = 8, message = "Password must be at least 8 characters")
         String password
-) {}
+) {
+    /**
+     * Masks {@code password}. Both fields are optional here, so the {@code null} case must stay
+     * distinguishable: "no password sent" and "password hidden" lead to different investigations.
+     */
+    @Override
+    public String toString() {
+        return "UpdateUserRequest[email=" + email
+                + ", password=" + (password == null ? "null" : "***") + "]";
+    }
+}

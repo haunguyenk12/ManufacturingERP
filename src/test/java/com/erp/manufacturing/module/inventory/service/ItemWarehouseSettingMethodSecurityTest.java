@@ -1,6 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
+import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
+import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
 import com.erp.manufacturing.module.inventory.dto.ItemWarehouseSettingRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
@@ -19,8 +21,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -59,6 +63,7 @@ class ItemWarehouseSettingMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(itemLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq("WAREHOUSE"), eq(warehouseId));
     }
 
     @Test
@@ -71,6 +76,21 @@ class ItemWarehouseSettingMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(settingRepository);
+        verify(inventorySettingPermissionGuard).hasSettingAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(settingId));
+    }
+
+    @Test
+    void deactivate_allowedWhenSettingGuardAllows() {
+        UUID settingId = UUID.randomUUID();
+        when(inventorySettingPermissionGuard.hasSettingAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(settingId)))
+                .thenReturn(true);
+        when(settingRepository.findWithDetailsBySettingId(settingId)).thenReturn(Optional.of(
+                ItemWarehouseSetting.builder()
+                        .settingId(settingId)
+                        .status(ItemWarehouseSettingStatus.ACTIVE)
+                        .build()));
+
+        assertThatCode(() -> settingService.deactivate(settingId)).doesNotThrowAnyException();
     }
 
     @Configuration

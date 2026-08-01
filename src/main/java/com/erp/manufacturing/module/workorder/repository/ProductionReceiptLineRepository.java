@@ -20,7 +20,7 @@ public interface ProductionReceiptLineRepository extends JpaRepository<Productio
             select coalesce(sum(l.quantity), 0)
             from ProductionReceiptLine l
             where l.receipt.workOrder.workOrderId = :workOrderId
-              and l.receipt.status = com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.POSTED
+              and l.receipt.status = com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.APPROVED
             """)
     BigDecimal sumReceivedQuantityByWorkOrder(@Param("workOrderId") UUID workOrderId);
 }

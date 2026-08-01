@@ -7,6 +7,7 @@ import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRep
 import com.erp.manufacturing.module.inventory.repository.StockAvailabilityProjection;
 import com.erp.manufacturing.module.inventory.repository.StockAvailabilityByWarehouseProjection;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
+import com.erp.manufacturing.module.inventory.repository.StockExcludedLotCountProjection;
 import com.erp.manufacturing.module.inventory.repository.StockPlanningQuantityProjection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -107,6 +108,34 @@ class InventoryAvailabilityServiceTest {
         assertThat(quantity.safetyStockQuantity()).isEqualByComparingTo("5");
         assertThat(quantity.reorderPointQuantity()).isEqualByComparingTo("8");
         assertThat(quantity.leadTimeDays()).isEqualTo(3);
+        assertThat(quantity.hasItemWarehouseSetting()).isTrue();
+        verify(stockBalanceRepository).aggregateExcludedLotCounts(
+                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+    }
+
+    @Test
+    void getPlanningQuantities_noActiveSetting_reportsFallbackAndCountsExcludedLots() {
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        when(stockBalanceRepository.aggregatePlanningQuantities(
+                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                .thenReturn(List.of(new TestPlanningQuantityProjection(
+                        itemId, new BigDecimal("4"), BigDecimal.ZERO, new BigDecimal("4"))));
+        when(stockBalanceRepository.aggregateExcludedLotCounts(
+                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                .thenReturn(List.of(new TestExcludedLotCountProjection(itemId, 2L)));
+        when(itemWarehouseSettingRepository.aggregatePlanningSettings(
+                List.of(itemId), List.of(warehouseId), ItemWarehouseSettingStatus.ACTIVE))
+                .thenReturn(List.of());
+
+        InventoryAvailabilityService.PlanningInventoryQuantity quantity =
+                service.getPlanningQuantities(List.of(itemId), List.of(warehouseId)).get(itemId);
+
+        assertThat(quantity.hasItemWarehouseSetting()).isFalse();
+        assertThat(quantity.safetyStockQuantity()).isEqualByComparingTo("0");
+        assertThat(quantity.excludedLotCount()).isEqualTo(2);
+        verify(stockBalanceRepository, times(1)).aggregateExcludedLotCounts(
+                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
     }
 
     private record TestProjection(UUID itemId, BigDecimal quantity) implements StockAvailabilityProjection {
@@ -131,6 +160,12 @@ class InventoryAvailabilityServiceTest {
         @Override public BigDecimal getOnHandQuantity() { return onHandQuantity; }
         @Override public BigDecimal getReservedQuantity() { return reservedQuantity; }
         @Override public BigDecimal getAvailableQuantity() { return availableQuantity; }
+    }
+
+    private record TestExcludedLotCountProjection(UUID itemId, Long excludedLotCount)
+            implements StockExcludedLotCountProjection {
+        @Override public UUID getItemId() { return itemId; }
+        @Override public Long getExcludedLotCount() { return excludedLotCount; }
     }
 
     private record TestPlanningSettingProjection(
