@@ -196,6 +196,14 @@ Trả về **cặp token hoàn toàn mới** (rotation) — `tokenId` cũng đ�
 |---|---|---|
 | `401 REFRESH_TOKEN_EXPIRED` | Refresh token hết hạn / không hợp lệ | Xoá storage, về màn login |
 | `401 TOKEN_REUSE_DETECTED` | Token **đã bị rotate** mà vẫn được gửi lại (trong vòng 60s) ⇒ hệ thống coi là bị đánh cắp và **đã thu hồi toàn bộ phiên của user trên mọi thiết bị** | Xoá storage, về màn login, hiện thông báo bảo mật rõ ràng (**không** gộp chung message với dòng trên) |
+| `401 SESSION_ABSOLUTE_TIMEOUT` | Phiên đã sống **quá 30 ngày kể từ lúc login** và bị thu hồi theo chính sách, dù user vẫn đang dùng đều. **Không** phải sự cố bảo mật | Xoá storage, về màn login với message trung tính kiểu "Phiên đã hết hạn, vui lòng đăng nhập lại" — **đừng** dùng lại message cảnh báo của dòng trên |
+
+🔴 **Cả ba lỗi trên đều là HTTP 401 — status không phân biệt được chúng.** Rẽ nhánh theo `code`,
+đừng theo status. Đây chính là lý do envelope luôn có `code` (§5.1).
+
+⏱️ **30 ngày là mốc tuyệt đối, refresh không kéo dài nó.** Mốc đếm từ lần `login` gần nhất và được
+mang nguyên qua mọi lần rotate — user dùng liên tục vẫn bị buộc đăng nhập lại đúng hạn. Timeout chỉ
+được kiểm **khi gọi refresh**, nên access token đang cầm vẫn dùng được tới khi hết TTL của nó.
 
 🔴 **Đừng gửi 2 request refresh song song với cùng một `tokenId`.** Request thứ hai sẽ rơi đúng vào
 `TOKEN_REUSE_DETECTED` và user bị đăng xuất mọi thiết bị **oan**. FE phải serialize refresh: khi có
@@ -763,6 +771,7 @@ warehouseId, warehouseCode, lotId, lotNumber, quantity, stockMovementId, overIss
 | `TOKEN_REVOKED` / `TOKEN_MALFORMED` | Token bị logout / hỏng | Về login |
 | `REFRESH_TOKEN_EXPIRED` | Refresh token hỏng | Về login |
 | `TOKEN_REUSE_DETECTED` | Refresh token đã rotate bị dùng lại ⇒ **mọi phiên đã bị thu hồi** | Về login + báo bảo mật. Xem lưu ý serialize refresh ở §`POST /auth/refresh` |
+| `SESSION_ABSOLUTE_TIMEOUT` | Phiên quá **30 ngày** kể từ login ⇒ thu hồi theo chính sách, **không** phải sự cố bảo mật | Về login với message trung tính. **Đừng** gộp message với 2 dòng trên |
 | `INVALID_CREDENTIALS` | Sai user/mật khẩu | Hiện lỗi chung, **không** nói field nào sai |
 | `ACCOUNT_LOCKED` (423) | 5 lần sai liên tiếp → khoá 15 phút | |
 | `ACCOUNT_INACTIVE` (403) | Tài khoản bị vô hiệu | |

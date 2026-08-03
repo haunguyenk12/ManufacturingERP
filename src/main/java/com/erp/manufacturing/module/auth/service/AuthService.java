@@ -29,6 +29,8 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -120,6 +122,8 @@ public class AuthService {
         String tokenId      = UUID.randomUUID().toString();
 
         tokenStore.saveRefreshToken(principal.getUserId(), tokenId, refreshToken);
+        // B81: the absolute timeout is measured from here and is never extended by a refresh.
+        tokenStore.saveSessionStart(principal.getUserId(), tokenId, Instant.now());
 
         auditLogService.logAuth(principal.getUserId(), principal.getUsername(), ip, traceId,
                 AuditAction.LOGIN, "Login from " + ip + " device=" + deviceId);
@@ -177,6 +181,28 @@ public class AuthService {
             throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
 
+        // Absolute session timeout (B81). Placed here on purpose: after the token has been proven
+        // valid, so a caller holding nothing learns nothing about session age; and before rotation,
+        // so a session past its absolute limit can never walk away with a fresh pair.
+        Instant sessionStart = tokenStore.getSessionStart(principal.getUserId(), request.tokenId());
+        if (sessionStart == null) {
+            // Session established before D8b shipped: it has no start stamp to judge. Treated as
+            // starting now rather than as expired — refresh TTL is 7 days, so every live session
+            // carries a stamp within a week, whereas failing closed would log out every signed-in
+            // user the moment this deploys, buying no security.
+            sessionStart = Instant.now();
+        } else if (Duration.between(sessionStart, Instant.now()).toMillis()
+                >= jwtProperties.absoluteSessionTimeoutMs()) {
+            tokenStore.deleteAllUserTokens(principal.getUserId());
+            tokenStore.deleteAllDeviceSessions(principal.getUserId());
+            auditLogService.logAuthFailure(principal.getUsername(), ip, traceId,
+                    AuditAction.SESSION_ABSOLUTE_TIMEOUT,
+                    "Session started at " + sessionStart + " exceeded the absolute timeout; all sessions revoked");
+            log.info("[AUTH] Absolute session timeout: user={} sessionStart={} ip={}",
+                    principal.getUsername(), sessionStart, ip);
+            throw ExceptionFactory.unauthorized(AuthErrorCode.SESSION_ABSOLUTE_TIMEOUT);
+        }
+
         String newAccessToken  = jwtTokenProvider.generateAccessToken(principal);
         String newRefreshToken = jwtTokenProvider.generateRefreshToken();
         String newTokenId      = UUID.randomUUID().toString();
@@ -185,6 +211,10 @@ public class AuthService {
         // exist BEFORE the old key disappears, otherwise a concurrent replay landing in that gap
         // reads neither and gets diagnosed as an ordinary expiry instead of being detected.
         tokenStore.saveRefreshToken(principal.getUserId(), newTokenId, newRefreshToken);
+        // B81: carry the ORIGINAL session start over to the new tokenId. Stamping "now" here would
+        // reset the absolute clock on every refresh and silently disable the timeout altogether —
+        // with a byte-identical response, so nothing else would notice.
+        tokenStore.saveSessionStart(principal.getUserId(), newTokenId, sessionStart);
         tokenStore.markRefreshTokenUsed(request.tokenId());
         tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
 

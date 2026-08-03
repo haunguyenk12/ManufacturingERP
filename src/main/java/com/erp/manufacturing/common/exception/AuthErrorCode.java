@@ -24,6 +24,13 @@ public enum AuthErrorCode implements ErrorCode {
 
     // ── Session ────────────────────────────────────────────────────────────
     SESSION_CONFLICT        ("SESSION_CONFLICT",       "Session conflict detected",                 HttpStatus.CONFLICT),
+    /**
+     * B81 (D8b): the session behind this refresh token has been alive longer than the absolute
+     * timeout, so it is retired regardless of how recently it was used. Shares HTTP 401 with
+     * {@link #REFRESH_TOKEN_EXPIRED} and {@link #TOKEN_REUSE_DETECTED} — the {@code code} is the
+     * only thing telling the three apart, which is what clients must branch on.
+     */
+    SESSION_ABSOLUTE_TIMEOUT("SESSION_ABSOLUTE_TIMEOUT", "Session expired. Please login again.",    HttpStatus.UNAUTHORIZED),
 
     // ── Authorization ──────────────────────────────────────────────────────
     ACCESS_DENIED           ("PERMISSION_DENIED",      "Insufficient permissions",                  HttpStatus.FORBIDDEN);

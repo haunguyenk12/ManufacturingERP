@@ -13,5 +13,10 @@ import org.springframework.validation.annotation.Validated;
 public record JwtProperties(
         @NotBlank String secret,
         @NotNull Long accessTokenExpiryMs,
-        @NotNull Long refreshTokenExpiryMs
+        @NotNull Long refreshTokenExpiryMs,
+        /**
+         * Absolute session lifetime (D8b). Measured from login and never extended by a refresh,
+         * unlike {@code refreshTokenExpiryMs} which slides on every rotation.
+         */
+        @NotNull Long absoluteSessionTimeoutMs
 ) {}

@@ -16,6 +16,8 @@ public enum AuditAction {
     ACCOUNT_LOCKED,
     /** RTR (D8a): a refresh token that was already rotated away came back — all sessions revoked. */
     SUSPICIOUS_TOKEN_REUSE,
+    /** B81 (D8b): a session outlived the absolute timeout and was retired even though it was in use. */
+    SESSION_ABSOLUTE_TIMEOUT,
 
     // ── User Management ────────────────────────────────────────────────────
     USER_CREATED,

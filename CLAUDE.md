@@ -64,12 +64,12 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ **HOÀN THÀNH** (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B80`**. Trả **1/3** nợ #6 — `D8b`/`D8c` vẫn mở. Bản ghi: §0.22 |
-| **Phase trước** | **`F10` – 3 nợ field-level cuối của spec FE (`G`, `F`, `H`)** ✅ HOÀN THÀNH (2026-08-01). `projectedAvailable` (persist, **không** derive được), `sourceRoutingCode`/`Version` trên proposal, số chứng từ `MI-`/`PE-`. Migration **`V40`**, wire **additive**. Nợ `E` cố ý ngoài phạm vi. Bản ghi: §0.21 |
-| **Phase kế tiếp** | **Chưa chốt.** Ứng viên: `D8b` (absolute session timeout — đổi cấu trúc lưu refresh token Redis từ String sang payload có `sessionCreatedAt`, rủi ro cao hơn `D8a`), `D8c` (forgot-password — toàn bộ file mới, cần xác nhận hạ tầng gửi email trước), `P3` costing (spec FE xác nhận tường minh ngoài MVP), `P4` Work Center/CRP (chưa có logic nghiệp vụ nào phụ thuộc `workCenterCode`), nợ nhỏ `E`/`B`/`C`/`D`/`I` (`FRONTEND_ALIGNMENT_ROADMAP.md §7.1`). |
-| **Migration mới nhất** | `V40__add_projected_available_routing_snapshot_and_document_codes.sql` (`F10`) — `D7`, `D7b`, `D11`, `F9`, **`D8a`** **không** migration |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → **`D8a` (2026-08-03): 577 case unit + 66 case IT / 10 class IT**, failures = 0. ⚠️ **`D8a` KHÔNG chạy lại IT** — Docker Desktop không bật lúc nghiệm thu; hợp lệ vì phase thuần Redis/service, **không** JPQL/schema/entity, và grep xác nhận **không** `*IT.java` nào chạm `refresh`/`TokenStore`. Chạy lại khi có Docker |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.2% / branch 59.4%** (đo lại 2026-08-03 sau `D8a`; trước đó 73.7% / 59.2%). **unit + IT: line 80.1% / branch 63.9%** là số của `F10` (2026-08-01) — **`D8a` không đo lại được** vì cần Docker cho `*IT`. ⚠️ **Xu hướng đã xác nhận bảy phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; **`F10` +7 unit / +2 IT ⇒ +0.0 line / +0.4 branch**. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.21). `F10` là ví dụ mới nhất: cả 3 nợ nó đóng nằm ở vùng code **đã có coverage**, vì thứ thiếu là *một cột không tồn tại*; và mutation #3 của nó **xanh ở lần chạy đầu** dù case liên quan đã có sẵn và đang xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase đang chạy** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
+| **Phase trước** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Bản ghi: §0.22 |
+| **Phase kế tiếp** | **Chưa chốt.** Ứng viên: `D8c` (forgot-password — 🔴 **đang bị chặn**: `pom.xml` không có `spring-boot-starter-mail`, phải chốt hạ tầng gửi email trước), `P3` costing (spec FE xác nhận tường minh ngoài MVP), `P4` Work Center/CRP (chưa có logic nghiệp vụ nào phụ thuộc `workCenterCode`), nợ nhỏ `E`/`B`/`C`/`D`/`I` (`FRONTEND_ALIGNMENT_ROADMAP.md §7.1`). |
+| **Migration mới nhất** | `V40__add_projected_available_routing_snapshot_and_document_codes.sql` (`F10`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, **`D8b`** **không** migration |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → **`D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT**, failures = 0. ✅ **`D8b` đã chạy `mvn -o verify` thật với Docker** — trả nợ lần đo `*IT` mà `D8a` bỏ qua; 66 case IT xanh, **0 case IT bị ảnh hưởng** (`ProductionFlowE2EIT` dựng auth bằng `authentication(...)` post-processor nên **không** đi qua `AuthService.login`) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.23). `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (tổng quan + lịch sử) / `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -208,7 +208,7 @@ do not delete 47 lines above
 | 3 | ~~`AuthService.refresh` / `logout` / `logoutAll`, `TokenStoreService`, `JwtTokenProvider` không có test~~ ✅ **ĐÃ TRẢ (T3)** – 39 case mới. Còn lại: Redis là mock, chưa chạy thật (→ `T4`) | ~~`T3`~~ |
 | 4 | ~~Logic phân quyền (hạn hiệu lực assignment, status role/org) nằm trong JPQL nhưng JPQL chưa bao giờ được chạy trong test~~ ✅ **ĐÃ TRẢ (T4)** – `UserRoleAssignmentRepositoryIT` (6 case) chạy JPQL thật qua Testcontainers, nghiệm thu mutation xác nhận | ~~`T4`~~ |
 | 5 | ~~`Testcontainers` đã khai báo trong `pom.xml` nhưng chưa dùng lần nào~~ ✅ **ĐÃ TRẢ (T4)** – `AbstractPostgresIntegrationTest` + 3 `*IT.java`. `spring-security-test` ✅ đã dùng từ T2 | ~~`T4`~~ |
-| 6 | 🟡 **Trả 1/3 — nợ VẪN MỞ.** RTR (reuse detection): ✅ **đã trả (`D8a`, 2026-08-03)**, xem §0.22 + bất biến `B80`. **Absolute session timeout (`D8b`) và forgot-password (`D8c`): vẫn chưa có bất kỳ dòng code nào.** 🔴 Đừng ghi "nợ #6 đã đóng" — đúng bài học §0.20 (repo đã ba lần tuyên bố đóng nợ rộng hơn phạm vi thật) | RTR: ~~`D8a`~~ · còn lại: `D8b`/`D8c` |
+| 6 | 🟡 **Trả 2/3 — nợ VẪN MỞ.** RTR: ✅ **đã trả (`D8a`, 2026-08-03)**, §0.22 + `B80`. Absolute session timeout: ✅ **đã trả (`D8b`, 2026-08-03)**, §0.23 + `B81`. **Forgot-password (`D8c`): vẫn chưa có bất kỳ dòng code nào** — và đang **bị chặn** vì `pom.xml` không có `spring-boot-starter-mail` (phải chốt hạ tầng gửi email trước). 🔴 Đừng ghi "nợ #6 đã đóng" — đúng bài học §0.20 (repo đã ba lần tuyên bố đóng nợ rộng hơn phạm vi thật) | RTR: ~~`D8a`~~ · timeout: ~~`D8b`~~ · còn lại: `D8c` |
 | 7 | ~~`LoginRequest` / `RefreshRequest` là **record thuần** ⇒ `toString()` tự sinh **lộ password / raw token**~~ ✅ **ĐÃ TRẢ (`D1`, 2026-07-28)** – rà ra **5** record dính (không phải 2): `LoginRequest`, `RefreshRequest`, `LogoutRequest`, `CreateUserRequest`, `UpdateUserRequest`. Cả 5 override `toString()` che secret, **giữ** `tokenId` hiện (là định danh Redis, không phải credential) và **giữ** phân biệt `null` vs `***` (thiếu password và ẩn password là hai bug khác nhau). `SensitiveRequestToStringTest` (5 case) là regression guard, đã nghiệm thu mutation | ~~Commit riêng~~ `D1` |
 | 8 | ~~`StockBalanceRepository.aggregate*` dùng path expression `b.lot.status` ⇒ INNER JOIN loại bỏ mọi `StockBalance` không lot-tracked~~ ✅ **ĐÃ TRẢ (`F1.6`, 2026-07-26)** – cả 3 query dùng `left join b.lot l` tường minh; `StockBalanceRepositoryIT` nay assert hành vi đúng và là regression guard | ~~`F1`~~ |
 | 9 | ~~Spec đặt `INSUFFICIENT_AVAILABLE_STOCK` / `STATE_CONFLICT` ở **409**, code trả **422**~~ ✅ **ĐÃ TRẢ HẾT (`F5-A` + `D7`)** – `F5-A`: `INSUFFICIENT_STOCK` → 409, state machine của work order / issue / reservation / WIP → `STATE_CONFLICT` (409), lot sai trạng thái → `LOT_NOT_ELIGIBLE` (409). **`D7`**: rà nốt 4 module còn lại theo đúng tiêu chí `.claude/rules/error-handling.md §5.3`, **44 throw site** phân loại từng chỗ ⇒ sửa **9** (`bom` 1, `purchasing` 8), `organization`/`sales` **0** (vốn đã đúng). `OPERATION_NOT_ALLOWED` (422) **cố ý giữ lại** cho validate master data **và** cho "chứng từ chưa có dòng nào" — bảng liệt kê từng chỗ ở `FRONTEND_ALIGNMENT_ROADMAP.md §6.1.6` | ~~`F5`~~ + ~~`D7`~~ |
@@ -916,6 +916,71 @@ bảo mật với hoạt động bình thường.
 **Breaking changes — wire: KHÔNG có** (thuần additive: 1 mã lỗi mới, DTO không đổi).
 **Java positional: không có.** **Hành vi:** reuse token cũ nay **buộc đăng xuất toàn bộ thiết bị**
 thay vì chỉ báo hết hạn — đó là mục đích của tính năng, không phải tác dụng phụ.
+
+---
+
+### 0.23 D8b – Absolute Session Timeout (ĐÃ HOÀN THÀNH 2026-08-03)
+
+**Không migration** (thuần Redis), **không** permission mới, **không** đổi request/response DTO.
+Phase thứ hai của track `D8`. Trả **2/3** nợ #6. Thiết kế: `common/security/CLAUDE.md` §4.15.
+Bất biến: **`B81`**.
+
+**Vấn đề đã đóng:** refresh token TTL 7 ngày **sliding** ⇒ user active liên tục thì phiên **không
+bao giờ** kết thúc. Rủi ro `S13` đã ghi trong `best-practices.md §8.1` từ lâu, chưa có dòng code nào.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `saveSessionStart` / `getSessionStart` + key `auth:refresh:{userId}:{tokenId}:meta` TTL 7d | `TokenStoreService` |
+| `deleteRefreshToken` xoá **cả** key `:meta` (tránh orphan) | `TokenStoreService` |
+| `login` stamp session start; `refresh` check `B81` + carry-forward | `AuthService` |
+| `absoluteSessionTimeoutMs` (component thứ 4) + `app.jwt.absolute-session-timeout-ms: 2592000000` | `JwtProperties`, `application.yml`, `application-dev.yml` |
+| `SESSION_ABSOLUTE_TIMEOUT` (401) · `AuditAction.SESSION_ABSOLUTE_TIMEOUT` | `AuthErrorCode`, `AuditAction` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Carry-forward khi rotate là bất biến, không phải chi tiết triển khai.** Rotate phải mang
+   **nguyên** `sessionCreatedAt` cũ sang `newTokenId`. Stamp `now` ở đó ⇒ đồng hồ absolute reset mỗi
+   15 phút ⇒ **tính năng thành no-op hoàn toàn**, trong khi response **byte-identical**, mã lỗi và
+   HTTP status không đổi, **coverage không đổi**. Chỉ assertion đối số bắt được (mutation #1).
+2. 🔴 **Vị trí check: SAU validate `stored`, TRƯỚC rotate.** *Sau* — caller không cầm token hợp lệ
+   thì không được biết gì về tuổi phiên. *Trước* — phiên hết hạn tuyệt đối **không được** nhận cặp
+   token mới. Đặt sau rotate thì vẫn ném đúng mã lỗi, đúng 401, chỉ khác là Redis đã có cặp mới —
+   chỉ `verify(never())` bắt được (mutation #2).
+3. 🔴 **Key `:meta` cố ý NẰM TRONG pattern SCAN `auth:refresh:{userId}:*`** ⇒ `deleteAllUserTokens`
+   quét luôn, **không cần** sửa method đó. Đây là yêu cầu **NGƯỢC** với key `auth:refresh:used:`
+   của `D8a` (cố ý nằm **ngoài**, để force-logout không xoá mất marker chứng minh reuse). Hai key,
+   hai yêu cầu trái nhau, cùng namespace — mỗi cái có một test canh đúng chiều của nó, đặt cạnh nhau
+   trong `TokenStoreServiceTest`. **Đừng "đồng bộ" một trong hai.**
+4. **Phiên không có stamp (login trước `D8b`) là fail-open** — coi như bắt đầu **từ bây giờ**, không
+   phải "đã hết hạn". Fail-closed sẽ đăng xuất **toàn bộ** user đang online ngay lúc deploy mà không
+   tăng bảo mật (refresh TTL 7 ngày ⇒ trong một tuần mọi phiên sống đều có stamp). Quyết định này
+   **có test + mutation riêng**, không để ngầm.
+5. **Chốt companion key, KHÔNG phải JSON payload** như thiết kế gốc §4.15 mô tả (user chốt
+   2026-08-03). Nhờ vậy `saveRefreshToken`/`getRefreshToken`/toàn bộ `B80` **không đổi một dòng nào**
+   — `InOrder` của `D8a` vẫn đúng vì nó chỉ ràng buộc thứ tự **tương đối** giữa 3 lời gọi đã verify.
+6. **Giới hạn đã biết, chấp nhận:** timeout chỉ được đánh giá **khi refresh**. Access token đang cầm
+   (TTL 15 phút) vẫn dùng được tới hết hạn dù phiên vừa vượt mốc — cửa sổ tối đa bằng đúng
+   access-token TTL. Đóng nó cần kiểm ở `JwtAuthenticationFilter` (mỗi request thêm một lượt đọc
+   Redis), không tương xứng rủi ro.
+7. **`D8b` KHÔNG thêm permission ⇒ `docs/roles-and-permissions.md` KHÔNG đổi** (`C10` không kích hoạt).
+8. **Sửa mâu thuẫn tài liệu ↔ code về session** (user chốt): `architecture-decisions.md` +
+   `common/security/CLAUDE.md §4.10` từng ghi "cho phép nhiều thiết bị đăng nhập đồng thời", nhưng
+   `AuthService.login` xoá sạch mọi phiên cũ mỗi lần login ⇒ code là **single-session**. **Sửa tài
+   liệu theo code, KHÔNG đổi hành vi** — bỏ 2 dòng `deleteAll*` là quyết định bảo mật riêng.
+
+**Nghiệm thu mutation (4, đã revert — **4/4 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Carry-forward stamp `Instant.now()` thay vì start cũ | **1** — `refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId` | 🔴 **Giá trị nhất của phase.** Response byte-identical, mã lỗi/status/coverage đều không đổi, tính năng thành no-op. Chỉ assertion **đối số** bắt được |
+| 2 | Dời check timeout xuống **sau** rotate | **1** — `refresh_sessionOlderThanAbsoluteTimeout_…` (`NeverWantedButInvoked` ở `never().saveRefreshToken`) | Mã lỗi **và** HTTP status đều không đổi ⇒ chỉ `verify` side-effect bắt được (`R4`). ⚠️ 2 case khác cũng đỏ nhưng **do mock `jwtProperties` trả 0 mặc định**, không phải kill hành vi — đừng tính là bằng chứng |
+| 3 | `SESSION_ABSOLUTE_TIMEOUT` → `REFRESH_TOKEN_EXPIRED` (**cả hai đều 401**) | **1** — `refresh_sessionOlderThanAbsoluteTimeout_…` | Assert bám `ErrorCode`, **không** bám status — đúng cảnh báo §0.15 |
+| 4 | Nhánh legacy dùng `Instant.EPOCH` thay `now` (fail-closed) | **1** — `refresh_sessionWithoutStartStamp_isTreatedAsStartingNow` | Quyết định fail-open là **test-backed**, không phải chỉ văn xuôi |
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 1 mã lỗi mới trên `POST /auth/refresh`,
+DTO không đổi). **Java positional: có** — `JwtProperties` 3 → **4** component; 2 test class đã **sửa**
+theo `R10` (`TokenStoreServiceTest`, `JwtTokenProviderTest`). **Hành vi:** phiên quá 30 ngày buộc
+login lại dù user vẫn active — đó là **mục đích** tính năng.
 
 ---
 

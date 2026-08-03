@@ -33,14 +33,16 @@ class JwtTokenProviderTest {
 
     private static final long VALID_EXPIRY_MS   = 900_000L;
     private static final long EXPIRED_EXPIRY_MS = -1_000L;
-    private static final long REFRESH_EXPIRY_MS = 604_800_000L;
+    private static final long REFRESH_EXPIRY_MS   = 604_800_000L;
+    private static final long ABSOLUTE_TIMEOUT_MS = 2_592_000_000L;
 
     private JwtTokenProvider provider(long accessTokenExpiryMs) {
         return provider(SECRET, accessTokenExpiryMs);
     }
 
     private JwtTokenProvider provider(String secret, long accessTokenExpiryMs) {
-        return new JwtTokenProvider(new JwtProperties(secret, accessTokenExpiryMs, REFRESH_EXPIRY_MS));
+        return new JwtTokenProvider(
+                new JwtProperties(secret, accessTokenExpiryMs, REFRESH_EXPIRY_MS, ABSOLUTE_TIMEOUT_MS));
     }
 
     private UserDetails user() {

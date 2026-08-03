@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.ValueOperations;
 
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
@@ -51,6 +52,7 @@ class TokenStoreServiceTest {
 
     private static final long REFRESH_EXPIRY_MS  = 604_800_000L;   // 7 days
     private static final long REFRESH_EXPIRY_SEC = 604_800L;
+    private static final long ABSOLUTE_TIMEOUT_MS = 2_592_000_000L; // 30 days
 
     @Mock private RedisTemplate<String, String>   redis;
     @Mock private ValueOperations<String, String> valueOps;
@@ -63,7 +65,8 @@ class TokenStoreServiceTest {
     void setUp() {
         store = new TokenStoreService(
                 redis,
-                new JwtProperties("test-secret-key-that-is-at-least-256-bits-long!!", 900_000L, REFRESH_EXPIRY_MS));
+                new JwtProperties("test-secret-key-that-is-at-least-256-bits-long!!", 900_000L,
+                        REFRESH_EXPIRY_MS, ABSOLUTE_TIMEOUT_MS));
     }
 
     /** A closeable SCAN cursor mock that yields {@code keys} once, then reports exhaustion. */
@@ -102,7 +105,18 @@ class TokenStoreServiceTest {
         assertThat(store.getRefreshToken(userId, "tid-1")).isEqualTo("refresh-token");
 
         store.deleteRefreshToken(userId, "tid-1");
-        verify(redis).delete(key);
+        verify(redis).delete(List.of(key, key + ":meta"));
+    }
+
+    @Test
+    @DisplayName("deleteRefreshToken – removes the session-start companion key too, not just the token")
+    void deleteRefreshToken_alsoRemovesTheSessionStartKey() {
+        store.deleteRefreshToken(userId, "tid-1");
+
+        // Deleting only the token would leave a :meta orphan alive for the rest of the refresh TTL.
+        verify(redis).delete(List.of(
+                "auth:refresh:" + userId + ":tid-1",
+                "auth:refresh:" + userId + ":tid-1:meta"));
     }
 
     @Test
@@ -174,6 +188,52 @@ class TokenStoreServiceTest {
         // deleteAllUserTokens sweeps "auth:refresh:{userId}:*" — force-logout must not wipe the
         // very marker that proves a reuse happened.
         assertThat(key.getValue()).doesNotStartWith("auth:refresh:" + userId + ":");
+    }
+
+    // ── Absolute session timeout (D8b) ─────────────────────────────────────
+
+    @Test
+    @DisplayName("saveSessionStart – writes auth:refresh:{userId}:{tokenId}:meta with the refresh TTL")
+    void saveSessionStart_setsKeyWithRefreshTtl() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+
+        store.saveSessionStart(userId, "tid-1", Instant.ofEpochMilli(1_700_000_000_000L));
+
+        verify(valueOps).set(
+                eq("auth:refresh:" + userId + ":tid-1:meta"),
+                eq("1700000000000"),
+                eq(REFRESH_EXPIRY_SEC),
+                eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("getSessionStart – round-trips the stored instant, and returns null when unknown")
+    void getSessionStart_readsBackTheStoredInstant_nullWhenAbsent() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        String key = "auth:refresh:" + userId + ":tid-1:meta";
+        when(valueOps.get(key)).thenReturn("1700000000000");
+
+        assertThat(store.getSessionStart(userId, "tid-1"))
+                .isEqualTo(Instant.ofEpochMilli(1_700_000_000_000L));
+
+        // Absent key = session predating D8b, or a token that is simply gone. Not an error.
+        when(valueOps.get(key)).thenReturn(null);
+        assertThat(store.getSessionStart(userId, "tid-1")).isNull();
+    }
+
+    @Test
+    @DisplayName("saveSessionStart – the :meta key IS inside the deleteAllUserTokens SCAN pattern")
+    void sessionStartKey_isSweptByDeleteAllUserTokens() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+
+        store.saveSessionStart(userId, "tid-1", Instant.ofEpochMilli(1_700_000_000_000L));
+
+        verify(valueOps).set(key.capture(), anyString(), anyLong(), any(TimeUnit.class));
+        // Deliberately the OPPOSITE requirement of the RTR marker directly above: this key must be
+        // swept by force-logout, so it has to share the "auth:refresh:{userId}:" prefix. Two keys,
+        // two opposite requirements, one namespace — the pair of tests is the record of that.
+        assertThat(key.getValue()).startsWith("auth:refresh:" + userId + ":");
     }
 
     // ── Access token blacklist ─────────────────────────────────────────────

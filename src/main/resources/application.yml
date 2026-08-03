@@ -97,7 +97,8 @@ app:
   jwt:
     secret: ${JWT_SECRET:change-me-in-production-must-be-at-least-256-bits-long-secret-key}
     access-token-expiry-ms: 900000        # 15 minutes
-    refresh-token-expiry-ms: 604800000    # 7 days
+    refresh-token-expiry-ms: 604800000    # 7 days (sliding – reset on every refresh)
+    absolute-session-timeout-ms: 2592000000  # 30 days (absolute – measured from login, never extended)
 
   security:
     trusted-proxies:

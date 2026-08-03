@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -23,11 +24,18 @@ import java.util.concurrent.TimeUnit;
  * <p>Key patterns:
  * <pre>
  *   auth:refresh:{userId}:{tokenId}       → refresh token value          TTL=7d
+ *   auth:refresh:{userId}:{tokenId}:meta  → session start (epochMilli)   TTL=7d
  *   auth:refresh:used:{tokenId}           → "1" (RTR reuse marker)       TTL=60s
  *   auth:blacklist:{jti}                  → "1"                          TTL=remaining access token lifetime
  *   auth:failcount:{username}             → failure count                TTL=15m
  *   auth:session:device:{userId}:{deviceId} → last-seen IP + metadata   TTL=7d
  * </pre>
+ *
+ * <p><b>Two keys, opposite requirements, same namespace</b> — do not "harmonise" them:
+ * the {@code :meta} companion key matches {@code auth:refresh:{userId}:*} on purpose so
+ * {@link #deleteAllUserTokens} sweeps it along with the token it belongs to, whereas
+ * {@code auth:refresh:used:{tokenId}} deliberately falls <em>outside</em> that pattern so a
+ * force-logout cannot erase the very marker that proves a reuse happened (B80).
  *
  * <p><b>SCAN vs KEYS</b>: All multi-key deletions use cursor-based SCAN (O(1) per call)
  * instead of KEYS (O(N) blocking) to avoid Redis latency spikes in production.
@@ -39,6 +47,7 @@ public class TokenStoreService {
 
     private static final String REFRESH_KEY_PREFIX      = "auth:refresh:";
     private static final String REFRESH_USED_KEY_PREFIX = "auth:refresh:used:";
+    private static final String SESSION_START_KEY_SUFFIX = ":meta";
     private static final String BLACKLIST_KEY_PREFIX    = "auth:blacklist:";
     private static final String FAILCOUNT_KEY_PREFIX    = "auth:failcount:";
     private static final String SESSION_DEVICE_PREFIX   = "auth:session:device:";
@@ -64,8 +73,41 @@ public class TokenStoreService {
         return redisTemplate.opsForValue().get(refreshKey(userId, tokenId));
     }
 
+    /**
+     * Removes a refresh token together with its session-start companion key.
+     *
+     * <p>Both keys are deleted: leaving the {@code :meta} key behind would keep an orphan alive
+     * for the remaining refresh TTL after the token it describes is gone.
+     */
     public void deleteRefreshToken(UUID userId, String tokenId) {
-        redisTemplate.delete(refreshKey(userId, tokenId));
+        redisTemplate.delete(List.of(refreshKey(userId, tokenId), sessionStartKey(userId, tokenId)));
+    }
+
+    // ── Absolute Session Timeout (D8b) ────────────────────────────────────
+
+    /**
+     * Records when the session behind {@code tokenId} started.
+     *
+     * <p>Written at login with "now", then carried forward unchanged on every rotation — the
+     * absolute timeout measures the age of the <em>session</em>, not of the current token, so
+     * re-stamping it here with the current time would silently disable the timeout (B81).
+     */
+    public void saveSessionStart(UUID userId, String tokenId, Instant startedAt) {
+        long ttlSeconds = jwtProperties.refreshTokenExpiryMs() / 1000;
+        redisTemplate.opsForValue().set(
+                sessionStartKey(userId, tokenId),
+                String.valueOf(startedAt.toEpochMilli()),
+                ttlSeconds, TimeUnit.SECONDS);
+    }
+
+    /**
+     * @return when the session behind {@code tokenId} started, or {@code null} when unknown —
+     *         either the token is gone, or it belongs to a session established before {@code D8b}
+     *         shipped. Callers decide what "unknown" means; see {@code AuthService.refresh}.
+     */
+    public Instant getSessionStart(UUID userId, String tokenId) {
+        String value = redisTemplate.opsForValue().get(sessionStartKey(userId, tokenId));
+        return value == null ? null : Instant.ofEpochMilli(Long.parseLong(value));
     }
 
     /**
@@ -199,6 +241,14 @@ public class TokenStoreService {
 
     private String refreshKey(UUID userId, String tokenId) {
         return REFRESH_KEY_PREFIX + userId + ":" + tokenId;
+    }
+
+    /**
+     * Companion key of {@link #refreshKey}. The shared {@code auth:refresh:{userId}:} prefix is
+     * load-bearing: it puts this key inside the SCAN pattern of {@link #deleteAllUserTokens}.
+     */
+    private String sessionStartKey(UUID userId, String tokenId) {
+        return refreshKey(userId, tokenId) + SESSION_START_KEY_SUFFIX;
     }
 
     private String deviceSessionKey(UUID userId, String deviceId) {

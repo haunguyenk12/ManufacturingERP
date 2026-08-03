@@ -153,6 +153,18 @@ INTERNAL_SERVER_ERROR, ACCESS_DENIED
 lại. Cùng **401** với `REFRESH_TOKEN_EXPIRED` nên `code` là thứ **duy nhất** phân biệt "đăng nhập
 lại đi" với "phiên của bạn vừa bị thu hồi vì phát hiện replay". Bất biến `B80`.
 
+**Constant thêm ở `D8b`:** `SESSION_ABSOLUTE_TIMEOUT` (401) — phiên sống quá 30 ngày kể từ **login**,
+bị thu hồi dù vẫn đang hoạt động. Đây là mã **thứ ba** cùng **401** trên `POST /auth/refresh`:
+
+| `code` | Nghĩa | FE nên nói gì với user |
+|---|---|---|
+| `REFRESH_TOKEN_EXPIRED` | Token hỏng/hết hạn tự nhiên | "Đăng nhập lại" |
+| `TOKEN_REUSE_DETECTED` | Replay ⇒ **mọi phiên đã bị thu hồi** | Cảnh báo bảo mật rõ ràng |
+| `SESSION_ABSOLUTE_TIMEOUT` | Hết hạn theo chính sách 30 ngày | "Phiên đã hết hạn, đăng nhập lại" — **không** phải cảnh báo bảo mật |
+
+⇒ HTTP status **không** phân biệt được ba trường hợp này. Client **phải** rẽ theo `code` (`A7`).
+Bất biến `B81`.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

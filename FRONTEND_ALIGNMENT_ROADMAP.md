@@ -775,8 +775,8 @@ Controller         →  19 class, trong đó 3 có test tầng HTTP
 | **[x]** | **`D7b`** | **#2 (hết)** | 🟢 9 controller nhóm B+C (CRUD master data + read-only) chưa có test HTTP | — | Không | Thấp | `D7` ✅ |
 | **[x]** | **`D11`** | **#25, #26** | 🔴 Dòng receipt cuối của WO không nhập kho được; `planning` trả 409/422 mâu thuẫn với chính nó | — | **Có** (4 endpoint) | Trung bình | `D5` ✅, `D7b` ✅ |
 | **[x]** | **`D8a`** | **#6 (1/3)** | 🟡 RTR chưa có — token cũ bị đánh cắp không phân biệt được với hết hạn tự nhiên | — | Không (wire additive: +1 mã lỗi) | Trung bình | — |
-| **[ ]** | **`D8b`** | #6 (1/3) | 🟡 Absolute session timeout chưa có — session sống mãi nếu user active liên tục | — | Chưa xét | Cao | `D8a` |
-| **[ ]** | **`D8c`** | #6 (1/3) | 🟡 Forgot-password chưa có endpoint nào | — | Chưa xét | Cao (khối lượng file) | — |
+| **[x]** | **`D8b`** | **#6 (1/3)** | 🟡 Absolute session timeout chưa có — session sống mãi nếu user active liên tục | — | Không (wire additive: +1 mã lỗi) | Trung bình | `D8a` ✅ |
+| **[ ]** | **`D8c`** | #6 (1/3) | 🟡 Forgot-password chưa có endpoint nào. 🔴 **Bị chặn**: `pom.xml` không có `spring-boot-starter-mail` | — | Chưa xét | Cao (khối lượng file) | Chốt hạ tầng email |
 
 > **[2026-07-28] `D1` + `D2` + `D3` được gộp thành MỘT phase thực thi**, vì từng cái đơn lẻ quá nhỏ
 > để đáng một vòng baseline → sửa → verify → cập nhật tài liệu. Cả ba đều không migration, không
@@ -794,8 +794,13 @@ code, và effort khác hẳn nhau — RTR (`D8a`) được chọn làm trước 
 đổi schema Redis.
 **[2026-08-03] `D8a` ✅ xong** — `TOKEN_REUSE_DETECTED` + force-logout mọi phiên, không migration,
 wire additive. Bản ghi đầy đủ: `CLAUDE.md §0.22`, bất biến `B80` (`module/auth/CLAUDE.md`).
-🔴 Nợ #6 mới trả **1/3**: `D8b` (absolute session timeout) và `D8c` (forgot-password) **vẫn chưa có
-dòng code nào** — đừng đọc dấu ✅ của `D8a` rồi coi cả `D8` đã xong.
+**[2026-08-03] `D8b` ✅ xong** — `SESSION_ABSOLUTE_TIMEOUT` sau 30 ngày kể từ login, `sessionCreatedAt`
+ở companion key `…:{tokenId}:meta` carry-forward qua mỗi rotate. Không migration, wire additive.
+Bản ghi: `CLAUDE.md §0.23`, bất biến `B81`. Phase này cũng **trả nợ lần đo `*IT`** mà `D8a` bỏ qua
+(chạy `mvn -o verify` thật với Docker: 586 unit + 66 IT xanh) và sửa mâu thuẫn tài liệu↔code
+"multi-device vs single-session".
+🔴 Nợ #6 mới trả **2/3**: `D8c` (forgot-password) **vẫn chưa có dòng code nào** và đang **bị chặn**
+bởi hạ tầng email — đừng đọc hai dấu ✅ rồi coi cả `D8` đã xong.
 `D9` đã được chen lên đầu vì #22 làm **luồng sản xuất chính không chạy được qua API**; nay luồng đã
 thông nên các phase còn lại đo được trên một hệ thống chạy thật.
 Lý do `D2` đứng thứ hai dù không phải nợ nặng nhất: `D4`/`D5`/`D6` đều **đổi hành vi nghiệp vụ**

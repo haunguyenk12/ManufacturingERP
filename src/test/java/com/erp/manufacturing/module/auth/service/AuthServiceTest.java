@@ -23,12 +23,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -47,6 +50,9 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AuthService Unit Tests")
 class AuthServiceTest {
+
+    /** Matches {@code app.jwt.absolute-session-timeout-ms} in application.yml (B81). */
+    private static final long THIRTY_DAYS_MS = 2_592_000_000L;
 
     @Mock private UserDetailsServiceImpl          userDetailsService;
     @Mock private JwtTokenProvider                jwtTokenProvider;
@@ -327,6 +333,116 @@ class AuthServiceTest {
         // it was never rotated away — asking about reuse would be answering the wrong question.
         verify(tokenStore, never()).wasRefreshTokenUsed(any());
         verify(tokenStore, never()).deleteAllUserTokens(any());
+    }
+
+    // ── Absolute session timeout (B81, D8b) ────────────────────────────────
+
+    @Test
+    @DisplayName("Refresh of a session past the absolute timeout – SESSION_ABSOLUTE_TIMEOUT, every session revoked")
+    void refresh_sessionOlderThanAbsoluteTimeout_throwsAndForceLogoutAll() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid"))
+                .thenReturn(Instant.now().minus(31, ChronoUnit.DAYS));
+        when(jwtProperties.absoluteSessionTimeoutMs()).thenReturn(THIRTY_DAYS_MS);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.SESSION_ABSOLUTE_TIMEOUT));
+
+        verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
+        verify(tokenStore).deleteAllDeviceSessions(testUser.getUserId());
+        verify(auditLogService).logAuthFailure(eq("testuser"), eq("192.168.1.100"), eq("abc123"),
+                eq(AuditAction.SESSION_ABSOLUTE_TIMEOUT), anyString());
+
+        // B81: the check must sit BEFORE rotation — a retired session may not walk away with a
+        // fresh pair. Same error code and same 401 either way, so only these verifies catch it.
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
+        verify(tokenStore, never()).saveSessionStart(any(), any(), any());
+        verifyNoInteractions(jwtTokenProvider);
+    }
+
+    @Test
+    @DisplayName("Refresh just under the absolute timeout – still rotates normally")
+    void refresh_sessionJustUnderAbsoluteTimeout_rotatesNormally() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid"))
+                .thenReturn(Instant.now().minus(29, ChronoUnit.DAYS));
+        when(jwtProperties.absoluteSessionTimeoutMs()).thenReturn(THIRTY_DAYS_MS);
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("new-refresh");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        assertThat(response.accessToken()).isEqualTo("new.access");
+        verify(tokenStore, never()).deleteAllUserTokens(any());
+    }
+
+    @Test
+    @DisplayName("Rotation carries the ORIGINAL session start forward – it does not restart the absolute clock")
+    void refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId() {
+        Instant originalStart = Instant.now().minus(20, ChronoUnit.DAYS);
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid")).thenReturn(originalStart);
+        when(jwtProperties.absoluteSessionTimeoutMs()).thenReturn(THIRTY_DAYS_MS);
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("new-refresh");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        // B81: the EXACT original instant, not "now". Stamping now here would reset the absolute
+        // clock on every refresh and disable the timeout — with a byte-identical response, so this
+        // assertion on the argument is the only thing standing between the feature and a no-op.
+        verify(tokenStore).saveSessionStart(testUser.getUserId(), response.tokenId(), originalStart);
+    }
+
+    @Test
+    @DisplayName("Refresh of a pre-D8b session (no start stamp) – treated as starting now, not as expired")
+    void refresh_sessionWithoutStartStamp_isTreatedAsStartingNow() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("new-refresh");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        Instant beforeCall = Instant.now();
+        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        // Fail-open on purpose: sessions established before D8b have no stamp to judge. Failing
+        // closed would log out every signed-in user the moment this deploys, buying no security.
+        verify(tokenStore, never()).deleteAllUserTokens(any());
+        ArgumentCaptor<Instant> stamped = ArgumentCaptor.forClass(Instant.class);
+        verify(tokenStore).saveSessionStart(eq(testUser.getUserId()), eq(response.tokenId()), stamped.capture());
+        assertThat(stamped.getValue()).isBetween(beforeCall, Instant.now());
+    }
+
+    @Test
+    @DisplayName("Login – stamps the session start the absolute timeout is later measured from")
+    void login_recordsTheSessionStart() {
+        when(tokenStore.getFailCount("testuser")).thenReturn(0L);
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(passwordEncoder.matches("password123", testPrincipal.getPassword())).thenReturn(true);
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("access.token");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("refresh-token");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        Instant beforeCall = Instant.now();
+        var response = authService.login(new LoginRequest("testuser", "password123", null), httpRequest);
+
+        ArgumentCaptor<Instant> stamped = ArgumentCaptor.forClass(Instant.class);
+        verify(tokenStore).saveSessionStart(eq(testUser.getUserId()), eq(response.tokenId()), stamped.capture());
+        assertThat(stamped.getValue()).isBetween(beforeCall, Instant.now());
     }
 
     // ── Logout ─────────────────────────────────────────────────────────────

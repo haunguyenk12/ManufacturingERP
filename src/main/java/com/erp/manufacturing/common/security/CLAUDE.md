@@ -69,6 +69,12 @@ auth:session:device:{userId}:{deviceId}        →  {clientIp}  TTL=7d (sliding)
 # đúng cái marker chứng minh có reuse.
 auth:refresh:used:{tokenId}                    →  "1"  TTL=60s
 
+# Absolute session timeout – mốc bắt đầu phiên (epochMilli)  ✅ D8b
+# NGƯỢC với key ngay trên: cố ý DÙNG CHUNG prefix "auth:refresh:{userId}:" để nó NẰM TRONG
+# pattern SCAN của deleteAllUserTokens ⇒ force-logout dọn luôn, không cần sửa method đó.
+# Ghi ở login, carry-forward nguyên giá trị qua mỗi lần rotate (B81).
+auth:refresh:{userId}:{tokenId}:meta           →  {sessionCreatedAt}  TTL=7d
+
 # ── Planned (chưa implement) ────────────────────────────────────
 # Forgot password token (single-use)
 auth:reset:{token}                             →  {userId}  TTL=15m  [TODO D8c]
@@ -126,13 +132,15 @@ Client nhận 401 Unauthorized
   │           ├─ Key "used" tồn tại → TOKEN_REUSE_DETECTED (force logout all)
   │           └─ Key hết hạn → REFRESH_TOKEN_EXPIRED (bình thường)
   │
-  ├─ [TODO Phase 2] Absolute timeout check (xem 4.15):
-  │   sessionAge > 30 ngày → 401 SESSION_ABSOLUTE_TIMEOUT
+  ├─ Absolute timeout check (✅ D8b, xem 4.15) — SAU validate, TRƯỚC rotate (B81):
+  │   ├─ Không có auth:refresh:{userId}:{tokenId}:meta → phiên trước D8b, coi như bắt đầu BÂY GIỜ
+  │   └─ sessionAge ≥ 30 ngày → force logout all → 401 SESSION_ABSOLUTE_TIMEOUT
   │
   └─ Nếu hợp lệ → Tạo accessToken MỚI + refreshToken MỚI (xoay vòng)
        ├─ 1. Lưu refresh token MỚI vào Redis
-       ├─ 2. Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s  (✅ D8a)
-       ├─ 3. XOÁ token CŨ  ← thứ tự 1→2→3 là bắt buộc, xem bất biến B80
+       ├─ 2. Carry-forward sessionCreatedAt CŨ sang tokenId MỚI  (✅ D8b — KHÔNG stamp now)
+       ├─ 3. Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s  (✅ D8a)
+       ├─ 4. XOÁ token CŨ (cùng key :meta của nó)  ← thứ tự 1→3→4 là bắt buộc, xem bất biến B80
        └─ Trả về { accessToken, refreshToken, expiresIn }
 
 Kịch bản: Force logout / hoạt động đáng ngờ
@@ -173,9 +181,23 @@ Permit: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`, `/v3/api-docs/*
 > `.requestMatchers("/api/v1/auth/**").permitAll()`. 4 endpoint còn lại (`login`/`refresh`/`logout`/
 > `logout-all`) vẫn permit-all. Regression guard: `AuthMeSecurityTest` (filter chain thật, không mock).
 
-## 4.10 Multi-Device Session
+## 4.10 Device Session — hạ tầng multi-device, chính sách **single-session**
 
-> **Thiết kế**: Mỗi thiết bị (device) có session độc lập. User có thể đăng nhập từ nhiều thiết bị cùng lúc.
+> 🔴 **[`D8b`, 2026-08-03] Sửa mô tả sai đã tồn tại từ lâu.** Mục này (và
+> `.claude/rules/architecture-decisions.md`) từng ghi *"User có thể đăng nhập từ nhiều thiết bị cùng
+> lúc"*. **Code không làm thế**: `AuthService.login` gọi `deleteAllUserTokens` +
+> `deleteAllDeviceSessions` **mỗi lần login** ⇒ đăng nhập máy mới **thu hồi** mọi phiên cũ.
+>
+> Cả hai thứ đều đúng, chỉ là hai tầng khác nhau — đừng nhầm:
+>
+> | | Hạ tầng Redis | Chính sách `login()` |
+> |---|---|---|
+> | Khả năng | key **per-device** (`auth:session:device:{userId}:{deviceId}`), TTL độc lập ⇒ **chịu được** nhiều phiên song song | **single-session**: mỗi login xoá sạch phiên cũ |
+> | Đổi chính sách | không cần đổi | bỏ 2 dòng `deleteAll*` ở `AuthService.java` |
+>
+> ⇒ Muốn thật sự cho multi-device thì đó là **quyết định bảo mật** (bỏ 2 dòng đó), không phải việc
+> dọn tài liệu. `D8b` **cố ý không** đụng hành vi — chỉ sửa mô tả cho khớp code.
+> Javadoc `AuthService` vốn đã ghi đúng ("Enforced single-session per user") từ trước.
 
 **deviceId resolution**:
 - Client cung cấp `deviceId` (stable identifier, max 128 chars)
@@ -362,35 +384,57 @@ PATCH /api/v1/admin/users/{userId}/unlock
 
 ---
 
-## 4.15 Absolute Session Timeout [🔜 Phase 2 – chưa implement]
+## 4.15 Absolute Session Timeout [✅ `D8b`, 2026-08-03]
 
-> **Trạng thái**: Thiết kế đã có, chưa có code trong `AuthService.refresh`. Sẽ implement trong Phase 2.
+> **Trạng thái**: đã implement trong `AuthService.refresh` + `TokenStoreService.saveSessionStart` /
+> `getSessionStart`. Bất biến **`B81`** ở `module/auth/CLAUDE.md` — đọc nó trước khi sửa `refresh()`.
 
 > **Vấn đề**: Refresh token TTL sliding 7 ngày — user active liên tục sẽ **không bao giờ bị force logout**. Với ERP có dữ liệu nhạy cảm, đây là rủi ro bảo mật.
 
-**Giải pháp (planned)**: Lưu `sessionCreatedAt` vào payload refresh token trong Redis.
+**Giải pháp (đã implement)**: lưu `sessionCreatedAt` ở **companion key**, ghi lúc login và
+**carry-forward** qua mỗi lần rotate.
 
 ```
-Refresh token payload trong Redis:
-  {
-    userId,
-    tokenId,
-    sessionCreatedAt,   ← timestamp khi user login lần đầu
-    userAgentHash       ← (optional) fingerprint
-  }
+auth:refresh:{userId}:{tokenId}:meta  →  {sessionCreatedAt epochMilli}  TTL=7d
 
-Khi validate refresh:
-  → Tính sessionAge = now - sessionCreatedAt
-  → Nếu sessionAge > 30 ngày → SESSION_ABSOLUTE_TIMEOUT
-       → Force logout (xóa toàn bộ token)
+Khi validate refresh (SAU khi token đã được chứng minh hợp lệ, TRƯỚC khi rotate — B81):
+  → Đọc sessionCreatedAt của tokenId hiện tại
+  → Không có key  → phiên tạo trước D8b ⇒ coi như bắt đầu BÂY GIỜ (fail-open, xem dưới)
+  → sessionAge ≥ app.jwt.absolute-session-timeout-ms (30 ngày) → SESSION_ABSOLUTE_TIMEOUT
+       → deleteAllUserTokens + deleteAllDeviceSessions  → audit SESSION_ABSOLUTE_TIMEOUT
        → 401 { code: "SESSION_ABSOLUTE_TIMEOUT", message: "Session expired. Please login again." }
-  → Nếu < 30 ngày → tiếp tục (sliding TTL vẫn áp dụng)
+  → Còn hạn → rotate, và mang NGUYÊN sessionCreatedAt cũ sang tokenId mới
 ```
 
 | Timeout | Loại | Hành vi |
 |---|---|---|
 | 7 ngày | Sliding (inactive timeout) | Reset mỗi khi refresh token |
 | 30 ngày | Absolute (session timeout) | Bắt buộc login lại dù có active |
+
+> 🔴 **Ba điều `D8b` chốt KHÁC thiết kế gốc ở trên — đừng "sửa cho giống tài liệu cũ":**
+>
+> 1. **Companion key, KHÔNG phải JSON payload.** Bản thiết kế gốc ghi *"lưu `sessionCreatedAt` vào
+>    payload refresh token"*, tức đổi value của `auth:refresh:{userId}:{tokenId}` thành JSON. User
+>    chốt **không** làm vậy (2026-08-03): phương án đó đụng **mọi** đường đọc/ghi refresh token, kể
+>    cả nhánh RTR vừa làm ở `D8a`. Companion key giữ `saveRefreshToken`/`getRefreshToken`/`B80`
+>    nguyên vẹn. `userAgentHash` trong payload gốc thuộc §4.19, vẫn chưa làm.
+> 2. **Key `:meta` cố ý NẰM TRONG pattern SCAN** `auth:refresh:{userId}:*` — ngược hẳn với key
+>    `auth:refresh:used:{tokenId}` của `D8a`. Hai key cạnh nhau, hai yêu cầu trái nhau: cái này
+>    *phải* bị force-logout quét, cái kia *không được*. Mỗi cái có một test canh đúng chiều của nó
+>    (`sessionStartKey_isSweptByDeleteAllUserTokens` vs `markRefreshTokenUsed_keyIsNotSweptBy…`).
+> 3. **Ngưỡng là `≥`, không phải `>`** như pseudo-code gốc — khác biệt chỉ ở đúng mili-giây thứ
+>    2_592_000_000, ghi ra để người đọc sau không tưởng là lệch.
+>
+> **Quyết định fail-open (phiên không có stamp), có chủ đích:** phiên login **trước** khi `D8b`
+> deploy không có key `:meta`. Chúng được coi như **bắt đầu từ bây giờ**, không phải "đã hết hạn".
+> Fail-closed sẽ **đăng xuất toàn bộ user đang online ngay lúc deploy** mà không tăng bảo mật —
+> refresh TTL là 7 ngày nên trong vòng một tuần mọi phiên còn sống đều đã có stamp. Có test riêng
+> (`refresh_sessionWithoutStartStamp_isTreatedAsStartingNow`) + mutation #4 canh quyết định này.
+>
+> **Giới hạn đã biết, chấp nhận:** timeout chỉ được đánh giá **khi refresh**. Access token đang cầm
+> (TTL 15 phút) vẫn dùng được tới lúc hết hạn dù phiên vừa vượt mốc 30 ngày — cửa sổ tối đa bằng
+> đúng access-token TTL. Đóng nó cần kiểm ở `JwtAuthenticationFilter` (mỗi request một lượt đọc
+> Redis), không tương xứng với rủi ro.
 
 ---
 

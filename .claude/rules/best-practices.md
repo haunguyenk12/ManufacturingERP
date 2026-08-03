@@ -18,7 +18,7 @@
 | S10 | **Password policy** | ✅ Design | Min 8 ký tự, có chữ hoa, thường, số, đặc biệt |
 | S11 | **RTR – Token Reuse Detection** | ✅ Current (`D8a`) | Phát hiện refresh token bị đánh cắp → force logout toàn bộ thiết bị. Bất biến `B80` (`module/auth/CLAUDE.md`) |
 | S12 | **Account Enumeration Prevention** | ✅ Current | Login/forgot-password luôn trả cùng message, dùng constant-time compare |
-| S13 | **Absolute session timeout** | 🔜 Phase 2 | Bắt buộc login lại sau 30 ngày dù user vẫn active |
+| S13 | **Absolute session timeout** | ✅ Current (`D8b`) | Bắt buộc login lại sau 30 ngày dù user vẫn active. Đếm từ login, carry-forward qua mỗi lần rotate; đánh giá **khi refresh** nên access token đang cầm còn dùng được tới hết TTL của nó. Bất biến `B81` (`module/auth/CLAUDE.md`) |
 | S14 | **Log sanitization** | ✅ Design | Password/token không bao giờ xuất hiện trong log; `@ToString.Exclude` trên field nhạy cảm |
 
 ## 8.2 API Design
