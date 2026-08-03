@@ -64,12 +64,12 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`F10` – 3 nợ field-level cuối của spec FE (`G`, `F`, `H`)** ✅ **HOÀN THÀNH** (2026-08-01). `projectedAvailable` (persist, **không** derive được), `sourceRoutingCode`/`Version` trên proposal, số chứng từ `MI-`/`PE-`. Migration **`V40`**, wire **additive**. Nợ `E` cố ý ngoài phạm vi. Bản ghi: §0.21 |
-| **Phase trước** | **`F9` – 2 field cuối của spec FE + sửa tuyên bố nói quá của `F8`** ✅ HOÀN THÀNH (2026-07-31). `uom` trên execution-candidate, `reservedQuantity` trên component line. **Không migration.** Bản ghi: §0.20 |
-| **Phase kế tiếp** | **Chưa chốt.** Track `F*` sau `F10` **không còn nợ nào thuộc loại "field FE hiển thị mà backend đã có dữ liệu"**. Nợ còn mở ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`: **`B`** (`predecessorOperationIds` — chưa có consumer), **`C`** (`created_by` trong scope idempotency — cần backfill), **`D`** (17 DTO ngoài luồng spec — lệch tên có chủ đích), **`E`** (BOM `code` + `outputQuantity` — **khái niệm chưa tồn tại**, đụng công thức nổ BOM), **`I`** (`childBom` — WO snapshot direct-only theo `B12`). Không cái nào là bug. Ứng viên: **`D8`** (nợ #6 — RTR / absolute session timeout / forgot-password) · **`P3`** costing · **`P4`** Work Center + CRP (🔴 spec §11 **tự** xếp ngoài MVP ⇒ cần user xác nhận tường minh) · nợ `E`. **Cần user chốt.** |
-| **Migration mới nhất** | `V40__add_projected_available_routing_snapshot_and_document_codes.sql` (`F10`) — `D7`, `D7b`, `D11`, `F9` **không** migration |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → **hiện tại (`F10`): 556 case unit + 59 case IT / 10 class IT**, failures = 0 |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit + IT: line 80.1% / branch 63.9%** · **unit một mình: line 73.7% / branch 59.2%** (đo lại 2026-08-01 sau `F10`). ⚠️ **Xu hướng đã xác nhận bảy phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; **`F10` +7 unit / +2 IT ⇒ +0.0 line / +0.4 branch**. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.21). `F10` là ví dụ mới nhất: cả 3 nợ nó đóng nằm ở vùng code **đã có coverage**, vì thứ thiếu là *một cột không tồn tại*; và mutation #3 của nó **xanh ở lần chạy đầu** dù case liên quan đã có sẵn và đang xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase đang chạy** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ **HOÀN THÀNH** (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B80`**. Trả **1/3** nợ #6 — `D8b`/`D8c` vẫn mở. Bản ghi: §0.22 |
+| **Phase trước** | **`F10` – 3 nợ field-level cuối của spec FE (`G`, `F`, `H`)** ✅ HOÀN THÀNH (2026-08-01). `projectedAvailable` (persist, **không** derive được), `sourceRoutingCode`/`Version` trên proposal, số chứng từ `MI-`/`PE-`. Migration **`V40`**, wire **additive**. Nợ `E` cố ý ngoài phạm vi. Bản ghi: §0.21 |
+| **Phase kế tiếp** | **Chưa chốt.** Ứng viên: `D8b` (absolute session timeout — đổi cấu trúc lưu refresh token Redis từ String sang payload có `sessionCreatedAt`, rủi ro cao hơn `D8a`), `D8c` (forgot-password — toàn bộ file mới, cần xác nhận hạ tầng gửi email trước), `P3` costing (spec FE xác nhận tường minh ngoài MVP), `P4` Work Center/CRP (chưa có logic nghiệp vụ nào phụ thuộc `workCenterCode`), nợ nhỏ `E`/`B`/`C`/`D`/`I` (`FRONTEND_ALIGNMENT_ROADMAP.md §7.1`). |
+| **Migration mới nhất** | `V40__add_projected_available_routing_snapshot_and_document_codes.sql` (`F10`) — `D7`, `D7b`, `D11`, `F9`, **`D8a`** **không** migration |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → **`D8a` (2026-08-03): 577 case unit + 66 case IT / 10 class IT**, failures = 0. ⚠️ **`D8a` KHÔNG chạy lại IT** — Docker Desktop không bật lúc nghiệm thu; hợp lệ vì phase thuần Redis/service, **không** JPQL/schema/entity, và grep xác nhận **không** `*IT.java` nào chạm `refresh`/`TokenStore`. Chạy lại khi có Docker |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.2% / branch 59.4%** (đo lại 2026-08-03 sau `D8a`; trước đó 73.7% / 59.2%). **unit + IT: line 80.1% / branch 63.9%** là số của `F10` (2026-08-01) — **`D8a` không đo lại được** vì cần Docker cho `*IT`. ⚠️ **Xu hướng đã xác nhận bảy phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; **`F10` +7 unit / +2 IT ⇒ +0.0 line / +0.4 branch**. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.21). `F10` là ví dụ mới nhất: cả 3 nợ nó đóng nằm ở vùng code **đã có coverage**, vì thứ thiếu là *một cột không tồn tại*; và mutation #3 của nó **xanh ở lần chạy đầu** dù case liên quan đã có sẵn và đang xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (tổng quan + lịch sử) / `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -146,7 +146,7 @@ do not delete 47 lines above
 
 | Module | Trạng thái | Ghi chú |
 |---|---|---|
-| `auth` + `user` | ✅ Done | JWT HS256, refresh rotation, multi-device session, brute-force Lua |
+| `auth` + `user` | ✅ Done | JWT HS256, refresh rotation, multi-device session, brute-force Lua. **[2026-08-01]** `GET /api/v1/auth/me` — profile + permissions + `scopes[]` theo company/plant + `defaultPlantId` (endpoint duy nhất của `AuthController` không permit-all). Không phải phase `F*`/`D*`/`P*`, không migration. Xem `module/auth/CLAUDE.md` + `module/organization/CLAUDE.md` (B80) |
 | `organization` + dynamic RBAC | ✅ Done | `roles` / `permissions` / `access_scopes` / `user_role_assignments`, scope Company→Plant→Warehouse |
 | `inventory` | ✅ Done | `stock_movements` append-only ledger, `stock_balances` projection, lot tracking, idempotency. **[D6]** `Idempotency-Key` scope theo `(key, movement_type)` (V37). Xem §0.14 + `module/inventory/CLAUDE.md` B69-B71 |
 | `bom` | ✅ Done | BOM đa cấp, circular reference check, activate/deactivate revision |
@@ -208,7 +208,7 @@ do not delete 47 lines above
 | 3 | ~~`AuthService.refresh` / `logout` / `logoutAll`, `TokenStoreService`, `JwtTokenProvider` không có test~~ ✅ **ĐÃ TRẢ (T3)** – 39 case mới. Còn lại: Redis là mock, chưa chạy thật (→ `T4`) | ~~`T3`~~ |
 | 4 | ~~Logic phân quyền (hạn hiệu lực assignment, status role/org) nằm trong JPQL nhưng JPQL chưa bao giờ được chạy trong test~~ ✅ **ĐÃ TRẢ (T4)** – `UserRoleAssignmentRepositoryIT` (6 case) chạy JPQL thật qua Testcontainers, nghiệm thu mutation xác nhận | ~~`T4`~~ |
 | 5 | ~~`Testcontainers` đã khai báo trong `pom.xml` nhưng chưa dùng lần nào~~ ✅ **ĐÃ TRẢ (T4)** – `AbstractPostgresIntegrationTest` + 3 `*IT.java`. `spring-security-test` ✅ đã dùng từ T2 | ~~`T4`~~ |
-| 6 | RTR (reuse detection), absolute session timeout, forgot-password: **thiết kế xong, chưa implement** | Backlog auth |
+| 6 | 🟡 **Trả 1/3 — nợ VẪN MỞ.** RTR (reuse detection): ✅ **đã trả (`D8a`, 2026-08-03)**, xem §0.22 + bất biến `B80`. **Absolute session timeout (`D8b`) và forgot-password (`D8c`): vẫn chưa có bất kỳ dòng code nào.** 🔴 Đừng ghi "nợ #6 đã đóng" — đúng bài học §0.20 (repo đã ba lần tuyên bố đóng nợ rộng hơn phạm vi thật) | RTR: ~~`D8a`~~ · còn lại: `D8b`/`D8c` |
 | 7 | ~~`LoginRequest` / `RefreshRequest` là **record thuần** ⇒ `toString()` tự sinh **lộ password / raw token**~~ ✅ **ĐÃ TRẢ (`D1`, 2026-07-28)** – rà ra **5** record dính (không phải 2): `LoginRequest`, `RefreshRequest`, `LogoutRequest`, `CreateUserRequest`, `UpdateUserRequest`. Cả 5 override `toString()` che secret, **giữ** `tokenId` hiện (là định danh Redis, không phải credential) và **giữ** phân biệt `null` vs `***` (thiếu password và ẩn password là hai bug khác nhau). `SensitiveRequestToStringTest` (5 case) là regression guard, đã nghiệm thu mutation | ~~Commit riêng~~ `D1` |
 | 8 | ~~`StockBalanceRepository.aggregate*` dùng path expression `b.lot.status` ⇒ INNER JOIN loại bỏ mọi `StockBalance` không lot-tracked~~ ✅ **ĐÃ TRẢ (`F1.6`, 2026-07-26)** – cả 3 query dùng `left join b.lot l` tường minh; `StockBalanceRepositoryIT` nay assert hành vi đúng và là regression guard | ~~`F1`~~ |
 | 9 | ~~Spec đặt `INSUFFICIENT_AVAILABLE_STOCK` / `STATE_CONFLICT` ở **409**, code trả **422**~~ ✅ **ĐÃ TRẢ HẾT (`F5-A` + `D7`)** – `F5-A`: `INSUFFICIENT_STOCK` → 409, state machine của work order / issue / reservation / WIP → `STATE_CONFLICT` (409), lot sai trạng thái → `LOT_NOT_ELIGIBLE` (409). **`D7`**: rà nốt 4 module còn lại theo đúng tiêu chí `.claude/rules/error-handling.md §5.3`, **44 throw site** phân loại từng chỗ ⇒ sửa **9** (`bom` 1, `purchasing` 8), `organization`/`sales` **0** (vốn đã đúng). `OPERATION_NOT_ALLOWED` (422) **cố ý giữ lại** cho validate master data **và** cho "chứng từ chưa có dòng nào" — bảng liệt kê từng chỗ ở `FRONTEND_ALIGNMENT_ROADMAP.md §6.1.6` | ~~`F5`~~ + ~~`D7`~~ |
@@ -866,6 +866,59 @@ có cột `code`, và `outputQuantity` đổi **công thức nổ BOM** ⇒ đ�
 
 ---
 
+### 0.22 D8a – Refresh Token Reuse Detection (RTR) (ĐÃ HOÀN THÀNH 2026-08-03)
+
+**Không migration** (thuần Redis), **không** permission mới, **không** đổi request/response DTO.
+Phase đầu tiên của track `D8` — và là phase `D*` thứ hai **sửa hành vi** thay vì thêm test (sau `D11`).
+Trả **1/3** nợ #6. Thiết kế gốc: `common/security/CLAUDE.md` §4.12. Bất biến: **`B80`**.
+
+**Vấn đề đã đóng:** trước `D8a`, refresh token cũ bị đánh cắp rồi dùng lại sau khi đã rotate chỉ trả
+`REFRESH_TOKEN_EXPIRED` — **giống hệt** hết hạn tự nhiên. Server không có cách nào phân biệt sự cố
+bảo mật với hoạt động bình thường.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `markRefreshTokenUsed` / `wasRefreshTokenUsed` + key `auth:refresh:used:{tokenId}` TTL 60s | `TokenStoreService` |
+| Tách nhánh `stored == null` khỏi nhánh mismatch; nhánh reuse force-logout + audit + throw | `AuthService.refresh` |
+| `TOKEN_REUSE_DETECTED` (401) | `AuthErrorCode` |
+| `SUSPICIOUS_TOKEN_REUSE` | `AuditAction` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Thứ tự Redis khi rotate là lưu-mới → mark-used → xoá-cũ, và cả ba bước đều bắt buộc.**
+   Marker "used" phải tồn tại **trước khi** key cũ biến mất — nếu không, một request reuse rơi đúng
+   khoảng hở đó đọc thấy `stored == null` **và** `used` chưa có ⇒ bị chẩn đoán nhầm thành hết hạn
+   bình thường, **bỏ lọt tín hiệu tấn công**. Và **không** được bỏ bước xoá riêng: không xoá thì token
+   cũ vẫn `stored != null`, rotation coi như vô hiệu (token cũ sống tới hết TTL 7 ngày).
+2. 🔴 **RTR chỉ áp dụng nhánh `stored == null`.** Nhánh `stored != null` nhưng giá trị mismatch
+   **giữ** `REFRESH_TOKEN_EXPIRED` — tokenId còn sống nghĩa là nó **chưa từng** bị rotate away, đó là
+   giá trị sai/bị sửa chứ không phải replay. Có test `never()` canh đúng chỗ này.
+3. 🔴 **Key `used` cố ý KHÔNG có segment `{userId}`.** Nó phải nằm **ngoài** pattern SCAN
+   `auth:refresh:{userId}:*` của `deleteAllUserTokens`, nếu không chính thao tác force-logout sẽ xoá
+   mất cái marker chứng minh có reuse. Có test canh (`markRefreshTokenUsed_keyIsNotSweptBy…`).
+4. **Force-logout gọi CẢ `deleteAllUserTokens` LẪN `deleteAllDeviceSessions`** — thiết kế §4.12 chỉ
+   ghi cái đầu; `D8a` gọi cả hai cho khớp `logoutAll()`.
+5. **Hai giới hạn đã biết, CHẤP NHẬN — đừng tự mở rộng phạm vi để "sửa":** (a) race 2 request refresh
+   đồng thời cùng 1 token hợp lệ không giải được bằng thứ tự thao tác, cần lock/CAS mà thiết kế không
+   có; (b) hệ quả là client double-submit (network retry) có thể bị force-logout **oan** — giới hạn cố
+   hữu của RTR cơ bản không có grace window.
+6. **`D8a` KHÔNG thêm permission ⇒ `docs/roles-and-permissions.md` KHÔNG đổi** (`C10` không kích hoạt).
+
+**Nghiệm thu mutation (4, đã revert — **4/4 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Bỏ nhánh `if (wasRefreshTokenUsed(...))`, luôn nhảy thẳng `REFRESH_TOKEN_EXPIRED` | `refresh_reusedToken_throwsTokenReuseDetectedAndForceLogoutAll` (assertion dòng 263) | **HTTP vẫn 401** ở cả hai mã ⇒ assert phải bám `ErrorCode`, không bám status. ⚠️ Case thứ hai (`refresh_storedTokenNull_*`) cũng đỏ nhưng **do `UnnecessaryStubbing`**, không phải kill hành vi — đừng tính là bằng chứng |
+| 2 | Đổi thứ tự thành mark-used → xoá-cũ → lưu-mới | **1** — `refresh_validToken_rotatesAndReturnsNewPair` (`InOrder`) | Response **byte-identical**; chỉ assertion thứ tự bắt được. Đây là mutation giá trị nhất của phase |
+| 3 | Bỏ `deleteAllDeviceSessions` khỏi nhánh reuse | **1** — `refresh_reusedToken_*` (dòng 268) | Mã lỗi **và** HTTP status đều không đổi ⇒ chỉ `verify` side-effect bắt được (`R4`) |
+| 4 | Cho nhánh mismatch cũng gọi `wasRefreshTokenUsed` | **1** — `refresh_storedTokenMismatch_throwsRefreshTokenExpired` (`never()` vi phạm) | Khoá ranh giới ở hệ quả #2 |
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 1 mã lỗi mới, DTO không đổi).
+**Java positional: không có.** **Hành vi:** reuse token cũ nay **buộc đăng xuất toàn bộ thiết bị**
+thay vì chỉ báo hết hạn — đó là mục đích của tính năng, không phải tác dụng phụ.
+
+---
+
 ### 0.5 ✅ Đảo Ngược Ngữ Nghĩa — ĐÃ XỬ LÝ Ở `F5-A` (2026-07-27)
 
 Đây từng là rủi ro lớn nhất của track `F*`. **Đã xong**, giữ lại bảng để agent sau hiểu vì sao code
@@ -1030,6 +1083,13 @@ com.erp.manufacturing
 | Bất biến Routing B48-B52 + quyết định `MISSING_ROUTING` / Work Center là string | `src/main/java/com/erp/manufacturing/module/routing/CLAUDE.md` | Chỉ khi chạm `module/routing/**` |
 | Bất biến Sales Order B43-B47 + quyết định `sales`→`planning` | `src/main/java/com/erp/manufacturing/module/sales/CLAUDE.md` | Chỉ khi chạm `module/sales/**` |
 | Bất biến Purchasing B27-B29 | `src/main/java/com/erp/manufacturing/module/purchasing/CLAUDE.md` | Chỉ khi chạm `module/purchasing/**` |
+| **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
+| **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
+
+> 🔴 **`docs/api-guide-for-frontend.md` là tài liệu FE đang dùng để wire API.** Phase nào đổi
+> endpoint / DTO / mã lỗi trên luồng sản xuất **phải** cập nhật file đó trong cùng commit — để nó lệch
+> code chính là làm FE gắn sai. Nguồn của nó là **code thật**, không phải spec; spec gốc ở
+> `docs/fe-spec-omniplant.md`, phần lệch giữa hai bên nằm ở §9 của guide.
 
 > Nội dung không mất — chỉ đổi vị trí. Khi cần tra một bất biến `B<n>` hay một mục `4.x`/`9.x` cụ thể mà
 > không chắc nằm ở file nào, grep theo mã bất biến hoặc theo tên class liên quan trong bảng trên.

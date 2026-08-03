@@ -56,7 +56,7 @@ của `MANUFACTURING_GAP_ROADMAP.md`, chỉ sắp lại thứ tự theo dependen
 > (✅ 2026-07-31) đã đóng phần đó — xem §3.8 và §7.
 >
 > Kế hoạch dọn nợ kỹ thuật phát sinh trong và trước track này nằm ở **§6** (track `D*`); `D1`–`D11`
-> đã xong, còn `D8`.
+> và `D8a` đã xong, còn **`D8b`/`D8c`**.
 
 ---
 
@@ -774,18 +774,28 @@ Controller         →  19 class, trong đó 3 có test tầng HTTP
 | **[x]** | **`D7`** | **#9 (hết)**, #2 (một phần) | 🟡 17/20 controller không có test contract HTTP; 409/422 lệch giữa các module | — | **Có** (9 endpoint đổi status) | Cao | — |
 | **[x]** | **`D7b`** | **#2 (hết)** | 🟢 9 controller nhóm B+C (CRUD master data + read-only) chưa có test HTTP | — | Không | Thấp | `D7` ✅ |
 | **[x]** | **`D11`** | **#25, #26** | 🔴 Dòng receipt cuối của WO không nhập kho được; `planning` trả 409/422 mâu thuẫn với chính nó | — | **Có** (4 endpoint) | Trung bình | `D5` ✅, `D7b` ✅ |
-| **[ ]** | **`D8`** | #6 | 🟡 RTR / absolute timeout / forgot-password chưa có | — | Không | Cao | — |
+| **[x]** | **`D8a`** | **#6 (1/3)** | 🟡 RTR chưa có — token cũ bị đánh cắp không phân biệt được với hết hạn tự nhiên | — | Không (wire additive: +1 mã lỗi) | Trung bình | — |
+| **[ ]** | **`D8b`** | #6 (1/3) | 🟡 Absolute session timeout chưa có — session sống mãi nếu user active liên tục | — | Chưa xét | Cao | `D8a` |
+| **[ ]** | **`D8c`** | #6 (1/3) | 🟡 Forgot-password chưa có endpoint nào | — | Chưa xét | Cao (khối lượng file) | — |
 
 > **[2026-07-28] `D1` + `D2` + `D3` được gộp thành MỘT phase thực thi**, vì từng cái đơn lẻ quá nhỏ
 > để đáng một vòng baseline → sửa → verify → cập nhật tài liệu. Cả ba đều không migration, không
 > breaking change. Prompt chi tiết: `NEXT_PHASE_PLAN.md` (đang chạy). Tên phase trong sổ giữ nguyên
 > `D1`/`D2`/`D3` để không phải đánh số lại `D4`-`D8`.
 
-**Thứ tự đề xuất *(cập nhật 2026-07-31)*: ~~`D1`+`D2`+`D3`~~ ✅ → ~~`D9`+`D10`~~ ✅ → ~~`D4`~~ ✅ →
-~~`D5`~~ ✅ → ~~`D6`~~ ✅ → ~~`D7`~~ ✅ → ~~`D7b`~~ ✅ → ~~`D11`~~ ✅ → (`D8` tuỳ chọn).**
+**Thứ tự đề xuất *(cập nhật 2026-08-03)*: ~~`D1`+`D2`+`D3`~~ ✅ → ~~`D9`+`D10`~~ ✅ → ~~`D4`~~ ✅ →
+~~`D5`~~ ✅ → ~~`D6`~~ ✅ → ~~`D7`~~ ✅ → ~~`D7b`~~ ✅ → ~~`D11`~~ ✅ → ~~`D8a`~~ ✅ (2026-08-03) →
+`D8b` → `D8c`.**
 Nợ **#25** (`D5` phát hiện) và **#26** (`D7b` phát hiện) đã đóng ở `D11` — user chốt **phương án A**
 cho cả hai (nới `B13`; sửa 3 chỗ `planning` sang 409). Track `D*` nay **hết nợ đúng-sai**; `D8` còn lại
-là **tính năng chưa làm**, không phải nợ.
+là **tính năng chưa làm**, không phải nợ. **[2026-08-01]** `D8` tách thành 3 sub-phase độc lập
+(`D8a`/`D8b`/`D8c`) sau khi nghiên cứu cho thấy cả ba **chưa có bất kỳ dòng code nào**, kể cả error
+code, và effort khác hẳn nhau — RTR (`D8a`) được chọn làm trước vì hiệu quả bảo mật cao nhất và không
+đổi schema Redis.
+**[2026-08-03] `D8a` ✅ xong** — `TOKEN_REUSE_DETECTED` + force-logout mọi phiên, không migration,
+wire additive. Bản ghi đầy đủ: `CLAUDE.md §0.22`, bất biến `B80` (`module/auth/CLAUDE.md`).
+🔴 Nợ #6 mới trả **1/3**: `D8b` (absolute session timeout) và `D8c` (forgot-password) **vẫn chưa có
+dòng code nào** — đừng đọc dấu ✅ của `D8a` rồi coi cả `D8` đã xong.
 `D9` đã được chen lên đầu vì #22 làm **luồng sản xuất chính không chạy được qua API**; nay luồng đã
 thông nên các phase còn lại đo được trên một hệ thống chạy thật.
 Lý do `D2` đứng thứ hai dù không phải nợ nặng nhất: `D4`/`D5`/`D6` đều **đổi hành vi nghiệp vụ**

@@ -4,25 +4,32 @@ import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
+import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
+import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.organization.domain.Role;
+import com.erp.manufacturing.module.organization.dto.MyAccessScopeResponse;
+import com.erp.manufacturing.module.organization.service.AccessControlService;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
 import com.erp.manufacturing.module.user.domain.UserStatus;
+import com.erp.manufacturing.module.user.repository.UserRepository;
 import com.erp.manufacturing.module.user.service.UserDetailsServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -47,6 +54,8 @@ class AuthServiceTest {
     @Mock private PasswordEncoder                 passwordEncoder;
     @Mock private AuditLogService                 auditLogService;
     @Mock private com.erp.manufacturing.config.JwtProperties jwtProperties;
+    @Mock private AccessControlService            accessControlService;
+    @Mock private UserRepository                  userRepository;
 
     @InjectMocks
     private AuthService authService;
@@ -73,8 +82,10 @@ class AuthServiceTest {
                 .build();
         testPrincipal = new UserPrincipal(testUser);
 
-        when(httpRequest.getAttribute("clientIp")).thenReturn("192.168.1.100");
-        when(httpRequest.getAttribute("traceId")).thenReturn("abc123");
+        // lenient: the /me tests below never touch AuditLogService, so they never read these two
+        // attributes — unlike every other test in this class, which does via an audit call.
+        lenient().when(httpRequest.getAttribute("clientIp")).thenReturn("192.168.1.100");
+        lenient().when(httpRequest.getAttribute("traceId")).thenReturn("abc123");
     }
 
     // ── Login success ──────────────────────────────────────────────────────
@@ -229,6 +240,38 @@ class AuthServiceTest {
         verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
         verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
         verify(tokenStore).extendDeviceSession(testUser.getUserId(), response.deviceId());
+
+        // B80: the "used" marker must be written while the old key still exists. Any other order
+        // leaves a gap where a concurrent replay reads neither and looks like a plain expiry.
+        InOrder rotation = inOrder(tokenStore);
+        rotation.verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
+        rotation.verify(tokenStore).markRefreshTokenUsed("old-tid");
+        rotation.verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
+    }
+
+    @Test
+    @DisplayName("Refresh with a rotated-away tokenId – TOKEN_REUSE_DETECTED, every session revoked")
+    void refresh_reusedToken_throwsTokenReuseDetectedAndForceLogoutAll() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.TOKEN_REUSE_DETECTED));
+
+        // Force logout covers BOTH refresh tokens and device sessions, same as logoutAll()
+        verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
+        verify(tokenStore).deleteAllDeviceSessions(testUser.getUserId());
+        verify(auditLogService).logAuthFailure(eq("testuser"), eq("192.168.1.100"), eq("abc123"),
+                eq(AuditAction.SUSPICIOUS_TOKEN_REUSE), anyString());
+
+        // No new pair may leak out of a request we just classified as an attack
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
+        verifyNoInteractions(jwtTokenProvider);
     }
 
     @Test
@@ -251,6 +294,8 @@ class AuthServiceTest {
         when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        // Never rotated away within the RTR window ⇒ this is an ordinary expiry, not a replay (B80)
+        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(false);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -278,6 +323,10 @@ class AuthServiceTest {
         verify(tokenStore, never()).deleteRefreshToken(any(), any());
         verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
         verifyNoInteractions(jwtTokenProvider);
+        // B80: RTR covers only the "tokenId not found" branch. Here the tokenId still exists, so
+        // it was never rotated away — asking about reuse would be answering the wrong question.
+        verify(tokenStore, never()).wasRefreshTokenUsed(any());
+        verify(tokenStore, never()).deleteAllUserTokens(any());
     }
 
     // ── Logout ─────────────────────────────────────────────────────────────
@@ -342,5 +391,75 @@ class AuthServiceTest {
         authService.logoutAll(httpRequest);
 
         verifyNoInteractions(tokenStore, userDetailsService, auditLogService);
+    }
+
+    // ── Me ────────────────────────────────────────────────────────────────
+    //
+    // /me is only reachable with a valid, unexpired token (SecurityConfig carves it out of
+    // permitAll), so unlike refresh()/logout() there is no "missing authenticatedUserId" branch
+    // to test here — the filter chain never lets that request reach the controller.
+
+    @Test
+    @DisplayName("Me – returns profile with userId/email from User, and roles/permissions split from authorities")
+    void me_returnsProfileWithRolesPermissionsScopes() {
+        UserPrincipal principalWithPermissions = new UserPrincipal(
+                testUser, Set.of(), Set.of("PERM_WORK_ORDER_MANAGE", "PERM_MRP_RUN"));
+
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(principalWithPermissions);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.of(testUser));
+
+        MyAccessScopeResponse plantScope = new MyAccessScopeResponse(
+                "PLANT", UUID.randomUUID(), "CO-01", UUID.randomUUID(), "PL-HN",
+                Set.of("PERM_WORK_ORDER_MANAGE"));
+        UUID defaultPlantId = plantScope.plantId();
+        when(accessControlService.resolveMyScopes(testUser.getUserId()))
+                .thenReturn(new AccessControlService.UserAccessScopesResult(List.of(plantScope), defaultPlantId));
+
+        MeResponse response = authService.me(httpRequest);
+
+        assertThat(response.userId()).isEqualTo(testUser.getUserId());
+        assertThat(response.username()).isEqualTo("testuser");
+        assertThat(response.email()).isEqualTo("test@erp.local");
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        assertThat(response.roles()).containsExactly("ADMIN");
+        assertThat(response.permissions()).containsExactlyInAnyOrder("PERM_WORK_ORDER_MANAGE", "PERM_MRP_RUN");
+        assertThat(response.scopes()).containsExactly(plantScope);
+        assertThat(response.defaultPlantId()).isEqualTo(defaultPlantId);
+    }
+
+    @Test
+    @DisplayName("Me – strips ROLE_/PERM_ prefixes when splitting authorities")
+    void me_splitsAuthorities_stripsRoleAndPermPrefixes() {
+        UserPrincipal principalWithPermissions = new UserPrincipal(
+                testUser, Set.of(), Set.of("PERM_QUALITY_DISPOSITION"));
+
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(principalWithPermissions);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.of(testUser));
+        when(accessControlService.resolveMyScopes(testUser.getUserId()))
+                .thenReturn(new AccessControlService.UserAccessScopesResult(List.of(), null));
+
+        MeResponse response = authService.me(httpRequest);
+
+        assertThat(response.roles()).allSatisfy(role -> assertThat(role).doesNotStartWith("ROLE_"));
+        assertThat(response.permissions()).allSatisfy(perm -> assertThat(perm).startsWith("PERM_"));
+        assertThat(response.roles()).containsExactly("ADMIN");
+        assertThat(response.permissions()).containsExactly("PERM_QUALITY_DISPOSITION");
+    }
+
+    @Test
+    @DisplayName("Me – user missing from repository throws AppException RESOURCE_NOT_FOUND")
+    void me_userNotFoundInRepository_throwsResourceNotFound() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> authService.me(httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(com.erp.manufacturing.common.exception.ValidationErrorCode.RESOURCE_NOT_FOUND));
+
+        verifyNoInteractions(accessControlService);
     }
 }

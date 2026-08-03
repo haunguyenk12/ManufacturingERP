@@ -16,7 +16,7 @@
 | S8 | **Audit logging** | ✅ Current (`audit_logs`) / 🔜 Phase 2 (`audit_log_changes`) | Current: 1 bảng `audit_logs`; Phase 2: thêm `audit_log_changes` cho chi tiết field |
 | S9 | **Token jti uniqueness** | ✅ Current | Mỗi access token có `jti` UUID để blacklist chính xác |
 | S10 | **Password policy** | ✅ Design | Min 8 ký tự, có chữ hoa, thường, số, đặc biệt |
-| S11 | **RTR – Token Reuse Detection** | 🔜 Phase 2 | Phát hiện refresh token bị đánh cắp → force logout toàn bộ thiết bị |
+| S11 | **RTR – Token Reuse Detection** | ✅ Current (`D8a`) | Phát hiện refresh token bị đánh cắp → force logout toàn bộ thiết bị. Bất biến `B80` (`module/auth/CLAUDE.md`) |
 | S12 | **Account Enumeration Prevention** | ✅ Current | Login/forgot-password luôn trả cùng message, dùng constant-time compare |
 | S13 | **Absolute session timeout** | 🔜 Phase 2 | Bắt buộc login lại sau 30 ngày dù user vẫn active |
 | S14 | **Log sanitization** | ✅ Design | Password/token không bao giờ xuất hiện trong log; `@ToString.Exclude` trên field nhạy cảm |

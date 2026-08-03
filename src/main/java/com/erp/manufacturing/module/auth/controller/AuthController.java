@@ -4,6 +4,7 @@ import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
+import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.auth.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,7 +18,10 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * Authentication endpoints.
- * Base path: /api/v1/auth/ (permit all in SecurityConfig)
+ *
+ * <p>Base path: /api/v1/auth/. {@code login}/{@code refresh}/{@code logout}/{@code logout-all} are
+ * permit-all in {@code SecurityConfig}; {@code /me} is the one exception — it requires a valid,
+ * unexpired token (see {@code SecurityConfig} for the matcher that carves it out).
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -69,5 +73,11 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> logoutAll(HttpServletRequest httpRequest) {
         authService.logoutAll(httpRequest);
         return ResponseEntity.ok(ApiResponse.noContent("Logged out from all devices"));
+    }
+
+    @GetMapping("/me")
+    @Operation(summary = "Get current user profile, permissions, and accessible scopes")
+    public ResponseEntity<ApiResponse<MeResponse>> me(HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(ApiResponse.ok(authService.me(httpRequest)));
     }
 }

@@ -21,8 +21,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -212,6 +222,86 @@ public class AccessControlService {
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "User role assignment", assignmentId));
         assignment.deactivate();
         return mapper.toResponse(assignmentRepository.save(assignment));
+    }
+
+    /** Result of {@link #resolveMyScopes(UUID)} — the {@code scopes[]}/{@code defaultPlantId} pair
+     *  {@code GET /api/v1/auth/me} needs. */
+    public record UserAccessScopesResult(List<MyAccessScopeResponse> scopes, UUID defaultPlantId) {}
+
+    /**
+     * Builds the caller's {@code scopes[]} for {@code GET /api/v1/auth/me} — every company/plant
+     * the user has an active assignment on, with the permissions that apply to each.
+     *
+     * <p>No {@code @PreAuthorize}: this is self-service info about the caller's own access, not an
+     * admin operation like the rest of this service.
+     *
+     * <p>{@code WAREHOUSE}-scoped rows are deliberately dropped here — the frontend only navigates
+     * by company/plant. That permission is not lost: it is still counted in the flat
+     * {@code permissions[]} union on {@link com.erp.manufacturing.module.auth.dto.MeResponse},
+     * exactly like the access token's {@code roles} claim already reports it.
+     */
+    @Transactional(readOnly = true)
+    public UserAccessScopesResult resolveMyScopes(UUID userId) {
+        List<ScopeResourcePermissionRow> rows = assignmentRepository.findActiveScopeResourcePermissionRowsForUser(
+                userId, Instant.now(), AssignmentStatus.ACTIVE, RoleStatus.ACTIVE,
+                OrganizationStatus.ACTIVE, OrganizationStatus.ACTIVE);
+
+        Set<String> globalPermissions = new LinkedHashSet<>();
+        Map<UUID, Set<String>> permissionsByPlant = new LinkedHashMap<>();
+        Map<UUID, Set<String>> permissionsByCompany = new LinkedHashMap<>();
+
+        for (ScopeResourcePermissionRow row : rows) {
+            if (row.resourceType() == null) {
+                globalPermissions.add(row.permissionCode());
+                continue;
+            }
+            switch (row.resourceType()) {
+                case PLANT -> permissionsByPlant
+                        .computeIfAbsent(row.resourceId(), id -> new LinkedHashSet<>())
+                        .add(row.permissionCode());
+                case COMPANY -> permissionsByCompany
+                        .computeIfAbsent(row.resourceId(), id -> new LinkedHashSet<>())
+                        .add(row.permissionCode());
+                case WAREHOUSE -> { /* not surfaced as a navigable scope — see javadoc above */ }
+            }
+        }
+
+        Map<UUID, Plant> plantsById = plantRepository.findAllById(permissionsByPlant.keySet()).stream()
+                .collect(Collectors.toMap(Plant::getPlantId, p -> p));
+        Set<UUID> companyIds = new HashSet<>(permissionsByCompany.keySet());
+        plantsById.values().forEach(plant -> companyIds.add(plant.getCompany().getCompanyId()));
+        Map<UUID, Company> companiesById = companyRepository.findAllById(companyIds).stream()
+                .collect(Collectors.toMap(Company::getCompanyId, c -> c));
+
+        List<MyAccessScopeResponse> scopes = new ArrayList<>();
+        if (!globalPermissions.isEmpty()) {
+            scopes.add(new MyAccessScopeResponse("GLOBAL", null, null, null, null, globalPermissions));
+        }
+        permissionsByCompany.forEach((companyId, permissions) -> {
+            Company company = companiesById.get(companyId);
+            scopes.add(new MyAccessScopeResponse(
+                    "COMPANY", companyId, company.getCode(), null, null, permissions));
+        });
+        permissionsByPlant.forEach((plantId, permissions) -> {
+            Plant plant = plantsById.get(plantId);
+            Company company = companiesById.get(plant.getCompany().getCompanyId());
+            scopes.add(new MyAccessScopeResponse(
+                    "PLANT", company.getCompanyId(), company.getCode(), plantId, plant.getCode(), permissions));
+        });
+
+        // B80: sort deterministically before picking defaultPlantId — HashMap/Set iteration order
+        // is not stable across calls and a client should not see a different "default" every time.
+        scopes.sort(Comparator
+                .comparing(MyAccessScopeResponse::companyCode, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(MyAccessScopeResponse::plantCode, Comparator.nullsFirst(Comparator.naturalOrder())));
+
+        UUID defaultPlantId = scopes.stream()
+                .map(MyAccessScopeResponse::plantId)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+
+        return new UserAccessScopesResult(scopes, defaultPlantId);
     }
 
     private Role findActiveRole(UUID roleId) {

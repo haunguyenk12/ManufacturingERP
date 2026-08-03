@@ -149,6 +149,10 @@ INTERNAL_SERVER_ERROR, ACCESS_DENIED
 `RESERVATION_EXCEEDED` (409), `PLANNED_QUANTITY_EXCEEDED` (409), `LOT_NOT_ELIGIBLE` (409),
 `LOT_REQUIRED` (400), `APPROVAL_REASON_REQUIRED` (400).
 
+**Constant thêm ở `D8a`:** `TOKEN_REUSE_DETECTED` (401) — refresh token đã bị rotate away mà quay
+lại. Cùng **401** với `REFRESH_TOKEN_EXPIRED` nên `code` là thứ **duy nhất** phân biệt "đăng nhập
+lại đi" với "phiên của bạn vừa bị thu hồi vì phát hiện replay". Bất biến `B80`.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

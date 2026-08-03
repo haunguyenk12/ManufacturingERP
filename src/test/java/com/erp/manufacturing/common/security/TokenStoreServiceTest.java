@@ -133,6 +133,49 @@ class TokenStoreServiceTest {
         verify(redis, never()).delete(anyString());
     }
 
+    // ── Refresh token reuse detection (RTR) ────────────────────────────────
+
+    @Test
+    @DisplayName("markRefreshTokenUsed – writes auth:refresh:used:{tokenId} with a 60-second TTL")
+    void markRefreshTokenUsed_setsKeyWithSixtySecondTtl() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+
+        store.markRefreshTokenUsed("tid-1");
+
+        // Literal 60, not the private constant: the window length is the contract RTR depends on.
+        verify(valueOps).set(eq("auth:refresh:used:tid-1"), eq("1"), eq(60L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("wasRefreshTokenUsed – existing key means the tokenId was rotated away")
+    void wasRefreshTokenUsed_keyExists_returnsTrue() {
+        when(redis.hasKey("auth:refresh:used:tid-1")).thenReturn(true);
+
+        assertThat(store.wasRefreshTokenUsed("tid-1")).isTrue();
+    }
+
+    @Test
+    @DisplayName("wasRefreshTokenUsed – missing key (null hasKey) is not a reuse")
+    void wasRefreshTokenUsed_keyMissing_returnsFalse() {
+        when(redis.hasKey("auth:refresh:used:tid-1")).thenReturn(null);
+
+        assertThat(store.wasRefreshTokenUsed("tid-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("markRefreshTokenUsed – the used-marker key is outside the deleteAllUserTokens SCAN pattern")
+    void markRefreshTokenUsed_keyIsNotSweptByDeleteAllUserTokens() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+
+        store.markRefreshTokenUsed("tid-1");
+
+        verify(valueOps).set(key.capture(), anyString(), anyLong(), any(TimeUnit.class));
+        // deleteAllUserTokens sweeps "auth:refresh:{userId}:*" — force-logout must not wipe the
+        // very marker that proves a reuse happened.
+        assertThat(key.getValue()).doesNotStartWith("auth:refresh:" + userId + ":");
+    }
+
     // ── Access token blacklist ─────────────────────────────────────────────
 
     @Test

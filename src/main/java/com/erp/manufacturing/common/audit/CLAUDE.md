@@ -250,6 +250,6 @@ Controller / Service
 | `AuditAction` enum tập trung | ✅ Current | Tên event nhất quán, dễ query/filter |
 | `@TransactionalEventListener(AFTER_COMMIT)` | ✅ Current | Không ghi audit khi transaction rollback |
 | Tách `UserRateLimitFilter` (Order 4) | ✅ Current | USER-scope rate limit chạy sau JWT auth |
-| RTR – key `auth:refresh:used:{tokenId}` | 🔜 Phase 2 | Phát hiện token bị đánh cắp và reuse |
+| RTR – key `auth:refresh:used:{tokenId}` | ✅ Current (`D8a`) | Phát hiện token bị đánh cắp và reuse → audit `SUSPICIOUS_TOKEN_REUSE` (status `FAILURE`, qua `logAuthFailure`) |
 | `auth:reset:{token}` trong Redis | 🔜 Phase 2 | Forgot password flow single-use, TTL 15m |
 | Absolute session timeout 30 ngày | 🔜 Phase 2 | Ngăn session sống mãi dù user vẫn active |

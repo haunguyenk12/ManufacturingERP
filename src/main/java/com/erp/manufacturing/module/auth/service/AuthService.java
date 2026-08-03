@@ -7,15 +7,21 @@ import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.JwtProperties;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
+import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.organization.service.AccessControlService;
+import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
+import com.erp.manufacturing.module.user.repository.UserRepository;
 import com.erp.manufacturing.module.user.service.UserDetailsServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -23,7 +29,9 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Authentication service handling login, logout, and token refresh.
@@ -35,7 +43,9 @@ import java.util.UUID;
  *       logged in from one device at a time. Logging in from a new device invalidates all prior sessions.
  *       If {@code deviceId} is not provided by the client, one is derived server-side
  *       from a hash of {@code User-Agent + IP}.</li>
- *   <li><b>Token rotation on refresh</b> – old tokenId deleted before issuing new pair</li>
+ *   <li><b>Token rotation on refresh</b> – new pair saved, old tokenId marked "used", then deleted</li>
+ *   <li><b>Reuse detection (RTR)</b> – a tokenId replayed after being rotated away revokes every
+ *       session of that user and returns {@code TOKEN_REUSE_DETECTED} (B80)</li>
  *   <li><b>Refresh with expired access token</b> – the filter allows expired tokens through
  *       on the refresh path; this service validates the opaque refresh token independently</li>
  *   <li><b>Audit logging</b> – all auth events recorded</li>
@@ -54,6 +64,8 @@ public class AuthService {
     private final PasswordEncoder        passwordEncoder;
     private final AuditLogService        auditLogService;
     private final JwtProperties          jwtProperties;
+    private final AccessControlService   accessControlService;
+    private final UserRepository         userRepository;
 
     // ── Login ─────────────────────────────────────────────────────────────
 
@@ -144,18 +156,37 @@ public class AuthService {
 
         // Validate opaque refresh token
         String stored = tokenStore.getRefreshToken(principal.getUserId(), request.tokenId());
-        if (stored == null || !stored.equals(request.refreshToken())) {
+        if (stored == null) {
+            // RTR (B80): the tokenId is gone from the store, but if we rotated it away moments ago
+            // then someone is replaying a token they should no longer hold — treat it as stolen.
+            if (tokenStore.wasRefreshTokenUsed(request.tokenId())) {
+                tokenStore.deleteAllUserTokens(principal.getUserId());
+                tokenStore.deleteAllDeviceSessions(principal.getUserId());
+                auditLogService.logAuthFailure(principal.getUsername(), ip, traceId,
+                        AuditAction.SUSPICIOUS_TOKEN_REUSE,
+                        "Reused refresh tokenId=" + request.tokenId() + "; all sessions revoked");
+                log.warn("[AUTH] Refresh token reuse detected: user={} tokenId={} ip={}",
+                        principal.getUsername(), request.tokenId(), ip);
+                throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_REUSE_DETECTED);
+            }
             throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
-
-        // Token rotation: delete old, issue new
-        tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
+        if (!stored.equals(request.refreshToken())) {
+            // Deliberately NOT an RTR case (B80): the tokenId still exists, so it was never rotated
+            // away — this is a wrong/tampered token value, not a replay.
+            throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
+        }
 
         String newAccessToken  = jwtTokenProvider.generateAccessToken(principal);
         String newRefreshToken = jwtTokenProvider.generateRefreshToken();
         String newTokenId      = UUID.randomUUID().toString();
 
+        // Token rotation (B80): save new → mark old "used" → delete old. The "used" marker must
+        // exist BEFORE the old key disappears, otherwise a concurrent replay landing in that gap
+        // reads neither and gets diagnosed as an ordinary expiry instead of being detected.
         tokenStore.saveRefreshToken(principal.getUserId(), newTokenId, newRefreshToken);
+        tokenStore.markRefreshTokenUsed(request.tokenId());
+        tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
 
         // Extend device session TTL using the resolved deviceId
         String deviceId = resolveDeviceId(request.deviceId(), httpRequest, ip);
@@ -215,6 +246,46 @@ public class AuthService {
         auditLogService.logAuth(principal.getUserId(), principal.getUsername(), ip, traceId,
                 AuditAction.LOGOUT_ALL, "Logout from all devices");
         log.info("[AUTH] Logout-all: user={}", username);
+    }
+
+    // ── Me ────────────────────────────────────────────────────────────────
+
+    /**
+     * Self-service profile for the caller: {@code userId}/{@code email} the JWT cannot carry, and
+     * permissions broken down by the company/plant they actually apply to.
+     *
+     * <p>{@code roles}/{@code permissions} are split straight from {@code principal.getAuthorities()}
+     * — the same authorities {@link JwtTokenProvider#generateAccessToken} put in the token's
+     * {@code roles} claim — so this always agrees with what the caller's own JWT already says.
+     * {@code scopes}/{@code defaultPlantId} are the new part {@link AccessControlService} resolves.
+     *
+     * <p>Reachable only with a valid, unexpired token: {@code /api/v1/auth/me} is carved out of the
+     * {@code permitAll} pattern in {@code SecurityConfig}, so {@code authenticatedUserId} is always
+     * set by the time a request gets here — unlike {@link #refresh}, which is reached with an
+     * <em>expired</em> token on purpose.
+     */
+    public MeResponse me(HttpServletRequest httpRequest) {
+        String username = (String) httpRequest.getAttribute("authenticatedUserId");
+        UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(username);
+        User user = userRepository.findById(principal.getUserId())
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "User", principal.getUserId()));
+
+        Set<String> roles = principal.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("ROLE_"))
+                .map(authority -> authority.substring("ROLE_".length()))
+                .collect(Collectors.toSet());
+        Set<String> permissions = principal.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith("PERM_"))
+                .collect(Collectors.toSet());
+
+        AccessControlService.UserAccessScopesResult scopes =
+                accessControlService.resolveMyScopes(principal.getUserId());
+
+        return new MeResponse(principal.getUserId(), user.getUsername(), user.getEmail(),
+                user.getStatus().name(), roles, permissions, scopes.scopes(), scopes.defaultPlantId());
     }
 
     // ── Private helpers ───────────────────────────────────────────────────

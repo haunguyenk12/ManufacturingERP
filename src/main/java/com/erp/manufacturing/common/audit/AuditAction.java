@@ -14,6 +14,8 @@ public enum AuditAction {
     SESSION_KICKED,
     LOGIN_FAILED,
     ACCOUNT_LOCKED,
+    /** RTR (D8a): a refresh token that was already rotated away came back — all sessions revoked. */
+    SUSPICIOUS_TOKEN_REUSE,
 
     // ── User Management ────────────────────────────────────────────────────
     USER_CREATED,

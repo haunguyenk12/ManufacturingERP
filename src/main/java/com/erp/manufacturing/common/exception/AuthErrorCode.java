@@ -19,6 +19,8 @@ public enum AuthErrorCode implements ErrorCode {
     TOKEN_REVOKED           ("TOKEN_REVOKED",          "Token has been revoked",                    HttpStatus.UNAUTHORIZED),
     TOKEN_MALFORMED         ("TOKEN_MALFORMED",        "Token is malformed or invalid",             HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_EXPIRED   ("REFRESH_TOKEN_EXPIRED",  "Refresh token has expired or is invalid",   HttpStatus.UNAUTHORIZED),
+    /** RTR (B80): a refresh token that was already rotated away came back — treated as stolen. */
+    TOKEN_REUSE_DETECTED    ("TOKEN_REUSE_DETECTED",   "Suspicious activity detected. Please login again.", HttpStatus.UNAUTHORIZED),
 
     // ── Session ────────────────────────────────────────────────────────────
     SESSION_CONFLICT        ("SESSION_CONFLICT",       "Session conflict detected",                 HttpStatus.CONFLICT),

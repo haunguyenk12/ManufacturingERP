@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Key patterns:
  * <pre>
  *   auth:refresh:{userId}:{tokenId}       → refresh token value          TTL=7d
+ *   auth:refresh:used:{tokenId}           → "1" (RTR reuse marker)       TTL=60s
  *   auth:blacklist:{jti}                  → "1"                          TTL=remaining access token lifetime
  *   auth:failcount:{username}             → failure count                TTL=15m
  *   auth:session:device:{userId}:{deviceId} → last-seen IP + metadata   TTL=7d
@@ -37,9 +38,13 @@ import java.util.concurrent.TimeUnit;
 public class TokenStoreService {
 
     private static final String REFRESH_KEY_PREFIX      = "auth:refresh:";
+    private static final String REFRESH_USED_KEY_PREFIX = "auth:refresh:used:";
     private static final String BLACKLIST_KEY_PREFIX    = "auth:blacklist:";
     private static final String FAILCOUNT_KEY_PREFIX    = "auth:failcount:";
     private static final String SESSION_DEVICE_PREFIX   = "auth:session:device:";
+
+    /** How long a rotated-away tokenId stays recognisable as "already used" (RTR window). */
+    private static final long REUSE_DETECTION_TTL_SEC = 60L;
 
     /** How many keys to fetch per SCAN iteration – keeps each call O(1). */
     private static final int SCAN_COUNT = 100;
@@ -77,6 +82,30 @@ public class TokenStoreService {
             redisTemplate.delete(keysToDelete);
             log.debug("[TokenStore] Deleted {} refresh tokens for userId={}", keysToDelete.size(), userId);
         }
+    }
+
+    // ── Refresh Token Reuse Detection (RTR) ───────────────────────────────
+
+    /**
+     * Marks a tokenId as "already rotated away" for {@value #REUSE_DETECTION_TTL_SEC} seconds.
+     *
+     * <p>Keyed by {@code tokenId} alone (no {@code userId} segment) — the tokenId is globally
+     * unique, and the reuse check runs before the caller's identity has been re-established
+     * against a stored token.
+     *
+     * <p>The key deliberately outlives the refresh token itself: that short window is exactly
+     * what lets {@link #wasRefreshTokenUsed} tell a stolen-and-replayed token apart from one
+     * that simply expired.
+     */
+    public void markRefreshTokenUsed(String tokenId) {
+        redisTemplate.opsForValue().set(
+                REFRESH_USED_KEY_PREFIX + tokenId, "1",
+                REUSE_DETECTION_TTL_SEC, TimeUnit.SECONDS);
+    }
+
+    /** @return true if this tokenId was rotated away within the reuse-detection window. */
+    public boolean wasRefreshTokenUsed(String tokenId) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(REFRESH_USED_KEY_PREFIX + tokenId));
     }
 
     // ── Access Token Blacklist ────────────────────────────────────────────

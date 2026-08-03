@@ -63,12 +63,15 @@ auth:failcount:{username}                      →  {count}  TTL=15m
 # Multi-device session (mỗi device có entry riêng)
 auth:session:device:{userId}:{deviceId}        →  {clientIp}  TTL=7d (sliding)
 
-# ── Planned (chưa implement) ────────────────────────────────────
-# RTR – token đã dùng (phát hiện reuse)
-auth:refresh:used:{tokenId}                    →  "1"  TTL=60s  [TODO Phase 2]
+# RTR – token đã dùng (phát hiện reuse)  ✅ D8a
+# Key theo tokenId TOÀN CỤC, không có segment {userId} — cố ý: nó phải nằm NGOÀI pattern
+# SCAN "auth:refresh:{userId}:*" của deleteAllUserTokens, nếu không force-logout sẽ xoá
+# đúng cái marker chứng minh có reuse.
+auth:refresh:used:{tokenId}                    →  "1"  TTL=60s
 
+# ── Planned (chưa implement) ────────────────────────────────────
 # Forgot password token (single-use)
-auth:reset:{token}                             →  {userId}  TTL=15m  [TODO Phase 2]
+auth:reset:{token}                             →  {userId}  TTL=15m  [TODO D8c]
 ```
 
 ## 4.5 Cấu Trúc JWT Claims
@@ -115,10 +118,10 @@ Client nhận 401 Unauthorized
   │
   ├─ Client gửi POST /api/v1/auth/refresh { refreshToken }
   │
-  ├─ Server validate refresh token (basic rotation – current):
-  │   ├─ Tồn tại trong Redis? → tiếp tục
-  │   ├─ KHÔNG TÌM THẤY → REFRESH_TOKEN_EXPIRED
-  │   └─ [TODO Phase 2] RTR reuse detection (xem 4.12):
+  ├─ Server validate refresh token (rotation + RTR – current):
+  │   ├─ Tồn tại trong Redis nhưng giá trị SAI → REFRESH_TOKEN_EXPIRED (không phải RTR, xem 4.12)
+  │   ├─ Tồn tại và khớp → tiếp tục
+  │   └─ KHÔNG TÌM THẤY → RTR reuse detection (✅ D8a, xem 4.12):
   │         → kiểm tra auth:refresh:used:{tokenId}
   │           ├─ Key "used" tồn tại → TOKEN_REUSE_DETECTED (force logout all)
   │           └─ Key hết hạn → REFRESH_TOKEN_EXPIRED (bình thường)
@@ -127,8 +130,9 @@ Client nhận 401 Unauthorized
   │   sessionAge > 30 ngày → 401 SESSION_ABSOLUTE_TIMEOUT
   │
   └─ Nếu hợp lệ → Tạo accessToken MỚI + refreshToken MỚI (xoay vòng)
-       ├─ Lưu refresh token MỚI vào Redis TRƯỚC
-       ├─ [TODO Phase 2] Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s
+       ├─ 1. Lưu refresh token MỚI vào Redis
+       ├─ 2. Đánh dấu token CŨ là USED: SET auth:refresh:used:{oldTokenId} "1" TTL=60s  (✅ D8a)
+       ├─ 3. XOÁ token CŨ  ← thứ tự 1→2→3 là bắt buộc, xem bất biến B80
        └─ Trả về { accessToken, refreshToken, expiresIn }
 
 Kịch bản: Force logout / hoạt động đáng ngờ
@@ -162,6 +166,12 @@ Thứ tự filter chain (quan trọng — được đăng ký trong `SecurityCon
 > không bao giờ thực thi (không có userId lúc chạy IP layer).
 
 Permit: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`
+
+> ⚠️ **[2026-08-01] Ngoại lệ:** `/api/v1/auth/me` **không** permit-all — matcher cụ thể hơn đứng
+> **trước** wildcard `/api/v1/auth/**` (`authorizeHttpRequests` khớp theo thứ tự khai báo, match đầu
+> tiên thắng): `.requestMatchers("/api/v1/auth/me").authenticated()` rồi mới tới
+> `.requestMatchers("/api/v1/auth/**").permitAll()`. 4 endpoint còn lại (`login`/`refresh`/`logout`/
+> `logout-all`) vẫn permit-all. Regression guard: `AuthMeSecurityTest` (filter chain thật, không mock).
 
 ## 4.10 Multi-Device Session
 
@@ -262,15 +272,17 @@ rate:blacklist:ip:{ip}  →  "lý do"  TTL tuỳ ý
 | `X-RateLimit-Rule` | Rule ID đang áp dụng |
 | `Retry-After` | Giây cần chờ (chỉ khi 429) |
 
-## 4.12 Refresh Token Reuse Detection (RTR) [🔜 Phase 2 – chưa implement]
+## 4.12 Refresh Token Reuse Detection (RTR) [✅ `D8a`, 2026-08-03]
 
-> **Trạng thái**: Thiết kế đã có, chưa có code trong `AuthService.refresh`. Sẽ implement trong Phase 2.
+> **Trạng thái**: đã implement trong `AuthService.refresh` + `TokenStoreService.markRefreshTokenUsed`
+> / `wasRefreshTokenUsed`. Bất biến **`B80`** ở `module/auth/CLAUDE.md` — đọc nó trước khi sửa
+> `refresh()`, đặc biệt phần thứ tự thao tác Redis và ranh giới "chỉ nhánh `stored == null`".
 
 **Mục tiêu**: Phát hiện kịp thời khi refresh token bị đánh cắp và dùng lại.
 
 **Vấn đề với rotation đơn thuần**: Sau khi rotate, nếu token cũ bị dùng lại, server chỉ trả `REFRESH_TOKEN_EXPIRED` — không phân biệt được "hết hạn tự nhiên" với "token bị đánh cắp".
 
-**Giải pháp RTR (planned)**:
+**Giải pháp RTR (đã implement)**:
 ```
 Khi rotate thành công:
   → SET auth:refresh:used:{oldTokenId} "1" EX 60
@@ -286,6 +298,20 @@ Khi validate refresh token và KHÔNG TÌM THẤY trong store:
 ```
 
 > **Lưu ý**: TTL của key `used` (60s) đủ để phát hiện reuse kịp thời nhưng không giữ Redis lâu.
+
+> 🔴 **Hai điều `D8a` chốt khác thiết kế gốc ở trên — đừng "sửa cho giống tài liệu":**
+> 1. **Force-logout gọi CẢ `deleteAllUserTokens` LẪN `deleteAllDeviceSessions`** (thiết kế gốc chỉ
+>    ghi cái đầu). Lý do: khớp `logoutAll()`, và device-session cũng là dữ liệu phiên — bỏ lại thì
+>    "force logout toàn bộ thiết bị" không đúng nghĩa đen của chính nó.
+> 2. **Thứ tự rotate là lưu-mới → mark-used → xoá-cũ**, không phải "mark rồi lưu/xoá" như đoạn
+>    pseudo-code trên gợi ý. Marker phải tồn tại **trước khi** key cũ biến mất.
+>
+> **Giới hạn đã biết, chấp nhận cho `D8a`** (đừng tự mở rộng phạm vi để "sửa"):
+> - **Race 2 request refresh đồng thời cùng 1 token hợp lệ** không giải được bằng thứ tự thao tác —
+>   cần lock/CAS, thiết kế này không có. Hệ quả: client double-submit (network retry) có thể bị
+>   force-logout **oan**. Đây là giới hạn cố hữu của RTR cơ bản không có grace window.
+> - RTR **chỉ** áp dụng nhánh `stored == null`. Nhánh `stored != null` nhưng giá trị mismatch giữ
+>   `REFRESH_TOKEN_EXPIRED` — tokenId còn sống nghĩa là nó chưa từng bị rotate away.
 
 ---
 
