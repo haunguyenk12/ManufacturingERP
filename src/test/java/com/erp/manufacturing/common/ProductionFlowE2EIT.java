@@ -34,6 +34,9 @@ import com.erp.manufacturing.module.routing.repository.RoutingHeaderRepository;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
 import com.erp.manufacturing.module.user.repository.UserRepository;
+import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
+import com.erp.manufacturing.module.workcenter.repository.WorkCenterRepository;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
@@ -120,6 +123,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
     @Autowired CompanyRepository companyRepository;
     @Autowired PlantRepository plantRepository;
+    @Autowired WorkCenterRepository workCenterRepository;
     @Autowired WarehouseRepository warehouseRepository;
     @Autowired ItemRepository itemRepository;
     @Autowired InventoryLotRepository inventoryLotRepository;
@@ -665,11 +669,16 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .quantityPer(QUANTITY_PER).scrapRate(BigDecimal.ZERO).build());
         bomHeaderRepository.save(bom);
 
+        WorkCenter workCenter = workCenterRepository.save(WorkCenter.builder()
+                .plant(plant).code("WC-" + suffix).name("E2E Work Center")
+                .capacityUnitType(CapacityUnitType.MACHINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build());
+
         RoutingHeader routing = RoutingHeader.builder()
                 .company(company).item(finishedGood).code("RT-" + suffix).routingVersion("1")
                 .status(RoutingStatus.ACTIVE).build();
         routing.getOperations().add(RoutingOperation.builder()
-                .routing(routing).sequence(10).name("Assemble").workCenterCode("WC-01")
+                .routing(routing).sequence(10).name("Assemble").workCenter(workCenter)
                 .setupMinutes(new BigDecimal("5")).runMinutesPerUnit(new BigDecimal("1")).build());
         routingHeaderRepository.save(routing);
 
@@ -692,6 +701,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
      */
     private NonLotFixture seedNonLotTrackedFinishedGood() {
         Company company = companyRepository.findById(fixture.companyId).orElseThrow();
+        Plant plant = plantRepository.findById(fixture.plantId).orElseThrow();
         Warehouse warehouse = warehouseRepository.findById(fixture.warehouseId).orElseThrow();
         Item component = itemRepository.findById(fixture.componentId).orElseThrow();
 
@@ -708,11 +718,16 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .quantityPer(QUANTITY_PER).scrapRate(BigDecimal.ZERO).build());
         bomHeaderRepository.save(bom);
 
+        WorkCenter workCenter = workCenterRepository.save(WorkCenter.builder()
+                .plant(plant).code("WCN-" + fixture.suffix).name("E2E Work Center (no lot)")
+                .capacityUnitType(CapacityUnitType.MACHINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build());
+
         RoutingHeader routing = RoutingHeader.builder()
                 .company(company).item(finishedGood).code("RTN-" + fixture.suffix).routingVersion("1")
                 .status(RoutingStatus.ACTIVE).build();
         routing.getOperations().add(RoutingOperation.builder()
-                .routing(routing).sequence(10).name("Assemble").workCenterCode("WC-01")
+                .routing(routing).sequence(10).name("Assemble").workCenter(workCenter)
                 .setupMinutes(new BigDecimal("5")).runMinutesPerUnit(new BigDecimal("1")).build());
         routingHeaderRepository.save(routing);
 

@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.routing.domain;
 
 import com.erp.manufacturing.common.audit.BaseEntity;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -34,11 +35,15 @@ public class RoutingOperation extends BaseEntity {
     private String name;
 
     /**
-     * Free-text work center reference. Work Center is deliberately NOT an entity in this phase —
-     * the MVP has no work center screen and capacity/CRP is out of scope (spec §11).
+     * FK to Work Center (C2-6). Nullable: rows created before this phase have no work center to
+     * point at (the old free-text {@code work_center_code} carried no plant, so it cannot be
+     * backfilled — see {@code module/workcenter/CLAUDE.md} bất biến {@code B_wc2}). Every row
+     * created through {@link com.erp.manufacturing.module.routing.service.RoutingService} from now
+     * on is required to have one ({@code RoutingOperationRequest.workCenterId} is {@code @NotNull}).
      */
-    @Column(name = "work_center_code", nullable = false, length = 100)
-    private String workCenterCode;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "work_center_id")
+    private WorkCenter workCenter;
 
     @Column(name = "setup_minutes", nullable = false, precision = 19, scale = 6)
     private BigDecimal setupMinutes;

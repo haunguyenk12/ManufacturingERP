@@ -17,6 +17,8 @@ import com.erp.manufacturing.module.routing.dto.RoutingOperationRequest;
 import com.erp.manufacturing.module.routing.dto.RoutingResponse;
 import com.erp.manufacturing.module.routing.mapper.RoutingMapper;
 import com.erp.manufacturing.module.routing.repository.RoutingHeaderRepository;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
+import com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,8 +26,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -35,6 +40,7 @@ public class RoutingService {
 
     private final RoutingHeaderRepository routingHeaderRepository;
     private final ItemLookupService itemLookupService;
+    private final WorkCenterLookupService workCenterLookupService;
     private final RoutingMapper mapper;
 
     @Transactional
@@ -61,13 +67,24 @@ public class RoutingService {
                 .note(trimToNull(request.note()))
                 .build();
 
+        // Resolve every work center and validate B_wc2 (same plant across all operations) BEFORE
+        // building any entity (rule C9) — a routing whose operations span two plants must never
+        // reach the repository.
         Set<Integer> sequences = new HashSet<>();
+        Map<Integer, WorkCenter> workCentersBySequence = new LinkedHashMap<>();
         for (RoutingOperationRequest operationRequest : request.operations()) {
             if (!sequences.add(operationRequest.sequence())) {
                 throw ExceptionFactory.businessRule(BusinessErrorCode.BUSINESS_RULE_VIOLATION,
                         "Duplicate operation sequence: " + operationRequest.sequence());
             }
-            routing.getOperations().add(buildOperation(routing, operationRequest));
+            workCentersBySequence.put(operationRequest.sequence(),
+                    workCenterLookupService.getActiveWorkCenter(operationRequest.workCenterId()));
+        }
+        ensureOperationsShareOnePlant(workCentersBySequence.values());
+
+        for (RoutingOperationRequest operationRequest : request.operations()) {
+            routing.getOperations().add(buildOperation(
+                    routing, operationRequest, workCentersBySequence.get(operationRequest.sequence())));
         }
         return mapper.toResponse(routingHeaderRepository.save(routing));
     }
@@ -127,15 +144,32 @@ public class RoutingService {
         return mapper.toResponse(findRouting(routingId));
     }
 
-    private RoutingOperation buildOperation(RoutingHeader routing, RoutingOperationRequest request) {
+    private RoutingOperation buildOperation(RoutingHeader routing, RoutingOperationRequest request, WorkCenter workCenter) {
         return RoutingOperation.builder()
                 .routing(routing)
                 .sequence(request.sequence())
                 .name(request.name().trim())
-                .workCenterCode(request.workCenterCode().trim().toUpperCase(Locale.ROOT))
+                .workCenter(workCenter)
                 .setupMinutes(request.setupMinutes())
                 .runMinutesPerUnit(request.runMinutesPerUnit())
                 .build();
+    }
+
+    /**
+     * Bất biến B_wc2 (module/workcenter/CLAUDE.md): every operation in one routing must reference a
+     * work center of the same plant. Routing itself stays company-level (no schema change), so this
+     * is the only place that enforces the consequence of Work Center being per-plant — 422, not 409:
+     * it is invalid <em>input</em>, not a status-machine conflict (error-handling.md §5.3).
+     */
+    private void ensureOperationsShareOnePlant(Collection<WorkCenter> workCenters) {
+        long distinctPlants = workCenters.stream()
+                .map(workCenter -> workCenter.getPlant().getPlantId())
+                .distinct()
+                .count();
+        if (distinctPlants > 1) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "All routing operations must reference work centers of the same plant");
+        }
     }
 
     private RoutingHeader findRouting(UUID routingId) {

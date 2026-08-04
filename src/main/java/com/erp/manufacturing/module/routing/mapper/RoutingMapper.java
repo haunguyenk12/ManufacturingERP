@@ -36,11 +36,15 @@ public class RoutingMapper {
     }
 
     public RoutingOperationResponse toResponse(RoutingOperation operation) {
+        // workCenter is null for rows created before C2-6 (not backfilled — see RoutingOperation
+        // javadoc); both id and derived code fall back to null rather than throwing.
+        var workCenter = operation.getWorkCenter();
         return new RoutingOperationResponse(
                 operation.getRoutingOperationId(),
                 operation.getSequence(),
                 operation.getName(),
-                operation.getWorkCenterCode(),
+                workCenter == null ? null : workCenter.getWorkCenterId(),
+                workCenter == null ? null : workCenter.getCode(),
                 operation.getSetupMinutes(),
                 operation.getRunMinutesPerUnit());
     }

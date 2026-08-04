@@ -87,9 +87,9 @@ class RoutingControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"itemId":"%s","code":"RT-001","version":"1",
-                                 "operations":[{"sequence":10,"name":"Assemble","workCenterCode":"WC-01",
+                                 "operations":[{"sequence":10,"name":"Assemble","workCenterId":"%s",
                                                 "setupMinutes":5,"runMinutesPerUnit":2}]}
-                                """.formatted(ITEM_ID)))
+                                """.formatted(ITEM_ID, UUID.randomUUID())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.routingId").value(ROUTING_ID.toString()))

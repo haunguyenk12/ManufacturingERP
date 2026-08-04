@@ -7,6 +7,7 @@ public record RoutingOperationResponse(
         UUID routingOperationId,
         Integer sequence,
         String name,
+        UUID workCenterId,
         String workCenterCode,
         BigDecimal setupMinutes,
         BigDecimal runMinutesPerUnit

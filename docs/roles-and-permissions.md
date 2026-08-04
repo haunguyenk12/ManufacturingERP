@@ -136,6 +136,12 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_ROUTING_READ` | Xem routing và danh sách công đoạn (`F4`, `V31`) |
 | `PERM_ROUTING_MANAGE` | Tạo / Activate / Deactivate routing. **Activate deactivate bản `ACTIVE` cũ của cùng item**; routing `ACTIVE` là điều kiện bắt buộc để convert proposal MAKE thành Work Order (`F4`, `V31`) |
 
+### Work Center
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_WORK_CENTER_READ` | Xem danh sách work center của plant (`C2-6`, `V45`) |
+| `PERM_WORK_CENTER_MANAGE` | Tạo / sửa / activate / deactivate work center. Cùng tầng quyền với `PERM_ROUTING_MANAGE` — work center là master data sản xuất, không phải cấu trúc tổ chức (`C2-6`, `V45`) |
+
 > Endpoint `GET /sales-orders/planning-demands` **không** dùng quyền sales — nó là màn hình của
 > planner nên gác bằng `PERM_MRP_RUN` (spec §2.2 gán `PLANNING_RUN` cho endpoint này).
 
@@ -202,6 +208,11 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 | Quyền | Mô tả |
 |-------|-------|
 | `PERM_ROUTING_READ` | Xem công đoạn của routing đang chạy trên Work Order (`F4`, `V31`). **Không** có `PERM_ROUTING_MANAGE` — routing là master data ràng buộc thứ được phép sản xuất, thuộc MANAGER |
+
+### Work Center
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_WORK_CENTER_READ` | Xem work center của operation đang chạy (`C2-6`, `V45`). **Không** có `PERM_WORK_CENTER_MANAGE` — tạo/sửa/deactivate work center là cấu hình master data, thuộc MANAGER |
 
 ### UOM
 | Quyền | Mô tả |

@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V43) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V45) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -44,7 +44,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("43");
+        assertThat(current.getVersion().getVersion()).isEqualTo("45");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -193,6 +193,40 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(grantedUomPermissions("ADMIN")).containsExactlyInAnyOrder("PERM_UOM_READ", "PERM_UOM_MANAGE");
         assertThat(grantedUomPermissions("MANAGER")).containsExactlyInAnyOrder("PERM_UOM_READ", "PERM_UOM_MANAGE");
         assertThat(grantedUomPermissions("OPERATOR")).containsExactly("PERM_UOM_READ");
+    }
+
+    /**
+     * C2-6: same shape as {@code migrate_v43_*} — {@code PERM_WORK_CENTER_READ} for all three roles,
+     * {@code PERM_WORK_CENTER_MANAGE} for ADMIN/MANAGER only (docs/roles-and-permissions.md, V45).
+     */
+    @Test
+    void migrate_v45_grantsWorkCenterPermissionsToTheDocumentedRoles() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedWorkCenterPermissions("ADMIN"))
+                .containsExactlyInAnyOrder("PERM_WORK_CENTER_READ", "PERM_WORK_CENTER_MANAGE");
+        assertThat(grantedWorkCenterPermissions("MANAGER"))
+                .containsExactlyInAnyOrder("PERM_WORK_CENTER_READ", "PERM_WORK_CENTER_MANAGE");
+        assertThat(grantedWorkCenterPermissions("OPERATOR")).containsExactly("PERM_WORK_CENTER_READ");
+    }
+
+    private Set<String> grantedWorkCenterPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN ('PERM_WORK_CENTER_READ', 'PERM_WORK_CENTER_MANAGE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
     }
 
     private Set<String> grantedUomPermissions(String roleCode) throws Exception {

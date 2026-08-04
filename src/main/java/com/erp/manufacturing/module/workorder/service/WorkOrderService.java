@@ -425,7 +425,7 @@ public class WorkOrderService {
                     .sourceRoutingOperationId(operation.getRoutingOperationId())
                     .sequence(operation.getSequence())
                     .name(operation.getName())
-                    .workCenterCode(operation.getWorkCenterCode())
+                    .workCenterCode(operation.getWorkCenter().getCode())
                     .setupMinutes(operation.getSetupMinutes())
                     .runMinutesPerUnit(operation.getRunMinutesPerUnit())
                     .build());

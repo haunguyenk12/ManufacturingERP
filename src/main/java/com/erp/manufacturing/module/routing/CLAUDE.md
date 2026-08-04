@@ -42,14 +42,20 @@ Khác `F3` (xem `module/sales/CLAUDE.md` mục 1, nơi lookup service hoá ra kh
 (rule `C7`). `RoutingLookupService` **không** có `@PreAuthorize`: caller đã được authorize trên
 plant của mình, và đây là đọc master data read-only — cùng pattern `BomLookupService`.
 
-### 3. Work Center là **string**, không phải entity
+### 3. ✅ Work Center là **entity thật** từ `C2-6` — mục này mô tả trạng thái lúc `F4`
 
-`RoutingOperation.workCenterCode` là `VARCHAR(100)`. Spec §11 đặt capacity/CRP ngoài MVP và MVP
-không có màn hình quản lý work center ⇒ tạo entity + CRUD + permission cho nó là mở rộng phạm vi
-(`coding-rules.md §11.5`). Khi `P4` làm CRP thật thì mới nâng lên entity.
+> ⚠️ **[`C2-6`, 2026-08-05] Mục này đã hết hiệu lực.** `RoutingOperation.workCenterCode` (String) đã
+> đổi thành `RoutingOperation.workCenter` (`@ManyToOne WorkCenter`, nullable — dòng cũ không
+> backfill). Xem bất biến `B_wc2` + toàn bộ quyết định thiết kế ở
+> `module/workcenter/CLAUDE.md`. Giữ đoạn dưới để hiểu vì sao `F4` từng chọn free-text.
 
-Spec §3.3 còn liệt kê `predecessorOperationIds` cho Operation — **chưa** làm ở `F4` vì không có
-consumer (dependency graph giữa operation chỉ có ý nghĩa khi có scheduling).
+`RoutingOperation.workCenterCode` **từng là** `VARCHAR(100)`. Spec §11 đặt capacity/CRP ngoài MVP và
+MVP không có màn hình quản lý work center ⇒ tạo entity + CRUD + permission cho nó từng là mở rộng
+phạm vi (`coding-rules.md §11.5`). `C2-6` (cluster `P4` — Work Center/Shift/Calendar/Capacity) là
+lúc nâng lên entity.
+
+Spec §3.3 còn liệt kê `predecessorOperationIds` cho Operation — **vẫn chưa** làm (không có consumer;
+dependency graph giữa operation chỉ có ý nghĩa khi có scheduling, thuộc `C2-8`).
 
 ### 4. `F4` chỉ snapshot **header** — `work_order_operations` ✅ đã có từ `F5-A`
 

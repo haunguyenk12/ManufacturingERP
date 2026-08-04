@@ -702,11 +702,33 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 | Routing activate / **deactivate** | `POST /routings/{routingId}/activate` · **`DELETE /routings/{routingId}`** ⇐ đây **là** deactivate |
 
 > 🔴 **`DELETE` ở đây là deactivate, KHÔNG phải xoá.** Rule `C6` cấm hard-delete chứng từ nghiệp vụ,
-> nên toàn bộ endpoint deactivate của repo dùng verb `DELETE` và trả `200` + `{"result": null}` —
-> **không** có `POST /…/deactivate` ở bất kỳ đâu. Áp dụng cho cả `companies`, `plants`, `warehouses`,
-> `items`, `bom-lines`, `material-reservations`. Deactivate BOM/Routing **không** đổi snapshot của work
+> nên phần lớn endpoint deactivate của repo dùng verb `DELETE` và trả `200` + `{"result": null}` —
+> **không** có `POST /…/deactivate` cho `companies`, `plants`, `warehouses`, `items`, `bom-lines`,
+> `material-reservations`, BOM, Routing. Deactivate BOM/Routing **không** đổi snapshot của work
 > order đã tạo (bất biến `B12`/`B49`); nhưng khi item không còn routing `ACTIVE` thì convert proposal
 > MAKE sẽ bị từ chối bằng `409 MISSING_ROUTING`.
+
+### Work Center *(`C2-6`, 2026-08-05)*
+
+| Việc | Endpoint |
+|---|---|
+| Tạo / danh sách theo plant | `POST /plants/{plantId}/work-centers` · `GET /plants/{plantId}/work-centers?status=` |
+| Xem / sửa | `GET /work-centers/{id}` · `PATCH /work-centers/{id}` (chỉ `name`/`description`/`capacityUnitType`/`capacityUnits`) |
+| Activate / deactivate / **delete** | `POST /work-centers/{id}/activate` · `POST /work-centers/{id}/deactivate` · **`DELETE /work-centers/{id}`** ⇐ gọi **cùng** hành vi với `deactivate` |
+
+> 🔴 **Work Center là ngoại lệ duy nhất có CẢ BA verb** (`POST .../activate`, `POST .../deactivate`
+> **và** `DELETE` cùng nghĩa deactivate) — khác Routing/BOM/UOM ở trên chỉ có `DELETE` (không có
+> `POST .../deactivate`) và Access Control chỉ có `POST .../deactivate` (không có `DELETE`). Ba pattern
+> khác nhau tồn tại song song trong cùng API vì mỗi nhóm đi theo đúng verb FE liệt kê tường minh lúc
+> đặc tả — **đừng "đồng bộ hoá" chúng lại với nhau**.
+>
+> 🔴 **Breaking change trên Routing:** `RoutingOperationRequest.workCenterCode` (text tự do) đã đổi
+> thành `workCenterId` (UUID, phải trỏ một Work Center có thật, cùng plant với mọi operation khác
+> trong cùng routing — trộn Work Center của hai plant khác nhau trả `422 OPERATION_NOT_ALLOWED`).
+> Client cũ gửi text tự do cho field này **sẽ hỏng** — phải tạo Work Center trước rồi lấy
+> `workCenterId`. `RoutingOperationResponse` vẫn trả **cả** `workCenterId` **và** `workCenterCode`
+> (resolve qua join, không phải cột riêng) để FE hiện được cả id lẫn tên hiển thị mà không cần gọi
+> thêm API. Work Center per-plant, **không** có `companyId` — khác UOM (global).
 
 ### Access Control — Role / Scope lifecycle + Assignments *(`C2-4`, 2026-08-05)*
 

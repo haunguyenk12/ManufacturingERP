@@ -1,12 +1,17 @@
 package com.erp.manufacturing.module.routing.service;
 
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
+import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.routing.domain.RoutingStatus;
 import com.erp.manufacturing.module.routing.dto.RoutingCreateRequest;
 import com.erp.manufacturing.module.routing.dto.RoutingOperationRequest;
 import com.erp.manufacturing.module.routing.mapper.RoutingMapper;
 import com.erp.manufacturing.module.routing.repository.RoutingHeaderRepository;
+import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
+import com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,12 +46,22 @@ class RoutingMethodSecurityTest {
     @Autowired RoutingPermissionGuard routingPermissionGuard;
     @Autowired RoutingHeaderRepository routingHeaderRepository;
     @Autowired ItemLookupService itemLookupService;
+    @Autowired WorkCenterLookupService workCenterLookupService;
+
+    private static final UUID WORK_CENTER_ID = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, routingPermissionGuard, routingHeaderRepository, itemLookupService);
+        reset(permissionGuard, routingPermissionGuard, routingHeaderRepository, itemLookupService, workCenterLookupService);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, List.of()));
+        lenient().when(workCenterLookupService.getActiveWorkCenter(WORK_CENTER_ID)).thenReturn(
+                WorkCenter.builder().workCenterId(WORK_CENTER_ID)
+                        .plant(Plant.builder().plantId(UUID.randomUUID()).code("PLANT").name("Plant")
+                                .status(OrganizationStatus.ACTIVE).build())
+                        .code("WC-01").name("WC-01")
+                        .capacityUnitType(CapacityUnitType.MACHINE).capacityUnits(1)
+                        .status(OrganizationStatus.ACTIVE).build());
     }
 
     @AfterEach
@@ -62,7 +77,7 @@ class RoutingMethodSecurityTest {
 
         assertThatThrownBy(() -> routingService.create(companyId, new RoutingCreateRequest(
                 UUID.randomUUID(), "RT-FG100", "V1", null,
-                List.of(new RoutingOperationRequest(10, "Assembly", "WC-01",
+                List.of(new RoutingOperationRequest(10, "Assembly", WORK_CENTER_ID,
                         BigDecimal.ZERO, BigDecimal.ONE)))))
                 .isInstanceOf(AccessDeniedException.class);
 
@@ -157,8 +172,9 @@ class RoutingMethodSecurityTest {
         @Bean
         RoutingService routingService(RoutingHeaderRepository routingHeaderRepository,
                                       ItemLookupService itemLookupService,
+                                      WorkCenterLookupService workCenterLookupService,
                                       RoutingMapper mapper) {
-            return new RoutingService(routingHeaderRepository, itemLookupService, mapper);
+            return new RoutingService(routingHeaderRepository, itemLookupService, workCenterLookupService, mapper);
         }
 
         @Bean RoutingMapper routingMapper() { return new RoutingMapper(); }
@@ -171,5 +187,6 @@ class RoutingMethodSecurityTest {
 
         @Bean RoutingHeaderRepository routingHeaderRepository() { return mock(RoutingHeaderRepository.class); }
         @Bean ItemLookupService itemLookupService() { return mock(ItemLookupService.class); }
+        @Bean WorkCenterLookupService workCenterLookupService() { return mock(WorkCenterLookupService.class); }
     }
 }

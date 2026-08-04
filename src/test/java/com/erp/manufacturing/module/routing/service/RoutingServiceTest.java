@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.routing.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
@@ -9,6 +10,7 @@ import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
+import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.routing.domain.RoutingHeader;
 import com.erp.manufacturing.module.routing.domain.RoutingOperation;
 import com.erp.manufacturing.module.routing.domain.RoutingStatus;
@@ -17,6 +19,8 @@ import com.erp.manufacturing.module.routing.dto.RoutingOperationRequest;
 import com.erp.manufacturing.module.routing.dto.RoutingResponse;
 import com.erp.manufacturing.module.routing.mapper.RoutingMapper;
 import com.erp.manufacturing.module.routing.repository.RoutingHeaderRepository;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
+import com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,12 +45,30 @@ class RoutingServiceTest {
 
     @Mock RoutingHeaderRepository routingHeaderRepository;
     @Mock ItemLookupService itemLookupService;
+    @Mock WorkCenterLookupService workCenterLookupService;
 
     RoutingService service;
 
+    private static final UUID PLANT_ID = UUID.randomUUID();
+    private static final UUID WC_01_ID = UUID.randomUUID();
+    private static final UUID WC_02_ID = UUID.randomUUID();
+
     @BeforeEach
     void setUp() {
-        service = new RoutingService(routingHeaderRepository, itemLookupService, new RoutingMapper());
+        service = new RoutingService(routingHeaderRepository, itemLookupService, workCenterLookupService, new RoutingMapper());
+        lenientStubWorkCenters();
+    }
+
+    /**
+     * Most tests below don't care about work centers — they only need buildOperation() to resolve
+     * something valid. Stubbed with lenient() so tests that never touch work centers (e.g. the
+     * activate/deactivate suites, which never build operations) don't fail on unnecessary stubbing.
+     */
+    private void lenientStubWorkCenters() {
+        lenient().when(workCenterLookupService.getActiveWorkCenter(WC_01_ID))
+                .thenReturn(workCenter(WC_01_ID, PLANT_ID, "WC-01"));
+        lenient().when(workCenterLookupService.getActiveWorkCenter(WC_02_ID))
+                .thenReturn(workCenter(WC_02_ID, PLANT_ID, "WC-02"));
     }
 
     // ── create ─────────────────────────────────────────────────────────────
@@ -65,8 +87,8 @@ class RoutingServiceTest {
         RoutingResponse response = service.create(companyId, new RoutingCreateRequest(
                 itemId, "  rt-fg100 ", " v1 ", "  First routing  ",
                 List.of(
-                        new RoutingOperationRequest(20, " Paint ", " wc-02 ", new BigDecimal("5"), new BigDecimal("1.5")),
-                        new RoutingOperationRequest(10, " Assembly ", " wc-01 ", new BigDecimal("15"), new BigDecimal("2.5")))));
+                        new RoutingOperationRequest(20, " Paint ", WC_02_ID, new BigDecimal("5"), new BigDecimal("1.5")),
+                        new RoutingOperationRequest(10, " Assembly ", WC_01_ID, new BigDecimal("15"), new BigDecimal("2.5")))));
 
         assertThat(response.status()).isEqualTo(RoutingStatus.DRAFT.name());
         assertThat(response.code()).isEqualTo("RT-FG100");
@@ -76,6 +98,7 @@ class RoutingServiceTest {
         assertThat(response.operations()).hasSize(2);
         assertThat(response.operations().get(0).sequence()).isEqualTo(10);
         assertThat(response.operations().get(0).name()).isEqualTo("Assembly");
+        assertThat(response.operations().get(0).workCenterId()).isEqualTo(WC_01_ID);
         assertThat(response.operations().get(0).workCenterCode()).isEqualTo("WC-01");
         assertThat(response.operations().get(0).setupMinutes()).isEqualByComparingTo("15");
         assertThat(response.operations().get(0).runMinutesPerUnit()).isEqualByComparingTo("2.5");
@@ -113,11 +136,60 @@ class RoutingServiceTest {
         assertThatThrownBy(() -> service.create(companyId, new RoutingCreateRequest(
                 itemId, "RT-FG100", "V1", null,
                 List.of(
-                        new RoutingOperationRequest(10, "Assembly", "WC-01", BigDecimal.ZERO, BigDecimal.ONE),
-                        new RoutingOperationRequest(10, "Paint", "WC-02", BigDecimal.ZERO, BigDecimal.ONE)))))
+                        new RoutingOperationRequest(10, "Assembly", WC_01_ID, BigDecimal.ZERO, BigDecimal.ONE),
+                        new RoutingOperationRequest(10, "Paint", WC_02_ID, BigDecimal.ZERO, BigDecimal.ONE)))))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.BUSINESS_RULE_VIOLATION));
+
+        verify(routingHeaderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("create: operations referencing work centers of two different plants throw 422 (B_wc2)")
+    void create_operationsAcrossTwoPlants_throwsOperationNotAllowed() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        Company company = company(companyId);
+        UUID otherPlantId = UUID.randomUUID();
+        UUID wcOtherPlantId = UUID.randomUUID();
+
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item(itemId, company, ItemType.FINISHED_GOOD));
+        when(routingHeaderRepository.existsByCompanyCompanyIdAndCodeAndRoutingVersion(companyId, "RT-FG100", "V1"))
+                .thenReturn(false);
+        when(workCenterLookupService.getActiveWorkCenter(wcOtherPlantId))
+                .thenReturn(workCenter(wcOtherPlantId, otherPlantId, "WC-99"));
+
+        assertThatThrownBy(() -> service.create(companyId, new RoutingCreateRequest(
+                itemId, "RT-FG100", "V1", null,
+                List.of(
+                        new RoutingOperationRequest(10, "Assembly", WC_01_ID, BigDecimal.ZERO, BigDecimal.ONE),
+                        new RoutingOperationRequest(20, "Paint", wcOtherPlantId, BigDecimal.ZERO, BigDecimal.ONE)))))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(routingHeaderRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("create: inactive work center is refused before any save")
+    void create_inactiveWorkCenter_fails() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        Company company = company(companyId);
+
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item(itemId, company, ItemType.FINISHED_GOOD));
+        when(routingHeaderRepository.existsByCompanyCompanyIdAndCodeAndRoutingVersion(companyId, "RT-FG100", "V1"))
+                .thenReturn(false);
+        when(workCenterLookupService.getActiveWorkCenter(WC_01_ID))
+                .thenThrow(ExceptionFactory.businessRule(
+                        BusinessErrorCode.OPERATION_NOT_ALLOWED, "Inactive work center cannot be used: " + WC_01_ID));
+
+        assertThatThrownBy(() -> service.create(companyId, createRequest(itemId)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
         verify(routingHeaderRepository, never()).save(any());
     }
@@ -261,7 +333,7 @@ class RoutingServiceTest {
 
     private RoutingCreateRequest createRequest(UUID itemId) {
         return new RoutingCreateRequest(itemId, "RT-FG100", "V1", null,
-                List.of(new RoutingOperationRequest(10, "Assembly", "WC-01",
+                List.of(new RoutingOperationRequest(10, "Assembly", WC_01_ID,
                         new BigDecimal("15"), new BigDecimal("2.5"))));
     }
 
@@ -280,7 +352,7 @@ class RoutingServiceTest {
                 .routing(routing)
                 .sequence(10)
                 .name("Assembly")
-                .workCenterCode("WC-01")
+                .workCenter(workCenter(WC_01_ID, PLANT_ID, "WC-01"))
                 .setupMinutes(new BigDecimal("15"))
                 .runMinutesPerUnit(new BigDecimal("2.5"))
                 .build());
@@ -295,6 +367,19 @@ class RoutingServiceTest {
     private Item item(UUID itemId, Company company, ItemType type) {
         return Item.builder().itemId(itemId).company(company).code("FG-100").name("Widget")
                 .type(type).unit("EA").status(ItemStatus.ACTIVE).build();
+    }
+
+    private WorkCenter workCenter(UUID workCenterId, UUID plantId, String code) {
+        return WorkCenter.builder()
+                .workCenterId(workCenterId)
+                .plant(Plant.builder().plantId(plantId).code("PLANT").name("Plant")
+                        .status(OrganizationStatus.ACTIVE).build())
+                .code(code)
+                .name(code)
+                .capacityUnitType(com.erp.manufacturing.module.workcenter.domain.CapacityUnitType.MACHINE)
+                .capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
     }
 
     private org.mockito.stubbing.Answer<RoutingHeader> saveWithGeneratedIds() {

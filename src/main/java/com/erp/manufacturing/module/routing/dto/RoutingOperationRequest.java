@@ -7,11 +7,12 @@ import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record RoutingOperationRequest(
         @NotNull @Positive Integer sequence,
         @NotBlank @Size(max = 255) String name,
-        @NotBlank @Size(max = 100) String workCenterCode,
+        @NotNull UUID workCenterId,
         @NotNull @PositiveOrZero BigDecimal setupMinutes,
         @NotNull @PositiveOrZero BigDecimal runMinutesPerUnit
 ) {}

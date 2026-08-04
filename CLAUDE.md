@@ -64,16 +64,16 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`C2-4` – SO PATCH · Role/Scope Lifecycle · Over-BOM Contract · Time Variance** ✅ **HOÀN THÀNH** (2026-08-05). `PATCH /sales-orders/{id}` (full-replace, `DRAFT` only, `expectedVersion` bắt buộc) · 9 endpoint Role/Scope lifecycle (tái dùng `PERM_ACCESS_MANAGE`) · `timeVariance` trên `/work-orders/{id}/variance` · over-BOM contract chốt (tài liệu, không code). **Không migration.** Bất biến `B86`-`B88`. Bản ghi: **§0.27** |
-| **Phase trước** | **`C2-3` – UOM Master** ✅ **HOÀN THÀNH** (2026-08-04). Bảng `uoms` **global** (không `company_id`), 7 endpoint `/api/v1/uoms`, migration **`V42`** (schema) + **`V43`** (seed `PERM_UOM_READ`/`_MANAGE`). Không đụng `items.unit`. Không breaking change wire. Bản ghi: **§0.26** |
-| **Phase trước đó** | **`C2-5` – CORS + dữ liệu test multi-plant + sửa lệch RBAC seed↔tài liệu** ✅ **HOÀN THÀNH** (2026-08-04). Migration **`V41`** cấp 10 permission lõi cho `MANAGER` / 6 cho `OPERATOR` — trước đó 12 permission lõi chỉ `ADMIN` có nên **mọi account khác `admin` bị 403 ở màn hình lõi**. Cộng `app.cors.*` (repo trước đó **0 dòng** CORS) và `db/dev-seed.sql` (2 plant + 3 account, **chạy tay**). Bản ghi: **§0.25** |
+| **Phase đang chạy** | **`C2-6` – Work Center Entity + CRUD + Routing FK** ✅ **HOÀN THÀNH** (2026-08-05). Bảng `work_centers` **per-plant**, 7 endpoint `/api/v1/plants/{plantId}/work-centers` + `/api/v1/work-centers/{id}`, migration **`V44`** (schema + `routing_operations.work_center_id`) + **`V45`** (seed `PERM_WORK_CENTER_READ`/`_MANAGE`). `RoutingOperation.workCenterCode` (String) → `workCenter` (FK, nullable, không backfill). Bất biến `B_wc1`-`B_wc3`. Bản ghi: **§0.28** |
+| **Phase trước** | **`C2-4` – SO PATCH · Role/Scope Lifecycle · Over-BOM Contract · Time Variance** ✅ **HOÀN THÀNH** (2026-08-05). `PATCH /sales-orders/{id}` (full-replace, `DRAFT` only, `expectedVersion` bắt buộc) · 9 endpoint Role/Scope lifecycle (tái dùng `PERM_ACCESS_MANAGE`) · `timeVariance` trên `/work-orders/{id}/variance` · over-BOM contract chốt (tài liệu, không code). **Không migration.** Bất biến `B86`-`B88`. Bản ghi: **§0.27** |
+| **Phase trước đó** | **`C2-3` – UOM Master** ✅ **HOÀN THÀNH** (2026-08-04). Bảng `uoms` **global** (không `company_id`), 7 endpoint `/api/v1/uoms`, migration **`V42`** (schema) + **`V43`** (seed `PERM_UOM_READ`/`_MANAGE`). Không đụng `items.unit`. Không breaking change wire. Bản ghi: **§0.26** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Bản ghi: §0.22 |
-| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn: `C2-6..8` (= `P4` Work Center/Shift/Calendar/Capacity, phần lớn nhất), `D8c` (forgot-password — 🔴 bị chặn: thiếu `spring-boot-starter-mail`), `P3` costing. |
-| **Migration mới nhất** | **`V43__seed_uom_permissions.sql`** (`C2-3`, cùng phase với `V42__create_uom.sql`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` **không** migration |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → **`C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT**, failures = 0, errors = 0 (`+44` unit từ `SalesOrderServiceTest`/`SalesOrderControllerTest`/`SalesOrderMethodSecurityTest` (Part A), `AccessControlServiceTest`/`AccessControlControllerTest`/`AccessControlMethodSecurityTest` (Part B), `WorkOrderVarianceServiceTest` (Part D); **0** IT case ròng — Part D ban đầu định thêm 1 case `WorkOrderRepositoryIT` cho N+1 rồi phải **bỏ** khi đổi thiết kế vì `MultipleBagFetchException`, xem §0.27). ✅ `D8b` đã chạy `mvn -o verify` thật với Docker — trả nợ lần đo `*IT` mà `D8a` bỏ qua (`ProductionFlowE2EIT` dựng auth bằng `authentication(...)` post-processor nên **không** đi qua `AuthService.login`).<br>🔴 **Nhưng con số "66 case IT xanh" của `D8b` là SAI:** `WorkOrderRepositoryIT.search_withoutATermReturnsEveryWorkOrderOfThePlant` **đang đỏ** ở thời điểm đó (lỗi `lower(bytea)`, xem §0.24) — lần đo đó bỏ sót 1 error. Đúng là **65 xanh / 1 error**. Từ 2026-08-04 mới thật sự `failures = 0`. **Bài học:** đọc dòng tổng `Tests run:` của **cả hai** phase (`test` và `integration-test`) và kiểm cả `Errors:`, không chỉ `Failures:` |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
-| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 6/13 §8.0, bẫy từng phase §8.7 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
+| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn: `C2-7`/`C2-8` (= phần còn lại của `P4` Shift/Calendar/Capacity Board, phụ thuộc `C2-6` vừa xong), `D8c` (forgot-password — 🔴 bị chặn: thiếu `spring-boot-starter-mail`), `P3` costing. |
+| **Migration mới nhất** | **`V45__seed_work_center_permissions.sql`** (`C2-6`, cùng phase với `V44__create_work_center.sql`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` **không** migration |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → **`C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT**, failures = 0, errors = 0 (`+29` unit từ `WorkCenterServiceTest`/`WorkCenterMethodSecurityTest`/`WorkCenterControllerTest` + 2 case B_wc2 mới trong `RoutingServiceTest`; `+1` IT từ `FlywayMigrationIT.migrate_v45_*`, không thêm class IT mới — `WorkCenterRepository.search` chỉ `=`/`is null` đơn giản nên mock repository là đủ). ✅ `D8b` đã chạy `mvn -o verify` thật với Docker — trả nợ lần đo `*IT` mà `D8a` bỏ qua (`ProductionFlowE2EIT` dựng auth bằng `authentication(...)` post-processor nên **không** đi qua `AuthService.login`).<br>🔴 **Nhưng con số "66 case IT xanh" của `D8b` là SAI:** `WorkOrderRepositoryIT.search_withoutATermReturnsEveryWorkOrderOfThePlant` **đang đỏ** ở thời điểm đó (lỗi `lower(bytea)`, xem §0.24) — lần đo đó bỏ sót 1 error. Đúng là **65 xanh / 1 error**. Từ 2026-08-04 mới thật sự `failures = 0`. **Bài học:** đọc dòng tổng `Tests run:` của **cả hai** phase (`test` và `integration-test`) và kiểm cả `Errors:`, không chỉ `Failures:` |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
 > **ngược từ frontend đã implement**, nên field name + business rule là phần cố định, tên endpoint
@@ -160,14 +160,15 @@ do not delete 47 lines above
 | `common/audit`, `common/security`, `common/response`, `common/exception` | ✅ Done | |
 | `quality` (QC disposition) | ✅ Done (`F2`, `D5`) | **Không** là package riêng — `QualityDisposition` nằm trong `module/workorder` vì thuộc aggregate Production Receipt. **[D5]** QC chạy cho **cả** output không lot-tracked (phán quyết trên receipt); `quality_dispositions` vẫn chỉ ghi khi có lot. Xem `module/workorder/CLAUDE.md` B38-B41 |
 | `sales` | ✅ Done (`F3`, `F6`) | Sales Order + line, confirm ⇒ independent demand cho MRP, endpoint `planning-demands`. **[F6]** fulfillment + roll-up status. Xem `module/sales/CLAUDE.md` B43-B47, B66 |
-| `routing` | ✅ Done (`F4`) | `RoutingHeader` + `RoutingOperation`, 1 routing `ACTIVE`/item, snapshot bất biến lên WO. **Work Center vẫn là string**, chưa có CRP/capacity (`P4` phần còn lại). Xem `module/routing/CLAUDE.md` B48-B52 |
+| `routing` | ✅ Done (`F4`, FK Work Center ở `C2-6`) | `RoutingHeader` + `RoutingOperation`, 1 routing `ACTIVE`/item, snapshot bất biến lên WO. **[C2-6]** `RoutingOperation.workCenterCode` → `workCenter` (FK), bất biến `B_wc2`; CRP/capacity vẫn chưa làm (`C2-8`). Xem `module/routing/CLAUDE.md` B48-B52 |
 | `planning` – **F5-B** | ✅ Done | Endpoint `/planning-runs` + `/supply-suggestions`, `demandLineIds`, `supplyType` `MAKE`/`BUY`, `exceptionState` + `messages[]`, `settingSource` + `excludedLotCount` (V34). Xem §0.10 + `module/planning/CLAUDE.md` B58-B61 |
 | `planning` – **D4** | ✅ Done | Open purchase order vào netting (`PurchaseOrderSupplyService`), `MrpRun.code` + 4 ô summary Run header (V36). Xem §0.12 + `module/planning/CLAUDE.md` B67-B68 |
 | `workorder` – **F5-A** | ✅ Done | `ProductionExecution` + `WorkOrderOperation` (snapshot routing), status `PLANNED`, đảo ngược B16/B17, `PERM_PRODUCTION_EXECUTION_*` (V32/V33). Xem §0.9 |
 | `workorder` – **F6** | ✅ Done | `WorkOrderDemandAllocation` (V35) nối WO ↔ Sales Order line; QC `AVAILABLE` ⇒ fulfillment. Xem §0.11 + `module/workorder/CLAUDE.md` B62-B65 |
 | `uom` | ✅ Done (`C2-3`) | Unit of measure master data, **global** (không `company_id`). 7 endpoint, permission `PERM_UOM_READ`/`_MANAGE`. **Chưa nối** với `items.unit` (vẫn `String` tự do) — xem `module/uom/CLAUDE.md` |
+| `workcenter` | ✅ Done (`C2-6`) | Work center master data, **per-plant**. 7 endpoint `/api/v1/plants/{plantId}/work-centers` + `/api/v1/work-centers/{id}`, permission `PERM_WORK_CENTER_READ`/`_MANAGE`. Xem `module/workcenter/CLAUDE.md` B_wc1-B_wc3 |
 | `costing` | 🔜 P3 | Chưa bắt đầu |
-| work center entity / CRP | 🔜 P4 (phần còn lại) | Chưa bắt đầu |
+| Shift/Work Calendar, Capacity Board | 🔜 `C2-7`/`C2-8` (phần còn lại của `P4`) | Chưa bắt đầu |
 
 ### 0.3 P1 – Approval Workflow & Business Gates (ĐÃ HOÀN THÀNH)
 
@@ -1248,6 +1249,70 @@ số (`ProductionExecutionRepository`, `WorkOrderOperationRepository`).
 
 ---
 
+### 0.28 C2-6 – Work Center Entity + CRUD + Routing FK (ĐÃ HOÀN THÀNH 2026-08-05)
+
+Phase thứ năm của track `C2-*`, mở đầu cluster `P4` (Work Center/Shift/Calendar/Capacity).
+Migration **`V44`** (bảng `work_centers` + cột `routing_operations.work_center_id`) + **`V45`**
+(seed permission). Module mới `module/workcenter/` — 7 endpoint. **Không** đổi request/response DTO
+ngoài Routing (xem Breaking changes).
+
+| Phần | Nội dung |
+|---|---|
+| A | `WorkCenter` **per-plant** (không company-level, khác `UOM` global của `C2-3`) — 7 endpoint, `PERM_WORK_CENTER_READ`/`_MANAGE` theo khuôn Routing (không theo khuôn `PERM_ORG_*`) |
+| B | `RoutingOperation.workCenterCode` (free text) → `RoutingOperation.workCenter` (FK `WorkCenter`, **nullable, không backfill**) |
+
+**Ba quyết định đã chốt với user trước khi viết phase** (đầy đủ ở `NEXT_PHASE_PLAN.md` lịch sử
+`C2-6` §1): Work Center per-plant; `RoutingOperation` khoá vào 1 plant qua Work Center (bất biến
+`B_wc2`); chưa thêm Calendar/Shift reference (chờ `C2-7`); `DELETE` + `POST .../activate|deactivate`
+cùng tồn tại, `DELETE`/`deactivate` gọi **cùng** service method.
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Defect thật bắt được lúc `mvn verify`, không phải lúc viết code.** `V30` tạo
+   `routing_operations.work_center_code` là `NOT NULL`. Bản nháp đầu của `V44` chỉ `ADD COLUMN
+   work_center_id` mà quên `ALTER COLUMN work_center_code DROP NOT NULL` — vì entity không còn map
+   cột đó nữa, **mọi** insert `RoutingOperation` mới (kể cả `ProductionFlowE2EIT` seed dữ liệu)
+   chết với `null value in column "work_center_code" violates not-null constraint`. `mvn test`
+   (mock repository) không thấy được; chỉ Testcontainers thật (`FlywayMigrationIT`,
+   `ProductionFlowE2EIT`) bắt được — đúng kiểu lỗ hổng `§0.24`/`§0.26` đã ghi hai lần trước đó,
+   nay là lần thứ ba trong repo.
+2. **`FlywayMigrationIT` là nơi duy nhất kiểm được ma trận grant `V45`** — `migrate_v45_grantsWorkCenterPermissionsToTheDocumentedRoles`, cùng khuôn `migrate_v43_*`/`migrate_v41_*`. `PermissionCatalogTest` chỉ chứng minh permission tồn tại, không chứng minh được cấp cho role nào (bài học lặp lại từ `C2-5`).
+3. **B_wc2 validate ở `RoutingService.create()`, KHÔNG ở `WorkCenterService`.** Resolve toàn bộ
+   `workCenterId` của request trước, kiểm tập `plantId` phân biệt > 1 mới build entity (rule C9).
+   Nghiệm thu mutation: bỏ dòng gọi `ensureOperationsShareOnePlant(...)` ⇒ đúng
+   **1** case đỏ (`RoutingServiceTest.create_operationsAcrossTwoPlants_throwsOperationNotAllowed`),
+   các case khác (cùng plant) vẫn xanh — xác nhận check không nới quá tay.
+4. **`WorkOrderOperation.workCenterCode` (String) không đổi** — vẫn là snapshot bất biến
+   (`B56`/`B49`). `WorkOrderService.snapshotRouting` đổi đúng 1 dòng:
+   `operation.getWorkCenter().getCode()` thay vì `operation.getWorkCenterCode()` (đã xoá field đó
+   khỏi `RoutingOperation`).
+5. **`RoutingOperationResponse` giữ cả `workCenterId` lẫn `workCenterCode`** — code nay resolve qua
+   `operation.getWorkCenter()` (join), không phải cột riêng; null-safe cho dòng lịch sử chưa có
+   Work Center (`workCenter == null` ⇒ cả hai field trả `null`).
+6. **Mọi test dựng `RoutingOperation`/`RoutingOperationRequest` trực tiếp phải sửa** — không chỉ
+   file mới viết mà cả `RoutingServiceTest`, `RoutingControllerTest`, `RoutingMethodSecurityTest`,
+   `WorkOrderServiceTest`, `ProductionFlowE2EIT` đều dùng `workCenterCode`/`WC-01` (String) trước
+   phase này; tất cả **sửa** theo `R10`, không xoá.
+7. **`C2-6` KHÔNG thêm `*IT` mới** (vẫn 12 class IT) — đúng nhận định trong kế hoạch: query của
+   `WorkCenterRepository.search` chỉ là `=`/`is null` đơn giản, không phải `concat`/`like` phức tạp
+   nên mock repository là đủ (`R7` không áp dụng).
+
+**Nghiệm thu:** `mvn -o clean verify` — **690 case unit + 79 case IT / 12 class IT, failures = 0,
+errors = 0** (baseline trước phase: 661 unit + 78 IT / 12 class — `+29` unit từ `WorkCenterServiceTest`
+(9) + `WorkCenterMethodSecurityTest` (8) + `WorkCenterControllerTest` (10) + 2 case mới trong
+`RoutingServiceTest`; `+1` IT từ `FlywayMigrationIT.migrate_v45_*`, không thêm class IT mới).
+
+**Breaking changes — wire:**
+- `RoutingOperationRequest.workCenterCode` (String) → `workCenterId` (UUID). Client gửi text tự do
+  cho field này **sẽ hỏng** — phải tạo Work Center trước rồi lấy `workCenterId`.
+- `RoutingOperationResponse` thêm `workCenterId` (additive).
+- 7 endpoint Work Center: additive.
+
+**Java positional:** `RoutingOperation` field `workCenterCode` (String) → `workCenter` (`WorkCenter`);
+`RoutingService` constructor +1 tham số (`WorkCenterLookupService`).
+
+---
+
 ### 0.5 ✅ Đảo Ngược Ngữ Nghĩa — ĐÃ XỬ LÝ Ở `F5-A` (2026-07-27)
 
 Đây từng là rủi ro lớn nhất của track `F*`. **Đã xong**, giữ lại bảng để agent sau hiểu vì sao code
@@ -1409,10 +1474,11 @@ com.erp.manufacturing
 | Bất biến BOM B7-B11 | `src/main/java/com/erp/manufacturing/module/bom/CLAUDE.md` | Chỉ khi chạm `module/bom/**` |
 | Bất biến Work Order & Manufacturing Execution B12-B20 | `src/main/java/com/erp/manufacturing/module/workorder/CLAUDE.md` | Chỉ khi chạm `module/workorder/**` |
 | Bất biến Planning/MRP B21-B26 | `src/main/java/com/erp/manufacturing/module/planning/CLAUDE.md` | Chỉ khi chạm `module/planning/**` |
-| Bất biến Routing B48-B52 + quyết định `MISSING_ROUTING` / Work Center là string | `src/main/java/com/erp/manufacturing/module/routing/CLAUDE.md` | Chỉ khi chạm `module/routing/**` |
+| Bất biến Routing B48-B52 + quyết định `MISSING_ROUTING` / Work Center FK (`C2-6`) | `src/main/java/com/erp/manufacturing/module/routing/CLAUDE.md` | Chỉ khi chạm `module/routing/**` |
 | Bất biến Sales Order B43-B47 + quyết định `sales`→`planning` | `src/main/java/com/erp/manufacturing/module/sales/CLAUDE.md` | Chỉ khi chạm `module/sales/**` |
 | Bất biến Purchasing B27-B29 | `src/main/java/com/erp/manufacturing/module/purchasing/CLAUDE.md` | Chỉ khi chạm `module/purchasing/**` |
 | Bất biến UOM B82-B85 + giới hạn `hasPermission`/`GLOBAL` scope (`C2-3`) | `src/main/java/com/erp/manufacturing/module/uom/CLAUDE.md` | Chỉ khi chạm `module/uom/**` |
+| Bất biến Work Center B_wc1-B_wc3 (`C2-6`) | `src/main/java/com/erp/manufacturing/module/workcenter/CLAUDE.md` | Chỉ khi chạm `module/workcenter/**` |
 | **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
 | **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
 | **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và **5 câu hỏi đang chờ FE trả lời** — `C2-1`/`C2-2` bị chặn cho tới khi có câu 1 và 2 |

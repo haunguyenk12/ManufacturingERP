@@ -37,7 +37,7 @@ của `MANUFACTURING_GAP_ROADMAP.md`, chỉ sắp lại thứ tự theo dependen
 ## 1. Bảng Theo Dõi Tiến Độ — track `F*` *(cập nhật: 2026-08-01, `F*` đã đóng ở `F10`)*
 
 > 🔴 **Track đang chạy là `C2-*`, xem §8** — bảng dưới đây chỉ là lịch sử `F1`–`F10`.
-> Trạng thái checklist Capstone 2 (6/13) ở **§8.0**; `C2-4` đã xong, phase kế tiếp chưa chốt (§8.1).
+> Trạng thái checklist Capstone 2 (7/13) ở **§8.0**; `C2-6` đã xong, phase kế tiếp `C2-7`/`C2-8` (§8.1).
 
 | ✔ | Phase | Nội dung | Trùng roadmap `P*` |
 |---|---|---|---|
@@ -1592,7 +1592,7 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 
 ---
 
-## 8. Track `C2-*` — Gap API Cho Capstone 2  *(soạn 2026-08-04; `C2-0`+`C2-5`+`C2-3`+`C2-4` ✅ xong)*
+## 8. Track `C2-*` — Gap API Cho Capstone 2  *(soạn 2026-08-04; `C2-0`+`C2-5`+`C2-3`+`C2-4`+`C2-6` ✅ xong)*
 
 > **Nguồn:** `BACKEND_CAPSTONE2_API_GAPS.md` (FE team, 2026-08-04) — **file khác** với spec `.docx` của
 > track `F*`. Nó liệt kê **6 nhóm P0** (UOM, Inventory Lot, Audit Logs, Work Center, Shift/Calendar,
@@ -1605,7 +1605,7 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 > file đó **không tồn tại trong repo này**, nên không kiểm được snapshot họ đọc. Ba mục họ báo thiếu
 > hoá ra đã có, rất có thể vì snapshot cũ. Đã đề nghị FE commit snapshot hoặc cho commit hash.
 
-### 8.0 Trạng thái checklist §6 của tài liệu FE — **6/13** *(cập nhật sau `C2-4`)*
+### 8.0 Trạng thái checklist §6 của tài liệu FE — **7/13** *(cập nhật sau `C2-6`)*
 
 | # | Ô checklist | Trạng thái |
 |---|---|---|
@@ -1614,7 +1614,7 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 | 3 | UOM CRUD/lifecycle | ✅ **`C2-3`** (2026-08-04) — 7 endpoint, `V42`+`V43` |
 | 4 | Inventory Lot list/detail/status | ❌ `C2-2` — **bị chặn** |
 | 5 | Audit list/detail | ❌ `C2-1` — **bị chặn** |
-| 6 | Work Center CRUD/lifecycle | ❌ `C2-6` |
+| 6 | Work Center CRUD/lifecycle | ✅ **`C2-6`** (2026-08-05) — 7 endpoint, `V44`+`V45`, xem §8.6 |
 | 7 | Shift/Calendar CRUD/lifecycle | ❌ `C2-7` |
 | 8 | Capacity Board + schedule adjustment | ❌ `C2-8` |
 | 9 | BOM/Routing deactivate | ✅ **`C2-0`** — đã có từ trước, chỉ là verb `DELETE` |
@@ -1623,7 +1623,8 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 | 12 | Over-BOM approval semantics | ✅ **`C2-4`** (2026-08-05) — phương án (1) chốt, `docs/capstone2-api-gap-response.md §5` câu 4 đã trả lời |
 | 13 | Multi-Plant isolation test data | ✅ **`C2-5`** — 2 plant + 3 account, isolation kiểm qua HTTP thật |
 
-**Ngoài checklist:** CORS ✅ (`C2-5`) · **time variance** ✅ **`C2-4`** (2026-08-05) — xem §8.5.
+**Ngoài checklist:** CORS ✅ (`C2-5`) · **time variance** ✅ **`C2-4`** (2026-08-05) — xem §8.5 ·
+`RoutingOperation.workCenterCode` → FK ✅ **`C2-6`** (2026-08-05) — xem §8.6.
 
 🔴 **Phát hiện khi làm `C2-3` (2026-08-04), áp dụng cho MỌI ô ✅ dùng account seed `C2-5`:**
 `manager.a`/`operator.a` (scope `PLANT`) **không dùng được** để probe permission gác bằng
@@ -1643,17 +1644,17 @@ Sắp theo **giá trị/rủi ro**, **không** theo thứ tự trong tài liệu
 | `C2-5` | CORS + dev-seed 2 plant/3 account + **`V41`** sửa lệch RBAC | **`V41`** | ✅ **2026-08-04** — §8.3 |
 | `C2-3` | UOM master (7 endpoint, bảng mới, **global**) | **`V42`+`V43`** | ✅ **2026-08-04** — §8.4 |
 | `C2-4` | `PATCH /sales-orders/{id}` · Role/Scope lifecycle · `GET /access/assignments` · chốt over-BOM · **time variance** | không | ✅ **2026-08-05** — §8.5 |
-| **`C2-1`** | Audit Logs read API | `V44` (1 cột) | 🔴 **BỊ CHẶN** — chờ FE câu 1 |
-| **`C2-2`** | Inventory Lot list/detail/status | `V45` | 🔴 **BỊ CHẶN** — chờ FE câu 2 |
-| `C2-6` | Work Center entity + CRUD | `V46` | chưa bắt đầu — mở đầu cluster `P4`, **KẾ TIẾP không bị chặn** |
-| `C2-7` | Shift + Work Calendar | `V47` | chưa bắt đầu — phụ thuộc `C2-6` |
-| `C2-8` | Capacity Board + schedule adjustment | `V48` | chưa bắt đầu — **nặng nhất**, phụ thuộc `C2-6`+`C2-7` |
+| `C2-6` | Work Center entity + CRUD + `RoutingOperation` FK | **`V44`+`V45`** | ✅ **2026-08-05** — §8.6 |
+| **`C2-1`** | Audit Logs read API | `V46` (1 cột) | 🔴 **BỊ CHẶN** — chờ FE câu 1 |
+| **`C2-2`** | Inventory Lot list/detail/status | `V47` | 🔴 **BỊ CHẶN** — chờ FE câu 2 |
+| `C2-7` | Shift + Work Calendar | `V48` | chưa bắt đầu — phụ thuộc `C2-6` (xong), **KẾ TIẾP không bị chặn** |
+| `C2-8` | Capacity Board + schedule adjustment | `V49` | chưa bắt đầu — **nặng nhất**, phụ thuộc `C2-6`(xong)+`C2-7` |
 
 > `C2-6`..`C2-8` **chính là phase `P4`** của `MANUFACTURING_GAP_ROADMAP.md` (Work Center/CRP). Dùng mã
 > `C2-*` để `git log --grep` truy theo đợt Capstone 2; ghi chú chéo sang `P4` khi khởi động.
 >
 > **Số migration ở bảng trên là dự kiến** — thực tế lấy số kế tiếp tại thời điểm làm (`C5`: không sửa
-> migration cũ). Cao nhất hiện tại: **`V43`**.
+> migration cũ). Cao nhất hiện tại: **`V45`**.
 
 ### 8.2 Bản ghi `C2-0` ✅ **HOÀN THÀNH 2026-08-04**
 
@@ -1783,7 +1784,45 @@ mới, 1 field mới (`timeVariance`) trên `WorkOrderVarianceResponse`. **Java 
 
 ---
 
-### 8.6 Hai phase đang bị chặn — chặn bởi **thiết kế**, không phải bởi thứ tự
+### 8.6 Bản ghi `C2-6` ✅ **HOÀN THÀNH 2026-08-05**
+
+Migration **`V44`** (bảng `work_centers` + cột `routing_operations.work_center_id`) + **`V45`** (seed
+permission). Bản ghi đầy đủ + nghiệm thu mutation: **`CLAUDE.md §0.28`**. Bất biến `B_wc1`-`B_wc3`
+(`module/workcenter/CLAUDE.md`).
+
+| Phần | Nội dung |
+|---|---|
+| A | `WorkCenter` **per-plant**, 7 endpoint, `PERM_WORK_CENTER_READ`/`_MANAGE` theo khuôn Routing |
+| B | `RoutingOperation.workCenterCode` (String) → `workCenter` (FK, **nullable, không backfill**) |
+
+🔴 **Defect thật bắt được lúc `mvn verify`, không phải lúc viết code:** `V30` tạo
+`routing_operations.work_center_code` là `NOT NULL`. Bản nháp đầu của `V44` chỉ `ADD COLUMN
+work_center_id` mà quên `ALTER COLUMN work_center_code DROP NOT NULL` — vì entity không còn map cột
+đó, **mọi** insert `RoutingOperation` mới (kể cả seed của `ProductionFlowE2EIT`) chết với
+`null value in column "work_center_code" violates not-null constraint`. `mvn test` (mock repository)
+không thấy được; chỉ Testcontainers thật bắt được — lần thứ ba trong repo cùng loại lỗ hổng
+(`§0.24`/`§0.26`).
+
+Bất biến `B_wc2` (mọi operation trong 1 routing phải cùng plant) nghiệm thu mutation: bỏ dòng gọi
+`ensureOperationsShareOnePlant(...)` ⇒ đúng **1** case đỏ
+(`RoutingServiceTest.create_operationsAcrossTwoPlants_throwsOperationNotAllowed`).
+
+**Nghiệm thu:** `mvn -o clean verify` — **690 case unit + 79 case IT / 12 class IT, failures = 0,
+errors = 0** (baseline trước phase: 661 unit + 78 IT / 12 class — không thêm class IT mới, chỉ
+`FlywayMigrationIT` +1 case cho ma trận grant `V45`).
+
+**Breaking changes — wire:** `RoutingOperationRequest.workCenterCode` (String) → `workCenterId`
+(UUID) — client cũ gửi text tự do **sẽ hỏng**. `RoutingOperationResponse` thêm `workCenterId`
+(additive). 7 endpoint Work Center: additive. **Java positional:** `RoutingOperation` field
+`workCenterCode` → `workCenter`; `RoutingService` constructor +1 tham số (`WorkCenterLookupService`).
+
+**Cập nhật bẫy §8.8 hàng `C2-6`/`C2-8`:** dự đoán cũ ("snapshot giữ `source_work_center_id`") **không
+xảy ra** — `WorkOrderOperation.sourceRoutingOperationId` đã đủ để truy vết ngược, không cần thêm cột
+riêng cho work center.
+
+---
+
+### 8.7 Hai phase đang bị chặn — chặn bởi **thiết kế**, không phải bởi thứ tự
 
 `C2-1` và `C2-2` là hai phase **rẻ nhất** (hạ tầng đã có sẵn) nên kế hoạch gốc xếp lên đầu. Nhưng câu
 trả lời của FE **đổi thiết kế**, làm trước rồi sửa lại là tự tạo việc:
@@ -1793,24 +1832,24 @@ trả lời của FE **đổi thiết kế**, làm trước rồi sửa lại l�
 | `C2-1` | Màn hình Audit dùng được khi `changes[]` **rỗng**? | `AuditLogChange` + repository + bảng (`V6`) **đều tồn tại nhưng 0 call site ghi** — `AuditLogService` chỉ ghi *sự kiện*, không nhận diff. Nếu FE cần diff thật thì phải làm `C2-1b` (sửa `AuditableAspect`), phạm vi khác hẳn `C2-1a` |
 | `C2-2` | Màn hình Lot dẫn user sang QC khi lot `HOLD` chờ QC? | Nếu `POST /inventory/lots/{id}/status` cho tự do `HOLD → AVAILABLE` thì lot của production receipt ra `AVAILABLE` **không qua QC** ⇒ `fulfilledQuantity` của SO line **không bao giờ tăng**, đơn treo `IN_PROGRESS` vĩnh viễn **không lỗi nào báo** — dựng lại đúng nợ **#17** mà `D5` vừa trả (`B62`) |
 
-### 8.7 Bẫy đã xác định cho các phase chưa làm
+### 8.8 Bẫy đã xác định cho các phase chưa làm
 
 | Phase | Bẫy |
 |---|---|
 | `C2-1` | `audit_logs` **không có cột `plant_id`** mà filter §3.3 đòi. Thêm cột ⇒ mọi dòng lịch sử `NULL` (audit append-only, không backfill được) ⇒ filter chỉ đúng cho dòng mới. Ghi tường minh `NULL = "trước C2-1"`, đúng tiền lệ `cancel_reason` của `F7` |
 | `C2-2` | `InventoryLot` **không có** warehouse, **không có** manufacture date. `warehouseId` bắt buộc phải resolve qua `stock_balances` (tái dùng `StockBalanceRepository.aggregate*`, `C14`); `manufactureDate` map từ `receivedAt` (như alias `bomCapturedAt` của `F8`) — **đừng** thêm cột cho giống tài liệu. Phần **tốn công nhất là source genealogy**, không phải status |
 | `C2-3` | **Additive.** `items.unit` là `String NOT NULL` đọc ở **13 call site / 5 mapper**, tất cả read-only để hiển thị `uom` (`F8`/`F9`). ⇒ `C2-3` chỉ dựng bảng `uoms` + CRUD; nối `items.uom_id` FK và bỏ cột `unit` là **phase riêng** |
-| `C2-6`/`C2-8` | 🔴 **Không** đổi `WorkOrderOperation.workCenterCode` thành FK — nó là **snapshot bất biến** (`B56`, cùng hợp đồng `B49`); FK = đọc master data sống ⇒ phá bất biến (đúng bẫy §3.4.3). Master data `RoutingOperation.workCenterCode` **thì được** trỏ FK. Snapshot giữ cột code phẳng + `source_work_center_id` chỉ để truy vết, **không** dereference |
+| ~~`C2-6`/`C2-8`~~ ✅ | ~~Không đổi `WorkOrderOperation.workCenterCode` thành FK...~~ **Đã xong đúng như dự đoán ở `C2-6`** (2026-08-05): `WorkOrderOperation.workCenterCode` **giữ nguyên** String snapshot (`B56`/`B49`), chỉ `RoutingOperation.workCenterCode` đổi thành FK `WorkCenter`. Không cần thêm `source_work_center_id` — `sourceRoutingOperationId` đã đủ để truy vết ngược. Xem §8.6 |
 | `C2-8` | 🔴 `work_order_operations` **chưa có** `plannedStartAt`/`plannedEndAt`. ⇒ không phải "thêm 2 cột" mà là **quyết định nghiệp vụ**: sinh lịch lúc nào — tạo WO, `plan`, hay `release`? Phải chốt riêng trước khi code. Và đọc nợ **B** (`predecessorOperationIds`, §7.1) **trước** — `C2-8` chính là consumer làm lý do hoãn của nó hết hiệu lực |
-| mọi phase | Permission mới ⇒ seed migration cùng phase **+** `docs/roles-and-permissions.md` (`C10`) **+** cập nhật `adminOnlyByDesign` / checklist ở `FlywayMigrationIT.migrate_v41_*` nếu tập admin-only đổi · query search có param `String` nullable **phải** `cast(:p as string)` (`§0.24`: thiếu nó là **500 toàn endpoint** mà unit test lẫn coverage đều xanh) · `X-Plant-Id` theo **endpoint**, không theo controller (3 phase đã sập bẫy) · mỗi controller mới ⇒ 1 `*ControllerTest` assert `$.code` + đủ 7 field `PageResult` · logic trong JPQL ⇒ bắt buộc `*IT` (`R7`) · ≥3 nghiệm thu mutation, ưu tiên loại **giữ nguyên HTTP status** · **[`C2-4`]** thêm path `List` thứ hai vào một `@EntityGraph` đã có collection `List` ⇒ `MultipleBagFetchException`, chỉ `mvn verify` bắt được — kiểm loại collection trước khi mở rộng entity graph |
+| mọi phase | Permission mới ⇒ seed migration cùng phase **+** `docs/roles-and-permissions.md` (`C10`) **+** cập nhật `adminOnlyByDesign` / checklist ở `FlywayMigrationIT.migrate_v41_*` nếu tập admin-only đổi · query search có param `String` nullable **phải** `cast(:p as string)` (`§0.24`: thiếu nó là **500 toàn endpoint** mà unit test lẫn coverage đều xanh) · `X-Plant-Id` theo **endpoint**, không theo controller (3 phase đã sập bẫy) · mỗi controller mới ⇒ 1 `*ControllerTest` assert `$.code` + đủ 7 field `PageResult` · logic trong JPQL ⇒ bắt buộc `*IT` (`R7`) · ≥3 nghiệm thu mutation, ưu tiên loại **giữ nguyên HTTP status** · **[`C2-4`]** thêm path `List` thứ hai vào một `@EntityGraph` đã có collection `List` ⇒ `MultipleBagFetchException`, chỉ `mvn verify` bắt được — kiểm loại collection trước khi mở rộng entity graph · **[`C2-6`]** thêm cột `NOT NULL` cũ cần `DROP NOT NULL` khi cột đó không còn được entity mới ghi — quên là **500/lỗi insert toàn bộ**, chỉ Testcontainers thật bắt được |
 
-### 8.8 Kiểm chứng (áp dụng mọi phase `C2-*`)
+### 8.9 Kiểm chứng (áp dụng mọi phase `C2-*`)
 
 Ngoài §5 (áp cho cả track `F*`):
 
 1. `mvn -o clean verify` — **đọc cả `Errors:`, không chỉ `Failures:`**, ở **cả hai** dòng tổng (`test`
    và `integration-test`). Bài học 2026-08-04: `D8b` báo "66 IT xanh" trong khi thật là 65 xanh / 1 error.
-2. Số case **≥ baseline hiện tại: 661 unit + 78 IT / 12 class IT**, `failures = 0`, `errors = 0`.
+2. Số case **≥ baseline hiện tại: 690 unit + 79 IT / 12 class IT**, `failures = 0`, `errors = 0`.
 3. **Chạy thật qua HTTP** cho happy-path mới — cả 3 bug ngày 2026-08-04, defect RBAC của `C2-5`, và
    giới hạn `hasPermission`/`GLOBAL` scope phát hiện ở `C2-3` đều **không** bị unit test phát hiện.
    Dev stack: `erp-postgres:5434` + `erp-redis:6379`.
