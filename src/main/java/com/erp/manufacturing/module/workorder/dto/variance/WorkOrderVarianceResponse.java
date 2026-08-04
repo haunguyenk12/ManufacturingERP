@@ -11,5 +11,6 @@ public record WorkOrderVarianceResponse(
         String status,
         List<WorkOrderMaterialVarianceLineResponse> materialLines,
         WorkOrderOutputVarianceResponse outputVariance,
-        WorkOrderWipSummaryResponse wipSummary
+        WorkOrderWipSummaryResponse wipSummary,
+        WorkOrderTimeVarianceResponse timeVariance
 ) {}

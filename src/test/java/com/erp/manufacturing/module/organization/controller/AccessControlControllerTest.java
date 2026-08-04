@@ -8,6 +8,7 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.organization.dto.AccessScopeResponse;
 import com.erp.manufacturing.module.organization.dto.RoleResponse;
 import com.erp.manufacturing.module.organization.dto.UserRoleAssignmentRequest;
 import com.erp.manufacturing.module.organization.dto.UserRoleAssignmentResponse;
@@ -27,10 +28,13 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -86,6 +90,10 @@ class AccessControlControllerTest {
     private RoleResponse sampleRole() {
         return new RoleResponse(ROLE_ID, null, "PLANNER", "Production Planner",
                 "Runs MRP and manages planning demands", false, "ACTIVE");
+    }
+
+    private AccessScopeResponse sampleScope() {
+        return new AccessScopeResponse(SCOPE_ID, "SCOPE-01", "Plant scope", "PLANT", null, "ACTIVE");
     }
 
     private String assignBody() {
@@ -185,6 +193,118 @@ class AccessControlControllerTest {
                 .andExpect(jsonPath("$.result.totalPages").value(1))
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
+    }
+
+    @Test
+    @DisplayName("getRole: returns 200 with the role")
+    void getRole_returns200() throws Exception {
+        when(accessControlService.getRole(ROLE_ID)).thenReturn(sampleRole());
+
+        mockMvc.perform(get("/api/v1/access/roles/" + ROLE_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.code").value("PLANNER"));
+    }
+
+    @Test
+    @DisplayName("updateRole: returns 200 with the updated role")
+    void updateRole_returns200() throws Exception {
+        when(accessControlService.updateRole(eq(ROLE_ID), any())).thenReturn(sampleRole());
+
+        mockMvc.perform(patch("/api/v1/access/roles/" + ROLE_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"New Name"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("deactivateRole: system role returns 422 OPERATION_NOT_ALLOWED")
+    void deactivateRole_systemRole_returns422() throws Exception {
+        when(accessControlService.deactivateRole(ROLE_ID))
+                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "System role cannot be deactivated: " + ROLE_ID));
+
+        mockMvc.perform(post("/api/v1/access/roles/" + ROLE_ID + "/deactivate"))
+                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()));
+    }
+
+    @Test
+    @DisplayName("activateRole: returns 200 with ACTIVE status")
+    void activateRole_returns200() throws Exception {
+        when(accessControlService.activateRole(ROLE_ID)).thenReturn(sampleRole());
+
+        mockMvc.perform(post("/api/v1/access/roles/" + ROLE_ID + "/activate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("getScope: returns 200 with the scope")
+    void getScope_returns200() throws Exception {
+        when(accessControlService.getScope(SCOPE_ID)).thenReturn(sampleScope());
+
+        mockMvc.perform(get("/api/v1/access/scopes/" + SCOPE_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.code").value("SCOPE-01"));
+    }
+
+    @Test
+    @DisplayName("updateScope: returns 200 with the updated scope")
+    void updateScope_returns200() throws Exception {
+        when(accessControlService.updateScope(eq(SCOPE_ID), any())).thenReturn(sampleScope());
+
+        mockMvc.perform(patch("/api/v1/access/scopes/" + SCOPE_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"New Scope Name"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("deactivateScope: returns 200 with INACTIVE status")
+    void deactivateScope_returns200() throws Exception {
+        when(accessControlService.deactivateScope(SCOPE_ID)).thenReturn(sampleScope());
+
+        mockMvc.perform(post("/api/v1/access/scopes/" + SCOPE_ID + "/deactivate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("activateScope: returns 200")
+    void activateScope_returns200() throws Exception {
+        when(accessControlService.activateScope(SCOPE_ID)).thenReturn(sampleScope());
+
+        mockMvc.perform(post("/api/v1/access/scopes/" + SCOPE_ID + "/activate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("listAssignments: PageResult envelope, filters forwarded to the service")
+    void listAssignments_returns200WithFullPageEnvelope() throws Exception {
+        when(accessControlService.listAssignments(eq(USER_ID), isNull(), isNull(), any()))
+                .thenReturn(new PageResult<>(List.of(sampleAssignment()), 0, 20, 1L, 1, true, true));
+
+        mockMvc.perform(get("/api/v1/access/assignments").param("userId", USER_ID.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.content[0].userId").value(USER_ID.toString()))
+                .andExpect(jsonPath("$.result.page").value(0))
+                .andExpect(jsonPath("$.result.size").value(20))
+                .andExpect(jsonPath("$.result.totalElements").value(1))
+                .andExpect(jsonPath("$.result.totalPages").value(1))
+                .andExpect(jsonPath("$.result.first").value(true))
+                .andExpect(jsonPath("$.result.last").value(true));
+
+        verify(accessControlService).listAssignments(eq(USER_ID), isNull(), isNull(), any());
     }
 
     @Test

@@ -74,6 +74,21 @@ class SalesOrderMethodSecurityTest {
     }
 
     @Test
+    void update_deniedWhenSalesOrderManageMissing() {
+        UUID salesOrderId = UUID.randomUUID();
+        when(salesPermissionGuard.hasOrderAccess(
+                any(), eq("PERM_SALES_ORDER_MANAGE"), eq(salesOrderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> salesOrderService.update(salesOrderId,
+                new com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest(
+                        1L, "New Customer", null, null, null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(salesOrderRepository, planningDemandService);
+        verify(salesPermissionGuard).hasOrderAccess(any(), eq("PERM_SALES_ORDER_MANAGE"), eq(salesOrderId));
+    }
+
+    @Test
     void confirm_deniedWhenSalesOrderManageMissing() {
         UUID salesOrderId = UUID.randomUUID();
         when(salesPermissionGuard.hasOrderAccess(

@@ -19,6 +19,7 @@ import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLineRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.mapper.SalesOrderMapper;
 import com.erp.manufacturing.module.sales.repository.SalesOrderLineRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderPlanningDemandProjection;
@@ -83,6 +84,52 @@ public class SalesOrderService {
         int lineNo = 1;
         for (SalesOrderLineRequest lineRequest : request.lines()) {
             order.getLines().add(buildLine(order, lineRequest, lineNo++));
+        }
+        return mapper.toResponse(salesOrderRepository.save(order), true);
+    }
+
+    /**
+     * Full-replace update, {@code DRAFT} only (spec gap doc §4.3). {@code request.lines() == null}
+     * keeps the existing lines; a non-null list drops every existing line
+     * ({@code orphanRemoval = true} on {@link SalesOrder#getLines()}) and rebuilds {@code lineNo}
+     * 1..N via the same {@link #buildLine} used by {@code create}.
+     *
+     * <p>{@code expectedVersion} is compared by hand against {@link SalesOrder#getVersion()} —
+     * unlike a real concurrent write, there is nothing "stale" for JPA to detect on a freshly loaded
+     * entity, so the optimistic-lock check has to be explicit here (rule {@code C9}: fail before
+     * mutating anything).
+     */
+    @Transactional
+    @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
+    @Auditable(action = AuditAction.SALES_ORDER_UPDATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()")
+    public SalesOrderResponse update(UUID salesOrderId, SalesOrderUpdateRequest request) {
+        SalesOrder order = findOrder(salesOrderId);
+        if (!order.isDraft()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
+                    "Only DRAFT sales orders can be updated");
+        }
+        if (!request.expectedVersion().equals(order.getVersion())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Sales order was modified by another request");
+        }
+        LocalDate effectiveOrderDate = request.orderDate() != null ? request.orderDate() : order.getOrderDate();
+        ensureDueDatesRespectOrderDate(effectiveOrderDate, request.lines(), order.getLines());
+
+        if (request.customerName() != null) {
+            order.setCustomerName(request.customerName().trim());
+        }
+        if (request.orderDate() != null) {
+            order.setOrderDate(request.orderDate());
+        }
+        if (request.note() != null) {
+            order.setNote(trimToNull(request.note()));
+        }
+        if (request.lines() != null) {
+            order.getLines().clear();
+            int lineNo = 1;
+            for (SalesOrderLineRequest lineRequest : request.lines()) {
+                order.getLines().add(buildLine(order, lineRequest, lineNo++));
+            }
         }
         return mapper.toResponse(salesOrderRepository.save(order), true);
     }
@@ -192,6 +239,25 @@ public class SalesOrderService {
                 .fulfilledQuantity(BigDecimal.ZERO)
                 .dueDate(request.dueDate())
                 .build();
+    }
+
+    /**
+     * If {@code newLines} is non-null (a full line replace), validate against the request's due
+     * dates — the entity's own lines are about to be dropped. Otherwise the existing lines survive
+     * unchanged, so an order-date-only edit can still make them invalid and must be checked too.
+     */
+    private void ensureDueDatesRespectOrderDate(LocalDate orderDate,
+                                                 List<SalesOrderLineRequest> newLines,
+                                                 List<SalesOrderLine> existingLines) {
+        List<LocalDate> dueDates = newLines != null
+                ? newLines.stream().map(SalesOrderLineRequest::dueDate).toList()
+                : existingLines.stream().map(SalesOrderLine::getDueDate).toList();
+        for (LocalDate dueDate : dueDates) {
+            if (dueDate.isBefore(orderDate)) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Line due date cannot be before the order date");
+            }
+        }
     }
 
     private SalesOrder findOrder(UUID salesOrderId) {

@@ -45,6 +45,52 @@ mvn spring-boot:run           # API tại http://localhost:8080
 Endpoint **không cần token**: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`,
 `/v3/api-docs/**`, `/swagger-ui/**`. Mọi endpoint `/api/v1/**` khác đều cần `Authorization: Bearer`.
 
+### 1.1 CORS *(thêm ở `C2-5`, 2026-08-04)*
+
+Trước `C2-5` backend **không có một dòng cấu hình CORS nào** ⇒ mọi request từ browser ở origin khác
+đều bị chặn, bất kể API đúng hay sai. Nay:
+
+| | |
+|---|---|
+| Origin được phép (default dev) | `http://localhost:3000`, `http://localhost:5173` |
+| Đổi origin | biến môi trường `CORS_ALLOWED_ORIGINS` (phân tách bằng dấu phẩy) |
+| Header được gửi lên | `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Plant-Id`, `X-Trace-Id` |
+| Header JS đọc được | `X-Trace-Id`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Rule`, `Retry-After` |
+| Credentials | `Access-Control-Allow-Credentials: true` |
+
+> 🔴 **`"*"` không dùng được và backend sẽ từ chối khởi động nếu cấu hình như vậy** — API này gửi
+> `Authorization` mọi request, CORS spec cấm wildcard origin trên credentialed request. Origin của bạn
+> phải được liệt kê tường minh; gửi cho backend origin dev/demo để thêm vào biến môi trường.
+>
+> Preflight `OPTIONS` **không** cần token (nó không mang `Authorization` được) — nếu bạn thấy 401 ở
+> preflight thì đó là bug backend, báo ngay.
+
+### 1.2 Account dev để test phân quyền *(thêm ở `C2-5`)*
+
+Chạy `src/main/resources/db/dev-seed.sql` (hướng dẫn ở đầu file đó) để có 1 company + **2 plant** +
+6 warehouse + 3 account. **Mật khẩu của cả ba: `Admin@123`.**
+
+| Username | Role | Scope | Dùng để |
+|---|---|---|---|
+| `manager.a` | `MANAGER` | PLANT-A | Luồng quản lý: tạo/release WO, BOM, duyệt |
+| `operator.a` | `OPERATOR` | PLANT-A | Luồng thực thi: xuất vật tư, báo sản lượng |
+| `manager.b` | `MANAGER` | PLANT-B | **Cặp với `manager.a` để chứng minh isolation** |
+| `admin` | `ADMIN` | GLOBAL | Có sẵn từ trước, thấy mọi plant |
+
+Hai kiểm chứng đã chạy thật, FE nên thấy đúng như vậy:
+
+| Request | Kết quả |
+|---|---|
+| `manager.a` → `GET /plants/{PLANT-A}/work-orders` | **200** |
+| `manager.a` → `GET /plants/{PLANT-B}/work-orders` | **403 `PERMISSION_DENIED`** (không phải mảng rỗng) |
+| `operator.a` → `POST /plants/{PLANT-A}/work-orders` | **403** — tạo WO là quyền của `MANAGER` |
+
+> 🔴 **Sai plant thì là 403, KHÔNG phải danh sách rỗng.** Nếu bạn thấy mảng rỗng thay vì 403, nghĩa là
+> bộ lọc scope đã nới sai — báo backend, đừng xử lý như "plant không có dữ liệu".
+>
+> ⚠️ **`@Valid` chạy TRƯỚC kiểm quyền.** Body sai định dạng sẽ trả **400 `VALIDATION_ERROR`** kể cả khi
+> user không có quyền — đừng kết luận "tôi có quyền" từ việc không thấy 403.
+
 ---
 
 ## 2. Quy ước chung — đọc trước khi code
@@ -562,6 +608,12 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 | Đơn hàng đã giao tới đâu | `GET /api/v1/sales-orders/{id}` → `lines[].fulfilledQuantity` |
 | Chênh lệch kế hoạch/thực tế | `GET /api/v1/work-orders/{id}/variance` |
 
+> ✅ **[`C2-4`, 2026-08-05] `variance` nay trả đủ 4 khối:** `materialLines` + `outputVariance` +
+> `wipSummary` (scrap/rework) + **`timeVariance`** (`plannedMinutes`/`actualMinutes`/`varianceMinutes`).
+> `plannedMinutes` = `Σ (setupMinutes + runMinutesPerUnit × plannedQuantity)` trên mọi operation của
+> routing snapshot; `actualMinutes` = `Σ` thời lượng mọi production execution **đã kết thúc**
+> (`actualEndedAt` khác `null`) — execution đang chạy dở không tính vào tổng.
+
 ---
 
 ## 5. Tham chiếu endpoint theo màn hình
@@ -630,13 +682,49 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 |---|---|
 | Danh sách đơn | `GET /sales-orders?companyId=&plantId=&status=` |
 | Tạo / xác nhận / huỷ | `POST /sales-orders` · `/{id}/confirm` · `/{id}/cancel` |
+| Sửa (chỉ khi `DRAFT`) | `PATCH /sales-orders/{id}` — full-replace `lines[]`, `expectedVersion` bắt buộc (`C2-4`) |
 | Tồn kho | `GET /inventory/balances?warehouseId=` (bắt buộc) `&itemId=` (tuỳ chọn) |
-| Lịch sử movement | `GET /inventory/movements` |
+| Lịch sử movement | `GET /inventory/movements?warehouseId=` (**bắt buộc**) `&itemId=&lotId=` (tuỳ chọn) |
 | Nhập/xuất/điều chỉnh thủ công | `POST /inventory/receive` · `/issue` · `/adjust` |
 | Dashboard tồn kho | `GET /reports/inventory-dashboard` |
 | Cảnh báo tồn thấp | `GET /reports/low-stock` |
+| UOM (đơn vị tính, **global**) | `GET /uoms` · `POST /uoms` · `GET/PATCH /uoms/{id}` · `POST /uoms/{id}/activate` · `POST /uoms/{id}/deactivate` |
+
+> 🔴 **UOM không có `companyId`/`plantId`** — danh mục chung cho toàn hệ thống, không lọc theo company.
+> `code` **không sửa được sau khi tạo** — `PATCH /uoms/{id}` chỉ nhận `name`/`description`, gửi `code`
+> lên sẽ bị bỏ qua (không phải lỗi, server không đọc field đó). Trùng `code` trả `409
+> RESOURCE_ALREADY_EXISTS`. Item vẫn chưa gắn `uomId` (`items.unit` còn là text tự do) — UOM hiện là
+> danh mục độc lập, chưa dùng để validate item.
+
 | BOM | `GET /companies/{companyId}/boms` · `GET /boms/{bomId}/tree` · `GET /items/{itemId}/active-bom` |
+| BOM activate / **deactivate** | `POST /boms/{bomId}/activate` · **`DELETE /boms/{bomId}`** ⇐ đây **là** deactivate |
 | Routing | `GET /companies/{companyId}/routings` · `GET /routings/{routingId}` |
+| Routing activate / **deactivate** | `POST /routings/{routingId}/activate` · **`DELETE /routings/{routingId}`** ⇐ đây **là** deactivate |
+
+> 🔴 **`DELETE` ở đây là deactivate, KHÔNG phải xoá.** Rule `C6` cấm hard-delete chứng từ nghiệp vụ,
+> nên toàn bộ endpoint deactivate của repo dùng verb `DELETE` và trả `200` + `{"result": null}` —
+> **không** có `POST /…/deactivate` ở bất kỳ đâu. Áp dụng cho cả `companies`, `plants`, `warehouses`,
+> `items`, `bom-lines`, `material-reservations`. Deactivate BOM/Routing **không** đổi snapshot của work
+> order đã tạo (bất biến `B12`/`B49`); nhưng khi item không còn routing `ACTIVE` thì convert proposal
+> MAKE sẽ bị từ chối bằng `409 MISSING_ROUTING`.
+
+### Access Control — Role / Scope lifecycle + Assignments *(`C2-4`, 2026-08-05)*
+
+| Việc | Endpoint |
+|---|---|
+| Role: xem / sửa `name`+`description` | `GET/PATCH /access/roles/{roleId}` |
+| Role: activate / deactivate | `POST /access/roles/{roleId}/activate` · `/deactivate` |
+| Scope: xem / sửa `name`+`description` | `GET/PATCH /access/scopes/{scopeId}` |
+| Scope: activate / deactivate | `POST /access/scopes/{scopeId}/activate` · `/deactivate` |
+| Tra cứu assignment | `GET /access/assignments?userId=&roleId=&scopeId=&page=&size=` (cả 3 filter tuỳ chọn) |
+
+> 🔴 **Role/Scope dùng verb `POST .../activate`+`.../deactivate`, KHÁC với BOM/Routing/UOM ở trên**
+> (`DELETE` = deactivate). Đây là 2 pattern verb khác nhau tồn tại song song trong cùng API, không
+> phải lỗi — đi theo đúng 2 verb FE liệt kê tường minh cho nhóm này.
+> **Role `is_system = true` (ADMIN/MANAGER/OPERATOR) không bao giờ deactivate được**, kể cả bởi
+> `admin` — trả `422 OPERATION_NOT_ALLOWED`. `code`/`is_system`/`scopeType` là **immutable**, `PATCH`
+> chỉ nhận `name`/`description`. Cùng permission `PERM_ACCESS_MANAGE` cho cả 9 endpoint — **không**
+> có permission mới.
 
 ---
 

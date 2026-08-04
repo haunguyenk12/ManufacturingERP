@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -31,6 +32,8 @@ class WorkOrderVarianceServiceTest {
     @Mock ProductionReceiptLineRepository productionReceiptLineRepository;
     @Mock WipTransactionRepository wipTransactionRepository;
     @Mock WorkOrderRepository workOrderRepository;
+    @Mock ProductionExecutionRepository productionExecutionRepository;
+    @Mock WorkOrderOperationRepository workOrderOperationRepository;
 
     WorkOrderVarianceService service;
 
@@ -40,7 +43,9 @@ class WorkOrderVarianceServiceTest {
                 materialIssueLineRepository,
                 productionReceiptLineRepository,
                 wipTransactionRepository,
-                workOrderRepository);
+                workOrderRepository,
+                productionExecutionRepository,
+                workOrderOperationRepository);
     }
 
     @Test
@@ -83,6 +88,104 @@ class WorkOrderVarianceServiceTest {
         assertThat(response.outputVariance().varianceQuantity()).isEqualByComparingTo("-1");
         assertThat(response.wipSummary().scrapQuantity()).isEqualByComparingTo("1");
         assertThat(response.wipSummary().reworkQuantity()).isEqualByComparingTo("2");
+    }
+
+    // ── time variance (C2-4) ───────────────────────────────────────────────
+
+    @Test
+    void getVariance_timeVariance_sumsOperationsAndExecutionsExcludingInProgress() {
+        UUID workOrderId = UUID.randomUUID();
+        WorkOrder workOrder = baseWorkOrder(workOrderId, new BigDecimal("10"));
+        stubEmptyVarianceInputs(workOrderId);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(workOrder));
+        when(workOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrderId))
+                .thenReturn(List.of(
+                        operation(new BigDecimal("15"), new BigDecimal("2")),   // 15 + 2*10 = 35
+                        operation(new BigDecimal("5"), new BigDecimal("1"))));  // 5 + 1*10 = 15
+
+        Instant start = Instant.parse("2026-08-01T08:00:00Z");
+        when(productionExecutionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrderId))
+                .thenReturn(List.of(
+                        execution(start, start.plusSeconds(30 * 60)),        // 30 min
+                        execution(start, start.plusSeconds(20 * 60)),        // 20 min
+                        execution(start, null)));                           // in-progress, excluded
+
+        var response = service.getVariance(workOrderId);
+
+        assertThat(response.timeVariance().plannedMinutes()).isEqualByComparingTo("50");
+        assertThat(response.timeVariance().actualMinutes()).isEqualByComparingTo("50");
+        assertThat(response.timeVariance().varianceMinutes()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void getVariance_noOperations_plannedMinutesIsZero() {
+        UUID workOrderId = UUID.randomUUID();
+        WorkOrder workOrder = baseWorkOrder(workOrderId, new BigDecimal("10"));
+        stubEmptyVarianceInputs(workOrderId);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(workOrder));
+        when(productionExecutionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrderId))
+                .thenReturn(List.of());
+
+        var response = service.getVariance(workOrderId);
+
+        assertThat(response.timeVariance().plannedMinutes()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void getVariance_noExecutions_actualMinutesIsZero() {
+        UUID workOrderId = UUID.randomUUID();
+        WorkOrder workOrder = baseWorkOrder(workOrderId, new BigDecimal("10"));
+        stubEmptyVarianceInputs(workOrderId);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(workOrder));
+        when(workOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrderId))
+                .thenReturn(List.of(operation(new BigDecimal("15"), new BigDecimal("2"))));
+        when(productionExecutionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrderId))
+                .thenReturn(List.of());
+
+        var response = service.getVariance(workOrderId);
+
+        assertThat(response.timeVariance().actualMinutes()).isEqualByComparingTo("0");
+        assertThat(response.timeVariance().plannedMinutes()).isEqualByComparingTo("35");
+    }
+
+    private WorkOrder baseWorkOrder(UUID workOrderId, BigDecimal plannedQuantity) {
+        Item product = item(UUID.randomUUID(), "FG-100", ItemType.FINISHED_GOOD);
+        return WorkOrder.builder()
+                .workOrderId(workOrderId)
+                .workOrderNo("WO-001")
+                .productItem(product)
+                .plannedQuantity(plannedQuantity)
+                .status(WorkOrderStatus.IN_PROGRESS)
+                .componentLines(new ArrayList<>())
+                .build();
+    }
+
+    private void stubEmptyVarianceInputs(UUID workOrderId) {
+        when(materialIssueLineRepository.sumIssuedByWorkOrder(workOrderId)).thenReturn(List.of());
+        when(productionReceiptLineRepository.sumReceivedQuantityByWorkOrder(workOrderId)).thenReturn(BigDecimal.ZERO);
+        when(wipTransactionRepository.sumQuantityByWorkOrderAndType(workOrderId, WipTransactionType.SCRAP_REPORTED))
+                .thenReturn(BigDecimal.ZERO);
+        when(wipTransactionRepository.sumQuantityByWorkOrderAndType(workOrderId, WipTransactionType.REWORK_REPORTED))
+                .thenReturn(BigDecimal.ZERO);
+    }
+
+    private WorkOrderOperation operation(BigDecimal setupMinutes, BigDecimal runMinutesPerUnit) {
+        return WorkOrderOperation.builder()
+                .workOrderOperationId(UUID.randomUUID())
+                .sequence(1)
+                .name("Assembly")
+                .workCenterCode("WC-1")
+                .setupMinutes(setupMinutes)
+                .runMinutesPerUnit(runMinutesPerUnit)
+                .build();
+    }
+
+    private ProductionExecution execution(Instant startedAt, Instant endedAt) {
+        return ProductionExecution.builder()
+                .productionExecutionId(UUID.randomUUID())
+                .actualStartedAt(startedAt)
+                .actualEndedAt(endedAt)
+                .build();
     }
 
     private record TestQuantity(UUID componentLineId, BigDecimal quantity) implements ComponentQuantityProjection {

@@ -61,7 +61,11 @@ public class BomController {
     }
 
     @DeleteMapping("/api/v1/boms/{bomId}")
-    @Operation(summary = "Deactivate BOM")
+    @Operation(summary = "Deactivate BOM (soft) — this IS the deactivate command",
+            description = "There is no POST /boms/{bomId}/deactivate. Rule C6 forbids hard-deleting "
+                    + "business documents, so DELETE moves the revision to INACTIVE and nothing is "
+                    + "removed. Work orders already created keep their own BOM snapshot (invariant "
+                    + "B12), so deactivating here never changes a work order's requirements.")
     public ResponseEntity<ApiResponse<Void>> deactivateBom(@PathVariable UUID bomId) {
         bomService.deactivateBom(bomId);
         return ResponseEntity.ok(ApiResponse.noContent("BOM deactivated successfully"));

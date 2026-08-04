@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.organization.service;
 
 import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.dto.*;
@@ -70,6 +71,161 @@ class AccessControlServiceTest {
         assertThat(captor.getValue().getCompanyId()).isEqualTo(companyId);
         assertThat(captor.getValue().getCode()).isEqualTo("PLANNER");
         assertThat(captor.getValue().isSystem()).isFalse();
+    }
+
+    // ── role lifecycle (C2-4) ─────────────────────────────────────────────
+
+    @Test
+    void updateRole_changesNameAndDescriptionOnly() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("PLANNER").name("Planner")
+                .description("old").system(false).status(RoleStatus.ACTIVE).build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RoleResponse response = service.updateRole(roleId, new RoleUpdateRequest("New Name", "new desc"));
+
+        assertThat(response.name()).isEqualTo("New Name");
+        assertThat(response.description()).isEqualTo("new desc");
+        assertThat(response.code()).isEqualTo("PLANNER");
+    }
+
+    @Test
+    void updateRole_nullFields_keepExistingValues() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("PLANNER").name("Planner")
+                .description("old").system(false).status(RoleStatus.ACTIVE).build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RoleResponse response = service.updateRole(roleId, new RoleUpdateRequest(null, null));
+
+        assertThat(response.name()).isEqualTo("Planner");
+        assertThat(response.description()).isEqualTo("old");
+    }
+
+    @Test
+    void deactivateRole_systemRole_throwsOperationNotAllowedBeforeSaving() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("ADMIN").name("Admin")
+                .system(true).status(RoleStatus.ACTIVE).build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+
+        assertThatThrownBy(() -> service.deactivateRole(roleId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(roleRepository, never()).save(any());
+    }
+
+    @Test
+    void deactivateRole_customRole_succeeds() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("PLANNER").name("Planner")
+                .system(false).status(RoleStatus.ACTIVE).build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RoleResponse response = service.deactivateRole(roleId);
+
+        assertThat(response.status()).isEqualTo("INACTIVE");
+    }
+
+    @Test
+    void activateRole_setsStatusActive() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("PLANNER").name("Planner")
+                .system(false).status(RoleStatus.INACTIVE).build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RoleResponse response = service.activateRole(roleId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+    }
+
+    // ── scope lifecycle (C2-4) ────────────────────────────────────────────
+
+    @Test
+    void updateScope_changesNameAndDescriptionOnly() {
+        UUID scopeId = UUID.randomUUID();
+        AccessScope scope = AccessScope.builder().scopeId(scopeId).code("SCOPE").name("Scope")
+                .scopeType(ScopeType.CUSTOM).description("old").status(OrganizationStatus.ACTIVE).build();
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(scope));
+        when(accessScopeRepository.save(any(AccessScope.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccessScopeResponse response = service.updateScope(scopeId, new AccessScopeUpdateRequest("New Scope", "new desc"));
+
+        assertThat(response.name()).isEqualTo("New Scope");
+        assertThat(response.description()).isEqualTo("new desc");
+        assertThat(response.code()).isEqualTo("SCOPE");
+    }
+
+    @Test
+    void deactivateScope_setsStatusInactive() {
+        UUID scopeId = UUID.randomUUID();
+        AccessScope scope = AccessScope.builder().scopeId(scopeId).code("SCOPE").name("Scope")
+                .scopeType(ScopeType.CUSTOM).status(OrganizationStatus.ACTIVE).build();
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(scope));
+        when(accessScopeRepository.save(any(AccessScope.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccessScopeResponse response = service.deactivateScope(scopeId);
+
+        assertThat(response.status()).isEqualTo("INACTIVE");
+    }
+
+    @Test
+    void activateScope_setsStatusActive() {
+        UUID scopeId = UUID.randomUUID();
+        AccessScope scope = AccessScope.builder().scopeId(scopeId).code("SCOPE").name("Scope")
+                .scopeType(ScopeType.CUSTOM).status(OrganizationStatus.INACTIVE).build();
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(scope));
+        when(accessScopeRepository.save(any(AccessScope.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AccessScopeResponse response = service.activateScope(scopeId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+    }
+
+    // ── listAssignments (C2-4) ────────────────────────────────────────────
+
+    @Test
+    void listAssignments_filtersByUserIdOnly() {
+        UUID userId = UUID.randomUUID();
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(assignmentRepository.search(userId, null, null, pageable))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.listAssignments(userId, null, null, pageable);
+
+        verify(assignmentRepository).search(userId, null, null, pageable);
+    }
+
+    @Test
+    void listAssignments_filtersByRoleIdOnly() {
+        UUID roleId = UUID.randomUUID();
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(assignmentRepository.search(null, roleId, null, pageable))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.listAssignments(null, roleId, null, pageable);
+
+        verify(assignmentRepository).search(null, roleId, null, pageable);
+    }
+
+    @Test
+    void listAssignments_filtersByAllThreeParameters() {
+        UUID userId = UUID.randomUUID();
+        UUID roleId = UUID.randomUUID();
+        UUID scopeId = UUID.randomUUID();
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(assignmentRepository.search(userId, roleId, scopeId, pageable))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.listAssignments(userId, roleId, scopeId, pageable);
+
+        verify(assignmentRepository).search(userId, roleId, scopeId, pageable);
     }
 
     @Test

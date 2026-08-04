@@ -86,6 +86,102 @@ public class AccessControlService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    public RoleResponse getRole(UUID roleId) {
+        return mapper.toResponse(findRoleById(roleId));
+    }
+
+    /** {@code name}/{@code description} only — {@code code} and {@code is_system} are immutable. */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.ROLE_UPDATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    public RoleResponse updateRole(UUID roleId, RoleUpdateRequest request) {
+        Role role = findRoleById(roleId);
+        if (request.name() != null) {
+            role.setName(request.name().trim());
+        }
+        if (request.description() != null) {
+            role.setDescription(request.description());
+        }
+        return mapper.toResponse(roleRepository.save(role));
+    }
+
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.ROLE_ACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    public RoleResponse activateRole(UUID roleId) {
+        Role role = findRoleById(roleId);
+        role.setStatus(RoleStatus.ACTIVE);
+        return mapper.toResponse(roleRepository.save(role));
+    }
+
+    /**
+     * {@code is_system} roles (ADMIN/MANAGER/OPERATOR) can never be deactivated, by anyone —
+     * protects the seeded roles the whole permission matrix (V41) is built on from being disabled by
+     * mistake. Blocking here alone is enough: a system role can never reach {@code INACTIVE} in the
+     * first place, so there is nothing for {@code activateRole} to guard against.
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.ROLE_DEACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    public RoleResponse deactivateRole(UUID roleId) {
+        Role role = findRoleById(roleId);
+        if (role.isSystem()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "System role cannot be deactivated: " + roleId);
+        }
+        role.setStatus(RoleStatus.INACTIVE);
+        return mapper.toResponse(roleRepository.save(role));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    public AccessScopeResponse getScope(UUID scopeId) {
+        return mapper.toResponse(findScopeById(scopeId));
+    }
+
+    /** {@code name}/{@code description} only — {@code code} and {@code scopeType} are immutable. */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.SCOPE_UPDATED, entityType = "AccessScope", entityIdExpression = "scopeId.toString()")
+    public AccessScopeResponse updateScope(UUID scopeId, AccessScopeUpdateRequest request) {
+        AccessScope scope = findScopeById(scopeId);
+        if (request.name() != null) {
+            scope.setName(request.name().trim());
+        }
+        if (request.description() != null) {
+            scope.setDescription(request.description());
+        }
+        return mapper.toResponse(accessScopeRepository.save(scope));
+    }
+
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.SCOPE_ACTIVATED, entityType = "AccessScope", entityIdExpression = "scopeId.toString()")
+    public AccessScopeResponse activateScope(UUID scopeId) {
+        AccessScope scope = findScopeById(scopeId);
+        scope.setStatus(OrganizationStatus.ACTIVE);
+        return mapper.toResponse(accessScopeRepository.save(scope));
+    }
+
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.SCOPE_DEACTIVATED, entityType = "AccessScope", entityIdExpression = "scopeId.toString()")
+    public AccessScopeResponse deactivateScope(UUID scopeId) {
+        AccessScope scope = findScopeById(scopeId);
+        scope.setStatus(OrganizationStatus.INACTIVE);
+        return mapper.toResponse(accessScopeRepository.save(scope));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    public PageResult<UserRoleAssignmentResponse> listAssignments(UUID userId, UUID roleId, UUID scopeId,
+                                                                   Pageable pageable) {
+        return PageResult.from(assignmentRepository.search(userId, roleId, scopeId, pageable)
+                .map(mapper::toResponse));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     public PageResult<PermissionResponse> listPermissions(Pageable pageable) {
         return PageResult.from(permissionRepository.findAll(pageable).map(mapper::toResponse));
     }
@@ -302,6 +398,21 @@ public class AccessControlService {
                 .orElse(null);
 
         return new UserAccessScopesResult(scopes, defaultPlantId);
+    }
+
+    /** Unlike {@link #findActiveRole}, lifecycle operations must be able to read/reactivate an
+     *  already-{@code INACTIVE} role, so this does not reject on status. */
+    private Role findRoleById(UUID roleId) {
+        return roleRepository.findById(roleId)
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", roleId));
+    }
+
+    /** Unlike {@link #findActiveScope}, lifecycle operations must be able to read/reactivate an
+     *  already-{@code INACTIVE} scope, so this does not reject on status. */
+    private AccessScope findScopeById(UUID scopeId) {
+        return accessScopeRepository.findById(scopeId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Access scope", scopeId));
     }
 
     private Role findActiveRole(UUID roleId) {

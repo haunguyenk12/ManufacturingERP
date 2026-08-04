@@ -40,6 +40,31 @@ public class AccessControlController {
                 .body(ApiResponse.created(accessControlService.createRole(request)));
     }
 
+    @GetMapping("/roles/{roleId}")
+    @Operation(summary = "Get role")
+    public ResponseEntity<ApiResponse<RoleResponse>> getRole(@PathVariable UUID roleId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.getRole(roleId)));
+    }
+
+    @PatchMapping("/roles/{roleId}")
+    @Operation(summary = "Update role name/description")
+    public ResponseEntity<ApiResponse<RoleResponse>> updateRole(
+            @PathVariable UUID roleId, @Valid @RequestBody RoleUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.updateRole(roleId, request)));
+    }
+
+    @PostMapping("/roles/{roleId}/activate")
+    @Operation(summary = "Activate role")
+    public ResponseEntity<ApiResponse<RoleResponse>> activateRole(@PathVariable UUID roleId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.activateRole(roleId)));
+    }
+
+    @PostMapping("/roles/{roleId}/deactivate")
+    @Operation(summary = "Deactivate role (system roles cannot be deactivated)")
+    public ResponseEntity<ApiResponse<RoleResponse>> deactivateRole(@PathVariable UUID roleId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.deactivateRole(roleId)));
+    }
+
     @PostMapping("/roles/{roleId}/permissions/{permissionId}")
     @Operation(summary = "Grant permission to role")
     public ResponseEntity<ApiResponse<Void>> grantPermission(
@@ -94,6 +119,31 @@ public class AccessControlController {
                 .body(ApiResponse.created(accessControlService.createScope(request)));
     }
 
+    @GetMapping("/scopes/{scopeId}")
+    @Operation(summary = "Get access scope")
+    public ResponseEntity<ApiResponse<AccessScopeResponse>> getScope(@PathVariable UUID scopeId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.getScope(scopeId)));
+    }
+
+    @PatchMapping("/scopes/{scopeId}")
+    @Operation(summary = "Update access scope name/description")
+    public ResponseEntity<ApiResponse<AccessScopeResponse>> updateScope(
+            @PathVariable UUID scopeId, @Valid @RequestBody AccessScopeUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.updateScope(scopeId, request)));
+    }
+
+    @PostMapping("/scopes/{scopeId}/activate")
+    @Operation(summary = "Activate access scope")
+    public ResponseEntity<ApiResponse<AccessScopeResponse>> activateScope(@PathVariable UUID scopeId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.activateScope(scopeId)));
+    }
+
+    @PostMapping("/scopes/{scopeId}/deactivate")
+    @Operation(summary = "Deactivate access scope")
+    public ResponseEntity<ApiResponse<AccessScopeResponse>> deactivateScope(@PathVariable UUID scopeId) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.deactivateScope(scopeId)));
+    }
+
     @PostMapping("/scopes/{scopeId}/resources")
     @Operation(summary = "Add resource to access scope")
     public ResponseEntity<ApiResponse<AccessScopeResourceResponse>> addScopeResource(
@@ -109,6 +159,21 @@ public class AccessControlController {
             @Valid @RequestBody UserRoleAssignmentRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(accessControlService.assignRole(request)));
+    }
+
+    /** Declared before {@code /assignments/{assignmentId}} would otherwise be considered — Spring
+     *  matches the literal path first, kept adjacent for readability (same pattern as
+     *  {@code SalesOrderController#planningDemands}). */
+    @GetMapping("/assignments")
+    @Operation(summary = "List role assignments, optionally filtered by user/role/scope")
+    public ResponseEntity<ApiResponse<PageResult<UserRoleAssignmentResponse>>> listAssignments(
+            @RequestParam(required = false) UUID userId,
+            @RequestParam(required = false) UUID roleId,
+            @RequestParam(required = false) UUID scopeId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(accessControlService.listAssignments(
+                userId, roleId, scopeId, PageableFactory.of(page, size, "createdAt", "desc"))));
     }
 
     @DeleteMapping("/assignments/{assignmentId}")

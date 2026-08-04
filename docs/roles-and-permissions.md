@@ -18,6 +18,56 @@ Hệ thống có **3 vai trò người dùng** + **1 actor tự động**:
 
 > **Mô hình phân quyền:** Dynamic RBAC — quyền gắn với **scope** (Company / Plant / Warehouse),  
 > không hardcode role vào business logic.
+>
+> 🔴 **[`C2-3`, 2026-08-04] Có HAI cơ chế kiểm quyền khác nhau, dễ nhầm khi test:**
+> `@permissionGuard.hasResourceAccess(auth, code, 'COMPANY'|'PLANT'|'WAREHOUSE', id)` đi theo cây
+> Company→Plant→Warehouse — role có permission qua **bất kỳ** scope nào phủ resource đó là qua.
+> `@permissionGuard.hasPermission(auth, code)` (dùng cho quyền **không có resource cụ thể**: toàn bộ
+> `PERM_ORG_READ`/`PERM_ORG_MANAGE`/`PERM_ACCESS_MANAGE`/`PERM_UOM_*`) **chỉ** đọc assignment có
+> **`AccessScope.scopeType = GLOBAL`** — role có permission mà scope là `PLANT`/`COMPANY` vẫn bị 403.
+> Trong dữ liệu hiện tại **chỉ `admin`** có scope `GLOBAL_ALL`. ⇒ Test tay các quyền nhóm thứ hai
+> **phải dùng `admin`**, không dùng account seed `manager.a`/`operator.a` (`dev-seed.sql`, scope
+> `PLANT`) — 403 ở đó không có nghĩa là seed permission sai. Chi tiết: `module/uom/CLAUDE.md`.
+
+---
+
+## 🔴 [`C2-5`, 2026-08-04] `V41` — seed đã được sửa cho khớp tài liệu này
+
+**Vấn đề:** từ `V7` tới `V15`, các seed sớm cấp permission cho **riêng `ADMIN`**
+(`WHERE r.code = 'ADMIN'`); từ `V17` trở đi mới cấp đủ `IN ('ADMIN','MANAGER','OPERATOR')`. Kết quả:
+**12 permission lõi** chỉ `ADMIN` có, trong khi tài liệu này mô tả MANAGER/OPERATOR sử dụng chúng.
+
+**Hệ quả đo được:** login một account `MANAGER` scope PLANT-A rồi gọi
+`GET /api/v1/plants/{A}/work-orders` trả **403 `PERMISSION_DENIED` ngay trên plant của chính nó**
+⇒ mọi account không phải `admin` đều không mở được các màn hình lõi.
+
+**`V41` cấp thêm** (quyết định của user: **tài liệu này là nguồn, code là chỗ trôi**):
+
+| Role | Permission được cấp thêm ở `V41` |
+|---|---|
+| `MANAGER` | `PERM_WORK_ORDER_READ` · `PERM_WORK_ORDER_MANAGE` · `PERM_WORK_ORDER_EXECUTE` · `PERM_BOM_READ` · `PERM_BOM_MANAGE` · `PERM_INVENTORY_READ` · `PERM_INVENTORY_MOVE` · `PERM_INVENTORY_MANAGE` · `PERM_ORG_READ` · `PERM_PLANNING_READ` |
+| `OPERATOR` | `PERM_WORK_ORDER_READ` · `PERM_WORK_ORDER_EXECUTE` · `PERM_BOM_READ` · `PERM_INVENTORY_READ` · `PERM_INVENTORY_MOVE` · `PERM_ORG_READ` |
+
+**Tập admin-only sau `V41` là ĐÚNG HAI:** `PERM_ORG_MANAGE` và `PERM_ACCESS_MANAGE` — hai quyền "cấu
+hình hệ thống" mà mục MANAGER dưới đây loại trừ tường minh (*"MANAGER xem master data nhưng không cấu
+hình hệ thống"*). Thêm vào tập này là **quyết định bảo mật**, không phải thủ tục: nó phải sửa đồng thời
+ở `FlywayMigrationIT.migrate_v41_leavesNoCorePermissionGrantedToAdminAlone` và ở tài liệu này.
+
+**Ba test canh, ở `FlywayMigrationIT`** (DB thật — `PermissionCatalogTest` **không** thay được: nó chỉ
+chứng minh permission **có dòng trong bảng `permissions`**, còn "được cấp cho role nào" nằm ở
+`role_permissions`):
+- `migrate_v41_leavesNoCorePermissionGrantedToAdminAlone` — không permission nào chỉ superuser dùng được.
+- `migrate_v41_grantsManagerTheCorePermissionsTheRolesDocPromises` — checklist dương cho MANAGER.
+- `migrate_v41_keepsOperatorOutOfApprovalAndConfigurationPermissions` — separation of duties (cấm).
+
+> ⚠️ **Hai chỗ tài liệu này tự mâu thuẫn, chưa sửa** (ghi ra để người đọc sau không tưởng là lỗi mới):
+> 1. **Tên quyền cũ.** Các mục dưới đây còn dùng tên thiết kế ban đầu (`WO_WRITE`, `WO_RELEASE`,
+>    `ITEM_READ`, `STOCK_RECEIVE`, `MATERIAL_ISSUE_POST`…) trong khi code dùng `PERM_WORK_ORDER_MANAGE`,
+>    `PERM_INVENTORY_MOVE`… Ánh xạ nằm ở `V41` và ở bảng trên; **`PERM_*` trong code là tên thật**.
+> 2. **Bảng RACI rộng hơn các mục chi tiết.** RACI cho OPERATOR là `R` ở "Quản lý Item Master" và
+>    "Tạo & Release Work Order", nhưng mục OPERATOR **không** liệt kê quyền quản lý item hay tạo WO.
+>    `V41` đi theo **các mục chi tiết** (hẹp hơn) + separation of duties, **không** theo RACI: tạo và
+>    release work order giữ ở MANAGER. Muốn nới thêm thì đó là quyết định riêng.
 
 ---
 
@@ -33,6 +83,7 @@ ADMIN **không** can thiệp vào luồng sản xuất hay mua hàng.
 | `LOT_WRITE` | Quản lý Lot/Batch: trạng thái AVAILABLE · HOLD · REJECTED · EXPIRED |
 | `BOM_WRITE` | Tạo / sửa BOM Header & BOM Lines |
 | `SUPPLIER_WRITE` | Tạo / sửa Supplier Master và Item Supplier |
+| `PERM_UOM_MANAGE` | Tạo / sửa / activate / deactivate đơn vị tính (`C2-3`, `V43`). **Global** — không gắn company/plant |
 
 ### Organization
 | Quyền | Mô tả |
@@ -46,9 +97,9 @@ ADMIN **không** can thiệp vào luồng sản xuất hay mua hàng.
 |-------|-------|
 | `AUTH_LOGIN` | Đăng nhập / Đăng xuất / Refresh token |
 | `USER_WRITE` | Tạo / sửa / vô hiệu hoá tài khoản người dùng |
-| `ROLE_WRITE` | Tạo / sửa vai trò và gán permission cho role |
-| `SCOPE_WRITE` | Định nghĩa Access Scope (Company / Plant / Warehouse) |
-| `USER_ROLE_ASSIGN` | Gán / thu hồi vai trò cho người dùng |
+| `ROLE_WRITE` | Tạo / sửa vai trò và gán permission cho role. **[`C2-4`]** Nay có đủ CRUD + lifecycle: `GET`/`PATCH /access/roles/{id}`, `POST .../activate`, `POST .../deactivate` — role `is_system` (ADMIN/MANAGER/OPERATOR) không deactivate được, kể cả bởi `admin` |
+| `SCOPE_WRITE` | Định nghĩa Access Scope (Company / Plant / Warehouse). **[`C2-4`]** Cùng bộ CRUD + lifecycle: `GET`/`PATCH /access/scopes/{id}`, `POST .../activate`, `POST .../deactivate` |
+| `USER_ROLE_ASSIGN` | Gán / thu hồi vai trò cho người dùng. **[`C2-4`]** `GET /access/assignments?userId=&roleId=&scopeId=` để tra cứu, cùng quyền `PERM_ACCESS_MANAGE` — không thêm permission mới |
 | `AUDIT_LOG_VIEW` | Xem toàn bộ lịch sử audit log |
 
 ---
@@ -70,12 +121,14 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `BOM_READ` | Xem BOM và cây BOM |
 | `SUPPLIER_READ` | Xem danh sách nhà cung cấp |
 | `ORG_READ` | Xem cấu trúc tổ chức (Company / Plant / Warehouse) |
+| `PERM_UOM_READ` | Xem danh mục đơn vị tính |
+| `PERM_UOM_MANAGE` | Tạo / sửa / activate / deactivate đơn vị tính (`C2-3`, `V43`) |
 
 ### Sales
 | Quyền | Mô tả |
 |-------|-------|
 | `PERM_SALES_ORDER_READ` | Xem Sales Order và các dòng đơn hàng (`F3`, `V29`) |
-| `PERM_SALES_ORDER_MANAGE` | Tạo / Confirm / Cancel Sales Order. **Confirm sinh independent demand cho MRP**, Cancel huỷ luôn demand còn `OPEN` (`F3`, `V29`) |
+| `PERM_SALES_ORDER_MANAGE` | Tạo / Confirm / Cancel Sales Order. **Confirm sinh independent demand cho MRP**, Cancel huỷ luôn demand còn `OPEN` (`F3`, `V29`). **[`C2-4`]** Cũng gác `PATCH /sales-orders/{id}` — sửa full-replace, chỉ áp dụng đơn `DRAFT` |
 
 ### Routing
 | Quyền | Mô tả |
@@ -149,6 +202,11 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 | Quyền | Mô tả |
 |-------|-------|
 | `PERM_ROUTING_READ` | Xem công đoạn của routing đang chạy trên Work Order (`F4`, `V31`). **Không** có `PERM_ROUTING_MANAGE` — routing là master data ràng buộc thứ được phép sản xuất, thuộc MANAGER |
+
+### UOM
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_UOM_READ` | Xem danh mục đơn vị tính để hiển thị trên màn hình (`C2-3`, `V43`). **Không** có `PERM_UOM_MANAGE` — tạo/sửa/deactivate đơn vị tính là cấu hình master data, thuộc MANAGER |
 
 ### Inventory
 | Quyền | Mô tả |

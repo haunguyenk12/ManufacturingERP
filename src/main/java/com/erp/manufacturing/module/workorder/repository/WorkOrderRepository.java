@@ -26,6 +26,13 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
      * is exactly how debt #8 silently dropped rows from the availability queries. Here the association
      * is {@code optional = false} so an inner join is correct either way — spelling it out is what
      * keeps the next reader from having to work that out again.
+     *
+     * <p>{@code cast(:search as string)} is not cosmetic. A {@code null} search term is bound without
+     * a JDBC type, so Postgres has to resolve {@code '%' || ? || '%'} from the parameter alone and
+     * picks the {@code bytea} overload of {@code ||} — the query then dies at parse time with
+     * {@code function lower(bytea) does not exist}, a 500 on the plain unfiltered list. The
+     * {@code :search is null} short circuit does not help: Postgres types the whole expression before
+     * it evaluates anything.
      */
     @Query("""
             select w
@@ -34,9 +41,9 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             where w.plant.plantId = :plantId
               and (:status is null or w.status = :status)
               and (:productItemId is null or p.itemId = :productItemId)
-              and (:search is null
-                   or lower(w.workOrderNo) like lower(concat('%', :search, '%'))
-                   or lower(p.code) like lower(concat('%', :search, '%')))
+              and (cast(:search as string) is null
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.code) like lower(concat('%', cast(:search as string), '%')))
             """)
     Page<WorkOrder> search(@Param("plantId") UUID plantId,
                            @Param("status") WorkOrderStatus status,

@@ -2,6 +2,7 @@ package com.erp.manufacturing.config;
 
 import com.erp.manufacturing.common.security.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -18,6 +19,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * Spring Security configuration.
@@ -33,6 +37,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
+// Binds CorsProperties for anyone importing this class. The application's
+// @ConfigurationPropertiesScan covers the full context, but a @WebMvcTest slice that imports only
+// SecurityConfig does not run it — without this, every such slice fails to start on a missing bean.
+@EnableConfigurationProperties(CorsProperties.class)
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -43,11 +51,13 @@ public class SecurityConfig {
     private final JwtAuthEntryPoint       authEntryPoint;
     private final JwtAccessDeniedHandler  accessDeniedHandler;
     private final UserDetailsService      userDetailsService;
+    private final CorsProperties          corsProperties;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -70,6 +80,34 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)
                 )
                 .build();
+    }
+
+    /**
+     * Applies {@link CorsProperties} to every path. Registered explicitly because Spring Boot's
+     * default chain already contains a {@code CorsFilter} — without this bean that filter allows
+     * nothing, which is why the frontend could not call the API cross-origin at all before C2-5.
+     *
+     * <p>Preflight requests must stay reachable without a token: the browser sends {@code OPTIONS}
+     * with no {@code Authorization} header, so it cannot pass {@code .anyRequest().authenticated()}.
+     * Spring Security's CORS support runs the preflight short-circuit ahead of authorization, which
+     * is why no {@code permitAll} entry for {@code OPTIONS} is needed here — and why this must be
+     * wired through {@code http.cors(...)} rather than as a standalone {@code WebMvcConfigurer}.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        corsProperties.validate();
+
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(corsProperties.allowedOrigins());
+        config.setAllowedMethods(corsProperties.allowedMethods());
+        config.setAllowedHeaders(corsProperties.allowedHeaders());
+        config.setExposedHeaders(corsProperties.exposedHeaders());
+        config.setAllowCredentials(corsProperties.allowCredentials());
+        config.setMaxAge(corsProperties.maxAgeSeconds());
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 
     @Bean

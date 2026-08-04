@@ -60,7 +60,12 @@ public class RoutingController {
     }
 
     @DeleteMapping("/api/v1/routings/{routingId}")
-    @Operation(summary = "Deactivate routing")
+    @Operation(summary = "Deactivate routing (soft) — this IS the deactivate command",
+            description = "There is no POST /routings/{routingId}/deactivate. Rule C6 forbids "
+                    + "hard-deleting business documents, so DELETE moves the routing to INACTIVE and "
+                    + "nothing is removed. Routing snapshots already captured onto work orders stay "
+                    + "frozen (invariant B49); new work orders created from MRP will be refused with "
+                    + "MISSING_ROUTING (409) while no ACTIVE routing exists for the item.")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID routingId) {
         routingService.deactivate(routingId);
         return ResponseEntity.ok(ApiResponse.noContent("Routing deactivated successfully"));

@@ -9,9 +9,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Test-only controller that deliberately throws each exception type
@@ -41,6 +43,16 @@ class ExceptionTestController {
     @GetMapping("/access-denied")
     String accessDenied() {
         throw new AccessDeniedException("no");
+    }
+
+    /**
+     * Shaped like the real query endpoints ({@code GET /inventory/movements?warehouseId=}): a required
+     * {@code @RequestParam} with no default. Calling it without the parameter is what Spring turns into
+     * {@code MissingServletRequestParameterException}.
+     */
+    @GetMapping("/required-param")
+    String requiredParam(@RequestParam UUID warehouseId) {
+        return warehouseId.toString();
     }
 
     @GetMapping("/data-integrity")

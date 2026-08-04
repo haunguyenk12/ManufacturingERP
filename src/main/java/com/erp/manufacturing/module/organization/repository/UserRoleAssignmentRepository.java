@@ -7,6 +7,8 @@ import com.erp.manufacturing.module.organization.domain.ScopeType;
 import com.erp.manufacturing.module.organization.domain.UserRoleAssignment;
 import com.erp.manufacturing.module.organization.domain.RoleStatus;
 import com.erp.manufacturing.module.organization.dto.ScopeResourcePermissionRow;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,6 +23,23 @@ public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssi
 
     Optional<UserRoleAssignment> findByUserIdAndRoleIdAndScopeIdAndStatus(
             UUID userId, UUID roleId, UUID scopeId, AssignmentStatus status);
+
+    /**
+     * {@code C2-4}: {@code GET /access/assignments?userId=&roleId=&scopeId=}. All three filters are
+     * optional UUID equality against columns that already live directly on {@code UserRoleAssignment}
+     * — no join needed (unlike the B32 permission-resolution queries above, which must cross into
+     * {@code Role}/{@code Permission}/{@code AccessScope} to know what a role actually grants).
+     */
+    @Query("""
+            select a from UserRoleAssignment a
+            where (:userId is null or a.userId = :userId)
+              and (:roleId is null or a.roleId = :roleId)
+              and (:scopeId is null or a.scopeId = :scopeId)
+            """)
+    Page<UserRoleAssignment> search(@Param("userId") UUID userId,
+                                    @Param("roleId") UUID roleId,
+                                    @Param("scopeId") UUID scopeId,
+                                    Pageable pageable);
 
     @Query("""
             select distinct r.code

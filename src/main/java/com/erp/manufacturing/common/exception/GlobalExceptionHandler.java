@@ -13,6 +13,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
  *   <li>{@link ConstraintViolationException}           – @Validated on path/query params</li>
  *   <li>{@link HttpMessageNotReadableException}        – malformed / unparseable JSON body</li>
  *   <li>{@link MethodArgumentTypeMismatchException}    – wrong type in path/query (e.g. bad UUID)</li>
+ *   <li>{@link MissingServletRequestParameterException}– required query param absent</li>
  *   <li>{@link HttpRequestMethodNotSupportedException} – wrong HTTP verb</li>
  *   <li>{@link AccessDeniedException}                  – Spring Security 403</li>
  *   <li>{@link ObjectOptimisticLockingFailureException}– @Version conflict</li>
@@ -130,7 +132,27 @@ public class GlobalExceptionHandler {
         return badRequestWithFields(fieldErrors);
     }
 
-    // ── 7. Wrong HTTP verb ─────────────────────────────────────────────────
+    // ── 7. Required query param absent ─────────────────────────────────────
+
+    /**
+     * Sibling of handler 6: a required {@code @RequestParam} that is present but unparseable is a type
+     * mismatch, one that is absent altogether lands here. Without this handler the request falls
+     * through to the catch-all and answers <b>500 INTERNAL_SERVER_ERROR</b> — telling the client the
+     * server broke when in fact the call was malformed, and setting off 5xx alerts for what is an
+     * ordinary client mistake. Reported as a field error so the caller learns <em>which</em> parameter
+     * is missing.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestParameter(
+            MissingServletRequestParameterException ex) {
+
+        List<FieldErrorResponse> fieldErrors = List.of(
+                new FieldErrorResponse(ex.getParameterName(), "is a required request parameter"));
+
+        return badRequestWithFields(fieldErrors);
+    }
+
+    // ── 8. Wrong HTTP verb ─────────────────────────────────────────────────
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(
@@ -141,7 +163,7 @@ public class GlobalExceptionHandler {
                         "HTTP method " + ex.getMethod() + " is not supported for this endpoint"));
     }
 
-    // ── 8. Spring Security – access denied (403) ───────────────────────────
+    // ── 9. Spring Security – access denied (403) ───────────────────────────
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
@@ -149,7 +171,7 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(AuthErrorCode.ACCESS_DENIED));
     }
 
-    // ── 9. Optimistic locking conflict (@Version) ──────────────────────────
+    // ── 10. Optimistic locking conflict (@Version) ─────────────────────────
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ResponseEntity<ApiResponse<Void>> handleOptimisticLocking(
@@ -161,7 +183,7 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(BusinessErrorCode.CONCURRENT_MODIFICATION));
     }
 
-    // ── 10. DB constraint violation (FK, unique index) ─────────────────────
+    // ── 11. DB constraint violation (FK, unique index) ─────────────────────
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(
@@ -174,7 +196,7 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Data constraint violation"));
     }
 
-    // ── 11. Catch-all – never expose internal details ──────────────────────
+    // ── 12. Catch-all – never expose internal details ──────────────────────
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleAll(

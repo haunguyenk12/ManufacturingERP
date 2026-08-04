@@ -116,6 +116,23 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
     }
 
+    /**
+     * A missing required query param used to fall through to the catch-all and answer 500 — the shape
+     * of the {@code GET /inventory/movements} report of 2026-08-04. Asserting the {@code errors[]} entry
+     * as well as the code is what makes this bite: a handler that returns a bare 400 without naming the
+     * parameter leaves the caller guessing which one it forgot.
+     */
+    @Test
+    @DisplayName("Missing required query param returns 400 INVALID_INPUT naming the param, not a 500")
+    void missingRequiredQueryParam_returns400NamingTheParameter() throws Exception {
+        mockMvc.perform(get("/api/v1/test/exceptions/required-param"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("warehouseId"))
+                .andExpect(jsonPath("$.errors[0].message").exists())
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
     @Test
     @DisplayName("Spring Security AccessDeniedException returns 403 ACCESS_DENIED")
     void accessDeniedException_returns403AccessDenied() throws Exception {

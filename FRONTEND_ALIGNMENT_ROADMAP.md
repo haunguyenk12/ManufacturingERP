@@ -1,8 +1,13 @@
-# Frontend Alignment Roadmap – Track `F*`
+# Frontend Alignment Roadmap – Track `F*` · `D*` · `C2-*`
 
 > **Vai trò của file này:** giữ toàn bộ lịch sử + kế hoạch chi tiết của track `F*` (căn chỉnh API
 > backend theo `OmniPlant_MVP_Production_Backend_Handoff.docx`), tương tự cách
 > `MANUFACTURING_GAP_ROADMAP.md` giữ track `P*` và `TEST_IMPROVEMENT_PLAN.md` giữ track `T*`.
+>
+> **File này host ba track**, vì cả ba đều xuất phát từ việc căn chỉnh backend theo nhu cầu frontend:
+> **`F*`** (§0–§5, §7 — spec `.docx` gốc) · **`D*`** (§6 — trả nợ kỹ thuật phát sinh từ `F*`) ·
+> **`C2-*`** (**§8** — gap Capstone 2 theo `BACKEND_CAPSTONE2_API_GAPS.md`, tài liệu FE gửi 2026-08-04).
+> Track `C2-*` là track **đang chạy**; `F*` đã đóng ở `F10`, `D*` còn `D8c`.
 >
 > **Quy ước:** `NEXT_PHASE_PLAN.md` **luôn chỉ chứa đúng một phase đang chạy** (quy ước chung của
 > repo, xem `MANUFACTURING_GAP_ROADMAP.md §2.1`). Khi một phase `F*` hoàn thành, nội dung chi tiết
@@ -29,7 +34,10 @@ của `MANUFACTURING_GAP_ROADMAP.md`, chỉ sắp lại thứ tự theo dependen
 
 ---
 
-## 1. Bảng Theo Dõi Tiến Độ *(cập nhật: 2026-07-28)*
+## 1. Bảng Theo Dõi Tiến Độ — track `F*` *(cập nhật: 2026-08-01, `F*` đã đóng ở `F10`)*
+
+> 🔴 **Track đang chạy là `C2-*`, xem §8** — bảng dưới đây chỉ là lịch sử `F1`–`F10`.
+> Trạng thái checklist Capstone 2 (6/13) ở **§8.0**; `C2-4` đã xong, phase kế tiếp chưa chốt (§8.1).
 
 | ✔ | Phase | Nội dung | Trùng roadmap `P*` |
 |---|---|---|---|
@@ -55,8 +63,12 @@ của `MANUFACTURING_GAP_ROADMAP.md`, chỉ sắp lại thứ tự theo dependen
 > phẳng chỉ có bản nested, và `uom` có mặt trên **đúng 1 DTO** trong cả `module/workorder`. `F8`
 > (✅ 2026-07-31) đã đóng phần đó — xem §3.8 và §7.
 >
-> Kế hoạch dọn nợ kỹ thuật phát sinh trong và trước track này nằm ở **§6** (track `D*`); `D1`–`D11`
-> và `D8a` đã xong, còn **`D8b`/`D8c`**.
+> Kế hoạch dọn nợ kỹ thuật phát sinh trong và trước track này nằm ở **§6** (track `D*`); `D1`–`D11`,
+> `D8a` và **`D8b`** đã xong, còn **`D8c`** (🔴 bị chặn: `pom.xml` không có `spring-boot-starter-mail`).
+>
+> **Track `C2-*` (§8) là track kế nhiệm** — nguồn của nó là `BACKEND_CAPSTONE2_API_GAPS.md`, tài liệu
+> **khác** với spec `.docx` của `F*`. `C2-0` lại tìm ra một field spec `F*` để sót (**time variance**,
+> §8.2) ⇒ bảng §7 vẫn chưa phải là bản đối chiếu cuối cùng, đừng đọc dấu ✅ ở đó như "đã xong hết".
 
 ---
 
@@ -1574,6 +1586,239 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 | ~~**G**~~ | ~~Requirement `projectedAvailable`~~ ✅ **ĐÃ TRẢ (`F10`, 2026-08-01)** — `V40` cột **nullable, không backfill**; giá trị là `remainingCoverage` mà `MrpCalculationService` vốn đã tính rồi vứt đi. Bất biến `B77` | §2.4 | — |
 | ~~**H**~~ | ~~`MaterialIssue.code`, `ProductionExecution.code`, execution `status`~~ ✅ **ĐÃ TRẢ (`F10`, 2026-08-01)** — `V40` (`MI-`/`PE-`, backfill + `UNIQUE`), sinh ở `@PrePersist`; `status` là **hằng `"POSTED"`, không cột**. Bất biến `B79` | §4.2, §5.2 | — |
 | **I** | `childBom` trên BOM-line snapshot của Work Order (§3.3) | `F9` | **Không phải field quên mà là quyết định thiết kế có từ `P1`:** WO snapshot là **direct-only** (`B12`), và MRP nổ cấp sâu thành **work order riêng**. Lồng cây BOM vào snapshot = đổi ngữ nghĩa `B12` + bảng `work_order_component_lines` và mọi chỗ đọc nó. FE xem cây BOM thì gọi endpoint BOM tree sẵn có của `module/bom` |
-| **B** | `predecessorOperationIds` (§3.3) | `F4` | Chưa có consumer — dependency graph chỉ có nghĩa khi có scheduling |
+| **B** | `predecessorOperationIds` (§3.3) | `F4` | Chưa có consumer — dependency graph chỉ có nghĩa khi có scheduling.<br>🔴 **[2026-08-04] Lý do này SẮP HẾT HIỆU LỰC:** `C2-8` (Capacity Board + schedule adjustment, §8) **chính là** consumer đó — spec FE đòi backend trả warning khi "sequence không hợp lệ", mà không có dependency graph thì không có gì để kiểm ngoài `sequence` tăng dần. ⇒ Khi khởi động `C2-8`, đọc lại nợ này **trước**, đừng thiết kế capacity rồi mới phát hiện thiếu |
 | **C** | `created_by` trong scope `Idempotency-Key` (§10.2) | `D6` | Cột nullable ⇒ cần backfill trước |
 | **D** | 17 DTO ngoài luồng spec vẫn dùng `itemCode`/`lotCode` | `F7` gap #2 | **Phương án A user chốt**: spec không mô tả màn hình cho chúng. Danh sách chính xác ở §3.7 |
+
+---
+
+## 8. Track `C2-*` — Gap API Cho Capstone 2  *(soạn 2026-08-04; `C2-0`+`C2-5`+`C2-3`+`C2-4` ✅ xong)*
+
+> **Nguồn:** `BACKEND_CAPSTONE2_API_GAPS.md` (FE team, 2026-08-04) — **file khác** với spec `.docx` của
+> track `F*`. Nó liệt kê **6 nhóm P0** (UOM, Inventory Lot, Audit Logs, Work Center, Shift/Calendar,
+> Capacity Board), **6 mục P1** và một checklist nghiệm thu **13 ô**.
+>
+> **Văn bản đối ngoại:** `docs/capstone2-api-gap-response.md` — phản hồi chính thức gửi FE, chứa 3 mục
+> họ báo thiếu mà **đã có**, 2 chỗ họ mô tả nhẹ hơn thực tế, và **5 câu hỏi đang chờ FE**.
+>
+> 🔴 **Baseline đối chiếu là CODE THẬT.** Tài liệu FE dẫn `plans/openapi/openapi-2026-08-04.json` —
+> file đó **không tồn tại trong repo này**, nên không kiểm được snapshot họ đọc. Ba mục họ báo thiếu
+> hoá ra đã có, rất có thể vì snapshot cũ. Đã đề nghị FE commit snapshot hoặc cho commit hash.
+
+### 8.0 Trạng thái checklist §6 của tài liệu FE — **6/13** *(cập nhật sau `C2-4`)*
+
+| # | Ô checklist | Trạng thái |
+|---|---|---|
+| 1 | Auth refresh rotation **+ concurrent refresh** | 🟡 **một nửa** — rotation/RTR/absolute timeout ✅ (`D8a`,`D8b`); 🔴 **concurrent refresh KHÔNG pass, cố ý** (`CLAUDE.md §0.22` #5: cần lock/CAS; double-submit có thể bị force-logout oan). FE coi đây là điều kiện nghiệm thu ⇒ phải mở phase riêng |
+| 2 | Không còn 500 không có trace ở happy path | 🟡 3 lỗi **được báo** đã sửa (`§0.24`); **chưa** rà toàn bộ endpoint ⇒ không tuyên bố "không còn" |
+| 3 | UOM CRUD/lifecycle | ✅ **`C2-3`** (2026-08-04) — 7 endpoint, `V42`+`V43` |
+| 4 | Inventory Lot list/detail/status | ❌ `C2-2` — **bị chặn** |
+| 5 | Audit list/detail | ❌ `C2-1` — **bị chặn** |
+| 6 | Work Center CRUD/lifecycle | ❌ `C2-6` |
+| 7 | Shift/Calendar CRUD/lifecycle | ❌ `C2-7` |
+| 8 | Capacity Board + schedule adjustment | ❌ `C2-8` |
+| 9 | BOM/Routing deactivate | ✅ **`C2-0`** — đã có từ trước, chỉ là verb `DELETE` |
+| 10 | SO DRAFT update | ✅ **`C2-4`** (2026-08-05) — `PATCH /sales-orders/{id}`, xem §8.5 |
+| 11 | Role/Scope/Assignment reads + lifecycle | ✅ **`C2-4`** (2026-08-05) — 9 endpoint, xem §8.5 |
+| 12 | Over-BOM approval semantics | ✅ **`C2-4`** (2026-08-05) — phương án (1) chốt, `docs/capstone2-api-gap-response.md §5` câu 4 đã trả lời |
+| 13 | Multi-Plant isolation test data | ✅ **`C2-5`** — 2 plant + 3 account, isolation kiểm qua HTTP thật |
+
+**Ngoài checklist:** CORS ✅ (`C2-5`) · **time variance** ✅ **`C2-4`** (2026-08-05) — xem §8.5.
+
+🔴 **Phát hiện khi làm `C2-3` (2026-08-04), áp dụng cho MỌI ô ✅ dùng account seed `C2-5`:**
+`manager.a`/`operator.a` (scope `PLANT`) **không dùng được** để probe permission gác bằng
+`@permissionGuard.hasPermission(...)` thuần (không resource) — cơ chế đó chỉ đọc assignment có
+`scopeType = GLOBAL`, và hiện tại **chỉ `admin`** có scope đó. Ô 3 (UOM) đã xác nhận điều này **không
+riêng UOM**: `manager.a` gọi `GET /companies` (cùng cơ chế, có từ trước `C2-*`) cũng 403. Khi kiểm bất
+kỳ ô nào dùng `hasPermission` (UOM, `PERM_ORG_*`, `PERM_ACCESS_MANAGE`), dùng `admin`, không dùng
+account seed `C2-5`. Chi tiết: `module/uom/CLAUDE.md`.
+
+### 8.1 Bảng phase
+
+Sắp theo **giá trị/rủi ro**, **không** theo thứ tự trong tài liệu FE.
+
+| Phase | Nội dung | Migration | Trạng thái |
+|---|---|---|---|
+| `C2-0` | Phản hồi FE + sửa `@Operation` 3 endpoint + api-guide | không | ✅ **2026-08-04** — §8.2 |
+| `C2-5` | CORS + dev-seed 2 plant/3 account + **`V41`** sửa lệch RBAC | **`V41`** | ✅ **2026-08-04** — §8.3 |
+| `C2-3` | UOM master (7 endpoint, bảng mới, **global**) | **`V42`+`V43`** | ✅ **2026-08-04** — §8.4 |
+| `C2-4` | `PATCH /sales-orders/{id}` · Role/Scope lifecycle · `GET /access/assignments` · chốt over-BOM · **time variance** | không | ✅ **2026-08-05** — §8.5 |
+| **`C2-1`** | Audit Logs read API | `V44` (1 cột) | 🔴 **BỊ CHẶN** — chờ FE câu 1 |
+| **`C2-2`** | Inventory Lot list/detail/status | `V45` | 🔴 **BỊ CHẶN** — chờ FE câu 2 |
+| `C2-6` | Work Center entity + CRUD | `V46` | chưa bắt đầu — mở đầu cluster `P4`, **KẾ TIẾP không bị chặn** |
+| `C2-7` | Shift + Work Calendar | `V47` | chưa bắt đầu — phụ thuộc `C2-6` |
+| `C2-8` | Capacity Board + schedule adjustment | `V48` | chưa bắt đầu — **nặng nhất**, phụ thuộc `C2-6`+`C2-7` |
+
+> `C2-6`..`C2-8` **chính là phase `P4`** của `MANUFACTURING_GAP_ROADMAP.md` (Work Center/CRP). Dùng mã
+> `C2-*` để `git log --grep` truy theo đợt Capstone 2; ghi chú chéo sang `P4` khi khởi động.
+>
+> **Số migration ở bảng trên là dự kiến** — thực tế lấy số kế tiếp tại thời điểm làm (`C5`: không sửa
+> migration cũ). Cao nhất hiện tại: **`V43`**.
+
+### 8.2 Bản ghi `C2-0` ✅ **HOÀN THÀNH 2026-08-04**
+
+**Không** code logic. Ba mục FE báo thiếu thì **đã có**, nguyên nhân là **verb + OpenAPI summary**:
+
+| FE nói | Thực tế |
+|---|---|
+| §4.1 BOM chưa có Deactivate | **Có** — `DELETE /api/v1/boms/{bomId}` |
+| §4.2 Routing chưa thấy Deactivate | **Có** — `DELETE /api/v1/routings/{routingId}` |
+| §5 variance "mô tả đầy đủ material, **time**, output" | Endpoint có, **nhưng thiếu thật phần time** |
+
+Repo dùng `DELETE` cho deactivate theo `C6` (không hard-delete); FE quét theo path `/deactivate` nên
+không thấy. **Không đổi verb** — đổi là breaking change cho 6 endpoint deactivate khác đang chạy.
+Đã sửa `@Operation(summary)` + `description` của cả hai để OpenAPI nói thẳng *"this IS the deactivate
+command"*, và ghi khối cảnh báo vào `docs/api-guide-for-frontend.md`.
+
+🔴 **`C2-0` sửa một tuyên bố sai của chính bản kế hoạch mình** — và đó là lần **thứ tư** repo mắc cùng
+lỗi (§7 đầu mục, `CLAUDE.md §0.20`). Kế hoạch xếp variance vào "chỉ cần tài liệu" vì đọc *tên endpoint
+có tồn tại* rồi kết luận. Mở DTO ra đọc thì `WorkOrderVarianceResponse` = `materialLines` +
+`outputVariance` + `wipSummary` ⇒ **không có time variance**, và không chỗ nào trong `src/main` tính nó.
+Dữ liệu thì đủ (`ProductionExecution.actualStartedAt`/`actualEndedAt` +
+`WorkOrderOperation.setupMinutes`/`runMinutesPerUnit`) ⇒ làm được, nhưng là **logic + DTO mới** ⇒ xếp
+vào `C2-4`. ⇒ **Quy tắc cho mọi phase `C2-*` còn lại: mở DTO đọc từng field, đừng dừng ở "endpoint có
+tồn tại không".**
+
+### 8.3 Bản ghi `C2-5` ✅ **HOÀN THÀNH 2026-08-04**
+
+Migration **`V41`**. Bản ghi đầy đủ + 4 nghiệm thu mutation: **`CLAUDE.md §0.25`**.
+
+| Phần | Nội dung |
+|---|---|
+| `C2-5a` | **CORS** — `CorsProperties` (`app.cors.*`) + `corsConfigurationSource()`. Trước đó repo có **0 dòng** CORS |
+| `C2-5b` | **`src/main/resources/db/dev-seed.sql`** — 1 company + 2 plant + 6 warehouse + 3 account. **Chạy tay, KHÔNG migration** |
+| `C2-5c` | **`V41`** — 10 permission cho `MANAGER`, 6 cho `OPERATOR` theo `docs/roles-and-permissions.md` |
+
+🔴 **Defect nặng nhất của phase KHÔNG nằm trong kế hoạch** (kế hoạch còn dự đoán phase này "không
+migration"): seed sớm (`V7`–`V15`) ghi `WHERE r.code = 'ADMIN'`, seed sau (`V17`+) ghi đủ 3 role ⇒
+**12 permission lõi chỉ `ADMIN` có** ⇒ login `manager.a` scope PLANT-A gọi
+`GET /plants/{A}/work-orders` trả **403 ngay trên plant của chính nó** ⇒ **mọi account không phải
+`admin` vô dụng** ở màn hình lõi. Đây là khoản nợ `F8` đã ghi và cố ý hoãn (*"sửa đúng chỗ là role
+seed — quyết định nới quyền, ngoài phạm vi F8"*), nay đóng theo quyết định user: **tài liệu là nguồn,
+code là chỗ trôi**.
+
+**Ba bài học áp cho mọi phase `C2-*` còn lại:**
+
+1. 🔴 **`PermissionCatalogTest` không phủ được ma trận grant.** Nó chỉ chứng minh `PERM_*` **có dòng
+   trong bảng `permissions`**; "được cấp cho role nào" là sự thật **khác**, nằm ở `role_permissions`, và
+   **chỉ DB thật** trả lời được. Phase nào thêm permission phải bổ sung **cả hai** dạng assertion:
+   **dương** (role phải có gì) và **cấm** (role không được có gì — separation of duties). 3 test mới ở
+   `FlywayMigrationIT.migrate_v41_*`; tập admin-only sau `V41` là **đúng 2**: `PERM_ORG_MANAGE`,
+   `PERM_ACCESS_MANAGE`.
+2. 🔴 **`@Valid` chạy TRƯỚC method security.** Probe authz bằng body sai định dạng trả **400
+   `VALIDATION_ERROR`** và làm người kiểm kết luận sai là "đã chặn". Tôi mắc đúng lỗi này khi tự kiểm
+   `C2-5` và phải làm lại probe với body hợp lệ.
+3. 🔴 **Config bảo mật "trông như đã wire" là loại bug tệ nhất.** `CorsFilter` nằm trong chain sẵn
+   (default Spring Security) nên không ai thấy thiếu, mà **không origin nào được phép**; và `curl`
+   không gửi preflight nên test tay vẫn xanh. ⇒ Kiểm config bảo mật bằng **browser-shaped request**
+   (preflight `OPTIONS`), không chỉ curl. Và CORS **phải** wire qua `http.cors(...)`, không phải
+   `WebMvcConfigurer` riêng — preflight không mang `Authorization` nên chỉ đường đó short-circuit được
+   trước `.anyRequest().authenticated()`.
+
+### 8.4 Bản ghi `C2-3` ✅ **HOÀN THÀNH 2026-08-04**
+
+Migration **`V42`** (schema) + **`V43`** (seed permission). Bản ghi đầy đủ + 4 nghiệm thu mutation:
+**`CLAUDE.md §0.26`**. Bất biến `B82`-`B85`: **`module/uom/CLAUDE.md`**.
+
+| Quyết định | Nội dung |
+|---|---|
+| Global, không company-scope | `uoms` **không có** `company_id` — theo đúng dữ kiện FE liệt kê (`GET /uoms` không lọc theo company) |
+| Lifecycle | `POST .../activate` + `POST .../deactivate`, không dùng `DELETE` — greenfield API, đi theo đúng 2 verb FE liệt kê tường minh |
+| `code` immutable | `UomUpdateRequest` **không có field `code`** — compile-time guarantee, không validate runtime |
+| Permission | `PERM_UOM_READ` (3 role), `PERM_UOM_MANAGE` (ADMIN+MANAGER) — theo khuôn `V31` (routing) |
+
+🔴 **Phát hiện khi kiểm chứng qua HTTP thật, KHÔNG phải bug của `C2-3`:** `PermissionGuard.hasPermission(...)`
+(cơ chế gác `PERM_UOM_*`, giống `PERM_ORG_READ`/`_MANAGE`) chỉ đọc assignment có **`scopeType = GLOBAL`**.
+Account seed `manager.a`/`operator.a` (`C2-5`, scope `PLANT`) trả **403 trên mọi endpoint UOM**, kể cả
+`GET /uoms` dù `V43` đã cấp `PERM_UOM_READ` cho `OPERATOR`. Xác nhận **không riêng UOM**: `manager.a` gọi
+`GET /companies` (cùng cơ chế, có từ trước `C2-*`) cũng 403. ⇒ **Bài học cho mọi ô checklist §8.0 dùng
+account seed `C2-5`:** muốn probe permission gác bằng `hasPermission` thuần, phải dùng `admin`.
+
+**Nghiệm thu mutation (4, đã revert — 4/4 đụng `src/main` hoặc migration):** typo permission string
+trong `create` ⇒ 2 case đỏ · đổi mã lỗi trùng `code` ⇒ 1 case đỏ · bỏ `cast(:keyword as string)` khỏi
+`UomRepository.search` ⇒ **2 case đỏ, và unit test (mock) xác nhận KHÔNG bắt được** — đúng điều kiện dự
+phòng mà kế hoạch phase tự ghi, nên đã thêm `UomRepositoryIT` (**class IT thứ 12**) · bỏ grant
+`PERM_UOM_READ` của `OPERATOR` khỏi `V43` ⇒ 1 case đỏ ở `FlywayMigrationIT` (test mới, theo khuôn
+`migrate_v41_*` của `C2-5`).
+
+**Breaking changes — wire: KHÔNG có.** Toàn bộ additive.
+
+---
+
+### 8.5 Bản ghi `C2-4` ✅ **HOÀN THÀNH 2026-08-05**
+
+**Không migration.** Bản ghi đầy đủ + nghiệm thu mutation: **`CLAUDE.md §0.27`**. Bất biến `B86`
+(`module/workorder/CLAUDE.md`), `B87` (`module/sales/CLAUDE.md`), `B88` (`module/organization/CLAUDE.md`).
+
+| Phần | Nội dung |
+|---|---|
+| A | `PATCH /sales-orders/{id}` — full-replace, chỉ `DRAFT`, `expectedVersion` bắt buộc |
+| B | 9 endpoint Role/Scope lifecycle (`GET`/`PATCH`/`activate`/`deactivate` × 2 + `GET /access/assignments`), tái dùng `PERM_ACCESS_MANAGE` |
+| C | Chốt contract over-BOM: phương án (1) đã chạy (`B15`) — chỉ cập nhật tài liệu, không code |
+| D | `timeVariance` trên `GET /work-orders/{id}/variance` |
+
+🔴 **Defect thật bắt được lúc `mvn verify`, không phải khi code Part D:** kế hoạch gốc định nới
+`WorkOrderRepository.findWithDetailsByWorkOrderId` thêm `"operations"` vào `@EntityGraph` sẵn có
+(đã có `"componentLines"`). Cả hai đều là `List` ("bag") ⇒ Hibernate ném
+`MultipleBagFetchException` ngay từ query đầu tiên — sập **toàn bộ** endpoint variance (và
+`ProductionFlowE2EIT`, vì nó gọi cùng entity graph), không chỉ phần time. `mvn test` (mock
+repository) không thấy được vì `@EntityGraph` không chạy trong unit test — chỉ `mvn verify` (Testcontainers
+thật) bắt được. Sửa: operations đọc qua **một query riêng**
+(`WorkOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc`, method có sẵn) thay vì
+`workOrder.getOperations()` — 1 query thêm, không phải 1/dòng (`C14`), và không đụng entity graph hiện có.
+⇒ **Bài học cho mọi phase sau:** trước khi thêm bất kỳ path thứ hai vào một `@EntityGraph` đã có
+collection `List`, kiểm xem path đó cũng là `List` không — nếu có, tách query.
+
+**Nghiệm thu:** `mvn -o clean verify` — **661 case unit + 78 case IT / 12 class IT, failures = 0,
+errors = 0** (baseline trước phase: 617 unit + 78 IT / 12 class — không migration nên số IT không đổi,
+Part D thêm rồi bỏ một IT case khi đổi thiết kế). Toàn bộ 44 case mới đều ở tầng unit
+(`SalesOrderServiceTest`/`SalesOrderControllerTest`/`SalesOrderMethodSecurityTest`,
+`AccessControlServiceTest`/`AccessControlControllerTest`/`AccessControlMethodSecurityTest`,
+`WorkOrderVarianceServiceTest`).
+
+**Breaking changes — wire: KHÔNG có.** Toàn bộ additive: 1 endpoint `PATCH` mới, 9 endpoint Role/Scope
+mới, 1 field mới (`timeVariance`) trên `WorkOrderVarianceResponse`. **Java positional:**
+`WorkOrderVarianceResponse` +1 component (cuối), `WorkOrderVarianceService` constructor +2 tham số
+(`ProductionExecutionRepository`, `WorkOrderOperationRepository`).
+
+---
+
+### 8.6 Hai phase đang bị chặn — chặn bởi **thiết kế**, không phải bởi thứ tự
+
+`C2-1` và `C2-2` là hai phase **rẻ nhất** (hạ tầng đã có sẵn) nên kế hoạch gốc xếp lên đầu. Nhưng câu
+trả lời của FE **đổi thiết kế**, làm trước rồi sửa lại là tự tạo việc:
+
+| Phase | Chờ gì | Vì sao câu trả lời đổi thiết kế |
+|---|---|---|
+| `C2-1` | Màn hình Audit dùng được khi `changes[]` **rỗng**? | `AuditLogChange` + repository + bảng (`V6`) **đều tồn tại nhưng 0 call site ghi** — `AuditLogService` chỉ ghi *sự kiện*, không nhận diff. Nếu FE cần diff thật thì phải làm `C2-1b` (sửa `AuditableAspect`), phạm vi khác hẳn `C2-1a` |
+| `C2-2` | Màn hình Lot dẫn user sang QC khi lot `HOLD` chờ QC? | Nếu `POST /inventory/lots/{id}/status` cho tự do `HOLD → AVAILABLE` thì lot của production receipt ra `AVAILABLE` **không qua QC** ⇒ `fulfilledQuantity` của SO line **không bao giờ tăng**, đơn treo `IN_PROGRESS` vĩnh viễn **không lỗi nào báo** — dựng lại đúng nợ **#17** mà `D5` vừa trả (`B62`) |
+
+### 8.7 Bẫy đã xác định cho các phase chưa làm
+
+| Phase | Bẫy |
+|---|---|
+| `C2-1` | `audit_logs` **không có cột `plant_id`** mà filter §3.3 đòi. Thêm cột ⇒ mọi dòng lịch sử `NULL` (audit append-only, không backfill được) ⇒ filter chỉ đúng cho dòng mới. Ghi tường minh `NULL = "trước C2-1"`, đúng tiền lệ `cancel_reason` của `F7` |
+| `C2-2` | `InventoryLot` **không có** warehouse, **không có** manufacture date. `warehouseId` bắt buộc phải resolve qua `stock_balances` (tái dùng `StockBalanceRepository.aggregate*`, `C14`); `manufactureDate` map từ `receivedAt` (như alias `bomCapturedAt` của `F8`) — **đừng** thêm cột cho giống tài liệu. Phần **tốn công nhất là source genealogy**, không phải status |
+| `C2-3` | **Additive.** `items.unit` là `String NOT NULL` đọc ở **13 call site / 5 mapper**, tất cả read-only để hiển thị `uom` (`F8`/`F9`). ⇒ `C2-3` chỉ dựng bảng `uoms` + CRUD; nối `items.uom_id` FK và bỏ cột `unit` là **phase riêng** |
+| `C2-6`/`C2-8` | 🔴 **Không** đổi `WorkOrderOperation.workCenterCode` thành FK — nó là **snapshot bất biến** (`B56`, cùng hợp đồng `B49`); FK = đọc master data sống ⇒ phá bất biến (đúng bẫy §3.4.3). Master data `RoutingOperation.workCenterCode` **thì được** trỏ FK. Snapshot giữ cột code phẳng + `source_work_center_id` chỉ để truy vết, **không** dereference |
+| `C2-8` | 🔴 `work_order_operations` **chưa có** `plannedStartAt`/`plannedEndAt`. ⇒ không phải "thêm 2 cột" mà là **quyết định nghiệp vụ**: sinh lịch lúc nào — tạo WO, `plan`, hay `release`? Phải chốt riêng trước khi code. Và đọc nợ **B** (`predecessorOperationIds`, §7.1) **trước** — `C2-8` chính là consumer làm lý do hoãn của nó hết hiệu lực |
+| mọi phase | Permission mới ⇒ seed migration cùng phase **+** `docs/roles-and-permissions.md` (`C10`) **+** cập nhật `adminOnlyByDesign` / checklist ở `FlywayMigrationIT.migrate_v41_*` nếu tập admin-only đổi · query search có param `String` nullable **phải** `cast(:p as string)` (`§0.24`: thiếu nó là **500 toàn endpoint** mà unit test lẫn coverage đều xanh) · `X-Plant-Id` theo **endpoint**, không theo controller (3 phase đã sập bẫy) · mỗi controller mới ⇒ 1 `*ControllerTest` assert `$.code` + đủ 7 field `PageResult` · logic trong JPQL ⇒ bắt buộc `*IT` (`R7`) · ≥3 nghiệm thu mutation, ưu tiên loại **giữ nguyên HTTP status** · **[`C2-4`]** thêm path `List` thứ hai vào một `@EntityGraph` đã có collection `List` ⇒ `MultipleBagFetchException`, chỉ `mvn verify` bắt được — kiểm loại collection trước khi mở rộng entity graph |
+
+### 8.8 Kiểm chứng (áp dụng mọi phase `C2-*`)
+
+Ngoài §5 (áp cho cả track `F*`):
+
+1. `mvn -o clean verify` — **đọc cả `Errors:`, không chỉ `Failures:`**, ở **cả hai** dòng tổng (`test`
+   và `integration-test`). Bài học 2026-08-04: `D8b` báo "66 IT xanh" trong khi thật là 65 xanh / 1 error.
+2. Số case **≥ baseline hiện tại: 661 unit + 78 IT / 12 class IT**, `failures = 0`, `errors = 0`.
+3. **Chạy thật qua HTTP** cho happy-path mới — cả 3 bug ngày 2026-08-04, defect RBAC của `C2-5`, và
+   giới hạn `hasPermission`/`GLOBAL` scope phát hiện ở `C2-3` đều **không** bị unit test phát hiện.
+   Dev stack: `erp-postgres:5434` + `erp-redis:6379`.
+   ⚠️ Cổng 8080 có thể đang có instance của user; dùng `-Dspring-boot.run.arguments=--server.port=8081`
+   và **đừng** tắt process của họ.
+4. Phase nào đụng permission/scope ⇒ probe **differential**: cùng một request với 2 role khác nhau, và
+   cùng một role với 2 plant khác nhau. Một mình 403 không chứng minh được gì (403 có thể vì scope, vì
+   permission, hoặc vì `@Valid` chưa chạy tới). 🔴 **Nếu permission gác bằng `hasPermission` thuần
+   (không resource — `PERM_UOM_*`, `PERM_ORG_READ/MANAGE`, `PERM_ACCESS_MANAGE`), account probe phải có
+   assignment `scopeType = GLOBAL`** — account seed `C2-5` (`manager.a`/`operator.a`, scope `PLANT`)
+   luôn 403 ở nhóm này bất kể migration seed đúng hay sai. Dùng `admin` để probe nhóm này (§8.4).

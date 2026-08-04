@@ -108,6 +108,21 @@ app:
       - "172.16.0.0/12"
       - "192.168.0.0/16"
 
+  # CORS (best practice S5). Exact origins only — "*" is refused at startup because every request
+  # carries the Authorization header, and the CORS spec forbids a wildcard on credentialed requests.
+  # Override per environment with CORS_ALLOWED_ORIGINS (comma-separated).
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+    allowed-methods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
+    # Idempotency-Key and X-Plant-Id are ours; without them the browser blocks the preflight of
+    # every sensitive POST and every plant-scoped call.
+    allowed-headers: [Authorization, Content-Type, Idempotency-Key, X-Plant-Id, X-Trace-Id]
+    # Response headers the browser hides from JS unless they are exposed explicitly. X-Trace-Id is
+    # what the frontend quotes in a bug report; the rate-limit trio is what it needs to back off.
+    exposed-headers: [X-Trace-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Rule, Retry-After]
+    allow-credentials: true
+    max-age-seconds: 3600
+
   rate-limit:
     enabled: true
     rules:

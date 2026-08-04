@@ -11,6 +11,7 @@ import com.erp.manufacturing.common.web.PlantContextResolver;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.service.SalesOrderService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -122,6 +124,51 @@ class SalesOrderControllerTest {
 
         // R5: the cross-check must fail before any business logic runs
         verifyNoInteractions(salesOrderService);
+    }
+
+    @Test
+    @DisplayName("update: valid request returns 200 with the updated order")
+    void update_validRequest_returns200Ok() throws Exception {
+        when(salesOrderService.update(eq(SALES_ORDER_ID), any(SalesOrderUpdateRequest.class)))
+                .thenReturn(sampleResponse("DRAFT"));
+
+        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedVersion":1,"customerName":"New Customer"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.salesOrderId").value(SALES_ORDER_ID.toString()));
+    }
+
+    @Test
+    @DisplayName("update: missing expectedVersion returns 400 VALIDATION_ERROR naming the field")
+    void update_missingExpectedVersion_returns400() throws Exception {
+        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[?(@.field == 'expectedVersion')]").exists());
+
+        verifyNoInteractions(salesOrderService);
+    }
+
+    @Test
+    @DisplayName("update: stale expectedVersion returns 409 CONCURRENT_MODIFICATION")
+    void update_staleExpectedVersion_returns409() throws Exception {
+        when(salesOrderService.update(eq(SALES_ORDER_ID), any(SalesOrderUpdateRequest.class)))
+                .thenThrow(new AppException(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                        "Sales order was modified by another request"));
+
+        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedVersion":1}
+                                """))
+                .andExpect(status().is(BusinessErrorCode.CONCURRENT_MODIFICATION.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.CONCURRENT_MODIFICATION.code()));
     }
 
     @Test

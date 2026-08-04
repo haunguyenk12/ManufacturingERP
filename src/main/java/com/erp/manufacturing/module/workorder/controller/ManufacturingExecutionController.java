@@ -339,7 +339,14 @@ public class ManufacturingExecutionController {
     }
 
     @GetMapping("/api/v1/work-orders/{workOrderId}/variance")
-    @Operation(summary = "Get work order variance")
+    @Operation(summary = "Get work order variance — material, output, WIP, and time",
+            description = "Returns materialLines (planned vs issued per component, OVER_ISSUED / "
+                    + "UNDER_ISSUED), outputVariance (planned vs actual output), wipSummary "
+                    + "(scrap, rework) — invariant B20 — and timeVariance (plannedMinutes/"
+                    + "actualMinutes/varianceMinutes, invariant B86). plannedMinutes sums "
+                    + "setupMinutes + runMinutesPerUnit x plannedQuantity across the routing "
+                    + "snapshot; actualMinutes sums the duration of every production execution "
+                    + "that has ended, excluding ones still in progress.")
     public ResponseEntity<ApiResponse<WorkOrderVarianceResponse>> getVariance(@PathVariable UUID workOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(varianceService.getVariance(workOrderId)));
     }

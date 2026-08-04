@@ -1,67 +1,50 @@
-# Next Phase Plan — **chưa chốt**
+# Next Phase Plan — Chưa chốt
 
-> Phase trước: **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH 2026-08-03.**
-> Bản ghi đầy đủ: `CLAUDE.md §0.23` · bất biến `B81`: `module/auth/CLAUDE.md` · cơ chế + 3 chỗ lệch
-> thiết kế gốc + giới hạn đã biết: `common/security/CLAUDE.md` §4.15 · sổ track `D*`:
-> `FRONTEND_ALIGNMENT_ROADMAP.md §6`.
+> Phase trước: **`C2-4` – SO PATCH · Role/Scope Lifecycle · Over-BOM Contract · Time Variance**
+> ✅ **HOÀN THÀNH 2026-08-05.**
+> Bản ghi đầy đủ + nghiệm thu mutation: `CLAUDE.md §0.27` · bất biến `B86` (`module/workorder/CLAUDE.md`),
+> `B87` (`module/sales/CLAUDE.md`), `B88` (`module/organization/CLAUDE.md`) · sổ track `C2-*`:
+> `FRONTEND_ALIGNMENT_ROADMAP.md §8` (bản ghi phase này: §8.5).
 >
-> **586 case unit** (từ 577) + 66 case IT / 10 class IT · failures = 0 · không migration ·
-> wire additive (thêm đúng 1 mã lỗi `SESSION_ABSOLUTE_TIMEOUT`) · 4/4 mutation đụng `src/main` đều bị bắt.
+> **661 case unit + 78 case IT / 12 class IT · failures = 0, errors = 0** · migration mới nhất `V43`
+> (`C2-4` không migration).
 
 ---
 
-## Trạng thái bàn giao *(đo 2026-08-03 sau `D8b` — ĐO LẠI trước khi bắt đầu phase mới, đừng chép)*
+## Vì sao phase tiếp theo chưa chốt
 
-```text
-Baseline:            586 case unit  +  66 case IT / 10 class IT   ·  failures = 0
-Coverage (unit):     line 74.3%  ·  branch 59.5%     (đo lại 2026-08-03)
-Coverage (unit+IT):  line 80.5%  ·  branch 64.2%     (đo lại 2026-08-03)
-Migration mới nhất:  V40
-```
+Trạng thái checklist Capstone 2 (`FRONTEND_ALIGNMENT_ROADMAP.md §8.0`): **6/13**. Các phase còn lại:
 
-✅ **Nợ đo `*IT` của `D8a` đã trả.** `D8b` bật Docker và chạy `mvn -o verify` thật: 66 case IT xanh,
-coverage unit+IT đo lại được. **0 case IT bị `D8b` ảnh hưởng** — `ProductionFlowE2EIT` dựng auth bằng
-`SecurityMockMvcRequestPostProcessors.authentication(...)` nên **không** đi qua `AuthService.login`.
+| Phase | Trạng thái | Vì sao chưa làm ngay |
+|---|---|---|
+| `C2-1` (Audit read API) | 🔴 **BỊ CHẶN** | Chờ FE trả lời câu 1 ở `docs/capstone2-api-gap-response.md §5` — màn hình Audit dùng được khi `changes[]` rỗng hay bắt buộc chờ field-level diff (`AuditableAspect`, phạm vi khác hẳn) |
+| `C2-2` (Inventory Lot list/detail/status) | 🔴 **BỊ CHẶN** | Chờ FE trả lời câu 2 — màn hình Lot có dẫn user sang QC disposition cho lot `HOLD` không (nếu không, cho `HOLD → AVAILABLE` tự do sẽ dựng lại đúng nợ #17 mà `D5` vừa trả, bất biến `B62`) |
+| `C2-6` (Work Center entity + CRUD) | ⚪ **Không bị chặn**, nhưng **chưa thiết kế** | Mở đầu cluster `P4` (Work Center/Shift/Calendar/Capacity) — **nặng nhất** trong toàn bộ track `C2-*`. Cần quyết định trước khi viết plan chi tiết: `WorkOrderOperation.workCenterCode` **giữ nguyên** là snapshot phẳng (bất biến `B56`/`B49`, đã cảnh báo ở `FRONTEND_ALIGNMENT_ROADMAP.md §8.7`) hay `RoutingOperation.workCenterCode` đổi sang FK trỏ Work Center — ảnh hưởng schema + migration, không phải chi tiết triển khai nên không tự quyết được |
+| `D8c` (forgot-password) | 🔴 **BỊ CHẶN** | Thiếu `spring-boot-starter-mail` — phải chốt hạ tầng gửi email trước |
+| `P3` (Costing) | ⚪ Chưa thiết kế | Chưa có invariant/entity nào tồn tại — cần phiên riêng để phác thảo trước khi lên kế hoạch triển khai |
 
-⚠️ Ba bẫy đo số liệu (không đổi): SIGPIPE khi pipe `Tests run:` qua `head`/`Select-Object -First`;
-`jacoco:report` phải chạy **lần hai** sau `mvn -o verify` để có số unit+IT (chạy `mvn -o clean verify
--DskipITs` mới ra số unit một mình); `*IT` cần Docker Desktop bật sẵn.
-
----
-
-## Ứng viên cho phase kế tiếp
-
-| Ứng viên | Nội dung | Effort | Ghi chú |
-|---|---|---|---|
-| **`D8c`** | Forgot-password — nợ #6, phần **3/3** (phần cuối) | Cao (khối lượng file) | 🔴 **Đang bị chặn**: `pom.xml` **không** có `spring-boot-starter-mail`. Phải chốt hạ tầng gửi email (thật / stub log / để FE tự gửi) **trước khi bắt đầu** — không có nó thì flow không nghiệm thu đầu-cuối được. Toàn bộ file mới (service/controller/DTO) + 2 mã lỗi `RESET_TOKEN_INVALID`/`RESET_TOKEN_EXPIRED` và 2 `AuditAction` (`PASSWORD_RESET`, `ACCOUNT_UNLOCKED`) hiện **chưa tồn tại trong code**. Thiết kế: `common/security/CLAUDE.md` §4.14 |
-| **`P3`** | Costing | Cao | Spec FE nói tường minh *"detailed costing/OEE… chưa thuộc contract này"*. Làm trước `P4` sẽ phải làm lại phần labor cost (thiếu `standardRunTimePerUnit`) |
-| **`P4`** | Work Center entity / CRP | Cao | `workCenterCode` hiện chỉ là string hiển thị, **không** logic nghiệp vụ nào phụ thuộc |
-| Nợ nhỏ `E`/`B`/`C`/`D`/`I` | Field-level còn lại của spec FE | Thấp–Trung bình | Không phải bug; lý do hoãn ghi ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`. Nợ `E` cần chú ý: `outputQuantity` đổi **công thức nổ BOM** ⇒ đổi số MRP lẫn component line của mọi WO |
-
-> **Chưa chọn cái nào** — chờ user chốt. Khi chốt xong, viết prompt đầy đủ vào file này theo đúng
-> cấu trúc `D8a`/`D8b` đã dùng (vì sao phase tồn tại → trạng thái bàn giao → thiết kế đã chốt → việc
-> cần làm → test bắt buộc + nghiệm thu mutation → breaking changes → tài liệu phải cập nhật →
-> KHÔNG làm gì).
+Không phase nào trong nhóm "không bị chặn" đủ dữ kiện để viết kế hoạch chi tiết ngay — `C2-6` cần
+quyết định thiết kế Work Center trước (FK hay snapshot, lịch capacity sinh lúc nào — câu hỏi này đã
+ghi ở `FRONTEND_ALIGNMENT_ROADMAP.md §8.7` cho `C2-8` nhưng phải trả lời từ `C2-6`), `P3` chưa có gì
+để bắt đầu từ.
 
 ---
 
-## Việc `D8b` cố ý KHÔNG làm (vẫn còn mở)
+## Việc cần làm trước khi viết plan chi tiết cho `C2-6`
 
-| Việc | Vì sao |
-|---|---|
-| Kiểm absolute timeout ở `JwtAuthenticationFilter` | Timeout hiện chỉ đánh giá **khi refresh** ⇒ access token đang cầm còn dùng được tới hết TTL (tối đa 15 phút) dù phiên vừa vượt mốc. Đóng cửa sổ đó tốn **một lượt đọc Redis mỗi request**, không tương xứng rủi ro. Giới hạn **đã chấp nhận**, ghi ở §4.15 |
-| Đổi value refresh token sang JSON payload (§4.15 bản gốc) | User chốt companion key (2026-08-03); JSON đụng **mọi** đường đọc/ghi refresh token kể cả nhánh RTR của `D8a` |
-| Backfill `sessionCreatedAt` cho phiên cũ | Không backfill được — Redis không biết phiên cũ bắt đầu khi nào. Fail-open có chủ đích, xem `B81` |
-| Thêm `SESSION_TERMINATED` | Có trong tài liệu (`error-handling.md §5.3`, `common/security/CLAUDE.md §4.7`) nhưng **chưa từng tồn tại trong code**. Việc riêng |
-| Grace-period / lock (CAS, Lua) cho race 2-request-đồng-thời của `D8a` | Thiết kế §4.12 không có cơ chế đó. Hệ quả **đã chấp nhận**: client double-submit có thể bị force-logout oan |
-| Device fingerprinting (§4.19) | Tài liệu tự ghi "Nice-to-have, không bắt buộc Phase 1" |
-| **Đổi** hành vi single-session của `login()` | `D8b` sửa **tài liệu** cho khớp code (`architecture-decisions.md`, §4.10). Bỏ 2 dòng `deleteAll*` để thật sự cho multi-device là **quyết định bảo mật riêng**, không phải dọn tài liệu — vẫn mở nếu user muốn |
+1. Đọc lại `MANUFACTURING_GAP_ROADMAP.md` phần Work Center/CRP (`P4`) — `C2-6..8` chính là `P4`.
+2. Quyết định: `WorkOrderOperation.workCenterCode` có tiếp tục là cột phẳng snapshot hay không khi
+   Work Center trở thành entity thật (khuyến nghị hiện tại: **giữ snapshot**, chỉ `RoutingOperation`
+   trỏ FK — xem bẫy đã ghi ở `FRONTEND_ALIGNMENT_ROADMAP.md §8.7` hàng `C2-6`/`C2-8`).
+3. Xác nhận với user: Work Center có cần gắn `plant_id` (per-plant) hay là master data company-level?
+   Chưa có dữ kiện rõ trong `BACKEND_CAPSTONE2_API_GAPS.md` — cần hỏi hoặc suy ra từ cách FE dùng.
+4. Sau khi có câu trả lời, viết `NEXT_PHASE_PLAN.md` mới theo đúng khuôn các phase `C2-*` trước
+   (thiết kế đã chốt → việc cần làm → test bắt buộc → KHÔNG làm gì → breaking changes → tài liệu phải
+   cập nhật → quyết định còn mở).
 
 ---
 
-## Hai chỗ lệch tài liệu đã ghi nhận, **chưa sửa** (ngoài phạm vi `D8b`)
+## Nếu FE trả lời trước khi `C2-6` được thiết kế xong
 
-| Chỗ | Nội dung lệch |
-|---|---|
-| `docs/fe-session-bootstrap.md:284` | Ghi *"Toàn bộ endpoint dưới `/api/v1/auth`: **chỉ có 4**"* trong khi chính dòng 23 của file đó nói về `/auth/me` — endpoint **thứ 5**, thêm 2026-08-01 |
-| `common/audit/CLAUDE.md §9.7` | Liệt kê `ACCOUNT_UNLOCKED` và `PASSWORD_RESET` như thể đã có, nhưng `AuditAction.java` **không** có hai hằng đó — chúng thuộc thiết kế `D8c` |
+`C2-1`/`C2-2` có độ ưu tiên cao hơn (đã có hạ tầng — bảng `V6`, `StockBalanceRepository.aggregate*` —
+chỉ chờ quyết định thiết kế từ câu trả lời FE) và nên làm trước `C2-6` nếu câu trả lời tới trước.

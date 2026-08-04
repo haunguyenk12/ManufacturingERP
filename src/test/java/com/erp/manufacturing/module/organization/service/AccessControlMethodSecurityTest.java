@@ -1,5 +1,12 @@
 package com.erp.manufacturing.module.organization.service;
 
+import com.erp.manufacturing.module.organization.domain.AccessScope;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
+import com.erp.manufacturing.module.organization.domain.Role;
+import com.erp.manufacturing.module.organization.domain.RoleStatus;
+import com.erp.manufacturing.module.organization.domain.ScopeType;
+import com.erp.manufacturing.module.organization.dto.AccessScopeUpdateRequest;
+import com.erp.manufacturing.module.organization.dto.RoleUpdateRequest;
 import com.erp.manufacturing.module.organization.mapper.OrganizationMapper;
 import com.erp.manufacturing.module.organization.repository.*;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
@@ -20,6 +27,9 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+import java.util.Optional;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -33,10 +43,12 @@ class AccessControlMethodSecurityTest {
     @Autowired PermissionGuard permissionGuard;
     @Autowired RoleRepository roleRepository;
     @Autowired PermissionRepository permissionRepository;
+    @Autowired AccessScopeRepository accessScopeRepository;
+    @Autowired UserRoleAssignmentRepository assignmentRepository;
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, roleRepository, permissionRepository);
+        reset(permissionGuard, roleRepository, permissionRepository, accessScopeRepository, assignmentRepository);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, java.util.List.of()));
     }
@@ -74,6 +86,139 @@ class AccessControlMethodSecurityTest {
         when(roleRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
 
         assertThatCode(() -> accessControlService.listRoles(PageRequest.of(0, 20)))
+                .doesNotThrowAnyException();
+    }
+
+    // ── role/scope lifecycle + assignments (C2-4) ──────────────────────────
+
+    @Test
+    void getRole_deniedWhenAccessManageMissing() {
+        UUID roleId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.getRole(roleId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(roleRepository);
+    }
+
+    @Test
+    void updateRole_deniedWhenAccessManageMissing() {
+        UUID roleId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.updateRole(roleId, new RoleUpdateRequest("New", null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(roleRepository);
+    }
+
+    @Test
+    void activateRole_deniedWhenAccessManageMissing() {
+        UUID roleId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.activateRole(roleId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(roleRepository);
+    }
+
+    @Test
+    void deactivateRole_deniedWhenAccessManageMissing() {
+        UUID roleId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.deactivateRole(roleId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(roleRepository);
+    }
+
+    @Test
+    void deactivateRole_allowedWhenAccessManagePresent() {
+        UUID roleId = UUID.randomUUID();
+        Role role = Role.builder().roleId(roleId).code("PLANNER").name("Planner")
+                .system(false).status(RoleStatus.ACTIVE).build();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(true);
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(role));
+        when(roleRepository.save(any(Role.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThatCode(() -> accessControlService.deactivateRole(roleId)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void getScope_deniedWhenAccessManageMissing() {
+        UUID scopeId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.getScope(scopeId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(accessScopeRepository);
+    }
+
+    @Test
+    void updateScope_deniedWhenAccessManageMissing() {
+        UUID scopeId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.updateScope(scopeId, new AccessScopeUpdateRequest("New", null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(accessScopeRepository);
+    }
+
+    @Test
+    void activateScope_deniedWhenAccessManageMissing() {
+        UUID scopeId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.activateScope(scopeId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(accessScopeRepository);
+    }
+
+    @Test
+    void deactivateScope_deniedWhenAccessManageMissing() {
+        UUID scopeId = UUID.randomUUID();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.deactivateScope(scopeId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(accessScopeRepository);
+    }
+
+    @Test
+    void deactivateScope_allowedWhenAccessManagePresent() {
+        UUID scopeId = UUID.randomUUID();
+        AccessScope scope = AccessScope.builder().scopeId(scopeId).code("SCOPE").name("Scope")
+                .scopeType(ScopeType.CUSTOM).status(OrganizationStatus.ACTIVE).build();
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(true);
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(scope));
+        when(accessScopeRepository.save(any(AccessScope.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThatCode(() -> accessControlService.deactivateScope(scopeId)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void listAssignments_deniedWhenAccessManageMissing() {
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(false);
+
+        assertThatThrownBy(() -> accessControlService.listAssignments(null, null, null, PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(assignmentRepository);
+    }
+
+    @Test
+    void listAssignments_allowedWhenAccessManagePresent() {
+        when(permissionGuard.hasPermission(any(), eq("PERM_ACCESS_MANAGE"))).thenReturn(true);
+        when(assignmentRepository.search(any(), any(), any(), any(Pageable.class))).thenReturn(Page.empty());
+
+        assertThatCode(() -> accessControlService.listAssignments(null, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 

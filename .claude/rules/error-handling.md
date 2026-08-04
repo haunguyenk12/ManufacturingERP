@@ -217,6 +217,7 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 | `MethodArgumentNotValidException` (`@Valid` body) | 400 | `VALIDATION_ERROR` | ✅ |
 | `ConstraintViolationException` (`@Validated` path/query) | 400 | `VALIDATION_ERROR` | ✅ |
 | `MethodArgumentTypeMismatchException` (vd UUID sai ở path) | 400 | `VALIDATION_ERROR` | ✅ |
+| `MissingServletRequestParameterException` (thiếu `@RequestParam` bắt buộc) | 400 | `VALIDATION_ERROR` | ✅ |
 | `HttpMessageNotReadableException` (JSON hỏng/thiếu body) | 400 | `VALIDATION_ERROR` | — |
 | `HttpRequestMethodNotSupportedException` | 405 | `VALIDATION_ERROR` | — |
 | `AccessDeniedException` (Spring) | 403 | `PERMISSION_DENIED` | — |
@@ -226,6 +227,17 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 
 > 5 handler ở giữa bảng được thêm ở `F1`. Trước đó chúng **không** được handle nên rơi xuống
 > catch-all và trả **500** — một UUID sai định dạng ở path cũng thành lỗi server.
+>
+> 🔴 **[2026-08-04] `MissingServletRequestParameterException` bị sót trong lần vá đó** — phát hiện qua
+> log thật: `GET /inventory/movements` thiếu `warehouseId` trả **500 `INTERNAL_SERVER_ERROR`**. Thiếu
+> param bắt buộc là **input sai của client** (400), không phải server hỏng; trả 500 khiến FE không
+> phân biệt được "tôi gọi sai" với "backend chết" và làm alert 5xx nổ oan. Nay trả 400
+> `VALIDATION_ERROR` + `errors[{field: "<tên param>"}]`, có test
+> (`GlobalExceptionHandlerTest.missingRequiredQueryParam_returns400NamingTheParameter`).
+> **`MissingRequestHeaderException` cố ý KHÔNG thêm handler:** mọi `@RequestHeader` trong repo đều
+> `required = false` (`Idempotency-Key`, `X-Plant-Id`) nên exception đó **không có đường ném** —
+> thêm handler cho nó là code speculative (`coding-rules.md §11.5`). Khi nào có header bắt buộc đầu
+> tiên thì **đó** mới là lúc thêm, cùng test.
 
 > **Catch-all không bao giờ expose stack trace ra client.** Log đầy đủ phía server.
 

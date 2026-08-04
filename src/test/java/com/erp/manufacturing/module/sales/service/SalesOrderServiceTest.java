@@ -19,6 +19,7 @@ import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLineRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.mapper.SalesOrderMapper;
 import com.erp.manufacturing.module.sales.repository.SalesOrderLineRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderPlanningDemandProjection;
@@ -140,6 +141,96 @@ class SalesOrderServiceTest {
         assertThatThrownBy(() -> service.create(new SalesOrderCreateRequest(
                 companyId, plantId, "SO-001", "ACME Corp", ORDER_DATE, null,
                 List.of(new SalesOrderLineRequest(itemId, BigDecimal.TEN, ORDER_DATE.minusDays(1))))))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(salesOrderRepository, never()).save(any());
+    }
+
+    // ── update ─────────────────────────────────────────────────────────────
+
+    @Test
+    void update_validRequest_replacesHeaderAndLines() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        Company company = order.getCompany();
+        UUID newItemId = UUID.randomUUID();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(itemLookupService.getActiveItem(newItemId)).thenReturn(item(newItemId, company, "FG-3"));
+        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+
+        SalesOrderResponse response = service.update(salesOrderId, new SalesOrderUpdateRequest(
+                1L, "New Customer", ORDER_DATE.plusDays(1), "updated note",
+                List.of(new SalesOrderLineRequest(newItemId, new BigDecimal("15"), ORDER_DATE.plusDays(30)))));
+
+        assertThat(response.customerName()).isEqualTo("New Customer");
+        assertThat(response.orderDate()).isEqualTo(ORDER_DATE.plusDays(1));
+        assertThat(response.note()).isEqualTo("updated note");
+        assertThat(response.lines()).hasSize(1);
+        assertThat(response.lines().get(0).lineNo()).isEqualTo(1);
+        assertThat(response.lines().get(0).itemSku()).isEqualTo("FG-3");
+        assertThat(response.lines().get(0).orderedQuantity()).isEqualByComparingTo("15");
+    }
+
+    @Test
+    void update_nullLines_keepsExistingLines() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+
+        SalesOrderResponse response = service.update(salesOrderId, new SalesOrderUpdateRequest(
+                1L, "New Customer", null, null, null));
+
+        assertThat(response.customerName()).isEqualTo("New Customer");
+        assertThat(response.orderDate()).isEqualTo(ORDER_DATE);
+        assertThat(response.lines()).hasSize(2);
+        assertThat(response.lines().get(0).itemSku()).isEqualTo("FG-1");
+        assertThat(response.lines().get(1).itemSku()).isEqualTo("FG-2");
+        verifyNoInteractions(itemLookupService);
+    }
+
+    @Test
+    void update_nonDraftOrder_throwsStateConflict() {
+        SalesOrder order = draftOrderWithTwoLines();
+        order.confirm();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> service.update(salesOrderId,
+                new SalesOrderUpdateRequest(1L, "New Customer", null, null, null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verify(salesOrderRepository, never()).save(any());
+    }
+
+    @Test
+    void update_staleExpectedVersion_throwsConcurrentModificationBeforeSaving() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> service.update(salesOrderId,
+                new SalesOrderUpdateRequest(99L, "New Customer", null, null, null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
+
+        verify(salesOrderRepository, never()).save(any());
+    }
+
+    @Test
+    void update_orderDateMovesPastAnExistingLineDueDate_throwsAndSavesNothing() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+
+        // First line is due ORDER_DATE + 10d; pushing the order date past that must fail.
+        assertThatThrownBy(() -> service.update(salesOrderId,
+                new SalesOrderUpdateRequest(1L, null, ORDER_DATE.plusDays(15), null, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
@@ -309,6 +400,7 @@ class SalesOrderServiceTest {
                 item(UUID.randomUUID(), company, "FG-1")));
         order.getLines().add(line(order, 2, new BigDecimal("40"), ORDER_DATE.plusDays(20),
                 item(UUID.randomUUID(), company, "FG-2")));
+        order.setVersion(1L);
         return order;
     }
 

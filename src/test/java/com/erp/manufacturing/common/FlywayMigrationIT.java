@@ -14,13 +14,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V40) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V43) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -42,10 +44,183 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("40");
+        assertThat(current.getVersion().getVersion()).isEqualTo("43");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
+    }
+
+    /**
+     * C2-5: the RBAC grant matrix, asserted against a really-migrated database.
+     *
+     * <p>{@code PermissionCatalogTest} already proves every {@code @PreAuthorize} code is <em>seeded as
+     * a permission row</em> — and that is precisely the blind spot that let this defect live: 12 core
+     * permissions existed and were granted to ADMIN alone, so a MANAGER account received 403 on the
+     * work order list of its own plant while every test stayed green. Granting is a different fact from
+     * existing, it lives only in {@code role_permissions}, and only a real database can answer it.
+     *
+     * <p>The assertion is deliberately shaped as "every permission must be usable by someone other
+     * than the superuser, unless it is declared system-configuration". A per-permission checklist would
+     * pass forever once written; this shape fails the moment a <em>new</em> migration seeds a permission
+     * and forgets MANAGER/OPERATOR — the exact way V7..V15 drifted from the documented model.
+     */
+    @Test
+    void migrate_v41_leavesNoCorePermissionGrantedToAdminAlone() throws Exception {
+        // The complete admin-only set after V41: the two "configure the system" permissions
+        // docs/roles-and-permissions.md reserves for ADMIN ("MANAGER xem master data nhưng không
+        // cấu hình hệ thống"). Adding to this list is a security decision, not a formality.
+        Set<String> adminOnlyByDesign = Set.of("PERM_ORG_MANAGE", "PERM_ACCESS_MANAGE");
+
+        migratePublicSchema();
+
+        Set<String> adminOnlyInDatabase = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM permissions p
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM role_permissions rp
+                         JOIN roles r ON r.role_id = rp.role_id
+                         WHERE rp.permission_id = p.permission_id
+                           AND r.code IN ('MANAGER', 'OPERATOR')
+                     )
+                     ORDER BY p.code
+                     """)) {
+            while (rows.next()) {
+                adminOnlyInDatabase.add(rows.getString("code"));
+            }
+        }
+
+        assertThat(adminOnlyInDatabase)
+                .as("These permissions are granted to ADMIN only. If that is intended, add them to "
+                        + "adminOnlyByDesign here AND to docs/roles-and-permissions.md; otherwise grant "
+                        + "them in a migration. Silently admin-only means the feature is unreachable "
+                        + "for every real user.")
+                .isEqualTo(new TreeSet<>(adminOnlyByDesign));
+    }
+
+    /**
+     * C2-5: the positive half. The admin-only assertion above accepts "MANAGER <b>or</b> OPERATOR", so
+     * it cannot notice a permission landing on the wrong one of the two — dropping MANAGER's
+     * {@code PERM_WORK_ORDER_MANAGE} would leave it granted to nobody who may create a work order while
+     * that test stayed green. A security policy is worth an explicit list; updating this list is the
+     * point at which someone has to say out loud that the policy changed.
+     */
+    @Test
+    void migrate_v41_grantsManagerTheCorePermissionsTheRolesDocPromises() throws Exception {
+        migratePublicSchema();
+
+        Set<String> expected = new TreeSet<>(Set.of(
+                "PERM_WORK_ORDER_READ", "PERM_WORK_ORDER_MANAGE", "PERM_WORK_ORDER_EXECUTE",
+                "PERM_BOM_READ", "PERM_BOM_MANAGE",
+                "PERM_INVENTORY_READ", "PERM_INVENTORY_MOVE", "PERM_INVENTORY_MANAGE",
+                "PERM_ORG_READ", "PERM_PLANNING_READ"));
+
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = 'MANAGER' AND p.code IN (
+                         'PERM_WORK_ORDER_READ', 'PERM_WORK_ORDER_MANAGE', 'PERM_WORK_ORDER_EXECUTE',
+                         'PERM_BOM_READ', 'PERM_BOM_MANAGE',
+                         'PERM_INVENTORY_READ', 'PERM_INVENTORY_MOVE', 'PERM_INVENTORY_MANAGE',
+                         'PERM_ORG_READ', 'PERM_PLANNING_READ')
+                     """)) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+
+        assertThat(granted)
+                .as("MANAGER is accountable for these in docs/roles-and-permissions.md; a missing one "
+                        + "means the role cannot do its documented job")
+                .isEqualTo(expected);
+    }
+
+    /**
+     * C2-5: separation of duties, stated as prohibitions because that is the half a positive grant list
+     * can never express. docs/roles-and-permissions.md "Separation of duties (P1 + F2)": whoever issues
+     * or produces must not approve their own work.
+     */
+    @Test
+    void migrate_v41_keepsOperatorOutOfApprovalAndConfigurationPermissions() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            for (String forbidden : new String[]{
+                    "PERM_MATERIAL_ISSUE_OVERRIDE",      // cannot approve its own over-issue
+                    "PERM_PRODUCTION_RECEIPT_APPROVE",   // cannot approve its own output
+                    "PERM_QUALITY_DISPOSITION",          // cannot pass its own goods through QC
+                    "PERM_WORK_ORDER_MANAGE",            // create/release stays with MANAGER
+                    "PERM_ORG_MANAGE",
+                    "PERM_ACCESS_MANAGE"}) {
+                try (ResultSet rows = statement.executeQuery("""
+                        SELECT count(*) AS granted
+                        FROM role_permissions rp
+                        JOIN roles r ON r.role_id = rp.role_id
+                        JOIN permissions p ON p.permission_id = rp.permission_id
+                        WHERE r.code = 'OPERATOR' AND p.code = '%s'
+                        """.formatted(forbidden))) {
+                    assertThat(rows.next()).isTrue();
+                    assertThat(rows.getInt("granted"))
+                            .as("OPERATOR must not hold %s — separation of duties", forbidden)
+                            .isZero();
+                }
+            }
+        }
+    }
+
+    /**
+     * C2-3: same shape as the {@code migrate_v41_*} pair above, applied to the new UOM permissions —
+     * {@code PERM_UOM_READ} for all three roles, {@code PERM_UOM_MANAGE} for ADMIN/MANAGER only
+     * (docs/roles-and-permissions.md, V43). Written as a single grant-set assertion per role rather
+     * than as separate positive/negative tests: with only two permissions the full set is the
+     * simplest correct statement, and it still fails if either permission lands on the wrong role.
+     */
+    @Test
+    void migrate_v43_grantsUomPermissionsToTheDocumentedRoles() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedUomPermissions("ADMIN")).containsExactlyInAnyOrder("PERM_UOM_READ", "PERM_UOM_MANAGE");
+        assertThat(grantedUomPermissions("MANAGER")).containsExactlyInAnyOrder("PERM_UOM_READ", "PERM_UOM_MANAGE");
+        assertThat(grantedUomPermissions("OPERATOR")).containsExactly("PERM_UOM_READ");
+    }
+
+    private Set<String> grantedUomPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN ('PERM_UOM_READ', 'PERM_UOM_MANAGE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    /** Migrating the shared public schema is idempotent, so each test can ask for it independently. */
+    private void migratePublicSchema() {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
     }
 
     /**

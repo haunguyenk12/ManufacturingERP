@@ -8,6 +8,7 @@ import com.erp.manufacturing.module.sales.domain.SalesOrderStatus;
 import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.service.SalesOrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -75,6 +76,14 @@ public class SalesOrderController {
     @Operation(summary = "Get sales order")
     public ResponseEntity<ApiResponse<SalesOrderResponse>> get(@PathVariable UUID salesOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(salesOrderService.get(salesOrderId)));
+    }
+
+    @PatchMapping("/{salesOrderId}")
+    @Operation(summary = "Update a DRAFT sales order (full-replace lines)")
+    public ResponseEntity<ApiResponse<SalesOrderResponse>> update(
+            @PathVariable UUID salesOrderId,
+            @Valid @RequestBody SalesOrderUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(salesOrderService.update(salesOrderId, request)));
     }
 
     @PostMapping("/{salesOrderId}/confirm")

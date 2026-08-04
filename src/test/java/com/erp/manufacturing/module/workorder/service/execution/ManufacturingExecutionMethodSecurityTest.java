@@ -379,9 +379,12 @@ class ManufacturingExecutionMethodSecurityTest {
         WorkOrderVarianceService workOrderVarianceService(MaterialIssueLineRepository issueLineRepository,
                                                           ProductionReceiptLineRepository receiptLineRepository,
                                                           WipTransactionRepository wipTransactionRepository,
-                                                          WorkOrderRepository workOrderRepository) {
+                                                          WorkOrderRepository workOrderRepository,
+                                                          ProductionExecutionRepository executionRepository,
+                                                          WorkOrderOperationRepository operationRepository) {
             return new WorkOrderVarianceService(
-                    issueLineRepository, receiptLineRepository, wipTransactionRepository, workOrderRepository);
+                    issueLineRepository, receiptLineRepository, wipTransactionRepository, workOrderRepository,
+                    executionRepository, operationRepository);
         }
 
         @Bean
