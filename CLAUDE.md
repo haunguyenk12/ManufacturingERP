@@ -64,15 +64,15 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — `P3` vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
-| **Phase trước** | **`P3` – Costing Engine** ✅ **HOÀN THÀNH** (2026-08-05). Module mới `module/costing`: `ItemStandardCost` (upsert, company-scoped) + `CostingService` (BOM cost roll-up đệ quy) + `WorkOrderCostAccumulator` (`module/workorder`, tích luỹ material/labor/overhead thực tế). 3 endpoint mới dưới `/api/v1/companies/{companyId}/items/{itemId}/standard-cost` (+ list). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` (Material Usage Variance — **không** làm Price Variance) + khối `costVariance`. Migration **`V50`** (schema) + **`V51`** (seed `PERM_COSTING_READ`/`_MANAGE`, ADMIN+MANAGER only). Bất biến `B91`-`B94`. Bản ghi: **§0.31** |
-| **Phase trước đó** | **`C2-8` – CRP tĩnh + Capacity Board + Schedule Adjustment** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt cluster `P4`. `WorkOrderOperation` có thêm `workCenter` (FK), `plannedStartAt`/`plannedEndAt` (sinh ở `release()`), `scheduleAdjustmentReason`. 2 endpoint mới: `GET /api/v1/plants/{plantId}/capacity-board`, `POST /api/v1/work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments`. Migration **`V48`** (schema) + **`V49`** (seed `PERM_CAPACITY_READ`/`_MANAGE`). Bản ghi: **§0.30** |
+| **Phase đang chạy** | *(không có — concurrent refresh-token race vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
+| **Phase trước** | **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt giới hạn "race double-submit" mà `D8a` từng chấp nhận. Advisory lock `acquireRefreshLock` (`SET NX PX`, TTL 2s) + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) trong `AuthService.refresh` — request trùng lặp race trên cùng `tokenId` nhận lại đúng cặp token đã rotate thay vì bị `TOKEN_REUSE_DETECTED` oan. **Không grace window** (quyết định user). **Không migration**, wire additive. Bất biến **`B95`**. Tiện thể sửa 1 câu sai trong tài liệu (`§4.8`: brute-force counter chưa từng dùng Lua script). Bản ghi: **§0.32** |
+| **Phase trước đó** | **`P3` – Costing Engine** ✅ **HOÀN THÀNH** (2026-08-05). Module mới `module/costing`: `ItemStandardCost` (upsert, company-scoped) + `CostingService` (BOM cost roll-up đệ quy) + `WorkOrderCostAccumulator` (`module/workorder`, tích luỹ material/labor/overhead thực tế). 3 endpoint mới dưới `/api/v1/companies/{companyId}/items/{itemId}/standard-cost` (+ list). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` (Material Usage Variance — **không** làm Price Variance) + khối `costVariance`. Migration **`V50`** (schema) + **`V51`** (seed `PERM_COSTING_READ`/`_MANAGE`, ADMIN+MANAGER only). Bất biến `B91`-`B94`. Bản ghi: **§0.31** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
-| **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Bản ghi: §0.22 |
-| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): concurrent refresh-token race, `P5` serial tracking, `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. `P3` (Costing Engine) ✅ đã xong — xem §0.31. |
-| **Migration mới nhất** | **`V51__seed_costing_permissions.sql`** (`P3`, cùng phase với `V50__create_costing.sql`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` **không** migration |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → **`P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+30` unit: `CostingServiceTest`(5), `ItemStandardCostServiceTest`(6), `ItemStandardCostMethodSecurityTest`(4), `ItemStandardCostControllerTest`(5), `WorkOrderCostAccumulatorServiceTest`(4), `MaterialIssueServiceTest`+2, `ProductionExecutionServiceTest`+2, `WorkOrderVarianceServiceTest`+2; `+1` IT: `FlywayMigrationIT.migrate_v51_*`(1), không thêm class IT mới — `ItemStandardCostRepository.search` chỉ `=`/`is null` nên mock repository là đủ, đúng tiền lệ `WorkCenterRepository`). Xác nhận thêm bằng smoke test HTTP thật qua `mvn -o spring-boot:run` trên Postgres/Redis thật (`docker-compose up -d`, không phải Testcontainer): BOM 2 cấp (nguyên liệu 5đ/kg, lắp ráp labor 3 + overhead 1, BOM 2kg/unit) → `GET .../standard-cost` trả `totalStandardCost=14` đúng công thức → issue 4kg (kế hoạch 6kg) → `GET .../variance` trả `usageVarianceCost=-10`, `actualMaterialCost=20` **trước khi** report → report `good=2` → `actualLaborCost=6`, `actualOverheadCost=2` — cả hai hook tích luỹ xác nhận chạy đúng qua ledger/DB thật. |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
+| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): `P5` serial tracking, `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. Concurrent refresh-token race ✅ đã xong — xem §0.32. |
+| **Migration mới nhất** | **`V51__seed_costing_permissions.sql`** (`P3`) — concurrent refresh-token race **không** migration (thuần Redis), cùng `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → **concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+10` unit: `TokenStoreServiceTest` +6 (`acquireRefreshLock` ×3, `saveRotationResult`/`getRotationResult` ×3), `AuthServiceTest` +4 (`refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected`, `.refresh_concurrentDuplicate_extendsDeviceSession`, `.refresh_rotationResultTargetGone_fallsThroughToReuseCheck`, `.refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists`) + 1 assertion thêm vào `refresh_validToken_rotatesAndReturnsNewPair` (không phải case mới); `+0` IT — phase này không đụng repository/JPQL nào |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -1565,6 +1565,78 @@ component (cuối cùng); `WorkOrderVarianceService` constructor +2 tham số
 constructor +1 tham số (`WorkOrderCostAccumulatorService`); `ProductionExecutionService` constructor
 +1 tham số (`WorkOrderCostAccumulatorService`). Test cũ dựng các service/DTO này đã **sửa** theo
 `R10`.
+
+---
+
+### 0.32 Concurrent Refresh-Token Race — Mở Rộng `D8` (ĐÃ HOÀN THÀNH 2026-08-05)
+
+Đóng giới hạn "race double-submit" mà `D8a` (§0.22) chấp nhận có chủ đích. Nguồn: FE coi đây là điều
+kiện nghiệm thu (`FRONTEND_ALIGNMENT_ROADMAP.md §8.0` mục 1, nay ✅). Không migration (thuần Redis),
+không permission mới, không đổi `AuthResponse`.
+
+**Vấn đề đã đóng** (trace từ code thật, `AuthService.refresh`): request A rotate xong (lưu mới →
+mark used → xoá cũ) nhưng client không nhận được response → client retry với **chính** `(tokenId,
+refreshToken)` cũ (chưa từng thấy cặp mới) → request B đọc `stored == null` → `wasRefreshTokenUsed`
+trả **true** (A vừa mark) → B bị chẩn đoán nhầm thành kẻ trộm dùng lại token đã đánh cắp →
+`TOKEN_REUSE_DETECTED` → **toàn bộ phiên hợp lệ của B bị force-logout oan**.
+
+**Quyết định chốt với user (AskUserQuestion, không phải đoán):** hard lock, **không** grace window —
+token cũ không bao giờ được chấp nhận lại làm credential lần hai; hai request race trên cùng
+`tokenId` phải được nhận diện là **cùng một hành động logic**.
+
+| Cơ chế | Ở đâu | TTL |
+|---|---|---|
+| Khoá tư vấn theo `tokenId` | `TokenStoreService.acquireRefreshLock` — `SET NX PX` qua `opsForValue().setIfAbsent`, **một lệnh Redis atomic**, không Lua | 2s |
+| Breadcrumb kết quả rotate | `TokenStoreService.saveRotationResult`/`getRotationResult` — winner ghi ngay sau `deleteRefreshToken` hiện có | 5s |
+
+`AuthService.refresh` gọi `acquireRefreshLock` **đầu tiên**, trước mọi validate — khoá được thì đi
+tiếp ngay (đường nhanh, không đổi hiệu năng của tuyệt đại đa số request); khoá **không** được thì ngủ
+một lần ~150ms rồi đi tiếp vào luồng validate y hệt cũ. Trong nhánh `stored == null` (đúng chỗ RTR
+sống), **trước** `wasRefreshTokenUsed`: nếu breadcrumb tồn tại và cặp nó trỏ tới còn sống → trả về
+**đúng cặp đó** (mint access token mới — vốn đã làm ở mọi lần refresh) thay vì ném
+`TOKEN_REUSE_DETECTED`. Breadcrumb vắng mặt/hết hạn/cặp trỏ tới đã mất ⇒ rơi xuống
+`wasRefreshTokenUsed` **y hệt trước phase này** — RTR thật (`B80`) không đổi một dòng.
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Cần CẢ HAI cơ chế, không phải một.** Chỉ khoá không đủ: theo đúng trace ở trên, request A đã
+   **hoàn tất hết** (kể cả xoá) trước khi B gọi `getRefreshToken` — B khoá được ngay (không có gì để
+   chờ) và vẫn cần một câu trả lời cho `stored == null`; breadcrumb là thứ trả lời câu đó. Chỉ
+   breadcrumb không đủ: hai request đọc `stored != null` ở CÙNG một khoảnh khắc (chưa ai kịp ghi gì)
+   sẽ cả hai tự rotate độc lập, sinh 2 phiên hợp lệ từ 1 hành động; khoá cho request thứ hai một
+   khoảng chờ ngắn để **thấy** kết quả của request thứ nhất thay vì tự làm lại.
+2. 🔴 **Không unlock tường minh — dựa hoàn toàn vào TTL 2s.** Vùng găng (critical section) chỉ là vài
+   lượt gọi Redis, hoàn tất trong vài mili-giây, nên compare-and-delete an toàn (Lua) không đáng công
+   thêm cho lợi ích chỉ xuất hiện ở trường hợp đụng độ 3 request hiếm gặp.
+3. **Tiện thể sửa một câu tài liệu sai đã tồn tại từ lâu, không phải bug mới.**
+   `common/security/CLAUDE.md §4.8` và `.claude/rules/architecture-decisions.md` từng ghi bộ đếm
+   brute-force "dùng Lua script Redis để atomic increment+expire" — đọc lại
+   `TokenStoreService.incrementFailCount` thật thì đó là `opsForValue().increment` (tự atomic) rồi
+   một `expire()` **riêng, không atomic**. Grep `RedisScript`/`DefaultRedisScript` toàn repo ra **0
+   kết quả** — chưa từng có Lua script nào. Phase này **không** sửa hành vi đó (ngoài phạm vi, chưa ai
+   yêu cầu), chỉ sửa mô tả cho khớp code — khoá mới ở đây dùng `SET NX PX` (atomic một lệnh), không
+   phải Lua, nên tài liệu không còn có thể trích dẫn nhầm "đã có tiền lệ Lua" nữa.
+4. **`respondWithExistingPair` KHÔNG rotate lại, KHÔNG gọi `saveRefreshToken`/`saveSessionStart`
+   lần hai.** Nó chỉ đọc lại cặp mà winner đã tạo và mint một access token mới (JWT stateless, không
+   lưu, mint mới ở **mọi** lần refresh vốn đã vậy — không phải cơ chế mới). `sessionCreatedAt` (B81)
+   không cần xử lý gì thêm ở đường này vì winner đã carry-forward đúng nó rồi.
+5. **Không audit `TOKEN_REUSE_DETECTED` cho nhánh breadcrumb-hit** — đây không phải sự cố bảo mật, chỉ
+   là hệ thống nhận đúng một request trùng lặp của chính nó. Có log `DEBUG`, không thêm `AuditAction`
+   mới (tránh phình enum cho một sự kiện không phải audit event).
+6. **Test unit cho `AuthService.refresh` cần default `acquireRefreshLock` trả `true`** (lenient stub
+   trong `@BeforeEach`) — nếu không, method-return mặc định của Mockito cho `boolean` là `false`,
+   khiến **mọi** test `refresh_*` hiện có phải trả giá `Thread.sleep(150)` thật một cách vô ích. Chỉ
+   test cố ý kiểm nhánh "khoá không acquire được" mới override thành `false`.
+
+**Nghiệm thu:** `mvn -o clean verify` — **831 case unit + 88 case IT / 13 class IT, failures = 0,
+errors = 0** (baseline trước phase: 821 unit + 88 IT / 13 class — `+10` unit, `+0` IT vì phase này
+không đụng repository/JPQL nào, xem hàng "Baseline test" §0.1). Không smoke test HTTP thủ công — race
+Redis không tái lập được đáng tin cậy qua curl tuần tự; bộ test unit mô phỏng đúng chuỗi sự kiện đã
+trace ra là bằng chứng thật.
+
+**Breaking changes — wire: KHÔNG có** (không đổi `AuthResponse`, không endpoint mới, không mã lỗi
+mới — nhánh breadcrumb-hit trả **cùng hình dạng response 200** như rotate bình thường). **Java
+positional: không có** — chỉ thêm method mới trên `TokenStoreService`, không đổi constructor nào.
 
 ---
 

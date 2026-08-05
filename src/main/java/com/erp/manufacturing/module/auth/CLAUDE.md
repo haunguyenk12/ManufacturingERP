@@ -34,6 +34,7 @@
 | B34 | Brute-force: đạt ngưỡng fail → khoá, và **không** truy vấn user nữa (short-circuit) | `AuthServiceTest.login_blockedAfterMaxFailedAttempts` |
 | B80 | **RTR (`D8a`)**: refresh token đã bị rotate away mà quay lại ⇒ `TOKEN_REUSE_DETECTED` (401) + xoá **cả** refresh token **lẫn** device session của user. Chỉ áp dụng nhánh `stored == null`. Thứ tự rotate bắt buộc: **lưu-mới → mark-used → xoá-cũ** | `AuthServiceTest.refresh_reusedToken_throwsTokenReuseDetectedAndForceLogoutAll` · `.refresh_validToken_rotatesAndReturnsNewPair` (`InOrder`) · `.refresh_storedTokenMismatch_throwsRefreshTokenExpired` |
 | B81 | **Absolute session timeout (`D8b`)**: phiên sống quá `app.jwt.absolute-session-timeout-ms` (30 ngày, đếm từ **login**) ⇒ `SESSION_ABSOLUTE_TIMEOUT` (401) + force logout **cả** refresh token **lẫn** device session. Ba vế bắt buộc: ① check nằm **sau** validate `stored`, **trước** rotate · ② rotate **carry-forward** `sessionCreatedAt` cũ sang tokenId mới, **không** stamp `now` · ③ phiên không có stamp (trước `D8b`) **fail-open**, coi như bắt đầu từ bây giờ | `AuthServiceTest.refresh_sessionOlderThanAbsoluteTimeout_throwsAndForceLogoutAll` · `.refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId` · `.refresh_sessionWithoutStartStamp_isTreatedAsStartingNow` · `.refresh_sessionJustUnderAbsoluteTimeout_rotatesNormally` · `.login_recordsTheSessionStart` |
+| B95 | **Concurrent refresh race (mở rộng `D8`)**: request đến sau, race trên **cùng** `tokenId` đã bị request khác rotate xong trong vài giây gần nhất ⇒ nhận lại **đúng** cặp token mà request thắng vừa sinh ra, **không** bị chẩn đoán thành `TOKEN_REUSE_DETECTED`, **không** rotate lần hai. Cơ chế: khoá tư vấn `acquireRefreshLock` (`SET NX PX`, TTL 2s) trước validate + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) đọc **trước** `wasRefreshTokenUsed` trong nhánh `stored == null`. **Không grace window** — token cũ vẫn chết ngay, chỉ request trùng lặp được dẫn tới cặp đã tồn tại. Breadcrumb hết hạn hoặc cặp nó trỏ tới đã mất ⇒ rơi xuống `wasRefreshTokenUsed` y hệt trước phase này, RTR thật (`B80`) không đổi | `AuthServiceTest.refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected` · `.refresh_concurrentDuplicate_extendsDeviceSession` · `.refresh_rotationResultTargetGone_fallsThroughToReuseCheck` · `.refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists` · `.refresh_validToken_rotatesAndReturnsNewPair` (`saveRotationResult` verify) |
 
 > **[`D1`, 2026-07-28] Nợ #7 đã trả.** `LoginRequest`, `RefreshRequest`, `LogoutRequest` (và
 > `CreateUserRequest`/`UpdateUserRequest` ở module `user`) đều override `toString()` che secret —
@@ -44,8 +45,9 @@
 > Thêm field secret mới vào các record này ⇒ **phải** cập nhật `toString()` + test.
 
 > **[`D8a`, 2026-08-03] RTR đã implement.** `refresh()` phân biệt "hết hạn bình thường" với "token bị
-> đánh cắp và dùng lại". Cơ chế + 2 giới hạn đã biết (race double-submit, chỉ nhánh `stored == null`):
-> `common/security/CLAUDE.md` §4.12.
+> đánh cắp và dùng lại". Cơ chế + phạm vi (chỉ nhánh `stored == null`): `common/security/CLAUDE.md`
+> §4.12. Giới hạn "race double-submit" của `D8a` **đã đóng** ở phase concurrent-refresh-token-race
+> sau `D8b` — xem `B95` + `common/security/CLAUDE.md §4.12a`.
 
 > **[`D8b`, 2026-08-03] Absolute session timeout đã implement — nợ #6 nay trả 2/3.**
 > 🔴 **`D8c` (forgot-password) vẫn chưa có dòng code nào** — đừng đọc `B80`+`B81` rồi tưởng cả nợ #6

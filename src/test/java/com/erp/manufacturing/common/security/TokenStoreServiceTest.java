@@ -190,6 +190,67 @@ class TokenStoreServiceTest {
         assertThat(key.getValue()).doesNotStartWith("auth:refresh:" + userId + ":");
     }
 
+    // ── Concurrent refresh race (advisory lock + rotation-result breadcrumb) ──
+
+    @Test
+    @DisplayName("acquireRefreshLock – first caller for a tokenId gets the lock (SET NX PX, 2s TTL)")
+    void acquireRefreshLock_firstCaller_returnsTrue() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.setIfAbsent("auth:refresh:lock:tid-1", "1", 2L, TimeUnit.SECONDS))
+                .thenReturn(true);
+
+        assertThat(store.acquireRefreshLock("tid-1")).isTrue();
+    }
+
+    @Test
+    @DisplayName("acquireRefreshLock – already held (SET NX fails) returns false, does not throw")
+    void acquireRefreshLock_alreadyHeld_returnsFalse() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.setIfAbsent("auth:refresh:lock:tid-1", "1", 2L, TimeUnit.SECONDS))
+                .thenReturn(false);
+
+        assertThat(store.acquireRefreshLock("tid-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("acquireRefreshLock – a null SET NX result (Redis quirk) is treated as not acquired")
+    void acquireRefreshLock_nullResult_returnsFalse() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.setIfAbsent("auth:refresh:lock:tid-1", "1", 2L, TimeUnit.SECONDS))
+                .thenReturn(null);
+
+        assertThat(store.acquireRefreshLock("tid-1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("saveRotationResult – writes auth:refresh:rotated:{oldTokenId} -> newTokenId with a 5s TTL")
+    void saveRotationResult_setsKeyWithFiveSecondTtl() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+
+        store.saveRotationResult("old-tid", "new-tid");
+
+        verify(valueOps).set(
+                eq("auth:refresh:rotated:old-tid"), eq("new-tid"), eq(5L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("getRotationResult – returns the newTokenId a rotation was saved under")
+    void getRotationResult_returnsStoredNewTokenId() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh:rotated:old-tid")).thenReturn("new-tid");
+
+        assertThat(store.getRotationResult("old-tid")).isEqualTo("new-tid");
+    }
+
+    @Test
+    @DisplayName("getRotationResult – no rotation recorded (or breadcrumb expired) returns null")
+    void getRotationResult_absent_returnsNull() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh:rotated:old-tid")).thenReturn(null);
+
+        assertThat(store.getRotationResult("old-tid")).isNull();
+    }
+
     // ── Absolute session timeout (D8b) ─────────────────────────────────────
 
     @Test

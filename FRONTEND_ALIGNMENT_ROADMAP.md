@@ -1606,11 +1606,11 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 > file đó **không tồn tại trong repo này**, nên không kiểm được snapshot họ đọc. Ba mục họ báo thiếu
 > hoá ra đã có, rất có thể vì snapshot cũ. Đã đề nghị FE commit snapshot hoặc cho commit hash.
 
-### 8.0 Trạng thái checklist §6 của tài liệu FE — **9/13** *(cập nhật sau `C2-8`)*
+### 8.0 Trạng thái checklist §6 của tài liệu FE — **10/13** *(cập nhật sau concurrent refresh-token race)*
 
 | # | Ô checklist | Trạng thái |
 |---|---|---|
-| 1 | Auth refresh rotation **+ concurrent refresh** | 🟡 **một nửa** — rotation/RTR/absolute timeout ✅ (`D8a`,`D8b`); 🔴 **concurrent refresh KHÔNG pass, cố ý** (`CLAUDE.md §0.22` #5: cần lock/CAS; double-submit có thể bị force-logout oan). FE coi đây là điều kiện nghiệm thu ⇒ phải mở phase riêng |
+| 1 | Auth refresh rotation **+ concurrent refresh** | ✅ **Đã xong** (2026-08-05, phase "concurrent refresh-token race") — rotation/RTR/absolute timeout (`D8a`,`D8b`) + advisory lock/rotation-result breadcrumb đóng nốt race double-submit, **không** grace window. Bất biến `B95` (`module/auth/CLAUDE.md`), thiết kế đầy đủ `common/security/CLAUDE.md §4.12a` |
 | 2 | Không còn 500 không có trace ở happy path | 🟡 3 lỗi **được báo** đã sửa (`§0.24`); **chưa** rà toàn bộ endpoint ⇒ không tuyên bố "không còn" |
 | 3 | UOM CRUD/lifecycle | ✅ **`C2-3`** (2026-08-04) — 7 endpoint, `V42`+`V43` |
 | 4 | Inventory Lot list/detail/status | ❌ `C2-2` — **bị chặn** |

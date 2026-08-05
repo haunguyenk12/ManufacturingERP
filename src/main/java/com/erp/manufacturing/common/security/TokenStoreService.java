@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
  *   auth:refresh:{userId}:{tokenId}       → refresh token value          TTL=7d
  *   auth:refresh:{userId}:{tokenId}:meta  → session start (epochMilli)   TTL=7d
  *   auth:refresh:used:{tokenId}           → "1" (RTR reuse marker)       TTL=60s
+ *   auth:refresh:lock:{tokenId}           → "1" (rotation-in-progress)   TTL=2s
+ *   auth:refresh:rotated:{tokenId}        → new tokenId (rotation result) TTL=5s
  *   auth:blacklist:{jti}                  → "1"                          TTL=remaining access token lifetime
  *   auth:failcount:{username}             → failure count                TTL=15m
  *   auth:session:device:{userId}:{deviceId} → last-seen IP + metadata   TTL=7d
@@ -47,6 +49,8 @@ public class TokenStoreService {
 
     private static final String REFRESH_KEY_PREFIX      = "auth:refresh:";
     private static final String REFRESH_USED_KEY_PREFIX = "auth:refresh:used:";
+    private static final String REFRESH_LOCK_KEY_PREFIX  = "auth:refresh:lock:";
+    private static final String REFRESH_ROTATED_KEY_PREFIX = "auth:refresh:rotated:";
     private static final String SESSION_START_KEY_SUFFIX = ":meta";
     private static final String BLACKLIST_KEY_PREFIX    = "auth:blacklist:";
     private static final String FAILCOUNT_KEY_PREFIX    = "auth:failcount:";
@@ -54,6 +58,17 @@ public class TokenStoreService {
 
     /** How long a rotated-away tokenId stays recognisable as "already used" (RTR window). */
     private static final long REUSE_DETECTION_TTL_SEC = 60L;
+
+    /** How long the advisory per-tokenId rotation lock is held before it auto-expires. */
+    private static final long REFRESH_LOCK_TTL_SEC = 2L;
+
+    /**
+     * How long a completed rotation's result stays discoverable by a racing duplicate. Deliberately
+     * much shorter than {@link #REUSE_DETECTION_TTL_SEC} — it only needs to cover realistic
+     * double-submit/retry timing, not to weaken the real reuse-detection boundary (a replay arriving
+     * after this window still hits {@link #wasRefreshTokenUsed} normally).
+     */
+    private static final long ROTATION_RESULT_TTL_SEC = 5L;
 
     /** How many keys to fetch per SCAN iteration – keeps each call O(1). */
     private static final int SCAN_COUNT = 100;
@@ -148,6 +163,40 @@ public class TokenStoreService {
     /** @return true if this tokenId was rotated away within the reuse-detection window. */
     public boolean wasRefreshTokenUsed(String tokenId) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(REFRESH_USED_KEY_PREFIX + tokenId));
+    }
+
+    // ── Concurrent Refresh Race (advisory lock + rotation-result breadcrumb) ──
+
+    /**
+     * Best-effort advisory lock on {@code tokenId}, held only for the brief window a rotation takes.
+     * Backed by a single atomic {@code SET NX PX} — {@link #REFRESH_LOCK_TTL_SEC} bounds the wait a
+     * genuinely-racing duplicate request pays; no explicit unlock (the critical section is Redis-only
+     * and completes in low single-digit milliseconds, so early release isn't worth a compare-and-delete).
+     *
+     * @return true if this caller acquired the lock (no one else is mid-rotation for this tokenId
+     *         right now); false if another request already holds it.
+     */
+    public boolean acquireRefreshLock(String tokenId) {
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                REFRESH_LOCK_KEY_PREFIX + tokenId, "1", REFRESH_LOCK_TTL_SEC, TimeUnit.SECONDS);
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    /**
+     * Records that {@code oldTokenId} was just rotated into {@code newTokenId}, so a duplicate
+     * request racing on the same old tokenId can be handed the one resulting pair instead of being
+     * misdiagnosed as a reuse attack (see {@code AuthService.refresh}, {@code stored == null} branch).
+     */
+    public void saveRotationResult(String oldTokenId, String newTokenId) {
+        redisTemplate.opsForValue().set(
+                REFRESH_ROTATED_KEY_PREFIX + oldTokenId, newTokenId,
+                ROTATION_RESULT_TTL_SEC, TimeUnit.SECONDS);
+    }
+
+    /** @return the tokenId {@code oldTokenId} was rotated into, if that happened within the last
+     *          {@value #ROTATION_RESULT_TTL_SEC} seconds; {@code null} otherwise. */
+    public String getRotationResult(String oldTokenId) {
+        return redisTemplate.opsForValue().get(REFRESH_ROTATED_KEY_PREFIX + oldTokenId);
     }
 
     // ── Access Token Blacklist ────────────────────────────────────────────

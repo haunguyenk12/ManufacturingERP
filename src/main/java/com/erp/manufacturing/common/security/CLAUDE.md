@@ -69,6 +69,13 @@ auth:session:device:{userId}:{deviceId}        →  {clientIp}  TTL=7d (sliding)
 # đúng cái marker chứng minh có reuse.
 auth:refresh:used:{tokenId}                    →  "1"  TTL=60s
 
+# Concurrent refresh race — advisory lock + rotation-result breadcrumb  ✅ (đóng nợ #6 phần race)
+# Xem §4.12a. Lock: SET NX PX, không unlock tường minh (TTL tự dọn). Breadcrumb: winner ghi ngay
+# sau khi rotate xong, để một request trùng lặp đang race trên CÙNG tokenId đọc lại token mới thay
+# vì bị chẩn đoán nhầm thành TOKEN_REUSE_DETECTED.
+auth:refresh:lock:{tokenId}                    →  "1"  TTL=2s
+auth:refresh:rotated:{tokenId}                 →  {newTokenId}  TTL=5s
+
 # Absolute session timeout – mốc bắt đầu phiên (epochMilli)  ✅ D8b
 # NGƯỢC với key ngay trên: cố ý DÙNG CHUNG prefix "auth:refresh:{userId}:" để nó NẰM TRONG
 # pattern SCAN của deleteAllUserTokens ⇒ force-logout dọn luôn, không cần sửa method đó.
@@ -156,7 +163,15 @@ Admin gọi deleteAllUserTokens(userId)
 **Cơ chế**: Redis counter theo username với TTL trượt.
 - Sau **5 lần thất bại liên tiếp** → trả về `AccountLockedException` (khoá 15 phút)
 - Đăng nhập thành công → reset counter
-- **Quan trọng**: Dùng **Lua script Redis** để đảm bảo `increment + expire` atomic (tránh race condition khi nhiều request đồng thời)
+
+> 🔴 **Sửa (concurrent refresh-token race phase, đọc lại code thật):** mục này từng ghi "Dùng Lua
+> script Redis để đảm bảo increment + expire atomic" — **không khớp** `TokenStoreService.
+> incrementFailCount`: đó là `opsForValue().increment(key)` (tự atomic, lệnh Redis đơn) rồi một
+> `expire()` **riêng, không atomic**, chỉ gọi khi `count == 1`. Grep toàn repo `RedisScript`/
+> `DefaultRedisScript` ra **0 kết quả** — chưa từng có Lua script nào trong codebase này. Đây là nợ
+> nhỏ có sẵn (cửa sổ hẹp: crash đúng giữa `increment` và `expire` để lại key không TTL), **không** sửa
+> ở đây (ngoài phạm vi, chưa ai yêu cầu) — chỉ sửa mô tả cho khớp thực tế. Khoá đồng thời mới ở
+> §4.12a dùng `SET NX PX` (`setIfAbsent` với TTL, cũng một lệnh atomic), **không** phải Lua.
 
 ## 4.9 Security Config
 
@@ -328,12 +343,63 @@ Khi validate refresh token và KHÔNG TÌM THẤY trong store:
 > 2. **Thứ tự rotate là lưu-mới → mark-used → xoá-cũ**, không phải "mark rồi lưu/xoá" như đoạn
 >    pseudo-code trên gợi ý. Marker phải tồn tại **trước khi** key cũ biến mất.
 >
-> **Giới hạn đã biết, chấp nhận cho `D8a`** (đừng tự mở rộng phạm vi để "sửa"):
-> - **Race 2 request refresh đồng thời cùng 1 token hợp lệ** không giải được bằng thứ tự thao tác —
+> **Giới hạn đã biết ở `D8a`, ✅ ĐÃ ĐÓNG** (concurrent refresh-token race phase, xem §4.12a):
+> - ~~Race 2 request refresh đồng thời cùng 1 token hợp lệ không giải được bằng thứ tự thao tác —
 >   cần lock/CAS, thiết kế này không có. Hệ quả: client double-submit (network retry) có thể bị
->   force-logout **oan**. Đây là giới hạn cố hữu của RTR cơ bản không có grace window.
+>   force-logout oan.~~ Đóng bằng advisory lock + rotation-result breadcrumb, **không** có grace
+>   window (quyết định của user) — token cũ vẫn chết ngay lập tức, chỉ có request trùng lặp được dẫn
+>   tới đúng cặp token đã sinh ra thay vì bị chẩn đoán nhầm.
 > - RTR **chỉ** áp dụng nhánh `stored == null`. Nhánh `stored != null` nhưng giá trị mismatch giữ
->   `REFRESH_TOKEN_EXPIRED` — tokenId còn sống nghĩa là nó chưa từng bị rotate away.
+>   `REFRESH_TOKEN_EXPIRED` — tokenId còn sống nghĩa là nó chưa từng bị rotate away. **Không đổi.**
+
+---
+
+## 4.12a Concurrent Refresh-Token Race — ĐÃ ĐÓNG (mở rộng `D8`, sau `D8b`)
+
+> **Trạng thái**: implement trong `AuthService.refresh` + `TokenStoreService.acquireRefreshLock` /
+> `saveRotationResult` / `getRotationResult`. Không migration, không permission mới, không đổi
+> `AuthResponse`.
+
+**Vấn đề đã đóng** (trace đầy đủ từ code thật): request A rotate xong (lưu mới → mark used → xoá cũ)
+nhưng client không nhận được response (mất kết nối, timeout) → client retry với **chính** `(tokenId,
+refreshToken)` cũ vì chưa từng thấy cặp mới → request B đọc `stored == null` (A đã xoá) → kiểm
+`wasRefreshTokenUsed` → **true** (A vừa mark) → B bị chẩn đoán nhầm thành kẻ trộm dùng lại token đã
+đánh cắp → `TOKEN_REUSE_DETECTED` → **toàn bộ phiên hợp lệ của B bị force-logout oan**.
+
+**Quyết định đã chốt với user (AskUserQuestion, không grace window):** token cũ **không bao giờ**
+được chấp nhận lại làm credential lần thứ hai. Hai request race trên cùng `tokenId` phải được nhận
+diện là **cùng một hành động logic**, không phải hai credential độc lập.
+
+**Giải pháp — hai cơ chế nhỏ, bổ sung cho nhau:**
+
+1. **Khoá tư vấn theo `tokenId`** (`auth:refresh:lock:{tokenId}`, TTL 2s, `SET NX PX` qua
+   `opsForValue().setIfAbsent` — atomic bằng **một lệnh Redis**, không cần Lua). Gọi **đầu tiên**,
+   trước mọi validate. Khoá được ⇒ đi tiếp ngay (đường nhanh, tuyệt đại đa số request). Khoá **không**
+   được (ai đó đang rotate cùng `tokenId` ngay lúc này) ⇒ ngủ một lần ~150ms rồi đi tiếp vào luồng
+   validate **y hệt cũ** — không có gì bị bỏ qua, chỉ trì hoãn.
+2. **Breadcrumb kết quả rotate** (`auth:refresh:rotated:{oldTokenId}` → `newTokenId`, TTL 5s). Winner
+   ghi ngay sau bước `deleteRefreshToken` hiện có (không đổi thứ tự B80). Trong nhánh `stored == null`
+   (đúng chỗ RTR sống), **trước khi** kiểm `wasRefreshTokenUsed`: nếu breadcrumb tồn tại và cặp
+   `newTokenId` nó trỏ tới vẫn còn (`getRefreshToken` khác `null`) → trả về **đúng cặp đó** (mint access
+   token mới — vốn đã làm ở mọi lần refresh, không phải cơ chế mới), **không** rotate thêm lần nào,
+   **không** audit `TOKEN_REUSE_DETECTED`. Breadcrumb vắng mặt hoặc cặp nó trỏ tới cũng đã biến mất ⇒
+   rơi xuống `wasRefreshTokenUsed` **y hệt trước phase này** — replay thật (đến sau khi breadcrumb 5s
+   hết hạn nhưng còn trong cửa sổ RTR 60s) vẫn bị bắt đúng như cũ.
+
+🔴 **Vì sao cần CẢ HAI, không phải một:**
+- **Chỉ khoá không đủ** — theo đúng trace ở trên, request A đã **hoàn tất hết** (kể cả xoá) trước khi
+  B gọi `getRefreshToken`; B khoá được ngay (không có gì để chờ) và vẫn cần một câu trả lời cho
+  `stored == null`. Breadcrumb là thứ trả lời câu đó.
+- **Chỉ breadcrumb không đủ** — hai request đọc `stored != null` ở CÙNG một khoảnh khắc (chưa ai kịp
+  ghi gì) sẽ **cả hai** tự rotate độc lập, sinh 2 phiên hợp lệ từ 1 hành động (không phải bug đã báo,
+  nhưng lãng phí và ghi đè breadcrumb kiểu "ai ghi sau thắng"). Khoá cho request thứ hai một khoảng
+  chờ ngắn để **thấy** kết quả của request thứ nhất thay vì tự làm lại.
+
+**Bất biến mới** (xem `module/auth/CLAUDE.md`): `B95`.
+
+**Giới hạn đã biết, chấp nhận:** khoá không có unlock tường minh — dựa hoàn toàn vào TTL 2s để tự
+dọn. Trường hợp 3 request đụng độ thật sự cùng lúc, request thứ ba có thể chờ tới hết TTL dù winner
+đã xong từ lâu — chấp nhận được vì cực hiếm và cửa sổ tối đa chỉ 2s.
 
 ---
 

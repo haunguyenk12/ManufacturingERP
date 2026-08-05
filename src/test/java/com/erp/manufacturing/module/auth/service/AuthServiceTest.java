@@ -92,6 +92,12 @@ class AuthServiceTest {
         // attributes — unlike every other test in this class, which does via an audit call.
         lenient().when(httpRequest.getAttribute("clientIp")).thenReturn("192.168.1.100");
         lenient().when(httpRequest.getAttribute("traceId")).thenReturn("abc123");
+
+        // lenient: only the tests under "Concurrent refresh race" below care about the lock outcome.
+        // Defaulting every other refresh_* test to "lock acquired" keeps them on the fast path —
+        // an unstubbed boolean-returning mock method returns false, which would otherwise make every
+        // single refresh test in this class pay the real 150ms sleepBriefly() wait for no reason.
+        lenient().when(tokenStore.acquireRefreshLock(anyString())).thenReturn(true);
     }
 
     // ── Login success ──────────────────────────────────────────────────────
@@ -253,6 +259,10 @@ class AuthServiceTest {
         rotation.verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
         rotation.verify(tokenStore).markRefreshTokenUsed("old-tid");
         rotation.verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
+
+        // Concurrent refresh race: the winner publishes the result so a duplicate request racing on
+        // "old-tid" can be handed this same pair instead of being misdiagnosed as a reuse attack.
+        verify(tokenStore).saveRotationResult("old-tid", response.tokenId());
     }
 
     @Test
@@ -333,6 +343,97 @@ class AuthServiceTest {
         // it was never rotated away — asking about reuse would be answering the wrong question.
         verify(tokenStore, never()).wasRefreshTokenUsed(any());
         verify(tokenStore, never()).deleteAllUserTokens(any());
+    }
+
+    // ── Concurrent refresh race ─────────────────────────────────────────────
+    // Fixes the false positive documented in common/security/CLAUDE.md §4.12: a client retry that
+    // still holds the OLD (tokenId, refreshToken) — because it never received the winner's response —
+    // must be handed the already-rotated pair, not force-logged-out as a thief.
+
+    @Test
+    @DisplayName("Refresh racing a just-completed rotation of the same tokenId absorbs the winner's " +
+            "pair instead of throwing TOKEN_REUSE_DETECTED")
+    void refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        // "old-tid" was already rotated away by a winner request moments ago.
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn("winners-refresh");
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("fresh.access");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        assertThat(response.accessToken()).isEqualTo("fresh.access");
+        assertThat(response.refreshToken()).isEqualTo("winners-refresh");
+        assertThat(response.tokenId()).isEqualTo("new-tid");
+
+        // This must NOT be diagnosed as an attack: no reuse check, no force-logout, no second pair
+        // minted, no re-rotation of anything.
+        verify(tokenStore, never()).wasRefreshTokenUsed(any());
+        verify(tokenStore, never()).deleteAllUserTokens(any());
+        verify(tokenStore, never()).deleteAllDeviceSessions(any());
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
+        verify(tokenStore, never()).saveSessionStart(any(), any(), any());
+        verifyNoInteractions(auditLogService);
+    }
+
+    @Test
+    @DisplayName("Refresh racing a just-completed rotation still extends the resolved device session")
+    void refresh_concurrentDuplicate_extendsDeviceSession() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn("winners-refresh");
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("fresh.access");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        var response = authService.refresh(
+                new RefreshRequest("old-refresh", "old-tid", "device-42"), httpRequest);
+
+        assertThat(response.deviceId()).isEqualTo("device-42");
+        verify(tokenStore).extendDeviceSession(testUser.getUserId(), "device-42");
+    }
+
+    @Test
+    @DisplayName("A rotation-result breadcrumb whose target pair no longer exists is ignored " +
+            "(falls through to the normal reuse check instead of failing)")
+    void refresh_rotationResultTargetGone_fallsThroughToReuseCheck() {
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
+        // The referenced new pair is gone too (e.g. it also expired) — don't hand out nothing.
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn(null);
+        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.TOKEN_REUSE_DETECTED));
+    }
+
+    @Test
+    @DisplayName("Losing the advisory lock does not skip real reuse detection when there is no " +
+            "rotation breadcrumb to absorb")
+    void refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists() {
+        when(tokenStore.acquireRefreshLock("old-tid")).thenReturn(false);
+        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
+        when(tokenStore.getRotationResult("old-tid")).thenReturn(null);
+        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.TOKEN_REUSE_DETECTED));
+
+        verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
     }
 
     // ── Absolute session timeout (B81, D8b) ────────────────────────────────

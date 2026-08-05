@@ -1,10 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`P3` – Costing Engine** ✅ **HOÀN THÀNH 2026-08-05.** Bản ghi đầy đủ: `CLAUDE.md
-> §0.31`.
+> Phase trước: **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH 2026-08-05.** Bản ghi
+> đầy đủ: `CLAUDE.md §0.32`.
 >
-> **821 case unit + 88 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V51`.
+> **831 case unit + 88 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V51` (phase này không migration).
 
 ---
 
@@ -26,8 +26,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `P3` vừa xong. Cập nhật dòng này thành tên phase khi bắt tay vào code phase kế tiếp)* |
-| **Ứng viên kế tiếp** | Concurrent refresh-token race (mở rộng `D8`) — xem §3 |
+| **Đang chạy** | *(không có — concurrent refresh-token race vừa xong. Cập nhật dòng này thành tên phase khi bắt tay vào code phase kế tiếp)* |
+| **Ứng viên kế tiếp** | `P5` — Serial Number Tracking, hoặc `P6` phần còn lại — xem §4/§5 |
 | **Bị chặn** | `C2-1`, `C2-2` (chờ FE), `D8c` (chờ quyết định hạ tầng email) |
 
 ---
@@ -38,7 +38,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 |---|---|---|---|
 | 1 | ~~`C2-8` — CRP tĩnh + Capacity Board + Schedule Adjustment~~ | ✅ **Đã xong (2026-08-05)** | Đóng nốt `P4`. Bản ghi: `CLAUDE.md §0.30` |
 | 2 | ~~`P3` — Costing Engine~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.31` |
-| 3 | Concurrent refresh-token race (mở rộng `D8`) | Không bị chặn | FE coi đây là điều kiện nghiệm thu |
+| 3 | ~~Concurrent refresh-token race (mở rộng `D8`)~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.32` |
 | 4 | `P5` — Serial Number Tracking | Không bị chặn | Đổi `MaterialIssueLineRequest` — nên làm sau khi `P3`/`C2-8` đã ổn định để tránh đổi DTO cùng lúc nhiều phase |
 | 5 | `P6` phần còn lại — WO Close/Reconcile | Không bị chặn | Nhỏ, đóng nốt track `P6` |
 | 6 | `C2-1` — Audit Logs read API | 🔴 Bị chặn — chờ FE câu 1 | Giữ vị trí trong roadmap để không quên |
@@ -72,30 +72,15 @@ Migration `V50`+`V51`.
 
 ---
 
-## 3. Concurrent refresh-token race (mở rộng `D8`)
+## 3. Concurrent refresh-token race (mở rộng `D8`) ✅ ĐÃ XONG (2026-08-05)
 
-Nguồn: `common/security/CLAUDE.md §4.12` — giới hạn đã biết, chấp nhận ở `D8a`: hai request refresh
-đồng thời dùng cùng một token hợp lệ không giải được bằng thứ tự thao tác, cần lock/CAS. FE coi đây
-là điều kiện nghiệm thu (`FRONTEND_ALIGNMENT_ROADMAP.md §8.0` mục 1).
-
-### Quyết định phải chốt với user TRƯỚC khi viết kế hoạch chi tiết
-
-Có cần "grace window" (token cũ vẫn dùng được N giây sau khi rotate, để tha thứ double-submit do
-network retry) hay khoá cứng theo `tokenId` trong lúc rotate là đủ? Đây là quyết định bảo mật, không
-tự chọn.
-
-### Thiết kế phác thảo
-
-Redis lock (Lua script atomic, đúng pattern đã dùng cho brute-force counter —
-`.claude/rules/architecture-decisions.md`) khoá theo `tokenId` trong lúc rotate; request đến sau
-trong lúc khoá còn giữ phải chờ ngắn rồi đọc lại token mới thay vì bị báo `TOKEN_REUSE_DETECTED` oan.
-**Không đụng** logic RTR (`B80`) hay absolute timeout (`B81`) đã có — đây là lớp bổ sung, không thay
-thế.
-
-### Test bắt buộc
-
-Test mô phỏng hai thread/coroutine gọi `refresh` đồng thời cùng token — xác nhận đúng một request
-thắng, request kia nhận lại token mới thay vì bị force-logout.
+Đóng giới hạn "race double-submit" mà `D8a` chấp nhận có chủ đích (`common/security/CLAUDE.md
+§4.12`). Bản ghi đầy đủ (thiết kế thật, bất biến `B95`, breaking changes): `CLAUDE.md §0.32`.
+Quyết định chốt với user trước khi viết kế hoạch chi tiết: **hard lock, không grace window** — token
+cũ không bao giờ được chấp nhận lại làm credential lần hai. Thiết kế thật lệch bản phác thảo gốc ở
+đúng một chỗ: khoá dùng `SET NX PX` (`opsForValue().setIfAbsent`, atomic một lệnh) thay vì Lua script
+— đọc lại `TokenStoreService.incrementFailCount` (bộ đếm brute-force) mới phát hiện nó **chưa từng**
+dùng Lua như tài liệu cũ ghi (đã sửa cùng phase, xem `CLAUDE.md §0.32` hệ quả #3). Không migration.
 
 ---
 
@@ -263,11 +248,12 @@ viết dòng code đầu tiên. **Không code phase này tới khi có quyết �
   - [x] Variance tiền trên `WorkOrderVarianceResponse` (`usageVarianceCost` + `costVariance`)
   - [x] Endpoint CRUD `ItemStandardCost` + permission mới (`PERM_COSTING_READ`/`_MANAGE`, `V51`)
   - [x] Test (821 case unit + 88 case IT / 13 class IT) + docs + smoke test HTTP thật
-- [ ] **Concurrent refresh-token race**
-  - [ ] Quyết định có grace window hay khoá cứng — đã chốt với user
-  - [ ] Lock/CAS qua Redis Lua script khi rotate
-  - [ ] Test đồng thời (2 request refresh cùng token)
-  - [ ] Docs cập nhật (`common/security/CLAUDE.md`, `error-handling.md` nếu có mã lỗi mới)
+- [x] **Concurrent refresh-token race** ✅ **2026-08-05**
+  - [x] Quyết định có grace window hay khoá cứng — chốt: khoá cứng, không grace window
+  - [x] Advisory lock (`SET NX PX`, không Lua) + breadcrumb kết quả rotate qua `TokenStoreService`
+  - [x] Test đồng thời (mô phỏng race, breadcrumb absent/present, lock not-acquired)
+  - [x] Docs cập nhật (`common/security/CLAUDE.md` §4.8+§4.12+§4.12a mới, `module/auth/CLAUDE.md`
+        `B95`, `architecture-decisions.md`, `FRONTEND_ALIGNMENT_ROADMAP.md §8.0`)
 - [ ] **`P5`** — Serial Number Tracking
   - [ ] Quyết định `lotTracked`+`serialTracked` có loại trừ nhau — đã chốt với user
   - [ ] `SerialNumber` entity + migration + FK trên 3 bảng (`stock_movements`,

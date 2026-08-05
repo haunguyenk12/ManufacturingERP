@@ -60,6 +60,9 @@ public class AuthService {
 
     private static final int MAX_FAIL_ATTEMPTS = 5;
 
+    /** Bounded wait paid only when {@code acquireRefreshLock} loses the race — see {@code sleepBriefly}. */
+    private static final long CONCURRENT_REFRESH_WAIT_MS = 150L;
+
     private final UserDetailsServiceImpl userDetailsService;
     private final JwtTokenProvider       jwtTokenProvider;
     private final TokenStoreService      tokenStore;
@@ -158,9 +161,29 @@ public class AuthService {
 
         UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(username);
 
+        // Concurrent refresh race: if another request is mid-rotation for this exact tokenId right
+        // now (client retry, double-fire, etc.), give it a brief head start to finish and publish
+        // its result before we read the token store below — see the stored == null branch.
+        if (!tokenStore.acquireRefreshLock(request.tokenId())) {
+            sleepBriefly();
+        }
+
         // Validate opaque refresh token
         String stored = tokenStore.getRefreshToken(principal.getUserId(), request.tokenId());
         if (stored == null) {
+            // Concurrent refresh race: this tokenId may have just been rotated by a duplicate of
+            // THIS SAME request rather than an attacker replaying a stolen token. Hand back the one
+            // resulting pair instead of treating a legitimate caller as a thief.
+            String rotatedToTokenId = tokenStore.getRotationResult(request.tokenId());
+            if (rotatedToTokenId != null) {
+                String rotatedRefreshToken = tokenStore.getRefreshToken(principal.getUserId(), rotatedToTokenId);
+                if (rotatedRefreshToken != null) {
+                    log.debug("[AUTH] Concurrent refresh absorbed: user={} oldTokenId={} newTokenId={}",
+                            principal.getUsername(), request.tokenId(), rotatedToTokenId);
+                    return respondWithExistingPair(
+                            principal, rotatedToTokenId, rotatedRefreshToken, request, httpRequest, ip);
+                }
+            }
             // RTR (B80): the tokenId is gone from the store, but if we rotated it away moments ago
             // then someone is replaying a token they should no longer hold — treat it as stolen.
             if (tokenStore.wasRefreshTokenUsed(request.tokenId())) {
@@ -217,6 +240,10 @@ public class AuthService {
         tokenStore.saveSessionStart(principal.getUserId(), newTokenId, sessionStart);
         tokenStore.markRefreshTokenUsed(request.tokenId());
         tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
+        // Concurrent refresh race: publish the result so a duplicate request racing on this exact
+        // old tokenId (see the stored == null branch above) can be handed this pair instead of
+        // being misdiagnosed as a reuse attack.
+        tokenStore.saveRotationResult(request.tokenId(), newTokenId);
 
         // Extend device session TTL using the resolved deviceId
         String deviceId = resolveDeviceId(request.deviceId(), httpRequest, ip);
@@ -319,6 +346,42 @@ public class AuthService {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
+
+    /**
+     * Builds the response for a duplicate refresh request that lost the race to rotate a tokenId
+     * someone else (presumably the same caller) already rotated moments ago — returns the SAME
+     * already-issued pair rather than minting a second one. The access token is freshly minted, same
+     * as every other call to {@code refresh}/{@code login}; it is not stored, so there is nothing to
+     * reuse from the winner's response.
+     */
+    private AuthResponse respondWithExistingPair(UserPrincipal principal,
+                                                 String tokenId,
+                                                 String refreshToken,
+                                                 RefreshRequest request,
+                                                 HttpServletRequest httpRequest,
+                                                 String ip) {
+        String accessToken = jwtTokenProvider.generateAccessToken(principal);
+        String deviceId = resolveDeviceId(request.deviceId(), httpRequest, ip);
+        tokenStore.extendDeviceSession(principal.getUserId(), deviceId);
+        return new AuthResponse(
+                accessToken, refreshToken, tokenId,
+                jwtProperties.accessTokenExpiryMs() / 1000,
+                deviceId,
+                false);
+    }
+
+    /**
+     * Brief, bounded wait paid only by a request that lost the {@code acquireRefreshLock} race —
+     * gives the winner a moment to finish rotating and publish its result before this caller re-reads
+     * the token store. Never blocks a normal, non-racing refresh call.
+     */
+    private void sleepBriefly() {
+        try {
+            Thread.sleep(CONCURRENT_REFRESH_WAIT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     /**
      * Resolves the effective device ID for this request.

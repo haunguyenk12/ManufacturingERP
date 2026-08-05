@@ -12,7 +12,8 @@
 | Absolute session timeout | 30 ngày, đếm từ login, companion key `auth:refresh:{userId}:{tokenId}:meta` | Refresh TTL sliding 7 ngày ⇒ user active liên tục không bao giờ bị buộc login lại (`D8b`, bất biến `B81`) |
 | Rate limiting | Redis sliding window per-IP + per-user | Không phụ thuộc ngoài; overhead dưới 1ms |
 | Response contract | `{code, result, message}` thống nhất | Frontend 1 contract duy nhất; OpenAPI dễ spec |
-| Brute-force counter | Redis Lua script (atomic) | Tránh race condition khi concurrent attack |
+| Brute-force counter | Redis `INCR` + `EXPIRE` khi count=1 | 🔴 **Sửa (concurrent refresh-token race phase)**: hàng này trước đây ghi "Lua script atomic" — **không khớp code**. `TokenStoreService.incrementFailCount` là `opsForValue().increment` (tự atomic) rồi một `expire()` **riêng, không atomic** khi count vừa chạm 1. Không có `RedisScript`/`DefaultRedisScript` nào trong repo (đã grep xác nhận, 0 kết quả) — Lua **chưa bao giờ** được dùng ở đây. Không sửa hành vi (ngoài phạm vi), chỉ sửa mô tả cho khớp code |
+| Concurrent refresh-token lock | `SET NX PX` qua `opsForValue().setIfAbsent` (không phải Lua) | Atomic đủ dùng cho advisory lock 1 lệnh; không cần compare-and-delete vì không unlock tường minh (TTL 2s tự dọn). Đóng nợ #6 phần "concurrent refresh race", xem `common/security/CLAUDE.md §4.12a` |
 | Session | Hoàn toàn stateless (STATELESS policy) | Horizontal scalability, microservice-ready |
 | ORM | JPA + Hibernate (không dùng native SQL mặc định) | Portability + type safety; raw SQL chỉ cho reports |
 | Soft delete | `deleted_at TIMESTAMPTZ NULL` + `@Where` filter | Audit trail + khôi phục dữ liệu |
