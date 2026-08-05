@@ -1,30 +1,44 @@
 # Next Phase Plan — Chưa chốt
 
-> Phase trước: **`C2-6` – Work Center Entity + CRUD + Routing FK** ✅ **HOÀN THÀNH 2026-08-05.**
-> Bản ghi đầy đủ: `CLAUDE.md §0.28` · sổ track `C2-*`: `FRONTEND_ALIGNMENT_ROADMAP.md §8.6`
-> (bảng phase §8.1, checklist §8.0 — 7/13).
+> Phase trước: **`C2-7` – Shift + Work Calendar Entity + CRUD + Work Center FK** ✅ **HOÀN THÀNH
+> 2026-08-05.** Bản ghi đầy đủ: `CLAUDE.md §0.29` · sổ track `C2-*`: `FRONTEND_ALIGNMENT_ROADMAP.md
+> §8.7` (bảng phase §8.1, checklist §8.0 — 8/13).
 >
-> **690 case unit + 79 case IT / 12 class IT · failures = 0, errors = 0** · migration mới nhất `V45`.
+> **759 case unit + 80 case IT / 12 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V47`.
 
 ---
 
-## Trạng thái track `C2-*` sau `C2-6`
+## Trạng thái
 
-| Phase | Trạng thái |
-|---|---|
-| `C2-0`, `C2-3`, `C2-4`, `C2-5`, `C2-6` | ✅ Xong |
-| `C2-1` (Audit read API), `C2-2` (Inventory lot) | 🔴 **Bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md §5` |
-| `C2-7` (Shift + Work Calendar) | Không bị chặn — phụ thuộc `C2-6` (đã xong). Ứng viên cho phase kế tiếp |
-| `C2-8` (Capacity Board + schedule adjustment) | Không bị chặn về mặt block, nhưng phụ thuộc `C2-6`+`C2-7` — nặng nhất, nên làm sau `C2-7` |
-| `D8c` (forgot-password) | 🔴 Bị chặn — thiếu `spring-boot-starter-mail`, cần chốt hạ tầng gửi email trước |
-| `P3` (costing) | Chưa bắt đầu, không phụ thuộc gì đang mở |
+Chưa chốt phase kế tiếp. Ứng viên không bị chặn:
 
-## Phase kế tiếp: chưa chốt
+- **`C2-8` – Capacity Board + schedule adjustment.** Phụ thuộc `C2-6` (xong) + `C2-7` (xong). **Nặng
+  nhất** trong cluster `P4` — trước khi viết kế hoạch, đọc:
+  - `FRONTEND_ALIGNMENT_ROADMAP.md §8.9` bảng bẫy hàng `C2-8`: `work_order_operations` **chưa có**
+    `plannedStartAt`/`plannedEndAt` ⇒ cần chốt **quyết định nghiệp vụ** (sinh lịch lúc tạo WO, lúc
+    `plan`, hay lúc `release`?) trước khi code, không chỉ "thêm 2 cột".
+  - `FRONTEND_ALIGNMENT_ROADMAP.md §7.1` nợ **B** (`predecessorOperationIds`) — `C2-8` là consumer
+    làm lý do hoãn của nợ đó hết hiệu lực, cần xác nhận có làm cùng lúc hay tách riêng.
+  - `module/shift/CLAUDE.md` mục 1 (quy ước qui-thuộc-ngày ca qua đêm) — `C2-8` phải cộng dồn giờ
+    làm đúng theo quy ước đó, đảo ngược sẽ tính sai capacity của mọi ca qua đêm.
+  - `WorkCalendarLookupService.computeWorkingWindows(calendarId, from, to)` (`module/shift/service/`)
+    là entry point sẵn có cho net working window — `C2-8` là consumer đầu tiên, gọi thẳng, không cần
+    lookup service mới.
+- **`D8c` – Forgot-password.** 🔴 Vẫn bị chặn: thiếu `spring-boot-starter-mail`, cần chốt hạ tầng gửi
+  email trước khi code.
+- **`P3` – Costing.** Chưa bắt đầu, chưa có kế hoạch chi tiết.
 
-Ứng viên hợp lý nhất là `C2-7` (nối tiếp `P4`, không bị chặn), nhưng cần user xác nhận trước khi viết
-kế hoạch chi tiết — theo đúng cách `C2-6` đã chốt 3 quyết định thiết kế với user trước khi viết
-`NEXT_PHASE_PLAN.md` của chính nó (ảnh hưởng schema Work Calendar/Shift, không tự suy ra được).
+**Vẫn bị chặn** (chờ FE trả lời):
+- `C2-1` (audit read API) — chờ câu 1 ở `docs/capstone2-api-gap-response.md §5`.
+- `C2-2` (inventory lot) — chờ câu 2 ở `docs/capstone2-api-gap-response.md §5`.
 
-Khi chốt phase kế tiếp, viết lại file này theo đúng khuôn các phase trước: mục tiêu, quyết định thiết
-kế cần chốt trước, việc cần làm, test bắt buộc, "KHÔNG làm gì", breaking changes, tài liệu phải cập
-nhật.
+---
+
+## Trước khi viết kế hoạch chi tiết cho phase kế tiếp
+
+1. Xác nhận với user chọn ứng viên nào ở trên.
+2. Đo lại baseline thật (`mvn -o clean verify`) — **đừng chép số ở đầu file này**, số liệu đổi theo
+   từng phase.
+3. Theo đúng `.claude/rules/dev-workflow.md §6.6`: viết kế hoạch mới đè lên file này, giữ đúng một
+   phase "đang chạy" tại một thời điểm.

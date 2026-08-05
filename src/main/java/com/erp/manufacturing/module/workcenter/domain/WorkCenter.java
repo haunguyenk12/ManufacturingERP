@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workcenter.domain;
 import com.erp.manufacturing.common.audit.BaseEntity;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
+import com.erp.manufacturing.module.shift.domain.WorkCalendar;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -73,6 +74,15 @@ public class WorkCenter extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private OrganizationStatus status = OrganizationStatus.ACTIVE;
+
+    /**
+     * Optional (C2-7 Part C) — nullable because Work Center predates Work Calendar (C2-6 before
+     * C2-7) and not every work center runs on a shift pattern. See module/workcenter/CLAUDE.md
+     * bất biến B_wc4 for the same-plant validation this FK requires.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "work_calendar_id")
+    private WorkCalendar workCalendar;
 
     public boolean isActive() {
         return status == OrganizationStatus.ACTIVE;

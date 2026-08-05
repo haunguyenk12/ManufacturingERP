@@ -2,12 +2,15 @@ package com.erp.manufacturing.module.workcenter.service;
 
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.shift.domain.WorkCalendar;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
 import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterCreateRequest;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterResponse;
@@ -36,6 +39,7 @@ public class WorkCenterService {
 
     private final WorkCenterRepository workCenterRepository;
     private final OrganizationLookupService organizationLookupService;
+    private final WorkCalendarLookupService workCalendarLookupService;
     private final WorkCenterMapper mapper;
 
     @Transactional
@@ -49,6 +53,10 @@ public class WorkCenterService {
             throw ExceptionFactory.alreadyExists(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Work center code", code);
         }
 
+        WorkCalendar workCalendar = request.workCalendarId() == null
+                ? null
+                : resolveWorkCalendarInPlant(request.workCalendarId(), plantId);
+
         WorkCenter workCenter = WorkCenter.builder()
                 .plant(plant)
                 .code(code)
@@ -57,6 +65,7 @@ public class WorkCenterService {
                 .capacityUnitType(request.capacityUnitType())
                 .capacityUnits(request.capacityUnits())
                 .status(OrganizationStatus.ACTIVE)
+                .workCalendar(workCalendar)
                 .build();
         return mapper.toResponse(workCenterRepository.save(workCenter));
     }
@@ -90,6 +99,10 @@ public class WorkCenterService {
         if (request.capacityUnits() != null) {
             workCenter.setCapacityUnits(request.capacityUnits());
         }
+        if (request.workCalendarId() != null) {
+            workCenter.setWorkCalendar(resolveWorkCalendarInPlant(
+                    request.workCalendarId(), workCenter.getPlant().getPlantId()));
+        }
         return mapper.toResponse(workCenterRepository.save(workCenter));
     }
 
@@ -119,6 +132,20 @@ public class WorkCenterService {
         WorkCenter workCenter = findWorkCenter(workCenterId);
         workCenter.deactivate();
         return mapper.toResponse(workCenterRepository.save(workCenter));
+    }
+
+    /**
+     * Bất biến B_wc4 (module/workcenter/CLAUDE.md): a work center's calendar must belong to the
+     * same plant as the work center itself — same shape as B_wc2's "same plant" requirement between
+     * a routing operation and its work center. 422, not 409: invalid input, not a state conflict.
+     */
+    private WorkCalendar resolveWorkCalendarInPlant(UUID workCalendarId, UUID plantId) {
+        WorkCalendar workCalendar = workCalendarLookupService.getActiveWorkCalendar(workCalendarId);
+        if (!workCalendar.getPlant().getPlantId().equals(plantId)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Work calendar " + workCalendarId + " does not belong to plant " + plantId);
+        }
+        return workCalendar;
     }
 
     private WorkCenter findWorkCenter(UUID workCenterId) {

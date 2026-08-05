@@ -729,6 +729,45 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 > `workCenterId`. `RoutingOperationResponse` vẫn trả **cả** `workCenterId` **và** `workCenterCode`
 > (resolve qua join, không phải cột riêng) để FE hiện được cả id lẫn tên hiển thị mà không cần gọi
 > thêm API. Work Center per-plant, **không** có `companyId` — khác UOM (global).
+>
+> **[`C2-7`]** `WorkCenterCreateRequest`/`UpdateRequest`/`Response` thêm field tuỳ chọn
+> `workCalendarId` (UUID, additive) — gán lịch làm việc cho work center (xem mục Shift/Work Calendar
+> ngay dưới). Phải cùng plant với work center, nếu không trả `422 OPERATION_NOT_ALLOWED`. `null` ở
+> `PATCH` nghĩa là "giữ nguyên" — **không có cách gỡ** một calendar đã gán qua endpoint này.
+
+### Shift & Work Calendar *(`C2-7`, 2026-08-05)*
+
+| Việc | Endpoint |
+|---|---|
+| Shift: tạo / danh sách theo plant | `POST /plants/{plantId}/shifts` · `GET /plants/{plantId}/shifts?status=` |
+| Shift: xem / sửa | `GET /shifts/{id}` · `PATCH /shifts/{id}` (chỉ `name`/`startTime`/`endTime`/`breaks[]`) |
+| Shift: activate / deactivate / **delete** | `POST /shifts/{id}/activate` · `POST /shifts/{id}/deactivate` · **`DELETE /shifts/{id}`** ⇐ cùng hành vi với `deactivate` |
+| Work Calendar: tạo / danh sách theo plant | `POST /plants/{plantId}/work-calendars` · `GET /plants/{plantId}/work-calendars?status=` |
+| Work Calendar: xem / sửa | `GET /work-calendars/{id}` · `PATCH /work-calendars/{id}` (chỉ `name`/`effectiveFrom`/`effectiveTo`/`weeklyShifts[]`/`exceptions[]`) |
+| Work Calendar: activate / deactivate / **delete** | `POST /work-calendars/{id}/activate` · `POST /work-calendars/{id}/deactivate` · **`DELETE /work-calendars/{id}`** ⇐ cùng hành vi với `deactivate` |
+
+> **Shift là MỘT khoảng liên tục**, không phải danh sách nhiều ca con: `startTime`/`endTime` kiểu
+> `TIME` (`"HH:mm:ss"`, không có ngày). `endTime` nhỏ hơn `startTime` nghĩa là **ca qua đêm** (vd
+> `22:00:00`-`06:00:00`), **không phải** lỗi input. `breaks[]` (mỗi phần tử `{startTime, endTime}`)
+> là các khoảng nghỉ nằm **trong** ca đó; gửi khoảng nghỉ nằm ngoài ca (kể cả ca qua đêm) trả
+> `422 OPERATION_NOT_ALLOWED`.
+>
+> **`weeklyShifts[]`** của Work Calendar là mảng `{weekday, shiftId}` (`weekday` ∈
+> `MONDAY`..`SUNDAY`) — **một weekday có thể gán nhiều shift** (vd ca ngày + ca đêm cùng chạy thứ
+> Hai). `shiftId` phải cùng plant với work calendar, nếu không trả `422 OPERATION_NOT_ALLOWED`.
+>
+> **`exceptions[]`** là mảng `{exceptionDate, reason}` — mỗi phần tử đánh dấu **một ngày cụ thể**
+> thành ngày nghỉ (`NON_WORKING`), ghi đè lịch tuần mặc định. **Chỉ có một chiều** — không có kiểu
+> "làm bù"/ngày đặc biệt khác. Trùng `exceptionDate` trong cùng request trả
+> `422 BUSINESS_RULE_VIOLATION`.
+>
+> 🔴 **`breaks[]`/`weeklyShifts[]`/`exceptions[]` trên `PATCH` theo đúng quy ước full-replace-khi-có-mặt
+> đã dùng ở Work Center/Routing:** không gửi field (`null`/vắng mặt trong JSON) = giữ nguyên danh sách
+> hiện có; gửi `[]` = xoá sạch danh sách đó. Gửi một mảng có phần tử = **thay thế toàn bộ**, không phải
+> "thêm vào".
+>
+> Chưa có API public tính "giờ làm thực" (net working window, đã trừ break/ngày nghỉ) — nội bộ dùng
+> cho `C2-8` (Capacity Board), chưa lộ ra ngoài.
 
 ### Access Control — Role / Scope lifecycle + Assignments *(`C2-4`, 2026-08-05)*
 

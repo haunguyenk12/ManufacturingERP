@@ -4,6 +4,7 @@ import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
 import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterCreateRequest;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterUpdateRequest;
@@ -74,7 +75,7 @@ class WorkCenterMethodSecurityTest {
                 any(), eq("PERM_WORK_CENTER_MANAGE"), eq("PLANT"), eq(PLANT_ID))).thenReturn(false);
 
         assertThatThrownBy(() -> workCenterService.create(PLANT_ID, new WorkCenterCreateRequest(
-                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1)))
+                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCenterRepository, organizationLookupService);
@@ -93,7 +94,7 @@ class WorkCenterMethodSecurityTest {
         when(workCenterRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThatCode(() -> workCenterService.create(PLANT_ID, new WorkCenterCreateRequest(
-                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1)))
+                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1, null)))
                 .doesNotThrowAnyException();
     }
 
@@ -138,7 +139,7 @@ class WorkCenterMethodSecurityTest {
                 any(), eq("PERM_WORK_CENTER_MANAGE"), eq(WORK_CENTER_ID))).thenReturn(false);
 
         assertThatThrownBy(() -> workCenterService.update(WORK_CENTER_ID,
-                new WorkCenterUpdateRequest("New name", null, null, null)))
+                new WorkCenterUpdateRequest("New name", null, null, null, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCenterRepository);
@@ -176,8 +177,9 @@ class WorkCenterMethodSecurityTest {
         @Bean
         WorkCenterService workCenterService(WorkCenterRepository workCenterRepository,
                                             OrganizationLookupService organizationLookupService,
+                                            WorkCalendarLookupService workCalendarLookupService,
                                             WorkCenterMapper mapper) {
-            return new WorkCenterService(workCenterRepository, organizationLookupService, mapper);
+            return new WorkCenterService(workCenterRepository, organizationLookupService, workCalendarLookupService, mapper);
         }
 
         @Bean WorkCenterMapper workCenterMapper() { return new WorkCenterMapper(); }
@@ -190,5 +192,6 @@ class WorkCenterMethodSecurityTest {
 
         @Bean WorkCenterRepository workCenterRepository() { return mock(WorkCenterRepository.class); }
         @Bean OrganizationLookupService organizationLookupService() { return mock(OrganizationLookupService.class); }
+        @Bean WorkCalendarLookupService workCalendarLookupService() { return mock(WorkCalendarLookupService.class); }
     }
 }

@@ -1,4 +1,4 @@
-package com.erp.manufacturing.module.workcenter.controller;
+package com.erp.manufacturing.module.shift.controller;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -7,9 +7,9 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
-import com.erp.manufacturing.module.workcenter.dto.WorkCenterCreateRequest;
-import com.erp.manufacturing.module.workcenter.dto.WorkCenterResponse;
-import com.erp.manufacturing.module.workcenter.service.WorkCenterService;
+import com.erp.manufacturing.module.shift.dto.WorkCalendarCreateRequest;
+import com.erp.manufacturing.module.shift.dto.WorkCalendarResponse;
+import com.erp.manufacturing.module.shift.service.WorkCalendarService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +22,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,22 +39,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Contract test for {@link WorkCenterController} (C2-6) — envelope contract only;
- * {@code @PreAuthorize} itself is covered by {@code WorkCenterMethodSecurityTest} (rule R2).
+ * Contract test for {@link WorkCalendarController} (C2-7) — envelope contract only;
+ * {@code @PreAuthorize} itself is covered by {@code WorkCalendarMethodSecurityTest} (rule R2).
  */
-@WebMvcTest(controllers = WorkCenterController.class)
+@WebMvcTest(controllers = WorkCalendarController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@DisplayName("WorkCenterController – response envelope contract")
-class WorkCenterControllerTest {
+@DisplayName("WorkCalendarController – response envelope contract")
+class WorkCalendarControllerTest {
 
     @Autowired
     MockMvc mockMvc;
 
     @MockBean
-    WorkCenterService workCenterService;
+    WorkCalendarService workCalendarService;
 
-    // Unused directly by these tests – required only so the auto-detected security filters
-    // can be constructed by the @WebMvcTest slice, even with addFilters = false.
     @MockBean IpExtractor ipExtractor;
     @MockBean JwtTokenProvider jwtTokenProvider;
     @MockBean TokenStoreService tokenStoreService;
@@ -62,28 +61,27 @@ class WorkCenterControllerTest {
     @MockBean RateLimitProperties rateLimitProperties;
 
     private static final UUID PLANT_ID = UUID.randomUUID();
-    private static final UUID WORK_CENTER_ID = UUID.randomUUID();
+    private static final UUID CALENDAR_ID = UUID.randomUUID();
 
-    private WorkCenterResponse sampleResponse(String status) {
-        return new WorkCenterResponse(WORK_CENTER_ID, PLANT_ID, "WC-01", "Line 1", "Main line",
-                "LINE", 2, status, 0L, Instant.now(), Instant.now(), null);
+    private WorkCalendarResponse sampleResponse(String status) {
+        return new WorkCalendarResponse(CALENDAR_ID, PLANT_ID, "CAL-01", "Default Calendar",
+                LocalDate.of(2026, 1, 1), null, status, List.of(), List.of(), 0L, Instant.now(), Instant.now());
     }
 
     @Test
-    @DisplayName("create: valid request returns 201 with the ACTIVE work center")
+    @DisplayName("create: valid request returns 201 with the ACTIVE work calendar")
     void create_validRequest_returns201Created() throws Exception {
-        when(workCenterService.create(eq(PLANT_ID), any(WorkCenterCreateRequest.class)))
+        when(workCalendarService.create(eq(PLANT_ID), any(WorkCalendarCreateRequest.class)))
                 .thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"code":"wc-01","name":"Line 1","description":"Main line",
-                                 "capacityUnitType":"LINE","capacityUnits":2}
+                                {"code":"cal-01","name":"Default Calendar","effectiveFrom":"2026-01-01"}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.result.workCenterId").value(WORK_CENTER_ID.toString()))
+                .andExpect(jsonPath("$.result.workCalendarId").value(CALENDAR_ID.toString()))
                 .andExpect(jsonPath("$.result.plantId").value(PLANT_ID.toString()))
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.result.version").value(0));
@@ -92,10 +90,10 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("create: blank name returns 400 VALIDATION_ERROR with the field name")
     void create_blankName_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"code":"WC-01","name":"","capacityUnitType":"LINE","capacityUnits":2}
+                                {"code":"CAL-01","name":"","effectiveFrom":"2026-01-01"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
@@ -106,14 +104,14 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("create: duplicate code returns 409 RESOURCE_ALREADY_EXISTS")
     void create_duplicateCode_returns409AlreadyExists() throws Exception {
-        when(workCenterService.create(eq(PLANT_ID), any(WorkCenterCreateRequest.class)))
+        when(workCalendarService.create(eq(PLANT_ID), any(WorkCalendarCreateRequest.class)))
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
-                        "Work center code already exists: WC-01"));
+                        "Work calendar code already exists: CAL-01"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"code":"WC-01","name":"Line 1","capacityUnitType":"LINE","capacityUnits":2}
+                                {"code":"CAL-01","name":"Default Calendar","effectiveFrom":"2026-01-01"}
                                 """))
                 .andExpect(status().is(ValidationErrorCode.RESOURCE_ALREADY_EXISTS.status().value()))
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_ALREADY_EXISTS.code()))
@@ -123,11 +121,11 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("get: unknown id returns 404 ENTITY_NOT_FOUND")
     void get_unknownId_returns404EntityNotFound() throws Exception {
-        when(workCenterService.get(WORK_CENTER_ID))
+        when(workCalendarService.get(CALENDAR_ID))
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
-                        "Work center not found with id: " + WORK_CENTER_ID));
+                        "Work calendar not found with id: " + CALENDAR_ID));
 
-        mockMvc.perform(get("/api/v1/work-centers/" + WORK_CENTER_ID))
+        mockMvc.perform(get("/api/v1/work-calendars/" + CALENDAR_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -135,12 +133,12 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("update: request body has no code/plantId field to send")
     void update_validRequest_returns200() throws Exception {
-        when(workCenterService.update(eq(WORK_CENTER_ID), any())).thenReturn(sampleResponse("ACTIVE"));
+        when(workCalendarService.update(eq(CALENDAR_ID), any())).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(patch("/api/v1/work-centers/" + WORK_CENTER_ID)
+        mockMvc.perform(patch("/api/v1/work-calendars/" + CALENDAR_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Line 1 (updated)"}
+                                {"name":"Default Calendar (updated)"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
@@ -149,9 +147,9 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("activate: returns 200 with ACTIVE status")
     void activate_returns200Active() throws Exception {
-        when(workCenterService.activate(WORK_CENTER_ID)).thenReturn(sampleResponse("ACTIVE"));
+        when(workCalendarService.activate(CALENDAR_ID)).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-centers/" + WORK_CENTER_ID + "/activate"))
+        mockMvc.perform(post("/api/v1/work-calendars/" + CALENDAR_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"));
     }
@@ -159,9 +157,9 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("deactivate: returns 200 with INACTIVE status")
     void deactivate_returns200Inactive() throws Exception {
-        when(workCenterService.deactivate(WORK_CENTER_ID)).thenReturn(sampleResponse("INACTIVE"));
+        when(workCalendarService.deactivate(CALENDAR_ID)).thenReturn(sampleResponse("INACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-centers/" + WORK_CENTER_ID + "/deactivate"))
+        mockMvc.perform(post("/api/v1/work-calendars/" + CALENDAR_ID + "/deactivate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("INACTIVE"));
     }
@@ -169,24 +167,24 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("delete: is the same command as POST .../deactivate — 200 with null result")
     void delete_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/work-centers/" + WORK_CENTER_ID))
+        mockMvc.perform(delete("/api/v1/work-calendars/" + CALENDAR_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
 
-        verify(workCenterService).deactivate(WORK_CENTER_ID);
+        verify(workCalendarService).deactivate(CALENDAR_ID);
     }
 
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/totalPages/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
+        when(workCalendarService.list(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-centers"))
+        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-calendars"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.result.content[0].code").value("WC-01"))
+                .andExpect(jsonPath("$.result.content[0].code").value("CAL-01"))
                 .andExpect(jsonPath("$.result.page").value(0))
                 .andExpect(jsonPath("$.result.size").value(20))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
@@ -194,17 +192,6 @@ class WorkCenterControllerTest {
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
 
-        verify(workCenterService).list(eq(PLANT_ID), isNull(), any());
-    }
-
-    @Test
-    @DisplayName("list: size above max is clamped to 100 (A4)")
-    void list_sizeAboveMax_isClampedToHundred() throws Exception {
-        when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
-                .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
-
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-centers").param("size", "500"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.result.size").value(100));
+        verify(workCalendarService).list(eq(PLANT_ID), isNull(), any());
     }
 }

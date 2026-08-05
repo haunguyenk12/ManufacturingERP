@@ -19,6 +19,7 @@ public class WorkCenterMapper {
                 workCenter.getStatus().name(),
                 workCenter.getVersion(),
                 workCenter.getCreatedAt(),
-                workCenter.getUpdatedAt());
+                workCenter.getUpdatedAt(),
+                workCenter.getWorkCalendar() == null ? null : workCenter.getWorkCalendar().getWorkCalendarId());
     }
 }

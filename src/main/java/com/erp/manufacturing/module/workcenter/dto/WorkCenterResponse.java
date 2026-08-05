@@ -19,5 +19,6 @@ public record WorkCenterResponse(
         String status,
         Long version,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        UUID workCalendarId
 ) {}

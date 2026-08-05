@@ -267,7 +267,7 @@ OpenAPI phải mô tả rõ permission, trạng thái, reason, stock posting tim
 - [ ] Inventory Lot list/detail/status có OpenAPI và business rules.
 - [ ] Audit list/detail có OpenAPI.
 - [x] Work Center CRUD/lifecycle có OpenAPI. *(`C2-6`, 2026-08-05 — 7 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.6`)*
-- [ ] Shift/Calendar CRUD/lifecycle có OpenAPI.
+- [x] Shift/Calendar CRUD/lifecycle có OpenAPI. *(`C2-7`, 2026-08-05 — 14 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.7`)*
 - [ ] Capacity Board và schedule adjustment có OpenAPI.
 - [ ] BOM/Routing deactivate được chốt.
 - [ ] SO DRAFT update được chốt.

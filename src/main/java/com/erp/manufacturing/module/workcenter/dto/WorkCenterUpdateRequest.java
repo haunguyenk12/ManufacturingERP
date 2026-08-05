@@ -4,14 +4,20 @@ import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import java.util.UUID;
+
 /**
  * {@code code} and {@code plantId} are deliberately absent — both are immutable after creation
  * (NEXT_PHASE_PLAN.md C2-6 §Phần A "Thiết kế đã chốt" #3). Every field here is optional: a
- * {@code null} value means "leave unchanged", following {@code SupplierUpdateRequest}.
+ * {@code null} value means "leave unchanged", following {@code SupplierUpdateRequest}. This
+ * includes {@code workCalendarId} (C2-7 Part C) — there is no way through this endpoint to clear an
+ * already-assigned calendar back to "none", the same accepted limitation as
+ * {@code WorkCalendarUpdateRequest.effectiveTo}.
  */
 public record WorkCenterUpdateRequest(
         @Size(max = 255) String name,
         String description,
         CapacityUnitType capacityUnitType,
-        @Positive Integer capacityUnits
+        @Positive Integer capacityUnits,
+        UUID workCalendarId
 ) {}

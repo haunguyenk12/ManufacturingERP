@@ -7,6 +7,8 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.shift.domain.WorkCalendar;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
 import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
 import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterCreateRequest;
@@ -35,11 +37,13 @@ class WorkCenterServiceTest {
 
     private final WorkCenterRepository repository = mock(WorkCenterRepository.class);
     private final OrganizationLookupService organizationLookupService = mock(OrganizationLookupService.class);
+    private final WorkCalendarLookupService workCalendarLookupService = mock(WorkCalendarLookupService.class);
     private final WorkCenterService service =
-            new WorkCenterService(repository, organizationLookupService, new WorkCenterMapper());
+            new WorkCenterService(repository, organizationLookupService, workCalendarLookupService, new WorkCenterMapper());
 
     private static final UUID PLANT_ID = UUID.randomUUID();
     private static final UUID WORK_CENTER_ID = UUID.randomUUID();
+    private static final UUID WORK_CALENDAR_ID = UUID.randomUUID();
 
     @BeforeEach
     void stubSave() {
@@ -58,7 +62,7 @@ class WorkCenterServiceTest {
         when(repository.existsByPlantPlantIdAndCode(PLANT_ID, "WC-01")).thenReturn(false);
 
         var response = service.create(PLANT_ID, new WorkCenterCreateRequest(
-                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2));
+                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2, null));
 
         assertThat(response.code()).isEqualTo("WC-01");
         assertThat(response.plantId()).isEqualTo(PLANT_ID);
@@ -74,7 +78,7 @@ class WorkCenterServiceTest {
         when(repository.existsByPlantPlantIdAndCode(PLANT_ID, "WC-01")).thenReturn(true);
 
         assertThatThrownBy(() -> service.create(PLANT_ID, new WorkCenterCreateRequest(
-                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2)))
+                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_ALREADY_EXISTS));
@@ -90,7 +94,7 @@ class WorkCenterServiceTest {
         when(repository.existsByPlantPlantIdAndCode(otherPlantId, "WC-01")).thenReturn(false);
 
         var response = service.create(otherPlantId, new WorkCenterCreateRequest(
-                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2));
+                "wc-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2, null));
 
         assertThat(response.code()).isEqualTo("WC-01");
         assertThat(response.plantId()).isEqualTo(otherPlantId);
@@ -104,7 +108,7 @@ class WorkCenterServiceTest {
                         "Inactive plant cannot be used: " + PLANT_ID));
 
         assertThatThrownBy(() -> service.create(PLANT_ID, new WorkCenterCreateRequest(
-                "WC-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2)))
+                "WC-01", "Assembly Line 1", null, CapacityUnitType.LINE, 2, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
@@ -117,7 +121,7 @@ class WorkCenterServiceTest {
     void update_hasNoCodeOrPlantIdField() {
         assertThat(WorkCenterUpdateRequest.class.getRecordComponents())
                 .extracting(RecordComponent::getName)
-                .containsExactly("name", "description", "capacityUnitType", "capacityUnits")
+                .containsExactly("name", "description", "capacityUnitType", "capacityUnits", "workCalendarId")
                 .doesNotContain("code", "plantId");
     }
 
@@ -131,12 +135,90 @@ class WorkCenterServiceTest {
         when(repository.findById(WORK_CENTER_ID)).thenReturn(Optional.of(existing));
 
         var response = service.update(WORK_CENTER_ID,
-                new WorkCenterUpdateRequest(null, "new description", null, 5));
+                new WorkCenterUpdateRequest(null, "new description", null, 5, null));
 
         assertThat(response.name()).isEqualTo("Old Name");
         assertThat(response.description()).isEqualTo("new description");
         assertThat(response.capacityUnitType()).isEqualTo("MACHINE");
         assertThat(response.capacityUnits()).isEqualTo(5);
+        assertThat(response.workCalendarId()).isNull();
+    }
+
+    private WorkCalendar activeWorkCalendar(UUID workCalendarId, UUID plantId) {
+        return WorkCalendar.builder().workCalendarId(workCalendarId).plant(activePlant(plantId))
+                .code("CAL-1").name("Calendar").effectiveFrom(java.time.LocalDate.of(2026, 1, 1))
+                .status(OrganizationStatus.ACTIVE).build();
+    }
+
+    @Test
+    @DisplayName("create: work calendar in the same plant is attached (B_wc4)")
+    void create_workCalendarInSamePlant_isAttached() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+        when(repository.existsByPlantPlantIdAndCode(PLANT_ID, "WC-01")).thenReturn(false);
+        when(workCalendarLookupService.getActiveWorkCalendar(WORK_CALENDAR_ID))
+                .thenReturn(activeWorkCalendar(WORK_CALENDAR_ID, PLANT_ID));
+
+        var response = service.create(PLANT_ID, new WorkCenterCreateRequest(
+                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1, WORK_CALENDAR_ID));
+
+        assertThat(response.workCalendarId()).isEqualTo(WORK_CALENDAR_ID);
+    }
+
+    @Test
+    @DisplayName("create: work calendar of a different plant throws OPERATION_NOT_ALLOWED before any save (B_wc4)")
+    void create_workCalendarOfDifferentPlant_throws() {
+        UUID otherPlantId = UUID.randomUUID();
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+        when(repository.existsByPlantPlantIdAndCode(PLANT_ID, "WC-01")).thenReturn(false);
+        when(workCalendarLookupService.getActiveWorkCalendar(WORK_CALENDAR_ID))
+                .thenReturn(activeWorkCalendar(WORK_CALENDAR_ID, otherPlantId));
+
+        assertThatThrownBy(() -> service.create(PLANT_ID, new WorkCenterCreateRequest(
+                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1, WORK_CALENDAR_ID)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("create: inactive work calendar propagates the rejection from WorkCalendarLookupService (B_wc4)")
+    void create_inactiveWorkCalendar_propagatesRejection() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+        when(repository.existsByPlantPlantIdAndCode(PLANT_ID, "WC-01")).thenReturn(false);
+        when(workCalendarLookupService.getActiveWorkCalendar(WORK_CALENDAR_ID)).thenThrow(
+                ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Inactive work calendar cannot be used: " + WORK_CALENDAR_ID));
+
+        assertThatThrownBy(() -> service.create(PLANT_ID, new WorkCenterCreateRequest(
+                "WC-01", "Line 1", null, CapacityUnitType.LINE, 1, WORK_CALENDAR_ID)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("update: work calendar of a different plant throws OPERATION_NOT_ALLOWED (B_wc4)")
+    void update_workCalendarOfDifferentPlant_throws() {
+        UUID otherPlantId = UUID.randomUUID();
+        WorkCenter existing = WorkCenter.builder()
+                .workCenterId(WORK_CENTER_ID).plant(activePlant(PLANT_ID)).code("WC-01").name("Line 1")
+                .capacityUnitType(CapacityUnitType.MACHINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build();
+        when(repository.findById(WORK_CENTER_ID)).thenReturn(Optional.of(existing));
+        when(workCalendarLookupService.getActiveWorkCalendar(WORK_CALENDAR_ID))
+                .thenReturn(activeWorkCalendar(WORK_CALENDAR_ID, otherPlantId));
+
+        assertThatThrownBy(() -> service.update(WORK_CENTER_ID,
+                new WorkCenterUpdateRequest(null, null, null, null, WORK_CALENDAR_ID)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(repository, never()).save(any());
     }
 
     @Test

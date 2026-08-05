@@ -13,6 +13,7 @@ permission).
 | B_wc1 | `work_centers` là **per-plant** (`plant_id NOT NULL`), không phải company-level — khác quyết định `C2-3` cho UOM (global). `UNIQUE (plant_id, code)`, không phải `UNIQUE (code)` toàn cục | `WorkCenterServiceTest.create_duplicateCodeInSamePlant_throws`, `.create_sameCodeDifferentPlant_isAllowed` |
 | B_wc2 | Mọi `RoutingOperation` trong **cùng một** `RoutingHeader` phải trỏ Work Center của **cùng một Plant**. Validate ở `RoutingService.create()` — resolve toàn bộ `workCenterId` trước, kiểm tập `plantId` phân biệt > 1 ⇒ `OPERATION_NOT_ALLOWED` (422, input sai — không phải state machine) **trước khi** build bất kỳ entity nào (rule C9). `RoutingHeader` vẫn company-level (không đổi schema) — đây là hệ quả **chấp nhận** của quyết định "Work Center per-plant", không phải thiếu sót | `RoutingServiceTest.create_operationsAcrossTwoPlants_throwsOperationNotAllowed` |
 | B_wc3 | `activate`/`deactivate` **không** kiểm tra tham chiếu (khác BOM/Routing `activate` — không có "revision cũ" cần deactivate). Deactivate **không** chặn khi đang được `RoutingOperation` tham chiếu — `RoutingOperation` giữ nguyên FK dù Work Center `INACTIVE` (giống Warehouse `INACTIVE` vẫn giữ FK từ `stock_balances`). `DELETE` và `POST .../deactivate` gọi **cùng** service method (`deactivate`), không phải hai hành vi khác nhau | `WorkCenterServiceTest.deactivateThenActivate_roundTrips`, `WorkCenterControllerTest.delete_returns200NoContentEnvelope` (verify `service.deactivate` được gọi, cùng method với endpoint `POST .../deactivate`) |
+| B_wc4 | **[`C2-7`]** `WorkCenter.workCalendar` (FK nullable, thêm ở `C2-7` Part C) phải cùng plant với chính `WorkCenter` — validate ở `WorkCenterService.resolveWorkCalendarInPlant`, gọi `WorkCalendarLookupService.getActiveWorkCalendar` (rule C7, entry point ở `module/shift`) rồi so `plantId`. 422, không phải 409 — cùng hình dạng `B_wc2`. `null` ở cả create lẫn update = "không gắn calendar" / "giữ nguyên", không có đường gỡ một calendar đã gán (xem `module/shift/CLAUDE.md` mục 5) | `WorkCenterServiceTest.create_workCalendarInSamePlant_isAttached`, `.create_workCalendarOfDifferentPlant_throws`, `.create_inactiveWorkCalendar_propagatesRejection`, `.update_workCalendarOfDifferentPlant_throws` |
 
 ## Quyết định thiết kế cần nhớ
 
@@ -61,5 +62,6 @@ cấu trúc tổ chức Company→Plant→Warehouse (`PERM_ORG_*`).
 
 ### 7. Chưa làm — chờ phase sau
 
-Calendar/Shift reference, Capacity Board, schedule adjustment (`C2-7`/`C2-8`) — xem
-`NEXT_PHASE_PLAN.md` lịch sử `C2-6` mục "KHÔNG làm gì".
+Capacity Board, schedule adjustment (`C2-8`) — xem `NEXT_PHASE_PLAN.md` lịch sử `C2-6`/`C2-7` mục
+"KHÔNG làm gì". ✅ **Calendar reference đã xong ở `C2-7`** (bất biến `B_wc4` ở trên) — dòng này trước
+đây liệt kê nó là "chưa làm", nay đã đóng.

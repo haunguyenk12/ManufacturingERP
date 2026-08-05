@@ -73,14 +73,15 @@
   - *Khác thiết kế gốc:* entity tên `QualityDisposition` (không phải `QualityInspection`), permission
     tên `PERM_QUALITY_DISPOSITION` (không phải `PERM_QUALITY_INSPECT`) — theo đúng đặc tả FE §6.2.
 - [ ] **P3 – Costing Engine**
-- [~] **P4 – Routing + Work Center + CRP tĩnh** — *phần Routing master data đã xong 2026-07-27 (thực thi dưới tên `F4`)*
+- [~] **P4 – Routing + Work Center + CRP tĩnh** — *phần Routing master data đã xong 2026-07-27 (thực thi dưới tên `F4`); phần Work Center/Shift/Calendar thực thi dưới mã `C2-6`/`C2-7` (track Capstone 2, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8`)*
   - [x] Module `module/routing`: `RoutingHeader` + `RoutingOperation`, 1 routing `ACTIVE` / `(company, item)`
   - [x] Snapshot bất biến lên `work_orders` (`source_routing_id/code/version` + `routing_captured_at`)
   - [x] `MISSING_ROUTING` (409) chặn convert proposal MAKE thiếu routing `ACTIVE`
   - [x] `PERM_ROUTING_READ` / `PERM_ROUTING_MANAGE` (`V31`), docs cập nhật
-  - [ ] `WorkCenter` entity + `capacityHoursPerDay` — **chưa làm**, `workCenterCode` vẫn là string (spec §11 đặt CRP ngoài MVP)
+  - [x] `WorkCenter` entity + CRUD/lifecycle, `RoutingOperation.workCenterCode` (string) → FK — **xong 2026-08-05 dưới tên `C2-6`** (per-plant, `capacityUnitType`+`capacityUnits` thay `capacityHoursPerDay`, xem `module/workcenter/CLAUDE.md`)
+  - [x] `Shift` + `WorkCalendar` entity + CRUD/lifecycle + `WorkCenter.workCalendarId` FK — **xong 2026-08-05 dưới tên `C2-7`** (net working window nội bộ, chưa endpoint public — xem `module/shift/CLAUDE.md`)
   - [x] `work_order_operations` snapshot + `stage_code` → FK — **xong 2026-07-27 dưới tên `F5-A`** (bảng snapshot copy, bất biến B56; `wip_transactions.work_order_operation_id` thêm cạnh `stage_code`, không bỏ cột cũ vì WO không routing vẫn cần free text)
-  - [ ] CRP tĩnh (`CapacityCalculationService`) + Labor time — **chưa làm**
+  - [ ] CRP tĩnh (`CapacityCalculationService`) + Labor time + Capacity Board — **chưa làm**, thực thi dưới mã `C2-8`
   - [x] Routing `ACTIVE` được kiểm ngay ở tầng MRP: proposal MAKE thiếu routing ⇒ `exceptionState = BLOCKED`
         + message `MISSING_ROUTING`, không đợi đến lúc convert — **xong 2026-07-28 dưới tên `F5-B`**
   - *Khác thiết kế gốc:* field entity là `routingVersion` (không phải `revision`) vì `BaseEntity` đã

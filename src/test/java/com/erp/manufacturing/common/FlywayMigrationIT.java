@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V45) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V47) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -44,7 +44,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("45");
+        assertThat(current.getVersion().getVersion()).isEqualTo("47");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -221,6 +221,43 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                      JOIN roles r ON r.role_id = rp.role_id
                      JOIN permissions p ON p.permission_id = rp.permission_id
                      WHERE r.code = '%s' AND p.code IN ('PERM_WORK_CENTER_READ', 'PERM_WORK_CENTER_MANAGE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * C2-7: same shape as {@code migrate_v45_*} — {@code PERM_SHIFT_READ}/{@code
+     * PERM_WORK_CALENDAR_READ} for all three roles, the two {@code _MANAGE} permissions for
+     * ADMIN/MANAGER only (docs/roles-and-permissions.md, V47).
+     */
+    @Test
+    void migrate_v47_grantsShiftAndWorkCalendarPermissionsToTheDocumentedRoles() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedShiftAndWorkCalendarPermissions("ADMIN")).containsExactlyInAnyOrder(
+                "PERM_SHIFT_READ", "PERM_SHIFT_MANAGE", "PERM_WORK_CALENDAR_READ", "PERM_WORK_CALENDAR_MANAGE");
+        assertThat(grantedShiftAndWorkCalendarPermissions("MANAGER")).containsExactlyInAnyOrder(
+                "PERM_SHIFT_READ", "PERM_SHIFT_MANAGE", "PERM_WORK_CALENDAR_READ", "PERM_WORK_CALENDAR_MANAGE");
+        assertThat(grantedShiftAndWorkCalendarPermissions("OPERATOR")).containsExactlyInAnyOrder(
+                "PERM_SHIFT_READ", "PERM_WORK_CALENDAR_READ");
+    }
+
+    private Set<String> grantedShiftAndWorkCalendarPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN
+                         ('PERM_SHIFT_READ', 'PERM_SHIFT_MANAGE', 'PERM_WORK_CALENDAR_READ', 'PERM_WORK_CALENDAR_MANAGE')
                      """.formatted(roleCode))) {
             while (rows.next()) {
                 granted.add(rows.getString("code"));
