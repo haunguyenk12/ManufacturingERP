@@ -105,6 +105,44 @@ cộng `CANCELLED` (chưa dùng). `POSTED` **đã bị đổi tên** thành `APP
 |---|---|---|
 | B86 | `GET /work-orders/{id}/variance` → `timeVariance`: `plannedMinutes = Σ(setupMinutes + runMinutesPerUnit × plannedQuantity)` trên mọi `WorkOrderOperation` snapshot của work order (`B56`); `actualMinutes = Σ Duration.between(actualStartedAt, actualEndedAt)` trên mọi `ProductionExecution`, **loại** execution còn dở dang (`actualEndedAt == null`) — thời gian dở dang không phải thời gian đã tiêu tốn xong, tính vào sẽ đánh giá sai giữa chừng ca làm việc.<br>🔴 **Operations đọc qua `WorkOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc`, KHÔNG qua `workOrder.getOperations()`.** `WorkOrderRepository.findWithDetailsByWorkOrderId` đã join-fetch `componentLines` (một `List`/"bag"); thêm `"operations"` (cũng `List`) vào cùng `@EntityGraph` làm Hibernate ném `MultipleBagFetchException` ngay từ query đầu tiên — phá **toàn bộ** endpoint variance, không chỉ phần time. Đây là lỗi thật bắt được lúc chạy `mvn verify` (`ProductionFlowE2EIT` sập theo vì nó gọi cùng entity graph), không phải giả định | `WorkOrderVarianceServiceTest.getVariance_timeVariance_sumsOperationsAndExecutionsExcludingInProgress`, `.getVariance_noOperations_plannedMinutesIsZero`, `.getVariance_noExecutions_actualMinutesIsZero` |
 
+## Bất Biến Capacity / Schedule (C2-8)
+
+> Thiết kế đầy đủ + bối cảnh quyết định: `CLAUDE.md §0.30`. Bảng dưới chỉ liệt kê bất biến.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B89 | Lịch (`WorkOrderOperation.plannedStartAt`/`plannedEndAt`) sinh **đúng một lần**, ở `WorkOrderService.release()` — không phải lúc tạo WO, không phải lúc `plan()`. Tuần tự theo `sequence`: operation sau bắt đầu khi operation trước kết thúc, operation đầu neo vào `workOrder.plannedStartAt` (nếu có) hoặc `now()`. Operation có `workCenter.workCalendar` thì gọi `WorkCalendarLookupService.computeEndInstant` (bỏ qua giờ không làm việc, đi qua `WorkingWindowCalculator.advance`); không có calendar thì cộng phút liên tục. Đây là lịch **infinite-capacity** — không biết WO khác có đang chiếm cùng Work Center hay không, cố ý tách khỏi việc báo quá tải (đó là Capacity Board, một read riêng) | `WorkOrderServiceTest.release_schedulesOperationsSequentially_continuousTimeWhenWorkCenterHasNoCalendar`, `.release_schedulesOperations_delegatesToTheWorkCenterCalendarWhenPresent`, `.release_withoutAnExplicitPlannedStartAt_anchorsTheFirstOperationAtNow`, `WorkingWindowCalculatorTest.advance_*` (6 case) |
+| B90 | `POST .../schedule-adjustments` chỉ chặn cứng khi version lệch (409 `CONCURRENT_MODIFICATION`) hoặc thời gian vô nghĩa (`plannedEndAt <= plannedStartAt`, 400 `INVALID_INPUT`), cộng hai gate tiền điều kiện (chưa có Work Center, hoặc chưa từng được `release()` — cả hai 422 `OPERATION_NOT_ALLOWED`). Xung đột **sequence**/**calendar**/**capacity** đều **không chặn** — trả về dưới dạng cờ tư vấn trên `ScheduleAdjustmentResponse`; backend **không bao giờ** tự dời operation khác | `ScheduleAdjustmentServiceTest.adjust_operationWithoutWorkCenter_throwsOperationNotAllowedBeforeAnyWrite`, `.adjust_neverScheduled_throwsOperationNotAllowedBeforeAnyWrite`, `.adjust_staleExpectedVersion_throwsConcurrentModificationBeforeAnyWrite`, `.adjust_endNotAfterStart_throwsInvalidInputBeforeAnyWrite`, `.adjust_cleanWindow_persistsAndReportsNoSequenceConflict`, `.adjust_windowStartingBeforePredecessorEnds_stillPersistsButFlagsSequenceConflict` |
+
+**Quyết định cần nhớ:**
+
+1. 🔴 **`WorkOrderOperation.workCenter` (FK) đảo ngược quyết định `C2-6`.** `module/workcenter/CLAUDE.md`
+   mục 4 từng nói cột này giữ `String` mãi mãi vì chưa có consumer — `C2-8` là consumer đó. FK **thêm
+   vào cạnh** `workCenterCode` (không thay thế), nullable, không backfill dòng lịch sử — cùng hình
+   dạng `B_wc2`/`B77`.
+2. **Ranh giới local-time ↔ `Instant` nằm ở `Plant.timezone`** — field có sẵn từ lâu nhưng `C2-8` là
+   lần đầu nó được nối vào toán ngày tháng thật. `WorkCalendarLookupService.computeEndInstant` là nơi
+   duy nhất quy đổi; JPQL `function('timezone', plant.timezone, plannedStartAt)` (Postgres
+   `timezone(zone, ts)`, tương đương `AT TIME ZONE`) dùng đúng phép quy đổi đó ở tầng SQL để hai bên
+   không lệch ngày. Đây là construct `function(...)` **đầu tiên** trong repo — không có tiền lệ native
+   query nào trước đó. `WorkOrderOperationRepositoryIT` khoá bằng một mốc mà ngày UTC và ngày local
+   (`America/New_York`, tháng 1) lệch nhau có chủ đích.
+3. **"Existing load" của Capacity Board luôn tính trên `{RELEASED, IN_PROGRESS, COMPLETED}`, bất kể
+   tham số `status` filter đang lọc gì** — filter chỉ thu hẹp dòng hiển thị, không thu hẹp mẫu số
+   utilization, để hai lượt gọi khác filter không báo hai con số khác nhau cho cùng một
+   Work Center/ngày.
+4. **`dayCapacityMinutes`/`utilizationPercent` là `null`, không phải `0`, khi Work Center không có
+   `workCalendar`** — "không biết" khác "không có sức chứa". `overload` khi đó luôn `false`.
+5. **Ngày quy-thuộc của một operation = ngày `plannedStartAt` rơi vào (local)**, toàn bộ thời lượng
+   gán hết cho ngày đó, không chia theo số ngày trải dài — đơn giản hoá có chủ đích của CRP tĩnh,
+   cùng quy ước "gán cho ngày ca bắt đầu" của ca qua đêm (`module/shift/CLAUDE.md` mục 1).
+6. `CapacityBoardService.buildDayContext`/`attributedDay`/`dayCapacityMinutes`/`utilizationPercent`/
+   `key` là `public` dù chỉ `ScheduleAdjustmentService` (khác package) gọi tới — hai endpoint phải
+   báo cùng một con số "quá tải" cho cùng `(workCenter, ngày)`, nên chia sẻ một implementation thay
+   vì hai công thức có thể trôi lệch nhau.
+7. `ScheduleAdjustmentService`/`CapacityBoardService` **không** có permission-guard component riêng —
+   tái dùng `workOrderPermissionGuard`/`permissionGuard` tổng quát đã có.
+
 ## Bất Biến Fulfillment Allocation (F6)
 
 | # | Bất biến | Test bảo vệ |

@@ -40,7 +40,16 @@ resolve qua `WorkCenterLookupService.getActiveWorkCenter(workCenterId)` — ném
 (404) nếu không tồn tại, `OPERATION_NOT_ALLOWED` (422) nếu `INACTIVE` — cùng khuôn
 `ItemLookupService.getActiveItem`.
 
-### 4. `WorkOrderOperation.workCenterCode` (snapshot) **không đổi thành FK**
+### 4. `WorkOrderOperation.workCenterCode` (snapshot) **không đổi thành FK** — mục này mô tả trạng thái lúc `C2-6`
+
+> ⚠️ **[`C2-8`, 2026-08-05] Mục này đã bị đảo ngược một phần.** Lúc `C2-6` chưa có consumer thật nào
+> cần đọc lại Work Center từ một `WorkOrderOperation`, nên quyết định là giữ `String` thuần. `C2-8`
+> (Capacity Board) **là** consumer đó — nó phải join/filter theo Work Center và đọc
+> `capacityUnits`/`workCalendar`, việc free-text không làm được. `C2-8` thêm **cột thứ hai**,
+> `WorkOrderOperation.workCenter` (FK, nullable, không backfill dòng lịch sử) — `workCenterCode` giữ
+> nguyên làm display snapshot bất biến (`B56`/`B49` không đổi). Chi tiết đầy đủ + bất biến:
+> `CLAUDE.md §0.30`, `module/workorder/CLAUDE.md` B89-B90. Đọc đoạn dưới để hiểu bối cảnh quyết định
+> gốc, đừng đọc nó như hiện trạng.
 
 `WorkOrderService.snapshotRouting` đọc `operation.getWorkCenter().getCode()` (thay vì
 `operation.getWorkCenterCode()` cũ) rồi copy **giá trị** vào `WorkOrderOperation.workCenterCode`
@@ -62,6 +71,7 @@ cấu trúc tổ chức Company→Plant→Warehouse (`PERM_ORG_*`).
 
 ### 7. Chưa làm — chờ phase sau
 
-Capacity Board, schedule adjustment (`C2-8`) — xem `NEXT_PHASE_PLAN.md` lịch sử `C2-6`/`C2-7` mục
-"KHÔNG làm gì". ✅ **Calendar reference đã xong ở `C2-7`** (bất biến `B_wc4` ở trên) — dòng này trước
-đây liệt kê nó là "chưa làm", nay đã đóng.
+✅ **Calendar reference đã xong ở `C2-7`** (bất biến `B_wc4` ở trên). ✅ **Capacity Board + schedule
+adjustment đã xong ở `C2-8`** (`WorkOrderOperation.workCenter` FK, xem mục 4 + `CLAUDE.md §0.30`).
+Còn lại: nợ B (`predecessorOperationIds`/sequence-dependency validation) — tách `C2-8b`, xem
+`NEXT_PHASE_PLAN.md` lịch sử `C2-8` §1.

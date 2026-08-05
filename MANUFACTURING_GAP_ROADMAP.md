@@ -30,7 +30,7 @@
 | **[x]** | **P1** | Approval Workflow & Business Gates | Khớp `business_flow` (4 chốt duyệt) | — | Trung bình | Không |
 | **[x]** | **P2** | Quality Control (QC) Module | Khớp `business_flow` (QC + HOLD) | P1 ✅ | Trung bình | Không |
 | **[ ]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
-| **[~]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
+| **[x]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
 | **[ ]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
 | **[~]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
 > `P6`: Sales Order (`F3`) + Fulfillment allocation (`F6`) ✅ **xong 2026-07-28**. Còn lại **WO Close/reconcile** (status `CLOSED` do manager) — chưa xếp lịch.
@@ -73,7 +73,7 @@
   - *Khác thiết kế gốc:* entity tên `QualityDisposition` (không phải `QualityInspection`), permission
     tên `PERM_QUALITY_DISPOSITION` (không phải `PERM_QUALITY_INSPECT`) — theo đúng đặc tả FE §6.2.
 - [ ] **P3 – Costing Engine**
-- [~] **P4 – Routing + Work Center + CRP tĩnh** — *phần Routing master data đã xong 2026-07-27 (thực thi dưới tên `F4`); phần Work Center/Shift/Calendar thực thi dưới mã `C2-6`/`C2-7` (track Capstone 2, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8`)*
+- [x] **P4 – Routing + Work Center + CRP tĩnh** — ✅ **đóng nốt 2026-08-05**. Routing master data xong 2026-07-27 (`F4`); Work Center/Shift/Calendar/CRP thực thi dưới mã `C2-6`/`C2-7`/`C2-8` (track Capstone 2, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8`)
   - [x] Module `module/routing`: `RoutingHeader` + `RoutingOperation`, 1 routing `ACTIVE` / `(company, item)`
   - [x] Snapshot bất biến lên `work_orders` (`source_routing_id/code/version` + `routing_captured_at`)
   - [x] `MISSING_ROUTING` (409) chặn convert proposal MAKE thiếu routing `ACTIVE`
@@ -81,7 +81,7 @@
   - [x] `WorkCenter` entity + CRUD/lifecycle, `RoutingOperation.workCenterCode` (string) → FK — **xong 2026-08-05 dưới tên `C2-6`** (per-plant, `capacityUnitType`+`capacityUnits` thay `capacityHoursPerDay`, xem `module/workcenter/CLAUDE.md`)
   - [x] `Shift` + `WorkCalendar` entity + CRUD/lifecycle + `WorkCenter.workCalendarId` FK — **xong 2026-08-05 dưới tên `C2-7`** (net working window nội bộ, chưa endpoint public — xem `module/shift/CLAUDE.md`)
   - [x] `work_order_operations` snapshot + `stage_code` → FK — **xong 2026-07-27 dưới tên `F5-A`** (bảng snapshot copy, bất biến B56; `wip_transactions.work_order_operation_id` thêm cạnh `stage_code`, không bỏ cột cũ vì WO không routing vẫn cần free text)
-  - [ ] CRP tĩnh (`CapacityCalculationService`) + Labor time + Capacity Board — **chưa làm**, thực thi dưới mã `C2-8`
+  - [x] CRP tĩnh (`CapacityBoardService` + `ScheduleAdjustmentService`) + Capacity Board — **xong 2026-08-05 dưới mã `C2-8`** (lịch operation sinh ở `WorkOrderService.release()`, infinite-capacity; Labor **cost** theo operation time vẫn thuộc `P3`, xem `CLAUDE.md §0.30`)
   - [x] Routing `ACTIVE` được kiểm ngay ở tầng MRP: proposal MAKE thiếu routing ⇒ `exceptionState = BLOCKED`
         + message `MISSING_ROUTING`, không đợi đến lúc convert — **xong 2026-07-28 dưới tên `F5-B`**
   - *Khác thiết kế gốc:* field entity là `routingVersion` (không phải `revision`) vì `BaseEntity` đã
@@ -215,6 +215,13 @@ variance có cột tiền tệ; test tính toán chi phí + variance; build + te
 ---
 
 ### P4 — Routing + Work Center + CRP Tĩnh + Labor Time
+
+> ✅ **Đã xong hết (2026-08-05, dưới mã `C2-6`/`C2-7`/`C2-8`).** Phần dưới đây là **thiết kế phác thảo
+> gốc**, giữ lại làm lịch sử — triển khai thật lệch vài chỗ: `WorkCenter.capacityHoursPerDay` →
+> `capacityUnitType`+`capacityUnits`; `CapacityCalculationService` chạy trong `MrpRunService` → tách
+> thành `CapacityBoardService` (read riêng, không đụng MRP) + `ScheduleAdjustmentService`; đánh dấu
+> `OVER_CAPACITY` ở MRP → cờ `overload` trên Capacity Board (một read độc lập, không phải nhánh của
+> MRP run). Bản ghi thật: `CLAUDE.md §0.28`-`§0.30`, `FRONTEND_ALIGNMENT_ROADMAP.md §8.6`-`§8.7b`.
 
 **Mục tiêu:** Bổ sung Master Data còn thiếu (`Routing`, `Work Center` — node 2) và Capacity Check
 tĩnh (node 5/6/7), làm cho `wip_transactions.stage_code` thực sự có nghĩa.

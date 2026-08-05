@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.workorder.dto.core;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 public record WorkOrderOperationResponse(
@@ -9,6 +10,10 @@ public record WorkOrderOperationResponse(
         Integer sequence,
         String name,
         String workCenterCode,
+        UUID workCenterId,
         BigDecimal setupMinutes,
-        BigDecimal runMinutesPerUnit
+        BigDecimal runMinutesPerUnit,
+        Instant plannedStartAt,
+        Instant plannedEndAt,
+        Long version
 ) {}

@@ -150,6 +150,12 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_WORK_CALENDAR_READ` | Xem lịch tuần + exception của plant (`C2-7`, `V47`) |
 | `PERM_WORK_CALENDAR_MANAGE` | Tạo / sửa / activate / deactivate work calendar. Permission **riêng** với Shift dù cùng module — hai resource tách biệt trên wire (`C2-7`, `V47`) |
 
+### Capacity (CRP tĩnh)
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_CAPACITY_READ` | Xem Capacity Board (`GET /plants/{plantId}/capacity-board`) (`C2-8`, `V49`) |
+| `PERM_CAPACITY_MANAGE` | Điều chỉnh lịch một operation (`POST /work-orders/{id}/operations/{id}/schedule-adjustments`) (`C2-8`, `V49`) |
+
 > Endpoint `GET /sales-orders/planning-demands` **không** dùng quyền sales — nó là màn hình của
 > planner nên gác bằng `PERM_MRP_RUN` (spec §2.2 gán `PLANNING_RUN` cho endpoint này).
 
@@ -227,6 +233,11 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 |-------|-------|
 | `PERM_SHIFT_READ` | Xem shift của work center đang chạy (`C2-7`, `V47`). **Không** có `PERM_SHIFT_MANAGE` |
 | `PERM_WORK_CALENDAR_READ` | Xem lịch tuần + exception của plant (`C2-7`, `V47`). **Không** có `PERM_WORK_CALENDAR_MANAGE` |
+
+### Capacity (CRP tĩnh)
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_CAPACITY_READ` | Xem Capacity Board (`C2-8`, `V49`). **Không** có `PERM_CAPACITY_MANAGE` — điều chỉnh lịch operation thuộc MANAGER (gap doc §3.6: "Manager điều chỉnh") |
 
 ### UOM
 | Quyền | Mô tả |

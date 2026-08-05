@@ -12,6 +12,7 @@ import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.repository.PlantRepository;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.routing.service.RoutingLookupService;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import com.erp.manufacturing.module.workorder.dto.execution.WorkOrderComponentIssueRequest;
@@ -214,6 +215,7 @@ class WorkOrderMethodSecurityTest {
                                           WorkOrderDemandAllocationService allocationService,
                                           MaterialReservationRepository reservationRepository,
                                           WorkOrderReleaseGate releaseGate,
+                                          WorkCalendarLookupService workCalendarLookupService,
                                           WorkOrderMapper mapper) {
             return new WorkOrderService(
                     workOrderRepository,
@@ -228,6 +230,7 @@ class WorkOrderMethodSecurityTest {
                     allocationService,
                     reservationRepository,
                     releaseGate,
+                    workCalendarLookupService,
                     mapper);
         }
 
@@ -238,6 +241,11 @@ class WorkOrderMethodSecurityTest {
         @Bean
         WorkOrderReleaseGate workOrderReleaseGate() {
             return mock(WorkOrderReleaseGate.class);
+        }
+
+        @Bean
+        WorkCalendarLookupService workCalendarLookupService() {
+            return mock(WorkCalendarLookupService.class);
         }
 
         @Bean

@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.shift.service;
 
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.module.shift.domain.Shift;
 import com.erp.manufacturing.module.shift.domain.ShiftBreak;
 import com.erp.manufacturing.module.shift.domain.WorkCalendar;
@@ -7,6 +9,7 @@ import com.erp.manufacturing.module.shift.domain.WorkCalendarException;
 import com.erp.manufacturing.module.shift.domain.WorkCalendarWeeklyShift;
 import com.erp.manufacturing.module.shift.domain.Weekday;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -76,6 +79,45 @@ public final class WorkingWindowCalculator {
         }
         return remaining;
     }
+
+    /**
+     * Forward-schedules {@code durationMinutes} of work starting no earlier than
+     * {@code earliestStart}, walking the calendar day by day and skipping non-working time (C2-8,
+     * {@code NEXT_PHASE_PLAN.md} §"module/shift — new forward-scheduling primitive"). This is the
+     * "infinite capacity" scheduling primitive: it only asks "when does the calendar have this much
+     * working time free", never "is another work order already using it" — that comparison is the
+     * Capacity Board's job, a separate read over already-persisted schedules.
+     *
+     * <p>The first day's intervals are clipped to start no earlier than {@code earliestStart} (an
+     * operation cannot be scheduled into the past relative to its own anchor). Capped at
+     * {@link #MAX_HORIZON_DAYS} days to fail loudly against a pathological calendar (e.g. one whose
+     * {@code effectiveTo} is already in the past) instead of looping forever.
+     */
+    public static LocalDateTime advance(WorkCalendar calendar, LocalDateTime earliestStart, long durationMinutes) {
+        if (durationMinutes <= 0) {
+            return earliestStart;
+        }
+        long remaining = durationMinutes;
+        LocalDate date = earliestStart.toLocalDate();
+        for (int daysWalked = 0; daysWalked <= MAX_HORIZON_DAYS; daysWalked++, date = date.plusDays(1)) {
+            for (WorkingInterval interval : computeDay(calendar, date)) {
+                LocalDateTime intervalStart = interval.start().isBefore(earliestStart) ? earliestStart : interval.start();
+                if (!intervalStart.isBefore(interval.end())) {
+                    continue;
+                }
+                long availableMinutes = Duration.between(intervalStart, interval.end()).toMinutes();
+                if (availableMinutes >= remaining) {
+                    return intervalStart.plusMinutes(remaining);
+                }
+                remaining -= availableMinutes;
+            }
+        }
+        throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                "Work calendar " + calendar.getWorkCalendarId() + " has no working time within "
+                        + MAX_HORIZON_DAYS + " days of " + earliestStart);
+    }
+
+    private static final int MAX_HORIZON_DAYS = 3650;
 
     private static List<WorkingInterval> subtract(List<WorkingInterval> pieces, LocalDateTime breakStart, LocalDateTime breakEnd) {
         List<WorkingInterval> result = new ArrayList<>();

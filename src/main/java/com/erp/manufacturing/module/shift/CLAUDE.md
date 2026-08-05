@@ -39,9 +39,14 @@ break có nằm trong shift không (`ShiftService`), và (b) shift đó chiếm 
 
 ### 3. Không có endpoint public cho net working window (Part D)
 
-`WorkCalendarLookupService.computeWorkingWindows(calendarId, from, to)` là entry point duy nhất, gọi
-trực tiếp bởi `C2-8` (Capacity Board) khi tới lượt — quyết định `NEXT_PHASE_PLAN.md` C2-7 §1.4. Thêm
-endpoint bây giờ là code speculative (`coding-rules.md §11.5`).
+`WorkCalendarLookupService.computeWorkingWindows(calendarId, from, to)` — quyết định `NEXT_PHASE_PLAN.md`
+C2-7 §1.4 vẫn đúng: không có endpoint public, chỉ module khác gọi vào qua service này. ✅
+**[`C2-8`] Đã có consumer thật** — `CapacityBoardService.buildDayContext` gọi `computeWorkingWindows`
++ `findNonWorkingExceptionDates` (mới); `WorkOrderService.scheduleOperations` (qua `release()`) gọi
+`computeEndInstant` (mới, forward-scheduling — dùng `WorkingWindowCalculator.advance`, không phải
+`computeWorkingWindows`, vì cần "khi nào đủ N phút" thay vì "cửa sổ làm việc trong khoảng ngày cho
+trước"). Cả ba đều **đọc-only** (rule C7, không có `@PreAuthorize` — caller đã tự authorize trên
+plant của mình). Chi tiết: `CLAUDE.md §0.30`.
 
 ### 4. `WorkCalendarRepository.findWithWeeklyShiftsByWorkCalendarId` cố ý KHÔNG fetch `exceptions`
 
@@ -68,6 +73,7 @@ C7 bảo vệ. `WorkCenter` (module khác) validate `workCalendarId` **qua** `Wo
 
 ### 7. Chưa làm — chờ phase sau
 
-Capacity Board, schedule adjustment (`C2-8`) — xem `NEXT_PHASE_PLAN.md` lịch sử `C2-7` mục "KHÔNG
-làm gì". `WorkCalendarException` kiểu `WORKING_OVERRIDE` (làm bù) và `shiftIds[]` riêng trên
-`WorkCenter` bị loại có chủ đích (quyết định §1.2/§1.3), không phải thiếu sót.
+✅ **Capacity Board + schedule adjustment đã xong ở `C2-8`** (mục 3). `WorkCalendarException` kiểu
+`WORKING_OVERRIDE` (làm bù) và `shiftIds[]` riêng trên `WorkCenter` bị loại có chủ đích (quyết định
+§1.2/§1.3), không phải thiếu sót. Còn lại ngoài phạm vi module này: `predecessorOperationIds`/
+sequence-dependency validation (`C2-8b`, xem `module/workcenter/CLAUDE.md` mục 7).

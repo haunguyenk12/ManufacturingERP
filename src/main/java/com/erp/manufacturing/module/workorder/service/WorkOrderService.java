@@ -18,6 +18,8 @@ import com.erp.manufacturing.module.organization.service.OrganizationLookupServi
 import com.erp.manufacturing.module.routing.domain.RoutingHeader;
 import com.erp.manufacturing.module.routing.domain.RoutingOperation;
 import com.erp.manufacturing.module.routing.service.RoutingLookupService;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderComponentLine;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
@@ -42,7 +44,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,6 +69,7 @@ public class WorkOrderService {
     private final WorkOrderDemandAllocationService allocationService;
     private final MaterialReservationRepository reservationRepository;
     private final WorkOrderReleaseGate releaseGate;
+    private final WorkCalendarLookupService workCalendarLookupService;
     private final WorkOrderMapper mapper;
 
     /**
@@ -245,9 +251,49 @@ public class WorkOrderService {
         }
         releaseGate.ensureMaterialReady(workOrderId);
         workOrder.release(Instant.now());
+        scheduleOperations(workOrder);
         WorkOrder saved = workOrderRepository.save(workOrder);
         wipTransactionService.recordStart(saved);
         return toResponse(saved);
+    }
+
+    /**
+     * C2-8 decision #1: the schedule is generated exactly once, here, at release — not at creation
+     * or at {@link #plan}. Sequential forward scheduling per operation (sequence order, already
+     * guaranteed by {@code @OrderBy} on {@link WorkOrder#getOperations()}): each operation starts
+     * when the previous one ends (or at the work order's own {@code plannedStartAt}/now for the
+     * first), and walks the operation's Work Center calendar (if any) to skip non-working time,
+     * exactly like {@code ProductionExecutionService}/{@code MrpCalculationService} reuse other
+     * modules' lookup services rather than duplicating their logic (rule C7).
+     *
+     * <p>This is "infinite capacity" scheduling — it does not know or care whether another work
+     * order is already loading the same work center that day. Reporting that overload is the
+     * Capacity Board's job (a separate read), not this method's; static CRP decouples the two on
+     * purpose (NEXT_PHASE_PLAN.md C2-8).
+     *
+     * <p>Operations whose Work Center has no calendar attached get continuous-time scheduling (no
+     * gaps skipped) — there is nothing to consult. Operations with no Work Center at all (legacy
+     * routing rows predating C2-6, {@code B_wc2}) are left unscheduled and are invisible to the
+     * Capacity Board, by design.
+     */
+    private void scheduleOperations(WorkOrder workOrder) {
+        ZoneId zone = ZoneId.of(workOrder.getPlant().getTimezone());
+        Instant cursor = workOrder.getPlannedStartAt() != null ? workOrder.getPlannedStartAt() : Instant.now();
+        for (WorkOrderOperation operation : workOrder.getOperations()) {
+            long durationMinutes = operation.getSetupMinutes()
+                    .add(operation.getRunMinutesPerUnit().multiply(workOrder.getPlannedQuantity()))
+                    .setScale(0, RoundingMode.CEILING)
+                    .longValueExact();
+            WorkCenter workCenter = operation.getWorkCenter();
+            Instant start = cursor;
+            Instant end = (workCenter != null && workCenter.getWorkCalendar() != null)
+                    ? workCalendarLookupService.computeEndInstant(
+                            workCenter.getWorkCalendar().getWorkCalendarId(), start, zone, durationMinutes)
+                    : start.plus(durationMinutes, ChronoUnit.MINUTES);
+            operation.setPlannedStartAt(start);
+            operation.setPlannedEndAt(end);
+            cursor = end;
+        }
     }
 
     @Transactional
@@ -426,6 +472,7 @@ public class WorkOrderService {
                     .sequence(operation.getSequence())
                     .name(operation.getName())
                     .workCenterCode(operation.getWorkCenter().getCode())
+                    .workCenter(operation.getWorkCenter())
                     .setupMinutes(operation.getSetupMinutes())
                     .runMinutesPerUnit(operation.getRunMinutesPerUnit())
                     .build());

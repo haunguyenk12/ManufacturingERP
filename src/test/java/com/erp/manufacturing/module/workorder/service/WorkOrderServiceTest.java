@@ -16,7 +16,12 @@ import com.erp.manufacturing.module.routing.domain.RoutingHeader;
 import com.erp.manufacturing.module.routing.domain.RoutingOperation;
 import com.erp.manufacturing.module.routing.domain.RoutingStatus;
 import com.erp.manufacturing.module.routing.service.RoutingLookupService;
+import com.erp.manufacturing.module.shift.domain.WorkCalendar;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
+import com.erp.manufacturing.module.workcenter.domain.CapacityUnitType;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
+import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderComponentLine;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import com.erp.manufacturing.module.workorder.dto.core.*;
@@ -41,6 +46,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +74,7 @@ class WorkOrderServiceTest {
     @Mock WorkOrderDemandAllocationService allocationService;
     @Mock MaterialReservationRepository reservationRepository;
     @Mock WorkOrderReleaseGate releaseGate;
+    @Mock WorkCalendarLookupService workCalendarLookupService;
 
     WorkOrderService service;
 
@@ -86,6 +93,7 @@ class WorkOrderServiceTest {
                 allocationService,
                 reservationRepository,
                 releaseGate,
+                workCalendarLookupService,
                 new WorkOrderMapper());
     }
 
@@ -386,6 +394,90 @@ class WorkOrderServiceTest {
         verifyNoInteractions(releaseGate);
     }
 
+    /**
+     * C2-8 decision #1: the schedule is generated at release, sequentially, per operation. No
+     * calendar on the work center ⇒ continuous time, no gaps skipped, and the calendar lookup is
+     * never consulted (nothing to consult).
+     */
+    @Test
+    void release_schedulesOperationsSequentially_continuousTimeWhenWorkCenterHasNoCalendar() {
+        Instant anchor = Instant.parse("2026-08-10T08:00:00Z");
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlannedStartAt(anchor);
+        WorkCenter workCenter = workCenter(workOrder.getPlant(), null);
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter, "5", "2"));
+        workOrder.getOperations().add(operation(workOrder, 2, workCenter, "0", "1"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        service.release(workOrder.getWorkOrderId());
+
+        WorkOrderOperation first = workOrder.getOperations().get(0);
+        WorkOrderOperation second = workOrder.getOperations().get(1);
+        // duration = setupMinutes + runMinutesPerUnit * plannedQuantity(10)
+        assertThat(first.getPlannedStartAt()).isEqualTo(anchor);
+        assertThat(first.getPlannedEndAt()).isEqualTo(anchor.plusSeconds(25 * 60));
+        assertThat(second.getPlannedStartAt()).isEqualTo(first.getPlannedEndAt());
+        assertThat(second.getPlannedEndAt()).isEqualTo(second.getPlannedStartAt().plusSeconds(10 * 60));
+        verifyNoInteractions(workCalendarLookupService);
+    }
+
+    /**
+     * When the operation's Work Center has a calendar, scheduling delegates the "when does this
+     * much working time fit" question to {@code WorkCalendarLookupService.computeEndInstant} instead
+     * of adding minutes directly — that method is the one that actually skips non-working time.
+     */
+    @Test
+    void release_schedulesOperations_delegatesToTheWorkCenterCalendarWhenPresent() {
+        Instant anchor = Instant.parse("2026-08-10T08:00:00Z");
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlannedStartAt(anchor);
+        WorkCalendar calendar = WorkCalendar.builder()
+                .workCalendarId(UUID.randomUUID())
+                .plant(workOrder.getPlant())
+                .code("CAL-1")
+                .name("Calendar 1")
+                .effectiveFrom(LocalDate.of(2026, 1, 1))
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        WorkCenter workCenter = workCenter(workOrder.getPlant(), calendar);
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter, "5", "2"));
+        // Pretend the calendar skipped a weekend — the point is the returned instant is what gets
+        // used verbatim, not "anchor + duration".
+        Instant scheduledEnd = anchor.plus(2, java.time.temporal.ChronoUnit.DAYS);
+        when(workCalendarLookupService.computeEndInstant(
+                eq(calendar.getWorkCalendarId()), eq(anchor), any(), eq(25L)))
+                .thenReturn(scheduledEnd);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        service.release(workOrder.getWorkOrderId());
+
+        WorkOrderOperation operation = workOrder.getOperations().get(0);
+        assertThat(operation.getPlannedStartAt()).isEqualTo(anchor);
+        assertThat(operation.getPlannedEndAt()).isEqualTo(scheduledEnd);
+    }
+
+    /** When the work order has no {@code plannedStartAt}, the first operation anchors at "now". */
+    @Test
+    void release_withoutAnExplicitPlannedStartAt_anchorsTheFirstOperationAtNow() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        WorkCenter workCenter = workCenter(workOrder.getPlant(), null);
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter, "0", "0"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        Instant before = Instant.now();
+        service.release(workOrder.getWorkOrderId());
+        Instant after = Instant.now();
+
+        Instant scheduledStart = workOrder.getOperations().get(0).getPlannedStartAt();
+        assertThat(scheduledStart).isBetween(before, after);
+    }
+
     @Test
     void cancel_blockedWorkOrder_shouldCancel() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
@@ -543,6 +635,33 @@ class WorkOrderServiceTest {
                 .code("P1")
                 .name("Plant 1")
                 .status(status)
+                .build();
+    }
+
+    private WorkCenter workCenter(Plant plant, WorkCalendar calendar) {
+        return WorkCenter.builder()
+                .workCenterId(UUID.randomUUID())
+                .plant(plant)
+                .code("WC-1")
+                .name("Work Center 1")
+                .capacityUnitType(CapacityUnitType.MACHINE)
+                .capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE)
+                .workCalendar(calendar)
+                .build();
+    }
+
+    private WorkOrderOperation operation(WorkOrder workOrder, int sequence, WorkCenter workCenter,
+                                          String setupMinutes, String runMinutesPerUnit) {
+        return WorkOrderOperation.builder()
+                .workOrderOperationId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .sequence(sequence)
+                .name("Operation " + sequence)
+                .workCenterCode(workCenter.getCode())
+                .workCenter(workCenter)
+                .setupMinutes(new BigDecimal(setupMinutes))
+                .runMinutesPerUnit(new BigDecimal(runMinutesPerUnit))
                 .build();
     }
 

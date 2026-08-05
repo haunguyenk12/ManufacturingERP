@@ -37,7 +37,8 @@ của `MANUFACTURING_GAP_ROADMAP.md`, chỉ sắp lại thứ tự theo dependen
 ## 1. Bảng Theo Dõi Tiến Độ — track `F*` *(cập nhật: 2026-08-01, `F*` đã đóng ở `F10`)*
 
 > 🔴 **Track đang chạy là `C2-*`, xem §8** — bảng dưới đây chỉ là lịch sử `F1`–`F10`.
-> Trạng thái checklist Capstone 2 (8/13) ở **§8.0**; `C2-7` đã xong, phase kế tiếp `C2-8` (§8.1).
+> Trạng thái checklist Capstone 2 (9/13) ở **§8.0**; `C2-8` đã xong, đóng nốt cluster `P4`. Phase
+> kế tiếp: `C2-1`/`C2-2` (bị chặn, chờ FE) — xem `NEXT_PHASE_PLAN.md` cho thứ tự đề xuất track `P*`.
 
 | ✔ | Phase | Nội dung | Trùng roadmap `P*` |
 |---|---|---|---|
@@ -1605,7 +1606,7 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 > file đó **không tồn tại trong repo này**, nên không kiểm được snapshot họ đọc. Ba mục họ báo thiếu
 > hoá ra đã có, rất có thể vì snapshot cũ. Đã đề nghị FE commit snapshot hoặc cho commit hash.
 
-### 8.0 Trạng thái checklist §6 của tài liệu FE — **8/13** *(cập nhật sau `C2-7`)*
+### 8.0 Trạng thái checklist §6 của tài liệu FE — **9/13** *(cập nhật sau `C2-8`)*
 
 | # | Ô checklist | Trạng thái |
 |---|---|---|
@@ -1616,7 +1617,7 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 | 5 | Audit list/detail | ❌ `C2-1` — **bị chặn** |
 | 6 | Work Center CRUD/lifecycle | ✅ **`C2-6`** (2026-08-05) — 7 endpoint, `V44`+`V45`, xem §8.6 |
 | 7 | Shift/Calendar CRUD/lifecycle | ✅ **`C2-7`** (2026-08-05) — 14 endpoint, `V46`+`V47`, xem §8.7 |
-| 8 | Capacity Board + schedule adjustment | ❌ `C2-8` |
+| 8 | Capacity Board + schedule adjustment | ✅ **`C2-8`** (2026-08-05) — 2 endpoint, `V48`+`V49`, xem §8.7b |
 | 9 | BOM/Routing deactivate | ✅ **`C2-0`** — đã có từ trước, chỉ là verb `DELETE` |
 | 10 | SO DRAFT update | ✅ **`C2-4`** (2026-08-05) — `PATCH /sales-orders/{id}`, xem §8.5 |
 | 11 | Role/Scope/Assignment reads + lifecycle | ✅ **`C2-4`** (2026-08-05) — 9 endpoint, xem §8.5 |
@@ -1625,7 +1626,9 @@ vòng đời một case (chính nó là thứ chứng minh hệ quả ở trên)
 
 **Ngoài checklist:** CORS ✅ (`C2-5`) · **time variance** ✅ **`C2-4`** (2026-08-05) — xem §8.5 ·
 `RoutingOperation.workCenterCode` → FK ✅ **`C2-6`** (2026-08-05) — xem §8.6 · `WorkCenter.workCalendarId`
-FK ✅ **`C2-7`** (2026-08-05) — xem §8.7.
+FK ✅ **`C2-7`** (2026-08-05) — xem §8.7 · `WorkOrderOperation.workCenter` FK (đảo ngược quyết định
+"giữ String" của `C2-6`, xem §8.9) + lịch operation sinh ở `release()` ✅ **`C2-8`** (2026-08-05) —
+xem §8.7b.
 
 🔴 **Phát hiện khi làm `C2-3` (2026-08-04), áp dụng cho MỌI ô ✅ dùng account seed `C2-5`:**
 `manager.a`/`operator.a` (scope `PLANT`) **không dùng được** để probe permission gác bằng
@@ -1647,15 +1650,15 @@ Sắp theo **giá trị/rủi ro**, **không** theo thứ tự trong tài liệu
 | `C2-4` | `PATCH /sales-orders/{id}` · Role/Scope lifecycle · `GET /access/assignments` · chốt over-BOM · **time variance** | không | ✅ **2026-08-05** — §8.5 |
 | `C2-6` | Work Center entity + CRUD + `RoutingOperation` FK | **`V44`+`V45`** | ✅ **2026-08-05** — §8.6 |
 | `C2-7` | Shift + Work Calendar entity + CRUD + Work Center FK | **`V46`+`V47`** | ✅ **2026-08-05** — §8.7 |
-| **`C2-1`** | Audit Logs read API | `V48` (1 cột) | 🔴 **BỊ CHẶN** — chờ FE câu 1 |
-| **`C2-2`** | Inventory Lot list/detail/status | `V49` | 🔴 **BỊ CHẶN** — chờ FE câu 2 |
-| `C2-8` | Capacity Board + schedule adjustment | `V50` | chưa bắt đầu — **nặng nhất**, phụ thuộc `C2-6`(xong)+`C2-7`(xong), **KẾ TIẾP không bị chặn** |
+| `C2-8` | Capacity Board + schedule adjustment | **`V48`+`V49`** | ✅ **2026-08-05** — §8.7b |
+| **`C2-1`** | Audit Logs read API | `V50` (1 cột) | 🔴 **BỊ CHẶN** — chờ FE câu 1 |
+| **`C2-2`** | Inventory Lot list/detail/status | `V51` | 🔴 **BỊ CHẶN** — chờ FE câu 2 |
 
-> `C2-6`..`C2-8` **chính là phase `P4`** của `MANUFACTURING_GAP_ROADMAP.md` (Work Center/CRP). Dùng mã
-> `C2-*` để `git log --grep` truy theo đợt Capstone 2; ghi chú chéo sang `P4` khi khởi động.
+> `C2-6`..`C2-8` **chính là phase `P4`** của `MANUFACTURING_GAP_ROADMAP.md` (Work Center/CRP) — nay
+> **đã đóng cả cụm**. Dùng mã `C2-*` để `git log --grep` truy theo đợt Capstone 2.
 >
 > **Số migration ở bảng trên là dự kiến** — thực tế lấy số kế tiếp tại thời điểm làm (`C5`: không sửa
-> migration cũ). Cao nhất hiện tại: **`V47`**.
+> migration cũ). Cao nhất hiện tại: **`V49`**.
 
 ### 8.2 Bản ghi `C2-0` ✅ **HOÀN THÀNH 2026-08-04**
 
@@ -1817,9 +1820,13 @@ errors = 0** (baseline trước phase: 661 unit + 78 IT / 12 class — không th
 (additive). 7 endpoint Work Center: additive. **Java positional:** `RoutingOperation` field
 `workCenterCode` → `workCenter`; `RoutingService` constructor +1 tham số (`WorkCenterLookupService`).
 
-**Cập nhật bẫy §8.9 hàng `C2-6`/`C2-8`:** dự đoán cũ ("snapshot giữ `source_work_center_id`") **không
-xảy ra** — `WorkOrderOperation.sourceRoutingOperationId` đã đủ để truy vết ngược, không cần thêm cột
-riêng cho work center.
+**🔴 Đính chính (viết lại ở `C2-8`, 2026-08-05):** dòng ngay trên đây từng kết luận
+"`sourceRoutingOperationId` đã đủ, không cần thêm cột riêng cho work center" — kết luận đó **sai**.
+`C2-8` (Capacity Board) hoá ra **là** consumer cần đúng thứ đó: nó phải join/filter theo Work Center
+sống để đọc `capacityUnits`/`workCalendar`, việc `sourceRoutingOperationId` (chỉ để truy vết, không
+bao giờ dereference — B49) không làm được. `C2-8` thêm `WorkOrderOperation.workCenter` (FK,
+**không** đặt tên `source_work_center_id` — nó không phải cột chỉ-để-truy-vết, mà được đọc thật bởi
+Capacity Board). Xem §8.7b + `CLAUDE.md §0.30`.
 
 ---
 
@@ -1856,6 +1863,46 @@ errors = 0** (baseline trước phase: 690 unit + 79 IT / 12 class — không th
 
 ---
 
+### 8.7b Bản ghi `C2-8` ✅ **HOÀN THÀNH 2026-08-05**
+
+Đóng nốt cluster `P4`. Migration **`V48`** (schema: `work_order_operations` +`work_center_id`
++`planned_start_at`+`planned_end_at`+`schedule_adjustment_reason`) + **`V49`** (seed
+`PERM_CAPACITY_READ`/`_MANAGE`). Bản ghi đầy đủ: **`CLAUDE.md §0.30`**. Bất biến `B89`-`B90`
+(`module/workorder/CLAUDE.md`).
+
+| Phần | Nội dung |
+|---|---|
+| A | `WorkOrderOperation.workCenter` (FK, cạnh `workCenterCode`) + `plannedStartAt`/`plannedEndAt` sinh ở `WorkOrderService.release()` (forward-schedule tuần tự, đi qua calendar Work Center nếu có) |
+| B | `GET /plants/{plantId}/capacity-board` — `CapacityBoardService`, aggregate load/capacity/utilization theo `(workCenter, ngày local theo Plant.timezone)` |
+| C | `POST /work-orders/{id}/operations/{id}/schedule-adjustments` — `ScheduleAdjustmentService`, ghi đè thủ công + cờ tư vấn (không auto-shift, không hard-block trừ version/thời gian) |
+
+🔴 **Construct JPQL `function('timezone', plant.timezone, plannedStartAt)` là native-escape đầu tiên
+trong repo** (không có tiền lệ native query trước đó) — dùng để gom nhóm load theo ngày **local**
+của plant, không phải ngày UTC. `WorkOrderOperationRepositoryIT` (**class IT thứ 13**) khoá bằng một
+mốc mà ngày UTC và ngày local (`America/New_York`, tháng 1) lệch nhau có chủ đích, chứng minh chiều
+quy đổi đúng — không có nó thì mock repository (hoặc test dùng `UTC` cho mọi timezone) sẽ không bao
+giờ thấy được lỗi nếu chiều quy đổi bị đảo ngược.
+
+**Nghiệm thu:** `mvn -o clean verify` — **791 case unit + 87 case IT / 13 class IT, failures = 0,
+errors = 0** (baseline trước phase: 759 unit + 80 IT / 12 class — `+32` unit từ
+`WorkingWindowCalculatorTest`(+7, `advance()`) + `WorkOrderServiceTest`(+3, lịch sinh ở `release()`)
++ `CapacityBoardServiceTest`(5) + `CapacityBoardServiceMethodSecurityTest`(2) +
+`ScheduleAdjustmentServiceTest`(7) + `ScheduleAdjustmentServiceMethodSecurityTest`(2) +
+`CapacityControllerTest`(6); `+7` IT từ `WorkOrderOperationRepositoryIT`(6, class IT mới) +
+`FlywayMigrationIT.migrate_v49_*`(1)). **Không** nghiệm thu bằng mutation testing lần này (khác các
+phase `C2-*` trước) — bù lại bằng smoke test HTTP thật qua `mvn -o spring-boot:run` trên Postgres
+thật (không phải Testcontainer, `docker-compose up -d`): JWT `admin` mang đúng
+`PERM_CAPACITY_READ`/`_MANAGE`, `GET .../capacity-board` trả `200` đúng envelope, `POST
+.../schedule-adjustments` trên work order không tồn tại trả **403** (không phải 404 — đúng hành vi
+sẵn có của `WorkOrderPermissionGuard`, xác nhận không phải bug mới).
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 2 endpoint mới, 4 field mới trên
+`WorkOrderOperationResponse`). **Java positional:** `WorkOrderService` constructor +1 tham số
+(`WorkCalendarLookupService`); `WorkOrderOperationResponse` +3 component;
+`WorkOrderMethodSecurityTest.Config` sửa theo `R10`.
+
+---
+
 ### 8.8 Hai phase đang bị chặn — chặn bởi **thiết kế**, không phải bởi thứ tự
 
 `C2-1` và `C2-2` là hai phase **rẻ nhất** (hạ tầng đã có sẵn) nên kế hoạch gốc xếp lên đầu. Nhưng câu
@@ -1873,9 +1920,9 @@ trả lời của FE **đổi thiết kế**, làm trước rồi sửa lại l�
 | `C2-1` | `audit_logs` **không có cột `plant_id`** mà filter §3.3 đòi. Thêm cột ⇒ mọi dòng lịch sử `NULL` (audit append-only, không backfill được) ⇒ filter chỉ đúng cho dòng mới. Ghi tường minh `NULL = "trước C2-1"`, đúng tiền lệ `cancel_reason` của `F7` |
 | `C2-2` | `InventoryLot` **không có** warehouse, **không có** manufacture date. `warehouseId` bắt buộc phải resolve qua `stock_balances` (tái dùng `StockBalanceRepository.aggregate*`, `C14`); `manufactureDate` map từ `receivedAt` (như alias `bomCapturedAt` của `F8`) — **đừng** thêm cột cho giống tài liệu. Phần **tốn công nhất là source genealogy**, không phải status |
 | `C2-3` | **Additive.** `items.unit` là `String NOT NULL` đọc ở **13 call site / 5 mapper**, tất cả read-only để hiển thị `uom` (`F8`/`F9`). ⇒ `C2-3` chỉ dựng bảng `uoms` + CRUD; nối `items.uom_id` FK và bỏ cột `unit` là **phase riêng** |
-| ~~`C2-6`/`C2-8`~~ ✅ | ~~Không đổi `WorkOrderOperation.workCenterCode` thành FK...~~ **Đã xong đúng như dự đoán ở `C2-6`** (2026-08-05): `WorkOrderOperation.workCenterCode` **giữ nguyên** String snapshot (`B56`/`B49`), chỉ `RoutingOperation.workCenterCode` đổi thành FK `WorkCenter`. Không cần thêm `source_work_center_id` — `sourceRoutingOperationId` đã đủ để truy vết ngược. Xem §8.6 |
-| `C2-8` | 🔴 `work_order_operations` **chưa có** `plannedStartAt`/`plannedEndAt`. ⇒ không phải "thêm 2 cột" mà là **quyết định nghiệp vụ**: sinh lịch lúc nào — tạo WO, `plan`, hay `release`? Phải chốt riêng trước khi code. Và đọc nợ **B** (`predecessorOperationIds`, §7.1) **trước** — `C2-8` chính là consumer làm lý do hoãn của nó hết hiệu lực. Đọc `module/shift/CLAUDE.md` mục 1 (quy ước qui-thuộc-ngày ca qua đêm) **trước khi** cộng dồn giờ làm — đảo ngược quy ước đó sẽ tính sai capacity của mọi ca qua đêm |
-| mọi phase | Permission mới ⇒ seed migration cùng phase **+** `docs/roles-and-permissions.md` (`C10`) **+** cập nhật `adminOnlyByDesign` / checklist ở `FlywayMigrationIT.migrate_v41_*` nếu tập admin-only đổi · query search có param `String` nullable **phải** `cast(:p as string)` (`§0.24`: thiếu nó là **500 toàn endpoint** mà unit test lẫn coverage đều xanh) · `X-Plant-Id` theo **endpoint**, không theo controller (3 phase đã sập bẫy) · mỗi controller mới ⇒ 1 `*ControllerTest` assert `$.code` + đủ 7 field `PageResult` · logic trong JPQL ⇒ bắt buộc `*IT` (`R7`) · ≥3 nghiệm thu mutation, ưu tiên loại **giữ nguyên HTTP status** · **[`C2-4`]** thêm path `List` thứ hai vào một `@EntityGraph` đã có collection `List` ⇒ `MultipleBagFetchException`, chỉ `mvn verify` bắt được — kiểm loại collection trước khi mở rộng entity graph · **[`C2-6`]** thêm cột `NOT NULL` cũ cần `DROP NOT NULL` khi cột đó không còn được entity mới ghi — quên là **500/lỗi insert toàn bộ**, chỉ Testcontainers thật bắt được · **[`C2-7`]** một entity có **hai** association `List` (bag) ⇒ đừng join-fetch cả hai trong cùng `@EntityGraph`/JPQL dù chưa viết code — thiết kế query tách ngay từ đầu, đừng chờ `MultipleBagFetchException` mới sửa |
+| ~~`C2-6`~~ 🔴 | ~~Không đổi `WorkOrderOperation.workCenterCode` thành FK...~~ **Dự đoán này ĐÚNG lúc `C2-6` (2026-08-05) nhưng SAI khi `C2-8` tới** (2026-08-05, cùng ngày, phase kế tiếp): `WorkOrderOperation.workCenterCode` giữ String snapshot đúng như dự đoán **tại thời điểm `C2-6`**, nhưng `C2-8` sau đó **thêm FK `workCenter` cạnh nó** vì Capacity Board cần join Work Center sống — dự đoán "sẽ không cần" chỉ đúng vì `C2-6` chưa có consumer, không phải vì không bao giờ cần. Bài học: dự đoán "X sẽ không cần" chỉ có giá trị **tới khi có consumer thật**, đừng đọc nó như kết luận vĩnh viễn. Xem §8.7b |
+| ~~`C2-8`~~ ✅ | ~~🔴 `work_order_operations` chưa có `plannedStartAt`/`plannedEndAt`...~~ **Đã xong** (2026-08-05): lịch sinh ở `release()` (chốt với user), nợ B tách `C2-8b` (chốt với user, không làm ở `C2-8`), quy ước qui-thuộc-ngày ca qua đêm áp dụng đúng ở cả `WorkingWindowCalculator.advance` lẫn gom nhóm load theo ngày. Xem §8.7b |
+| mọi phase | Permission mới ⇒ seed migration cùng phase **+** `docs/roles-and-permissions.md` (`C10`) **+** cập nhật `adminOnlyByDesign` / checklist ở `FlywayMigrationIT.migrate_v41_*` nếu tập admin-only đổi · query search có param `String` nullable **phải** `cast(:p as string)` (`§0.24`: thiếu nó là **500 toàn endpoint** mà unit test lẫn coverage đều xanh) · `X-Plant-Id` theo **endpoint**, không theo controller (3 phase đã sập bẫy) · mỗi controller mới ⇒ 1 `*ControllerTest` assert `$.code` + đủ 7 field `PageResult` · logic trong JPQL ⇒ bắt buộc `*IT` (`R7`) · ≥3 nghiệm thu mutation, ưu tiên loại **giữ nguyên HTTP status** · **[`C2-4`]** thêm path `List` thứ hai vào một `@EntityGraph` đã có collection `List` ⇒ `MultipleBagFetchException`, chỉ `mvn verify` bắt được — kiểm loại collection trước khi mở rộng entity graph · **[`C2-6`]** thêm cột `NOT NULL` cũ cần `DROP NOT NULL` khi cột đó không còn được entity mới ghi — quên là **500/lỗi insert toàn bộ**, chỉ Testcontainers thật bắt được · **[`C2-7`]** một entity có **hai** association `List` (bag) ⇒ đừng join-fetch cả hai trong cùng `@EntityGraph`/JPQL dù chưa viết code — thiết kế query tách ngay từ đầu, đừng chờ `MultipleBagFetchException` mới sửa · **[`C2-8`]** gom nhóm/lọc theo "ngày" từ một cột `Instant`/`TIMESTAMPTZ` mà có ý nghĩa **local** (không phải UTC) ⇒ bắt buộc quy đổi qua timezone thật (`Plant.timezone` hoặc tương đương) ở **cả** Java lẫn SQL, và phải khớp nhau — viết `*IT` cố ý chọn mốc mà ngày UTC và ngày local lệch nhau để tự kiểm, đừng tin bằng mắt · dự đoán "X sẽ không cần Y vì chưa có consumer" chỉ đúng **tới khi có consumer thật** — đừng đọc nó như kết luận vĩnh viễn khi phase sau đọc lại (xem §8.9 hàng `C2-6`) |
 
 ### 8.10 Kiểm chứng (áp dụng mọi phase `C2-*`)
 
@@ -1883,7 +1930,7 @@ Ngoài §5 (áp cho cả track `F*`):
 
 1. `mvn -o clean verify` — **đọc cả `Errors:`, không chỉ `Failures:`**, ở **cả hai** dòng tổng (`test`
    và `integration-test`). Bài học 2026-08-04: `D8b` báo "66 IT xanh" trong khi thật là 65 xanh / 1 error.
-2. Số case **≥ baseline hiện tại: 759 unit + 80 IT / 12 class IT**, `failures = 0`, `errors = 0`.
+2. Số case **≥ baseline hiện tại: 791 unit + 87 IT / 13 class IT**, `failures = 0`, `errors = 0`.
 3. **Chạy thật qua HTTP** cho happy-path mới — cả 3 bug ngày 2026-08-04, defect RBAC của `C2-5`, và
    giới hạn `hasPermission`/`GLOBAL` scope phát hiện ở `C2-3` đều **không** bị unit test phát hiện.
    Dev stack: `erp-postgres:5434` + `erp-redis:6379`.

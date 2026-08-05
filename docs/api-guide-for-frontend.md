@@ -767,7 +767,46 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 > "thêm vào".
 >
 > Chưa có API public tính "giờ làm thực" (net working window, đã trừ break/ngày nghỉ) — nội bộ dùng
-> cho `C2-8` (Capacity Board), chưa lộ ra ngoài.
+> cho `C2-8` (Capacity Board — nay **đã** dùng, xem mục ngay dưới).
+
+### Capacity Board (CRP tĩnh) *(`C2-8`, 2026-08-05)*
+
+| Việc | Endpoint |
+|---|---|
+| Load/capacity theo horizon | `GET /plants/{plantId}/capacity-board?from=&to=&workCenterId=&status=&page=&size=&sortBy=&sortDir=` (`from`/`to` bắt buộc, `ISO-8601` date) |
+| Điều chỉnh lịch một operation | `POST /work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments` |
+
+> **Lịch (`plannedStartAt`/`plannedEndAt` của mỗi operation) sinh MỘT LẦN, lúc `POST
+> /work-orders/{id}/release`** — không phải lúc tạo hay `plan()` work order. WO chưa release thì
+> operation của nó **không xuất hiện** trên Capacity Board (đúng thiết kế, không phải bug/thiếu dữ
+> liệu).
+>
+> **Mỗi dòng của Capacity Board là một operation**, kèm ngữ cảnh capacity/load/utilization của
+> Work Center nó chạy trên, cho đúng ngày operation đó bắt đầu: `dayCapacityMinutes`
+> (`null` = Work Center chưa gắn Work Calendar, **không phải** `0`), `dayExistingLoadMinutes`,
+> `utilizationPercent` (`null` khi capacity không xác định được), `overload` (boolean),
+> `calendarExceptionApplies` (ngày đó là exception `NON_WORKING` của Work Calendar).
+> `dayExistingLoadMinutes`/`overload` luôn tính trên **mọi** operation `RELEASED`/`IN_PROGRESS`/
+> `COMPLETED` của Work Center đó, **bất kể** filter `status` đang lọc dòng nào — filter chỉ ảnh
+> hưởng dòng hiển thị, không ảnh hưởng số utilization.
+>
+> 🔴 **Đây là lịch "infinite capacity"** — hệ thống không tự phát hiện và ngăn hai Work Order cùng
+> chiếm một Work Center cùng lúc; nó chỉ **báo cáo** khi việc đó đã xảy ra (`overload = true`). Việc
+> giải quyết xung đột là của con người, qua `schedule-adjustments`.
+>
+> **`schedule-adjustments` request:** `{plannedStartAt, plannedEndAt, reason, expectedVersion}` (cả
+> 4 field bắt buộc; `expectedVersion` là optimistic-lock — lệch trả `409 CONCURRENT_MODIFICATION`).
+> `plannedEndAt <= plannedStartAt` trả `400`. Operation chưa có Work Center hoặc chưa từng được
+> `release()` trả `422 OPERATION_NOT_ALLOWED`.
+>
+> 🔴 **Backend KHÔNG BAO GIỜ tự dời operation khác và KHÔNG chặn cứng khi lịch mới đụng operation
+> liền kề hoặc vượt capacity.** Response luôn thành công (nếu qua được 3 check cứng ở trên) kèm 3 cờ
+> tư vấn: `sequenceConflict` (đè lên cửa sổ của operation liền trước/sau), `calendarConflict` (0 phút
+> làm việc ngày đó), `capacityOverload` — FE tự quyết định hiển thị cảnh báo, người dùng tự xử lý
+> xung đột bằng tay (gọi lại `schedule-adjustments` cho operation khác nếu cần).
+>
+> Chưa làm: validate thứ tự phụ thuộc operation (`predecessorOperationIds`) — nợ tách riêng, xem
+> `NEXT_PHASE_PLAN.md`.
 
 ### Access Control — Role / Scope lifecycle + Assignments *(`C2-4`, 2026-08-05)*
 

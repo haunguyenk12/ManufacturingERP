@@ -100,8 +100,12 @@ public class WorkOrderMapper {
                 operation.getSequence(),
                 operation.getName(),
                 operation.getWorkCenterCode(),
+                operation.getWorkCenter() == null ? null : operation.getWorkCenter().getWorkCenterId(),
                 operation.getSetupMinutes(),
-                operation.getRunMinutesPerUnit());
+                operation.getRunMinutesPerUnit(),
+                operation.getPlannedStartAt(),
+                operation.getPlannedEndAt(),
+                operation.getVersion());
     }
 
     public WorkOrderComponentLineResponse toResponse(WorkOrderComponentLine line,

@@ -261,19 +261,19 @@ OpenAPI phải mô tả rõ permission, trạng thái, reason, stock posting tim
 
 ## 6. Acceptance checklist cho backend
 
-- [ ] Auth refresh rotation và concurrent refresh pass.
-- [ ] Không còn lỗi 500 không có trace trong core happy path.
-- [ ] UOM CRUD/lifecycle có OpenAPI và permission.
-- [ ] Inventory Lot list/detail/status có OpenAPI và business rules.
-- [ ] Audit list/detail có OpenAPI.
+- [~] Auth refresh rotation và concurrent refresh pass. *(rotation/RTR/absolute timeout ✅ `D8a`/`D8b`; 🔴 concurrent refresh KHÔNG pass, cố ý — cần lock/CAS, xem `CLAUDE.md §0.22` #5 — mở phase riêng nếu FE coi đây là điều kiện nghiệm thu)*
+- [~] Không còn lỗi 500 không có trace trong core happy path. *(3 lỗi được báo đã sửa, xem `CLAUDE.md §0.24`; **chưa** rà toàn bộ endpoint nên không tuyên bố "không còn")*
+- [x] UOM CRUD/lifecycle có OpenAPI và permission. *(`C2-3`, 2026-08-04 — 7 endpoint, `V42`+`V43`)*
+- [ ] Inventory Lot list/detail/status có OpenAPI và business rules. *(`C2-2` — bị chặn, chờ FE trả lời `docs/capstone2-api-gap-response.md §5` câu 2)*
+- [ ] Audit list/detail có OpenAPI. *(`C2-1` — bị chặn, chờ FE trả lời `docs/capstone2-api-gap-response.md §5` câu 1)*
 - [x] Work Center CRUD/lifecycle có OpenAPI. *(`C2-6`, 2026-08-05 — 7 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.6`)*
 - [x] Shift/Calendar CRUD/lifecycle có OpenAPI. *(`C2-7`, 2026-08-05 — 14 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.7`)*
-- [ ] Capacity Board và schedule adjustment có OpenAPI.
-- [ ] BOM/Routing deactivate được chốt.
-- [ ] SO DRAFT update được chốt.
-- [ ] Role/Scope/Assignment reads và lifecycle được chốt.
-- [ ] Over-BOM approval semantics được chốt.
-- [ ] Multi-Plant isolation test data sẵn sàng.
+- [x] Capacity Board và schedule adjustment có OpenAPI. *(`C2-8` — ✅ hoàn thành 2026-08-05: `GET /plants/{plantId}/capacity-board` + `POST /work-orders/{id}/operations/{id}/schedule-adjustments`, `V48`+`V49`. Xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.7b`, `CLAUDE.md §0.30`)*
+- [x] BOM/Routing deactivate được chốt. *(`C2-0`, 2026-08-04 — đã có từ trước, chỉ lệch verb `DELETE`, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.2`)*
+- [x] SO DRAFT update được chốt. *(`C2-4`, 2026-08-05 — `PATCH /sales-orders/{id}`, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.5`)*
+- [x] Role/Scope/Assignment reads và lifecycle được chốt. *(`C2-4`, 2026-08-05 — 9 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.5`)*
+- [x] Over-BOM approval semantics được chốt. *(`C2-4`, 2026-08-05 — phương án (1) chốt, `docs/capstone2-api-gap-response.md §5` câu 4 đã trả lời)*
+- [x] Multi-Plant isolation test data sẵn sàng. *(`C2-5`, 2026-08-04 — 2 plant + 3 account, isolation kiểm qua HTTP thật)*
 
 ## 7. Ngoài scope Capstone 2
 
