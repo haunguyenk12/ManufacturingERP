@@ -1,11 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`C2-8` – CRP tĩnh + Capacity Board + Schedule Adjustment** ✅ **HOÀN THÀNH
-> 2026-08-05.** Đóng nốt cluster `P4`. Bản ghi đầy đủ: `CLAUDE.md §0.30` · sổ track `C2-*`:
-> `FRONTEND_ALIGNMENT_ROADMAP.md §8.7` (bảng phase §8.1, checklist §8.0 — 9/13).
+> Phase trước: **`P3` – Costing Engine** ✅ **HOÀN THÀNH 2026-08-05.** Bản ghi đầy đủ: `CLAUDE.md
+> §0.31`.
 >
-> **791 case unit + 87 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V49`.
+> **821 case unit + 88 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V51`.
 
 ---
 
@@ -27,8 +26,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `C2-8` vừa xong. Cập nhật dòng này thành tên phase khi bắt tay vào code phase kế tiếp)* |
-| **Ứng viên kế tiếp** | `P3` — Costing Engine — xem §2 |
+| **Đang chạy** | *(không có — `P3` vừa xong. Cập nhật dòng này thành tên phase khi bắt tay vào code phase kế tiếp)* |
+| **Ứng viên kế tiếp** | Concurrent refresh-token race (mở rộng `D8`) — xem §3 |
 | **Bị chặn** | `C2-1`, `C2-2` (chờ FE), `D8c` (chờ quyết định hạ tầng email) |
 
 ---
@@ -38,7 +37,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | # | Phase | Trạng thái | Vì sao xếp ở đây |
 |---|---|---|---|
 | 1 | ~~`C2-8` — CRP tĩnh + Capacity Board + Schedule Adjustment~~ | ✅ **Đã xong (2026-08-05)** | Đóng nốt `P4`. Bản ghi: `CLAUDE.md §0.30` |
-| 2 | `P3` — Costing Engine | Không bị chặn | Roadmap gốc tự đánh giá là hạng mục độc lập giá trị cao nhất kế tiếp; không phụ thuộc `P4` |
+| 2 | ~~`P3` — Costing Engine~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.31` |
 | 3 | Concurrent refresh-token race (mở rộng `D8`) | Không bị chặn | FE coi đây là điều kiện nghiệm thu |
 | 4 | `P5` — Serial Number Tracking | Không bị chặn | Đổi `MaterialIssueLineRequest` — nên làm sau khi `P3`/`C2-8` đã ổn định để tránh đổi DTO cùng lúc nhiều phase |
 | 5 | `P6` phần còn lại — WO Close/Reconcile | Không bị chặn | Nhỏ, đóng nốt track `P6` |
@@ -61,41 +60,15 @@ không bao giờ tự dời operation khác, chỉ trả cờ tư vấn. Migrati
 
 ---
 
-## 2. `P3` — Costing Engine
+## 2. `P3` — Costing Engine ✅ ĐÃ XONG (2026-08-05)
 
-Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P3). Độc lập, không phụ thuộc phase nào ở trên.
-
-### Quyết định phải chốt với user TRƯỚC khi viết kế hoạch chi tiết
-
-`laborCost`/`overheadCost` nhập tay theo rate cố định trên `ItemStandardCost` (đơn giản, làm ngay
-được) hay tính từ `WorkOrderOperation.runMinutesPerUnit` × rate/phút (chính xác hơn, tận dụng
-`C2-6`/`C2-7` vừa xong, nhưng phức tạp hơn — có thể tách `P3b`)?
-
-### Thiết kế phác thảo (đối chiếu code thật)
-
-- `Item` **hiện chưa có field chi phí nào** (đã đọc `Item.java` xác nhận). Không đặt cost lên `Item`
-  — chi phí đổi theo thời gian, `Item` là master data tĩnh.
-- `ItemStandardCost` (company/plant + `effectiveDate`, `materialCost`/`laborCost`/`overheadCost`).
-- `CostingService.calculateStandardCost` — đệ quy giống `MrpCalculationService` nổ BOM, tái dùng
-  đúng công thức `BomLine.quantityPer`/`scrapRate` đã có:
-  `cost(FG) = Σ(component.standardCost × quantityPer × (1 + scrapRate)) + laborCost + overheadCost`.
-- `WorkOrderCostAccumulator` (1-1 với `WorkOrder`) — mỗi `MaterialIssueService.post` cộng
-  `issuedQuantity × standardCost` (`WorkOrderComponentLine.issuedQuantity` đã có sẵn, là điểm neo
-  actual cost đúng chỗ).
-- Mở rộng `WorkOrderVarianceResponse` (hiện chỉ có `materialLines`/`outputVariance`/`wipSummary`/
-  `timeVariance`, toàn số lượng — đã đọc file xác nhận không có field tiền nào) thêm Material Price
-  Variance + Material Usage Variance.
-
-### Việc cần làm
-
-Entity + migration `ItemStandardCost`/`WorkOrderCostAccumulator`, `CostingService`, wiring vào
-`MaterialIssueService`/`ProductionReceiptService`, mở rộng `WorkOrderVarianceService`, endpoint CRUD
-đọc/ghi `ItemStandardCost`, permission mới (`PERM_COSTING_READ`/`_MANAGE`?).
-
-### Test bắt buộc
-
-Unit cho `CostingService` (BOM roll-up nhiều cấp, giống cách `MrpCalculationServiceTest` đã làm),
-test variance tiền trên `WorkOrderVarianceServiceTest`, method-security, controller test.
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P3). Bản ghi đầy đủ (thiết kế, quyết định đã chốt,
+bất biến B91-B92, breaking changes): `CLAUDE.md §0.31`. Hai quyết định chốt với user trước khi viết
+kế hoạch chi tiết: `laborCost`/`overheadCost` nhập tay theo rate cố định trên `ItemStandardCost`
+(không tính từ `WorkOrderOperation.runMinutesPerUnit`); **bỏ Material Price Variance**, chỉ làm
+Material Usage Variance (không có cột giá trên `stock_movements`, dữ liệu giá duy nhất
+— `PurchaseOrderLine.unitPrice` — tách rời khỏi ledger xuất kho). Module mới `module/costing`.
+Migration `V50`+`V51`.
 
 ---
 
@@ -281,14 +254,15 @@ viết dòng code đầu tiên. **Không code phase này tới khi có quyết �
   - [x] Docs cập nhật (`CLAUDE.md` §0.30, `module/workorder`+`workcenter`+`shift` CLAUDE.md,
         `FRONTEND_ALIGNMENT_ROADMAP.md`, `roles-and-permissions.md`, `api-guide-for-frontend.md`,
         `BACKEND_CAPSTONE2_API_GAPS.md` checklist)
-- [ ] **`P3`** — Costing Engine
-  - [ ] Quyết định labor/overhead cost: nhập tay hay tính từ routing — đã chốt với user
-  - [ ] `ItemStandardCost` entity + migration
-  - [ ] `CostingService` (BOM cost roll-up nhiều cấp)
-  - [ ] `WorkOrderCostAccumulator` + wiring vào `MaterialIssueService`/`ProductionReceiptService`
-  - [ ] Variance tiền trên `WorkOrderVarianceResponse` (Material Price/Usage Variance)
-  - [ ] Endpoint CRUD `ItemStandardCost` + permission mới
-  - [ ] Test + docs
+- [x] **`P3`** — Costing Engine ✅ **2026-08-05**
+  - [x] Quyết định labor/overhead cost: nhập tay theo rate cố định — chốt với user
+  - [x] Quyết định bỏ Material Price Variance, chỉ làm Usage Variance — chốt với user
+  - [x] `ItemStandardCost` entity + migration (`V50`)
+  - [x] `CostingService` (BOM cost roll-up nhiều cấp, đệ quy giống `MrpCalculationService`)
+  - [x] `WorkOrderCostAccumulator` + wiring vào `MaterialIssueService`/`ProductionExecutionService`
+  - [x] Variance tiền trên `WorkOrderVarianceResponse` (`usageVarianceCost` + `costVariance`)
+  - [x] Endpoint CRUD `ItemStandardCost` + permission mới (`PERM_COSTING_READ`/`_MANAGE`, `V51`)
+  - [x] Test (821 case unit + 88 case IT / 13 class IT) + docs + smoke test HTTP thật
 - [ ] **Concurrent refresh-token race**
   - [ ] Quyết định có grace window hay khoá cứng — đã chốt với user
   - [ ] Lock/CAS qua Redis Lua script khi rotate

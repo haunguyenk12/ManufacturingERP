@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V49) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V51) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -44,7 +44,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("49");
+        assertThat(current.getVersion().getVersion()).isEqualTo("51");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -294,6 +294,43 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                      JOIN roles r ON r.role_id = rp.role_id
                      JOIN permissions p ON p.permission_id = rp.permission_id
                      WHERE r.code = '%s' AND p.code IN ('PERM_CAPACITY_READ', 'PERM_CAPACITY_MANAGE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * P3: {@code PERM_COSTING_READ}/{@code PERM_COSTING_MANAGE} — ADMIN+MANAGER only, NO grant to
+     * OPERATOR at all (unlike {@code migrate_v49_*}/{@code migrate_v47_*}, which give OPERATOR
+     * read-only). This is a pure "cấm" case: {@code PermissionCatalogTest} only proves the two
+     * permissions exist, never that OPERATOR is excluded from them — only a real database answers
+     * that (same lesson as {@code migrate_v41_*}).
+     */
+    @Test
+    void migrate_v51_grantsCostingPermissionsToAdminAndManagerOnly() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedCostingPermissions("ADMIN"))
+                .containsExactlyInAnyOrder("PERM_COSTING_READ", "PERM_COSTING_MANAGE");
+        assertThat(grantedCostingPermissions("MANAGER"))
+                .containsExactlyInAnyOrder("PERM_COSTING_READ", "PERM_COSTING_MANAGE");
+        assertThat(grantedCostingPermissions("OPERATOR")).isEmpty();
+    }
+
+    private Set<String> grantedCostingPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN ('PERM_COSTING_READ', 'PERM_COSTING_MANAGE')
                      """.formatted(roleCode))) {
             while (rows.next()) {
                 granted.add(rows.getString("code"));

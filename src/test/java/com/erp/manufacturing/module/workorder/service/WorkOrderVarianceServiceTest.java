@@ -1,6 +1,8 @@
 package com.erp.manufacturing.module.workorder.service;
 
 import com.erp.manufacturing.module.bom.domain.BomLine;
+import com.erp.manufacturing.module.costing.service.ItemStandardCostLookupService;
+import com.erp.manufacturing.module.costing.service.StandardCostBreakdown;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
@@ -22,6 +24,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,8 +38,13 @@ class WorkOrderVarianceServiceTest {
     @Mock WorkOrderRepository workOrderRepository;
     @Mock ProductionExecutionRepository productionExecutionRepository;
     @Mock WorkOrderOperationRepository workOrderOperationRepository;
+    @Mock WorkOrderCostAccumulatorRepository workOrderCostAccumulatorRepository;
+    @Mock ItemStandardCostLookupService itemStandardCostLookupService;
 
     WorkOrderVarianceService service;
+
+    private static final StandardCostBreakdown ZERO_BREAKDOWN =
+            new StandardCostBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
 
     @BeforeEach
     void setUp() {
@@ -45,7 +54,18 @@ class WorkOrderVarianceServiceTest {
                 wipTransactionRepository,
                 workOrderRepository,
                 productionExecutionRepository,
-                workOrderOperationRepository);
+                workOrderOperationRepository,
+                workOrderCostAccumulatorRepository,
+                itemStandardCostLookupService);
+        // Every test calls getVariance(), which always computes the cost variance block; only
+        // tests with component lines also hit findStandardUnitCost — lenient so those without
+        // lines don't trip strict-stubbing on an unused default.
+        lenient().when(itemStandardCostLookupService.findStandardCostBreakdown(any(), any()))
+                .thenReturn(ZERO_BREAKDOWN);
+        lenient().when(itemStandardCostLookupService.findStandardUnitCost(any(), any()))
+                .thenReturn(BigDecimal.ZERO);
+        lenient().when(workOrderCostAccumulatorRepository.findByWorkOrderWorkOrderId(any()))
+                .thenReturn(Optional.empty());
     }
 
     @Test
@@ -57,6 +77,7 @@ class WorkOrderVarianceServiceTest {
         WorkOrder workOrder = WorkOrder.builder()
                 .workOrderId(workOrderId)
                 .workOrderNo("WO-001")
+                .company(product.getCompany())
                 .productItem(product)
                 .plannedQuantity(new BigDecimal("10"))
                 .status(WorkOrderStatus.COMPLETED)
@@ -80,14 +101,84 @@ class WorkOrderVarianceServiceTest {
                 .thenReturn(new BigDecimal("1"));
         when(wipTransactionRepository.sumQuantityByWorkOrderAndType(workOrderId, WipTransactionType.REWORK_REPORTED))
                 .thenReturn(new BigDecimal("2"));
+        when(itemStandardCostLookupService.findStandardUnitCost(
+                product.getCompany().getCompanyId(), component.getItemId()))
+                .thenReturn(new BigDecimal("4.50"));
 
         var response = service.getVariance(workOrderId);
 
         assertThat(response.materialLines().get(0).varianceQuantity()).isEqualByComparingTo("1");
         assertThat(response.materialLines().get(0).status()).isEqualTo(VarianceStatus.OVER_ISSUED.name());
+        // varianceQuantity (1) * standardUnitCost (4.50) — P3 Material Usage Variance
+        assertThat(response.materialLines().get(0).usageVarianceCost()).isEqualByComparingTo("4.50");
         assertThat(response.outputVariance().varianceQuantity()).isEqualByComparingTo("-1");
         assertThat(response.wipSummary().scrapQuantity()).isEqualByComparingTo("1");
         assertThat(response.wipSummary().reworkQuantity()).isEqualByComparingTo("2");
+    }
+
+    // ── cost variance (P3) ──────────────────────────────────────────────────
+
+    @Test
+    void getVariance_costVariance_standardIsBreakdownTimesPlannedQuantity_actualIsZeroWithoutAnAccumulator() {
+        UUID workOrderId = UUID.randomUUID();
+        WorkOrder workOrder = baseWorkOrder(workOrderId, new BigDecimal("10"));
+        stubEmptyVarianceInputs(workOrderId);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(workOrder));
+        when(workOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrderId))
+                .thenReturn(List.of());
+        when(productionExecutionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrderId))
+                .thenReturn(List.of());
+        when(itemStandardCostLookupService.findStandardCostBreakdown(
+                workOrder.getCompany().getCompanyId(), workOrder.getProductItem().getItemId()))
+                .thenReturn(new StandardCostBreakdown(new BigDecimal("2"), new BigDecimal("3"), new BigDecimal("1")));
+        // No accumulator row — a work order that has issued nothing and reported nothing yet.
+        when(workOrderCostAccumulatorRepository.findByWorkOrderWorkOrderId(workOrderId))
+                .thenReturn(Optional.empty());
+
+        var response = service.getVariance(workOrderId);
+
+        var costVariance = response.costVariance();
+        assertThat(costVariance.standardMaterialCost()).isEqualByComparingTo("20");  // 2 * 10
+        assertThat(costVariance.standardLaborCost()).isEqualByComparingTo("30");     // 3 * 10
+        assertThat(costVariance.standardOverheadCost()).isEqualByComparingTo("10");  // 1 * 10
+        assertThat(costVariance.standardTotalCost()).isEqualByComparingTo("60");
+        assertThat(costVariance.actualMaterialCost()).isEqualByComparingTo("0");
+        assertThat(costVariance.actualLaborCost()).isEqualByComparingTo("0");
+        assertThat(costVariance.actualOverheadCost()).isEqualByComparingTo("0");
+        assertThat(costVariance.actualTotalCost()).isEqualByComparingTo("0");
+        assertThat(costVariance.totalCostVariance()).isEqualByComparingTo("-60");
+    }
+
+    @Test
+    void getVariance_costVariance_actualReadsTheAccumulatorRowWhenItExists() {
+        UUID workOrderId = UUID.randomUUID();
+        WorkOrder workOrder = baseWorkOrder(workOrderId, new BigDecimal("10"));
+        stubEmptyVarianceInputs(workOrderId);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(workOrder));
+        when(workOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrderId))
+                .thenReturn(List.of());
+        when(productionExecutionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrderId))
+                .thenReturn(List.of());
+        WorkOrderCostAccumulator accumulator = WorkOrderCostAccumulator.builder()
+                .workOrderCostAccumulatorId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .materialCostAccumulated(new BigDecimal("25"))
+                .laborCostAccumulated(new BigDecimal("35"))
+                .overheadCostAccumulated(new BigDecimal("15"))
+                .build();
+        when(workOrderCostAccumulatorRepository.findByWorkOrderWorkOrderId(workOrderId))
+                .thenReturn(Optional.of(accumulator));
+
+        var response = service.getVariance(workOrderId);
+
+        var costVariance = response.costVariance();
+        assertThat(costVariance.actualMaterialCost()).isEqualByComparingTo("25");
+        assertThat(costVariance.actualLaborCost()).isEqualByComparingTo("35");
+        assertThat(costVariance.actualOverheadCost()).isEqualByComparingTo("15");
+        assertThat(costVariance.actualTotalCost()).isEqualByComparingTo("75");
+        // standard is the ZERO_BREAKDOWN default from setUp() * plannedQuantity = 0
+        assertThat(costVariance.standardTotalCost()).isEqualByComparingTo("0");
+        assertThat(costVariance.totalCostVariance()).isEqualByComparingTo("75");
     }
 
     // ── time variance (C2-4) ───────────────────────────────────────────────
@@ -153,6 +244,7 @@ class WorkOrderVarianceServiceTest {
         return WorkOrder.builder()
                 .workOrderId(workOrderId)
                 .workOrderNo("WO-001")
+                .company(product.getCompany())
                 .productItem(product)
                 .plannedQuantity(plannedQuantity)
                 .status(WorkOrderStatus.IN_PROGRESS)

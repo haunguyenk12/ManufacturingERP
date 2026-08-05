@@ -59,6 +59,7 @@ public class MaterialIssueService {
     private final ManufacturingExecutionMapper mapper;
     private final TraceIdProvider traceIdProvider;
     private final UserLookupService userLookupService;
+    private final WorkOrderCostAccumulatorService costAccumulatorService;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', #workOrderId)")
@@ -211,6 +212,7 @@ public class MaterialIssueService {
             if (movementResult.created()) {
                 componentLine.addIssuedQuantity(quantity);
                 workOrder.markInProgress();
+                costAccumulatorService.accumulateMaterialCost(workOrder, componentLine.getComponentItem(), quantity);
             }
             issue.getLines().add(MaterialIssueLine.builder()
                     .issue(issue)

@@ -67,6 +67,7 @@ class MaterialIssueServiceTest {
     @Mock InventoryAvailabilityService inventoryAvailabilityService;
     @Mock WorkOrderPermissionGuard workOrderPermissionGuard;
     @Mock UserLookupService userLookupService;
+    @Mock WorkOrderCostAccumulatorService costAccumulatorService;
 
     MaterialIssueService service;
 
@@ -85,7 +86,8 @@ class MaterialIssueServiceTest {
                 new IdempotencySupport(new ObjectMapper()),
                 new ManufacturingExecutionMapper(),
                 new TraceIdProvider(),
-                userLookupService);
+                userLookupService,
+                costAccumulatorService);
     }
 
     @AfterEach
@@ -222,6 +224,41 @@ class MaterialIssueServiceTest {
         verify(issueRepository).save(captor.capture());
         assertThat(captor.getValue().getLines().get(0).isOverIssue()).isFalse();
         verifyNoInteractions(workOrderPermissionGuard);
+    }
+
+    @Test
+    void post_createdMovement_accumulatesMaterialCostExactlyOnce() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        StockMovement movement = movement(line.getComponentItem(), warehouse);
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-COST")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-COST:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("4"), null))), "KEY-COST");
+
+        verify(costAccumulatorService).accumulateMaterialCost(workOrder, line.getComponentItem(), new BigDecimal("4"));
+    }
+
+    @Test
+    void postInternal_replayedIdempotencyKey_doesNotDoubleAccumulateMaterialCost() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        // payloadHash is null (B5c) — the builder never sets it — so ensureSamePayload() below
+        // short-circuits without needing a matching hash; this test is only about accumulation.
+        MaterialIssue existing = issue(workOrder, UUID.randomUUID());
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-REPLAY")).thenReturn(Optional.of(existing));
+
+        service.postInternal(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of()), "KEY-REPLAY");
+
+        verifyNoInteractions(costAccumulatorService);
     }
 
     @Test

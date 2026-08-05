@@ -12,5 +12,6 @@ public record WorkOrderVarianceResponse(
         List<WorkOrderMaterialVarianceLineResponse> materialLines,
         WorkOrderOutputVarianceResponse outputVariance,
         WorkOrderWipSummaryResponse wipSummary,
-        WorkOrderTimeVarianceResponse timeVariance
+        WorkOrderTimeVarianceResponse timeVariance,
+        WorkOrderCostVarianceResponse costVariance
 ) {}

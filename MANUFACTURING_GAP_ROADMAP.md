@@ -29,7 +29,7 @@
 |---|---|---|---|---|---|---|
 | **[x]** | **P1** | Approval Workflow & Business Gates | Khớp `business_flow` (4 chốt duyệt) | — | Trung bình | Không |
 | **[x]** | **P2** | Quality Control (QC) Module | Khớp `business_flow` (QC + HOLD) | P1 ✅ | Trung bình | Không |
-| **[ ]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
+| **[x]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
 | **[x]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
 | **[ ]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
 | **[~]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
@@ -72,7 +72,14 @@
   - Chi tiết + giới hạn còn lại: `CLAUDE.md §0.6` và nợ #11/#12 ở `§0.4`
   - *Khác thiết kế gốc:* entity tên `QualityDisposition` (không phải `QualityInspection`), permission
     tên `PERM_QUALITY_DISPOSITION` (không phải `PERM_QUALITY_INSPECT`) — theo đúng đặc tả FE §6.2.
-- [ ] **P3 – Costing Engine**
+- [x] **P3 – Costing Engine** — ✅ **xong 2026-08-05**. Module mới `module/costing`: `ItemStandardCost`
+  (upsert, company-scoped) + `CostingService` (BOM cost roll-up đệ quy, cùng khuôn
+  `MrpCalculationService`) + `WorkOrderCostAccumulator` (2 hook: `MaterialIssueService`,
+  `ProductionExecutionService`). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` +
+  `costVariance`. **Chỉ Material Usage Variance** — không làm Price Variance (không có cột giá trên
+  `stock_movements`). `laborCost`/`overheadCost` nhập tay theo rate cố định, **không** tính từ
+  `WorkOrderOperation.runMinutesPerUnit`. Permission `PERM_COSTING_READ`/`_MANAGE` (ADMIN+MANAGER
+  only). Bản ghi đầy đủ: `CLAUDE.md §0.31`.
 - [x] **P4 – Routing + Work Center + CRP tĩnh** — ✅ **đóng nốt 2026-08-05**. Routing master data xong 2026-07-27 (`F4`); Work Center/Shift/Calendar/CRP thực thi dưới mã `C2-6`/`C2-7`/`C2-8` (track Capstone 2, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8`)
   - [x] Module `module/routing`: `RoutingHeader` + `RoutingOperation`, 1 routing `ACTIVE` / `(company, item)`
   - [x] Snapshot bất biến lên `work_orders` (`source_routing_id/code/version` + `routing_captured_at`)
@@ -186,6 +193,21 @@ chỉ thiếu workflow điều khiển transition.
 ---
 
 ### P3 — Costing Engine ⭐ (khoảng trống lý thuyết lớn nhất)
+
+> ✅ **Đã xong (2026-08-05).** Phần dưới đây là **thiết kế phác thảo gốc**, giữ lại làm lịch sử —
+> triển khai thật lệch vài chỗ, đã chốt với user trước khi viết kế hoạch chi tiết:
+> - `ItemStandardCost` **không** có `effectiveDate`/version-theo-thời-gian — upsert một dòng/item
+>   (không có "cost tại một thời điểm trong quá khứ" nào cần dùng lúc này, thêm sẽ là speculative).
+>   Company-scoped, **không** per-plant như bản nháp gợi ý.
+> - **Bỏ hẳn Material Price Variance**, chỉ làm Material Usage Variance — `stock_movements` không có
+>   cột giá, và giá duy nhất trong hệ thống (`PurchaseOrderLine.unitPrice`) tách rời khỏi ledger xuất
+>   kho.
+> - `WorkOrderCostAccumulator` cộng dồn material cost ở `MaterialIssueService.postNew` (đúng như bản
+>   nháp) nhưng cộng dồn labor/overhead ở `ProductionExecutionService.reportNew` (báo sản lượng),
+>   **không phải** lúc `ProductionReceiptService` hoàn tất — khớp với đảo ngược ngữ nghĩa `F5`
+>   (`CLAUDE.md §0.5`): chính execution làm WO tiến triển, không phải receipt.
+>
+> Bản ghi đầy đủ (thiết kế thật, bất biến B91-B94, breaking changes): `CLAUDE.md §0.31`.
 
 **Mục tiêu:** Trả lời được câu hỏi *"sản xuất lô này tốn bao nhiêu tiền"* — hiện tại `Item` không
 có field chi phí nào, `WorkOrderVarianceService` chỉ so sánh **số lượng**, chưa có tiền.

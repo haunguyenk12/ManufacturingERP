@@ -5,7 +5,7 @@
 > được ghi rõ ở [§9](#9-những-chỗ-lệch-so-với-spec-fe). Toàn bộ luồng ở [§4](#4-luồng-sản-xuất-đầu-cuối)
 > đã được kiểm chứng tự động bằng `ProductionFlowE2EIT` (chạy thật trên Postgres, không mock).
 >
-> Cập nhật: 2026-08-01 · Tương ứng code sau phase `F10` · Migration mới nhất `V40`
+> Cập nhật: 2026-08-05 · Tương ứng code sau phase `P3` · Migration mới nhất `V51`
 
 ---
 
@@ -614,6 +614,31 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 > routing snapshot; `actualMinutes` = `Σ` thời lượng mọi production execution **đã kết thúc**
 > (`actualEndedAt` khác `null`) — execution đang chạy dở không tính vào tổng.
 
+> ✅ **[`P3`, 2026-08-05] `variance` nay trả thêm khối thứ 5, `costVariance`, và mỗi dòng
+> `materialLines[]` có thêm `usageVarianceCost`.** Cần `PERM_COSTING_READ` **hoặc**
+> `PERM_WORK_ORDER_VARIANCE_READ` — thực tế cả hai đều ADMIN+MANAGER only nên OPERATOR không thấy
+> field tiền, chỉ thấy field số lượng như trước. Chỉ làm **Material Usage Variance**, **không** có
+> Material Price Variance (không có dữ liệu giá trên ledger xuất kho để tính).
+>
+> ```jsonc
+> {
+>   "materialLines": [{
+>     "componentItemCode": "RM-001", "plannedQuantity": 6, "actualIssuedQuantity": 4,
+>     "varianceQuantity": -2, "status": "UNDER_ISSUED",
+>     "usageVarianceCost": -10.0   // varianceQuantity × standard unit cost của component (rolled-up)
+>   }],
+>   "costVariance": {
+>     "standardMaterialCost": 30.0, "standardLaborCost": 9.0, "standardOverheadCost": 3.0,
+>     "standardTotalCost": 42.0,     // CostingService roll-up của product item × plannedQuantity
+>     "actualMaterialCost": 20.0, "actualLaborCost": 6.0, "actualOverheadCost": 2.0,
+>     "actualTotalCost": 28.0,       // tích luỹ từ MaterialIssue + ProductionExecution thực tế
+>     "totalCostVariance": -14.0     // actualTotalCost − standardTotalCost
+>   }
+> }
+> ```
+>
+> `actual*` = 0 với WO chưa từng issue vật tư/report sản lượng — không phải lỗi.
+
 ---
 
 ## 5. Tham chiếu endpoint theo màn hình
@@ -807,6 +832,28 @@ nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đún
 >
 > Chưa làm: validate thứ tự phụ thuộc operation (`predecessorOperationIds`) — nợ tách riêng, xem
 > `NEXT_PHASE_PLAN.md`.
+
+### Costing *(`P3`, 2026-08-05)*
+
+| Việc | Endpoint |
+|---|---|
+| Tạo / sửa standard cost của một item | `PUT /companies/{companyId}/items/{itemId}/standard-cost` — body `{materialCost, laborCost, overheadCost}` (cả 3 bắt buộc, `≥ 0`), 200 (upsert, không phải 201 kể cả lần đầu) |
+| Xem standard cost của một item | `GET /companies/{companyId}/items/{itemId}/standard-cost` — 404 nếu chưa từng `PUT` |
+| Danh sách standard cost | `GET /companies/{companyId}/items/standard-costs?itemId=&page=&size=&sortBy=&sortDir=` (`itemId` tuỳ chọn để lọc) |
+
+> **`PERM_COSTING_READ`/`PERM_COSTING_MANAGE` — ADMIN+MANAGER only, OPERATOR không có cả hai.** Khác
+> mọi permission thêm gần đây (Work Center/Shift/Capacity cho OPERATOR đọc) — chi phí bị coi là dữ
+> liệu nhạy cảm.
+>
+> **`totalStandardCost` trong response tính lại mỗi lần đọc, không lưu.** Với item có BOM `ACTIVE`:
+> `materialCost` = Σ(`totalStandardCost` của mỗi component × `quantityPer` × (1 + `scrapRate`)) —
+> field `materialCost` riêng của chính item đó (nhập qua `PUT`) bị **bỏ qua**, chỉ dùng cho item
+> không có BOM (nguyên liệu mua ngoài). `laborCost`/`overheadCost` **luôn** là giá trị đã `PUT` cho
+> item đó — không bao giờ cộng dồn từ BOM. Sửa một BOM line thì `GET .../standard-cost` của mọi item
+> cha (và cha của cha) phản ánh ngay lần đọc kế tiếp, không cần thao tác "tính lại".
+>
+> **Không có Material Price Variance** — chỉ Material Usage Variance, xem field `usageVarianceCost`
+> ở mục Bước 10 (`GET /work-orders/{id}/variance`) phía trên.
 
 ### Access Control — Role / Scope lifecycle + Assignments *(`C2-4`, 2026-08-05)*
 

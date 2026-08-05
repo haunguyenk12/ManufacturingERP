@@ -143,6 +143,24 @@ cộng `CANCELLED` (chưa dùng). `POSTED` **đã bị đổi tên** thành `APP
 7. `ScheduleAdjustmentService`/`CapacityBoardService` **không** có permission-guard component riêng —
    tái dùng `workOrderPermissionGuard`/`permissionGuard` tổng quát đã có.
 
+## Bất Biến Costing (P3)
+
+> Thiết kế đầy đủ (roll-up BOM, entry points, quyết định permission): `module/costing/CLAUDE.md`.
+> Bảng dưới chỉ liệt kê phần thuộc `workorder`: hai hook tích luỹ + phần mở rộng variance.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B93 | Hai hook tích luỹ chi phí thực tế, mỗi cái đặt **đúng trong** guard chống double-count đã có sẵn của luồng đó — không thêm guard riêng: `MaterialIssueService.postNew` cộng `quantity × findStandardUnitCost(component)` vào `materialCostAccumulated`, bên trong `if (movementResult.created())` (cùng điều kiện bảo vệ `addIssuedQuantity`/`markInProgress`); `ProductionExecutionService.reportNew` cộng `good × (laborCost + overheadCost)` của **product item** (không phải component) vào `laborCostAccumulated`/`overheadCostAccumulated`, chỉ khi `good > ZERO` — scrap/rework-only report không tạo dòng `WorkOrderCostAccumulator` | `MaterialIssueServiceTest.post_createdMovement_accumulatesMaterialCostExactlyOnce`, `.postInternal_replayedIdempotencyKey_doesNotDoubleAccumulateMaterialCost`, `ProductionExecutionServiceTest.report_good_accumulatesLaborAndOverheadCost`, `.report_scrapAndReworkOnly_accumulatesNothing` |
+| B94 | `GET /work-orders/{id}/variance` mở rộng: `materialLines[].usageVarianceCost = varianceQuantity × findStandardUnitCost(component)` (Material Usage Variance — **không** có Price Variance, xem `module/costing/CLAUDE.md` mở đầu); `costVariance.standard* = findStandardCostBreakdown(productItem) × plannedQuantity`; `costVariance.actual*` đọc `WorkOrderCostAccumulator` — **không tồn tại** ⇒ cả ba field actual là `ZERO` (WO chưa issue/report gì), không phải lỗi | `WorkOrderVarianceServiceTest.getVariance_calculatesMaterialOutputAndWipSummary` (usageVarianceCost bằng số thật, rule R6), `.getVariance_costVariance_standardIsBreakdownTimesPlannedQuantity_actualIsZeroWithoutAnAccumulator`, `.getVariance_costVariance_actualReadsTheAccumulatorRowWhenItExists` |
+
+**Xác nhận qua HTTP thật** (`mvn -o spring-boot:run`, Postgres/Redis thật qua `docker-compose up -d`):
+tạo item nguyên liệu (`materialCost=5`) + item lắp ráp (`labor=3`, `overhead=1`) + BOM 2:1 → `GET
+.../standard-cost` của item lắp ráp trả `totalStandardCost=14` (2×5+3+1, tính lại lúc đọc) → tạo/
+release/reserve/issue 4kg (kế hoạch 6kg) → `GET .../variance` trả `usageVarianceCost=-10`
+(-2×5) và `actualMaterialCost=20` (4×5) **trước khi** report sản lượng → report `good=2` → variance
+đọc lại: `actualLaborCost=6` (2×3), `actualOverheadCost=2` (2×1), `totalCostVariance` cập nhật đúng
+— xác nhận cả hai hook chạy đúng qua ledger/DB thật, không chỉ qua mock.
+
 ## Bất Biến Fulfillment Allocation (F6)
 
 | # | Bất biến | Test bảo vệ |

@@ -64,6 +64,7 @@ public class ProductionExecutionService {
     private final TraceIdProvider traceIdProvider;
     private final SecurityAuditorAware auditorAware;
     private final UserLookupService userLookupService;
+    private final WorkOrderCostAccumulatorService costAccumulatorService;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_EXECUTION_MANAGE', #workOrderId)")
@@ -168,6 +169,9 @@ public class ProductionExecutionService {
 
         workOrder.reportProduction(good, scrap, rework, now);
         workOrderRepository.save(workOrder);
+        if (good.compareTo(BigDecimal.ZERO) > 0) {
+            costAccumulatorService.accumulateLaborOverheadCost(workOrder, good);
+        }
         return toResponse(execution);
     }
 

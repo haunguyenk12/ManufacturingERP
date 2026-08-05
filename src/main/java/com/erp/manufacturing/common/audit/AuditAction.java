@@ -134,6 +134,14 @@ public enum AuditAction {
     INVENTORY_RECEIVED,
     INVENTORY_ISSUED,
     INVENTORY_ADJUSTED,
+    /**
+     * P3: item standard cost master data (NEXT_PHASE_PLAN.md "P3 — Costing Engine"). One action,
+     * not CREATED/UPDATED — the write path is a single upsert (PUT, matches
+     * ItemWarehouseSettingController.upsert) and create-vs-update is not distinguishable through
+     * {@code @Auditable} without either a self-invocation AOP hazard or a manual
+     * RequestContextHolder call that would break plain-mock unit tests of the service.
+     */
+    ITEM_STANDARD_COST_UPSERTED,
 
     // ── System / Admin ─────────────────────────────────────────────────────
     RATE_LIMIT_EXCEEDED,

@@ -71,6 +71,7 @@ class ProductionExecutionServiceTest {
     @Mock InventoryAvailabilityService inventoryAvailabilityService;
     @Mock SecurityAuditorAware auditorAware;
     @Mock UserLookupService userLookupService;
+    @Mock WorkOrderCostAccumulatorService costAccumulatorService;
 
     ProductionExecutionService service;
 
@@ -88,7 +89,8 @@ class ProductionExecutionServiceTest {
                 new IdempotencySupport(new ObjectMapper()),
                 new TraceIdProvider(),
                 auditorAware,
-                userLookupService);
+                userLookupService,
+                costAccumulatorService);
     }
 
     /**
@@ -191,6 +193,28 @@ class ProductionExecutionServiceTest {
         // Reporting output starts the work order, exactly as issuing material does.
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.IN_PROGRESS);
         verify(workOrderRepository).save(workOrder);
+    }
+
+    @Test
+    void report_good_accumulatesLaborAndOverheadCost() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        stubNewReport(workOrder, "KEY-COST");
+
+        service.report(workOrder.getWorkOrderId(), request(new BigDecimal("4"), null, null), "KEY-COST");
+
+        verify(costAccumulatorService).accumulateLaborOverheadCost(workOrder, new BigDecimal("4"));
+    }
+
+    @Test
+    void report_scrapAndReworkOnly_accumulatesNothing() {
+        // Only the GOOD quantity earns labor/overhead cost — scrap/rework are not sellable output.
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        stubNewReport(workOrder, "KEY-NO-GOOD");
+
+        service.report(workOrder.getWorkOrderId(),
+                request(null, new BigDecimal("2"), new BigDecimal("3")), "KEY-NO-GOOD");
+
+        verifyNoInteractions(costAccumulatorService);
     }
 
     @Test

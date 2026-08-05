@@ -64,15 +64,15 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`C2-8` – CRP tĩnh + Capacity Board + Schedule Adjustment** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt cluster `P4`. `WorkOrderOperation` có thêm `workCenter` (FK), `plannedStartAt`/`plannedEndAt` (sinh ở `release()`), `scheduleAdjustmentReason`. 2 endpoint mới: `GET /api/v1/plants/{plantId}/capacity-board`, `POST /api/v1/work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments`. Migration **`V48`** (schema) + **`V49`** (seed `PERM_CAPACITY_READ`/`_MANAGE`). Bản ghi: **§0.30** |
-| **Phase trước** | **`C2-7` – Shift + Work Calendar Entity + CRUD + Work Center FK** ✅ **HOÀN THÀNH** (2026-08-05). Bảng `shifts`/`shift_breaks`/`work_calendars`/`work_calendar_weekly_shifts`/`work_calendar_exceptions`, 14 endpoint (`/api/v1/plants/{plantId}/shifts` + `/api/v1/shifts/{id}` · `/api/v1/plants/{plantId}/work-calendars` + `/api/v1/work-calendars/{id}`), migration **`V46`** (schema + `work_centers.work_calendar_id`) + **`V47`** (seed `PERM_SHIFT_READ`/`_MANAGE`, `PERM_WORK_CALENDAR_READ`/`_MANAGE`). Bất biến `B_sh1`-`B_sh2`, `B_cal1`-`B_cal2`, `B_wc4`. Bản ghi: **§0.29** |
-| **Phase trước đó** | **`C2-4` – SO PATCH · Role/Scope Lifecycle · Over-BOM Contract · Time Variance** ✅ **HOÀN THÀNH** (2026-08-05). `PATCH /sales-orders/{id}` (full-replace, `DRAFT` only, `expectedVersion` bắt buộc) · 9 endpoint Role/Scope lifecycle (tái dùng `PERM_ACCESS_MANAGE`) · `timeVariance` trên `/work-orders/{id}/variance` · over-BOM contract chốt (tài liệu, không code). **Không migration.** Bất biến `B86`-`B88`. Bản ghi: **§0.27** |
+| **Phase đang chạy** | *(không có — `P3` vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
+| **Phase trước** | **`P3` – Costing Engine** ✅ **HOÀN THÀNH** (2026-08-05). Module mới `module/costing`: `ItemStandardCost` (upsert, company-scoped) + `CostingService` (BOM cost roll-up đệ quy) + `WorkOrderCostAccumulator` (`module/workorder`, tích luỹ material/labor/overhead thực tế). 3 endpoint mới dưới `/api/v1/companies/{companyId}/items/{itemId}/standard-cost` (+ list). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` (Material Usage Variance — **không** làm Price Variance) + khối `costVariance`. Migration **`V50`** (schema) + **`V51`** (seed `PERM_COSTING_READ`/`_MANAGE`, ADMIN+MANAGER only). Bất biến `B91`-`B94`. Bản ghi: **§0.31** |
+| **Phase trước đó** | **`C2-8` – CRP tĩnh + Capacity Board + Schedule Adjustment** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt cluster `P4`. `WorkOrderOperation` có thêm `workCenter` (FK), `plannedStartAt`/`plannedEndAt` (sinh ở `release()`), `scheduleAdjustmentReason`. 2 endpoint mới: `GET /api/v1/plants/{plantId}/capacity-board`, `POST /api/v1/work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments`. Migration **`V48`** (schema) + **`V49`** (seed `PERM_CAPACITY_READ`/`_MANAGE`). Bản ghi: **§0.30** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Bản ghi: §0.22 |
-| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): `P3` costing, concurrent refresh-token race, `P5` serial tracking, `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. `C2-8` (Capacity Board) ✅ đã xong — xem §0.30. |
-| **Migration mới nhất** | **`V49__seed_capacity_permissions.sql`** (`C2-8`, cùng phase với `V48__add_work_order_operation_scheduling.sql`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` **không** migration |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → **`C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+32` unit: `WorkingWindowCalculatorTest` +7 (`advance()`), `WorkOrderServiceTest` +3 (lịch sinh ở `release()`), `CapacityBoardServiceTest`(5), `CapacityBoardServiceMethodSecurityTest`(2), `ScheduleAdjustmentServiceTest`(7), `ScheduleAdjustmentServiceMethodSecurityTest`(2), `CapacityControllerTest`(6); `+7` IT: `WorkOrderOperationRepositoryIT`(6, **class IT thứ 13** — timezone-bucketing JPQL) + `FlywayMigrationIT.migrate_v49_*`(1)). Xác nhận thêm bằng smoke test HTTP thật qua `mvn -o spring-boot:run`: capacity-board trả 200 đúng envelope trên Postgres thật (không phải Testcontainer), JWT admin mang đúng `PERM_CAPACITY_READ`/`_MANAGE`. `D8b` đã chạy `mvn -o verify` thật với Docker — trả nợ lần đo `*IT` mà `D8a` bỏ qua (`ProductionFlowE2EIT` dựng auth bằng `authentication(...)` post-processor nên **không** đi qua `AuthService.login`).<br>🔴 **Nhưng con số "66 case IT xanh" của `D8b` là SAI:** `WorkOrderRepositoryIT.search_withoutATermReturnsEveryWorkOrderOfThePlant` **đang đỏ** ở thời điểm đó (lỗi `lower(bytea)`, xem §0.24) — lần đo đó bỏ sót 1 error. Đúng là **65 xanh / 1 error**. Từ 2026-08-04 mới thật sự `failures = 0`. **Bài học:** đọc dòng tổng `Tests run:` của **cả hai** phase (`test` và `integration-test`) và kiểm cả `Errors:`, không chỉ `Failures:` |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): concurrent refresh-token race, `P5` serial tracking, `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. `P3` (Costing Engine) ✅ đã xong — xem §0.31. |
+| **Migration mới nhất** | **`V51__seed_costing_permissions.sql`** (`P3`, cùng phase với `V50__create_costing.sql`) — `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` **không** migration |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → **`P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+30` unit: `CostingServiceTest`(5), `ItemStandardCostServiceTest`(6), `ItemStandardCostMethodSecurityTest`(4), `ItemStandardCostControllerTest`(5), `WorkOrderCostAccumulatorServiceTest`(4), `MaterialIssueServiceTest`+2, `ProductionExecutionServiceTest`+2, `WorkOrderVarianceServiceTest`+2; `+1` IT: `FlywayMigrationIT.migrate_v51_*`(1), không thêm class IT mới — `ItemStandardCostRepository.search` chỉ `=`/`is null` nên mock repository là đủ, đúng tiền lệ `WorkCenterRepository`). Xác nhận thêm bằng smoke test HTTP thật qua `mvn -o spring-boot:run` trên Postgres/Redis thật (`docker-compose up -d`, không phải Testcontainer): BOM 2 cấp (nguyên liệu 5đ/kg, lắp ráp labor 3 + overhead 1, BOM 2kg/unit) → `GET .../standard-cost` trả `totalStandardCost=14` đúng công thức → issue 4kg (kế hoạch 6kg) → `GET .../variance` trả `usageVarianceCost=-10`, `actualMaterialCost=20` **trước khi** report → report `good=2` → `actualLaborCost=6`, `actualOverheadCost=2` — cả hai hook tích luỹ xác nhận chạy đúng qua ledger/DB thật. |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -168,7 +168,7 @@ do not delete 47 lines above
 | `uom` | ✅ Done (`C2-3`) | Unit of measure master data, **global** (không `company_id`). 7 endpoint, permission `PERM_UOM_READ`/`_MANAGE`. **Chưa nối** với `items.unit` (vẫn `String` tự do) — xem `module/uom/CLAUDE.md` |
 | `workcenter` | ✅ Done (`C2-6`, calendar FK ở `C2-7`) | Work center master data, **per-plant**. 7 endpoint `/api/v1/plants/{plantId}/work-centers` + `/api/v1/work-centers/{id}`, permission `PERM_WORK_CENTER_READ`/`_MANAGE`. **[C2-7]** thêm FK tuỳ chọn `workCalendarId` (bất biến `B_wc4`). Xem `module/workcenter/CLAUDE.md` B_wc1-B_wc4 |
 | `shift` | ✅ Done (`C2-7`) | Shift (1 interval + `breaks[]`) + Work Calendar (lịch tuần + exception `NON_WORKING`), **per-plant**. 14 endpoint `/api/v1/plants/{plantId}/shifts`+`/api/v1/shifts/{id}` và `/api/v1/plants/{plantId}/work-calendars`+`/api/v1/work-calendars/{id}`, permission `PERM_SHIFT_READ`/`_MANAGE`, `PERM_WORK_CALENDAR_READ`/`_MANAGE`. **[C2-8]** `WorkingWindowCalculator`/`WorkCalendarLookupService` nay có người gọi thật ngoài module (xem dưới). Xem `module/shift/CLAUDE.md` B_sh1-B_sh2, B_cal1-B_cal2 |
-| `costing` | 🔜 P3 | Chưa bắt đầu |
+| `costing` | ✅ Done (`P3`) | `ItemStandardCost` (upsert, company-scoped, không có history/`effectiveDate`) + `CostingService` (BOM cost roll-up đệ quy) + `WorkOrderCostAccumulator` (`module/workorder`, tích luỹ material/labor/overhead thực tế qua 2 hook ở `MaterialIssueService`/`ProductionExecutionService`). 3 endpoint `/api/v1/companies/{companyId}/items/{itemId}/standard-cost` (+ list), permission `PERM_COSTING_READ`/`_MANAGE` (**ADMIN+MANAGER only**, không có OPERATOR — khác mọi permission `C2-*` gần đây). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` + `costVariance`. **Không** làm Material Price Variance (quyết định có chủ đích — không có cột giá trên `stock_movements`). Xem `module/costing/CLAUDE.md` B91-B92, `module/workorder/CLAUDE.md` B93-B94 |
 | Capacity Board (CRP tĩnh) | ✅ Done (`C2-8`) | `GET /plants/{plantId}/capacity-board` + `POST /work-orders/{id}/operations/{id}/schedule-adjustments`, permission `PERM_CAPACITY_READ`/`_MANAGE`. Lịch (`WorkOrderOperation.plannedStartAt`/`plannedEndAt`) sinh ở `WorkOrderService.release()`, "infinite capacity" (không biết WO khác đang chiếm cùng Work Center); Capacity Board là một read riêng tổng hợp load/capacity/utilization. Xem `module/workorder/CLAUDE.md` B89-B90 |
 
 ### 0.3 P1 – Approval Workflow & Business Gates (ĐÃ HOÀN THÀNH)
@@ -1484,6 +1484,90 @@ sẵn có của `WorkOrderPermissionGuard.hasWorkOrderAccess` (aggregate không 
 
 ---
 
+### 0.31 P3 – Costing Engine (ĐÃ HOÀN THÀNH 2026-08-05)
+
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P3, "khoảng trống lớn nhất về lý thuyết" — trước phase
+này repo **không có cột chi phí nào** ở bất kỳ đâu, `Item` xác nhận không field cost, đọc trực tiếp
+`WorkOrderVarianceResponse` xác nhận thuần số lượng, không có `$` nào). Module mới `module/costing`.
+Migration **`V50`** (schema: `item_standard_costs` + `work_order_cost_accumulators`) + **`V51`**
+(seed `PERM_COSTING_READ`/`_MANAGE`).
+
+**Hai quyết định chốt với user trước khi viết kế hoạch chi tiết:**
+1. **`laborCost`/`overheadCost` nhập tay theo rate cố định** trên `ItemStandardCost` — không tính từ
+   `WorkOrderOperation.runMinutesPerUnit` × rate/phút. Đơn giản hơn, không khoá costing vào dữ liệu
+   routing/work-center (`C2-6`/`C2-7`), ship được ngay.
+2. **Không làm Material Price Variance, chỉ Material Usage Variance.** `stock_movements` không có cột
+   giá (grep xác nhận), và dữ liệu giá duy nhất trong hệ thống (`PurchaseOrderLine.unitPrice`) tách
+   rời khỏi ledger xuất kho — tính "giá thực trả cho vật tư đã xuất cho WO này" đòi một lớp
+   actual-costing (FIFO/weighted-average) chưa tồn tại và không ai yêu cầu.
+
+| Phần | Nội dung |
+|---|---|
+| A | `ItemStandardCost` — upsert (`PUT`, không phải full CRUD, cùng khuôn `ItemWarehouseSettingController.upsert`), company-scoped (như `BomHeader`/`RoutingHeader`, không per-plant như `WorkCenter`, không global như `Uom`). 3 endpoint: `PUT`/`GET .../items/{itemId}/standard-cost`, `GET .../items/standard-costs` (list) |
+| B | `CostingService.calculateStandardCost` — đệ quy giống `MrpCalculationService.expandChildren`, cycle guard `LinkedHashSet<UUID>` defense-in-depth (B8 lẽ ra đã chặn BOM vòng lặp `ACTIVE`) |
+| C | `WorkOrderCostAccumulator` (`module/workorder`) — 2 hook: `MaterialIssueService.postNew` (material, bên trong guard chống double-count có sẵn), `ProductionExecutionService.reportNew` (labor+overhead, chỉ khi `good > 0`) |
+| D | `GET /work-orders/{id}/variance` mở rộng: `materialLines[].usageVarianceCost`, khối `costVariance` mới (`standard*`/`actual*`/`totalCostVariance`) |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **`ItemStandardCostLookupService` có BA method, mỗi cái phục vụ đúng một việc, đừng gộp:**
+   `findStandardUnitCost` (cost fully-loaded, roll-up — dùng cho component bị issue và cho
+   `usageVarianceCost`), `findLaborOverheadCost` (rate thẳng, không roll-up — chỉ dùng cho product
+   item của chính WO), `findStandardCostBreakdown` (tách 3 thành phần — dùng cho baseline
+   `costVariance`). Chi tiết đầy đủ: `module/costing/CLAUDE.md` mục 1.
+2. 🔴 **Cost của một component bị issue là cost fully-loaded của nó (`findStandardUnitCost`), KHÔNG
+   phải chỉ field `materialCost` riêng của nó.** Nếu component tự nó là hàng lắp ráp (có BOM), cost
+   fully-loaded đã gồm cả labor/overhead của chính nó — đây là cách absorbed-cost roll-up nhiều cấp
+   hoạt động đúng. Dùng nhầm field `materialCost` thô sẽ undercount nghiêm trọng cho mọi component là
+   sub-assembly (field đó thường bỏ trống/0 cho item có BOM, theo đúng thiết kế B91).
+3. **`ItemStandardCostService.upsert` dùng MỘT action audit (`ITEM_STANDARD_COST_UPSERTED`), không
+   tách CREATED/UPDATED.** `@Auditable` là AOP theo method, không hỗ trợ chọn action theo runtime
+   state (create-vs-update) mà không tự đâm vào một trong hai vấn đề: self-invocation bypass proxy
+   (tách 2 method) hoặc gọi `AuditLogService` thủ công qua `RequestContextHolder` (phá vỡ khả năng
+   unit-test service bằng constructor + mock thuần — `@Auditable` là no-op an toàn ngoài Spring proxy,
+   gọi thủ công thì không). Chọn phương án đơn giản nhất, đúng tinh thần `ItemWarehouseSettingService`
+   (tiền lệ upsert gần nhất) vốn **không** audit gì cả.
+4. **Permission dùng `hasResourceAccess(..., 'COMPANY', companyId)`, KHÔNG phải `hasPermission` như
+   UOM.** Cố ý tránh giới hạn đã ghi ở `module/uom/CLAUDE.md`: `hasPermission` chỉ đọc assignment
+   `scope_type = GLOBAL`, hiện chỉ `admin` có — `manager.a`/`operator.a` (seed `C2-5`, scope `PLANT`)
+   sẽ bị 403 dù đã được cấp quyền. `hasResourceAccess(..., 'COMPANY', ...)` không dính bẫy đó.
+5. **`PERM_COSTING_READ`/`_MANAGE`: ADMIN+MANAGER, KHÔNG có OPERATOR** — xác nhận bằng cách đọc
+   `V17__seed_manufacturing_execution_permissions.sql`: `PERM_WORK_ORDER_VARIANCE_READ` (quyền mà
+   cost figures của phase này gắn vào) đã luôn ADMIN+MANAGER only. Khác mọi permission `C2-*` gần đây
+   (Work Center/Shift cho OPERATOR đọc). `FlywayMigrationIT.migrate_v51_*` là test **cấm** thuần —
+   `PermissionCatalogTest` không chứng minh được cấp cho role nào (bài học lặp lại từ `C2-5`/`C2-3`/
+   `C2-6`).
+6. **`totalStandardCost` trên `ItemStandardCostResponse` tính lúc đọc (`CostingMapper.toResponse`
+   gọi `CostingService`), không lưu cột, không cache.** Sửa một BOM line thì mọi `GET
+   .../standard-cost` của item cha phản ánh ngay — đánh đổi là mỗi read tốn thêm truy vấn đệ quy,
+   chấp nhận được vì đây không phải hot path.
+7. **Không có `ItemStandardCostRepositoryIT`** — `search` chỉ so `=`/`is null` trên UUID, không có
+   `concat`/`like` trên `String` nullable nên không dính bẫy "lower(bytea)" (`§0.24`). Cùng lý do
+   `WorkCenterRepository.search` (`C2-6`) không có `*IT`.
+8. **Không nghiệm thu bằng mutation testing** (khác nhiều phase `C2-*` gần đây) — bù lại bằng test
+   rộng ở mọi tầng (unit, method-security, controller, `FlywayMigrationIT`) cộng smoke test HTTP thật
+   qua `mvn -o spring-boot:run` trên Postgres/Redis thật: BOM 2 cấp (nguyên liệu 5đ/kg, lắp ráp
+   labor=3+overhead=1, BOM 2kg/unit) → `standard-cost` trả `totalStandardCost=14` đúng công thức
+   (2×5+3+1) → issue 4kg (kế hoạch 6kg) → `variance` trả `usageVarianceCost=-10` (-2×5) và
+   `actualMaterialCost=20` (4×5) **trước khi** report sản lượng (accumulator row tồn tại độc lập với
+   report) → report `good=2` → `actualLaborCost=6` (2×3), `actualOverheadCost=2` (2×1) — xác nhận cả
+   hai hook chạy đúng qua ledger/DB thật, không chỉ qua mock.
+
+**Nghiệm thu:** `mvn -o clean verify` — **821 case unit + 88 case IT / 13 class IT, failures = 0,
+errors = 0** (baseline trước phase: 791 unit + 87 IT / 13 class — `+30` unit, `+1` IT, không thêm
+class IT mới, xem hàng "Baseline test" §0.1 để biết đúng test nào cộng vào đâu).
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 3 endpoint mới, `usageVarianceCost` +
+`costVariance` mới trên `WorkOrderVarianceResponse`). **Java positional:**
+`WorkOrderMaterialVarianceLineResponse` +1 component (cuối cùng); `WorkOrderVarianceResponse` +1
+component (cuối cùng); `WorkOrderVarianceService` constructor +2 tham số
+(`WorkOrderCostAccumulatorRepository`, `ItemStandardCostLookupService`); `MaterialIssueService`
+constructor +1 tham số (`WorkOrderCostAccumulatorService`); `ProductionExecutionService` constructor
++1 tham số (`WorkOrderCostAccumulatorService`). Test cũ dựng các service/DTO này đã **sửa** theo
+`R10`.
+
+---
+
 ### 0.5 ✅ Đảo Ngược Ngữ Nghĩa — ĐÃ XỬ LÝ Ở `F5-A` (2026-07-27)
 
 Đây từng là rủi ro lớn nhất của track `F*`. **Đã xong**, giữ lại bảng để agent sau hiểu vì sao code
@@ -1651,6 +1735,7 @@ com.erp.manufacturing
 | Bất biến UOM B82-B85 + giới hạn `hasPermission`/`GLOBAL` scope (`C2-3`) | `src/main/java/com/erp/manufacturing/module/uom/CLAUDE.md` | Chỉ khi chạm `module/uom/**` |
 | Bất biến Work Center B_wc1-B_wc4 (`C2-6`, `B_wc4` ở `C2-7`) | `src/main/java/com/erp/manufacturing/module/workcenter/CLAUDE.md` | Chỉ khi chạm `module/workcenter/**` |
 | Bất biến Shift/Work Calendar B_sh1-B_sh2, B_cal1-B_cal2 + quy ước qui-thuộc-ngày ca qua đêm (`C2-7`) | `src/main/java/com/erp/manufacturing/module/shift/CLAUDE.md` | Chỉ khi chạm `module/shift/**` |
+| Bất biến Costing B91-B92 + entry points `ItemStandardCostLookupService` (`P3`) | `src/main/java/com/erp/manufacturing/module/costing/CLAUDE.md` | Chỉ khi chạm `module/costing/**` |
 | **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
 | **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
 | **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và **5 câu hỏi đang chờ FE trả lời** — `C2-1`/`C2-2` bị chặn cho tới khi có câu 1 và 2 |

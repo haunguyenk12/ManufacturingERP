@@ -2,11 +2,14 @@ package com.erp.manufacturing.module.workorder.service.query;
 
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.module.costing.service.ItemStandardCostLookupService;
+import com.erp.manufacturing.module.costing.service.StandardCostBreakdown;
 import com.erp.manufacturing.module.workorder.domain.ProductionExecution;
 import com.erp.manufacturing.module.workorder.domain.VarianceStatus;
 import com.erp.manufacturing.module.workorder.domain.WipTransactionType;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderComponentLine;
+import com.erp.manufacturing.module.workorder.domain.WorkOrderCostAccumulator;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
@@ -16,6 +19,7 @@ import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineReposi
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptLineRepository;
 import com.erp.manufacturing.module.workorder.repository.WipTransactionRepository;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderCostAccumulatorRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +44,8 @@ public class WorkOrderVarianceService {
     private final WorkOrderRepository workOrderRepository;
     private final ProductionExecutionRepository productionExecutionRepository;
     private final WorkOrderOperationRepository workOrderOperationRepository;
+    private final WorkOrderCostAccumulatorRepository workOrderCostAccumulatorRepository;
+    private final ItemStandardCostLookupService itemStandardCostLookupService;
 
     @Transactional(readOnly = true)
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_VARIANCE_READ', #workOrderId)")
@@ -57,8 +63,10 @@ public class WorkOrderVarianceService {
         BigDecimal reworkQuantity = wipTransactionRepository.sumQuantityByWorkOrderAndType(
                 workOrderId, WipTransactionType.REWORK_REPORTED);
 
+        UUID companyId = workOrder.getCompany().getCompanyId();
         List<WorkOrderMaterialVarianceLineResponse> materialLines = workOrder.getComponentLines().stream()
-                .map(line -> toVarianceLine(line, issuedByLine.getOrDefault(line.getComponentLineId(), BigDecimal.ZERO)))
+                .map(line -> toVarianceLine(companyId, line,
+                        issuedByLine.getOrDefault(line.getComponentLineId(), BigDecimal.ZERO)))
                 .toList();
 
         return new WorkOrderVarianceResponse(
@@ -73,7 +81,37 @@ public class WorkOrderVarianceService {
                         actualOutput,
                         actualOutput.subtract(workOrder.getPlannedQuantity())),
                 new WorkOrderWipSummaryResponse(scrapQuantity, reworkQuantity),
-                toTimeVariance(workOrder));
+                toTimeVariance(workOrder),
+                toCostVariance(workOrder));
+    }
+
+    /**
+     * {@code standard*} = {@code CostingService.calculateStandardCost} of the product item times
+     * {@code plannedQuantity} (what it should have cost). {@code actual*} reads the work order's
+     * {@link WorkOrderCostAccumulator} — all-zero when the row does not exist yet, which is exactly
+     * a work order that has issued nothing and reported nothing.
+     */
+    private WorkOrderCostVarianceResponse toCostVariance(WorkOrder workOrder) {
+        StandardCostBreakdown breakdown = itemStandardCostLookupService.findStandardCostBreakdown(
+                workOrder.getCompany().getCompanyId(), workOrder.getProductItem().getItemId());
+        BigDecimal plannedQuantity = workOrder.getPlannedQuantity();
+        BigDecimal standardMaterialCost = breakdown.materialCost().multiply(plannedQuantity);
+        BigDecimal standardLaborCost = breakdown.laborCost().multiply(plannedQuantity);
+        BigDecimal standardOverheadCost = breakdown.overheadCost().multiply(plannedQuantity);
+        BigDecimal standardTotalCost = standardMaterialCost.add(standardLaborCost).add(standardOverheadCost);
+
+        WorkOrderCostAccumulator accumulator = workOrderCostAccumulatorRepository
+                .findByWorkOrderWorkOrderId(workOrder.getWorkOrderId())
+                .orElse(null);
+        BigDecimal actualMaterialCost = accumulator != null ? accumulator.getMaterialCostAccumulated() : BigDecimal.ZERO;
+        BigDecimal actualLaborCost = accumulator != null ? accumulator.getLaborCostAccumulated() : BigDecimal.ZERO;
+        BigDecimal actualOverheadCost = accumulator != null ? accumulator.getOverheadCostAccumulated() : BigDecimal.ZERO;
+        BigDecimal actualTotalCost = actualMaterialCost.add(actualLaborCost).add(actualOverheadCost);
+
+        return new WorkOrderCostVarianceResponse(
+                standardMaterialCost, standardLaborCost, standardOverheadCost, standardTotalCost,
+                actualMaterialCost, actualLaborCost, actualOverheadCost, actualTotalCost,
+                actualTotalCost.subtract(standardTotalCost));
     }
 
     /**
@@ -109,9 +147,12 @@ public class WorkOrderVarianceService {
         return operation.getSetupMinutes().add(operation.getRunMinutesPerUnit().multiply(plannedQuantity));
     }
 
-    private WorkOrderMaterialVarianceLineResponse toVarianceLine(WorkOrderComponentLine line,
+    private WorkOrderMaterialVarianceLineResponse toVarianceLine(UUID companyId,
+                                                                 WorkOrderComponentLine line,
                                                                  BigDecimal actualQuantity) {
         BigDecimal variance = actualQuantity.subtract(line.getRequiredQuantity());
+        BigDecimal standardUnitCost = itemStandardCostLookupService.findStandardUnitCost(
+                companyId, line.getComponentItem().getItemId());
         return new WorkOrderMaterialVarianceLineResponse(
                 line.getComponentLineId(),
                 line.getComponentItem().getItemId(),
@@ -120,7 +161,8 @@ public class WorkOrderVarianceService {
                 line.getRequiredQuantity(),
                 actualQuantity,
                 variance,
-                varianceStatus(variance).name());
+                varianceStatus(variance).name(),
+                variance.multiply(standardUnitCost));
     }
 
     private VarianceStatus varianceStatus(BigDecimal variance) {

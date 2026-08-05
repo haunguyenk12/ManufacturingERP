@@ -156,6 +156,17 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_CAPACITY_READ` | Xem Capacity Board (`GET /plants/{plantId}/capacity-board`) (`C2-8`, `V49`) |
 | `PERM_CAPACITY_MANAGE` | Điều chỉnh lịch một operation (`POST /work-orders/{id}/operations/{id}/schedule-adjustments`) (`C2-8`, `V49`) |
 
+### Costing
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_COSTING_READ` | Xem `ItemStandardCost` + `costVariance`/`usageVarianceCost` trên `GET /work-orders/{id}/variance` (`P3`, `V51`) |
+| `PERM_COSTING_MANAGE` | Tạo / sửa `ItemStandardCost` (`PUT /companies/{companyId}/items/{itemId}/standard-cost`) (`P3`, `V51`) |
+
+> 🔴 **Khác mọi permission `C2-*` gần đây: OPERATOR không có cả hai quyền này, kể cả `_READ`.**
+> `PERM_WORK_ORDER_VARIANCE_READ` (quyền mà cost figures của `P3` gắn vào qua `GET
+> /work-orders/{id}/variance`) đã luôn ADMIN+MANAGER only từ `V17` — dữ liệu chi phí được coi là
+> nhạy cảm, khác Work Center/Shift (nơi OPERATOR cần đọc để vận hành hàng ngày).
+
 > Endpoint `GET /sales-orders/planning-demands` **không** dùng quyền sales — nó là màn hình của
 > planner nên gác bằng `PERM_MRP_RUN` (spec §2.2 gán `PLANNING_RUN` cho endpoint này).
 

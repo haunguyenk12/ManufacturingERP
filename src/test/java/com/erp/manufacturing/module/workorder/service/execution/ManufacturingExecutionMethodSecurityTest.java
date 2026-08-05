@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.module.costing.service.ItemStandardCostLookupService;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
@@ -326,12 +327,13 @@ class ManufacturingExecutionMethodSecurityTest {
                                                   WorkOrderPermissionGuard workOrderPermissionGuard,
                                                   WorkOrderExecutionSupport support,
                                                   ManufacturingExecutionMapper mapper,
-                                                  UserLookupService userLookupService) {
+                                                  UserLookupService userLookupService,
+                                                  WorkOrderCostAccumulatorService costAccumulatorService) {
             return new MaterialIssueService(
                     issueRepository, issueLineRepository, reservationService, movementService,
                     wipTransactionService, workOrderPermissionGuard, support,
                     new IdempotencySupport(new ObjectMapper()), mapper, new TraceIdProvider(),
-                    userLookupService);
+                    userLookupService, costAccumulatorService);
         }
 
         @Bean
@@ -381,10 +383,13 @@ class ManufacturingExecutionMethodSecurityTest {
                                                           WipTransactionRepository wipTransactionRepository,
                                                           WorkOrderRepository workOrderRepository,
                                                           ProductionExecutionRepository executionRepository,
-                                                          WorkOrderOperationRepository operationRepository) {
+                                                          WorkOrderOperationRepository operationRepository,
+                                                          WorkOrderCostAccumulatorRepository workOrderCostAccumulatorRepository,
+                                                          ItemStandardCostLookupService itemStandardCostLookupService) {
             return new WorkOrderVarianceService(
                     issueLineRepository, receiptLineRepository, wipTransactionRepository, workOrderRepository,
-                    executionRepository, operationRepository);
+                    executionRepository, operationRepository, workOrderCostAccumulatorRepository,
+                    itemStandardCostLookupService);
         }
 
         @Bean
@@ -412,6 +417,9 @@ class ManufacturingExecutionMethodSecurityTest {
             return mock(WorkOrderExecutionSupport.class);
         }
 
+        @Bean WorkOrderCostAccumulatorService workOrderCostAccumulatorService() { return mock(WorkOrderCostAccumulatorService.class); }
+        @Bean WorkOrderCostAccumulatorRepository workOrderCostAccumulatorRepository() { return mock(WorkOrderCostAccumulatorRepository.class); }
+        @Bean ItemStandardCostLookupService itemStandardCostLookupService() { return mock(ItemStandardCostLookupService.class); }
         @Bean MaterialReservationRepository materialReservationRepository() { return mock(MaterialReservationRepository.class); }
         @Bean StockBalanceRepository stockBalanceRepository() { return mock(StockBalanceRepository.class); }
         @Bean MaterialIssueRepository materialIssueRepository() { return mock(MaterialIssueRepository.class); }
