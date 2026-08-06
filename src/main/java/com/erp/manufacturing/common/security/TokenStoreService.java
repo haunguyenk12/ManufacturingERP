@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
  * <pre>
  *   auth:refresh:{userId}:{tokenId}       → refresh token value          TTL=7d
  *   auth:refresh:{userId}:{tokenId}:meta  → session start (epochMilli)   TTL=7d
+ *   auth:refresh:owner:{tokenId}          → userId (reverse lookup)      TTL=7d
  *   auth:refresh:used:{tokenId}           → "1" (RTR reuse marker)       TTL=60s
  *   auth:refresh:lock:{tokenId}           → "1" (rotation-in-progress)   TTL=2s
  *   auth:refresh:rotated:{tokenId}        → new tokenId (rotation result) TTL=5s
@@ -48,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 public class TokenStoreService {
 
     private static final String REFRESH_KEY_PREFIX      = "auth:refresh:";
+    private static final String REFRESH_OWNER_KEY_PREFIX = "auth:refresh:owner:";
     private static final String REFRESH_USED_KEY_PREFIX = "auth:refresh:used:";
     private static final String REFRESH_LOCK_KEY_PREFIX  = "auth:refresh:lock:";
     private static final String REFRESH_ROTATED_KEY_PREFIX = "auth:refresh:rotated:";
@@ -78,14 +80,34 @@ public class TokenStoreService {
 
     // ── Refresh Token ─────────────────────────────────────────────────────
 
+    /**
+     * Also writes the {@code auth:refresh:owner:{tokenId}} reverse-lookup key (P0 auth fix) — every
+     * caller of this method (login, rotation) gets it automatically. This is what lets {@code
+     * AuthService.refresh} identify the user from {@code tokenId} alone, without needing to parse an
+     * access token out of the {@code Authorization} header at all.
+     */
     public void saveRefreshToken(UUID userId, String tokenId, String refreshToken) {
-        String key = refreshKey(userId, tokenId);
         long ttlSeconds = jwtProperties.refreshTokenExpiryMs() / 1000;
-        redisTemplate.opsForValue().set(key, refreshToken, ttlSeconds, TimeUnit.SECONDS);
+        redisTemplate.opsForValue().set(refreshKey(userId, tokenId), refreshToken, ttlSeconds, TimeUnit.SECONDS);
+        redisTemplate.opsForValue().set(REFRESH_OWNER_KEY_PREFIX + tokenId, userId.toString(), ttlSeconds, TimeUnit.SECONDS);
     }
 
     public String getRefreshToken(UUID userId, String tokenId) {
         return redisTemplate.opsForValue().get(refreshKey(userId, tokenId));
+    }
+
+    /**
+     * Reverse lookup for {@code tokenId → userId} (P0 auth fix). Deliberately **not** explicitly
+     * deleted on logout/rotation/force-logout — it self-expires via the same TTL as the refresh token
+     * it describes, same as {@code :used}/{@code :rotated} already do. Leaving it briefly stale after
+     * a delete is harmless: it only tells a caller which bucket to look in next, the actual
+     * authorization decision is still {@code stored.equals(refreshToken)} against the primary key.
+     *
+     * @return the owning userId, or {@code null} if unknown (never existed, or expired).
+     */
+    public UUID getTokenOwner(String tokenId) {
+        String value = redisTemplate.opsForValue().get(REFRESH_OWNER_KEY_PREFIX + tokenId);
+        return value == null ? null : UUID.fromString(value);
     }
 
     /**

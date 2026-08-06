@@ -54,6 +54,12 @@ INDEX: idx_users_username, idx_users_email
 # Refresh Token store (value = opaque UUID refresh token)
 auth:refresh:{userId}:{tokenId}                →  {refreshToken}  TTL=7d
 
+# Reverse lookup tokenId → userId (P0 auth fix, 2026-08-06) — written by the same
+# saveRefreshToken() call as the key above. Lets AuthService.refresh() identify the caller from
+# tokenId ALONE, without needing to parse an access token out of the Authorization header — see §4.20.
+# Not explicitly deleted on logout/rotation; self-expires via the same TTL, same as :used/:rotated.
+auth:refresh:owner:{tokenId}                   →  {userId}        TTL=7d
+
 # Access Token Blacklist (sau logout/bắt buộc vô hiệu hóa)
 auth:blacklist:{jti}                           →  "1"  TTL=<thời gian còn lại của access token>
 
@@ -129,7 +135,9 @@ Kịch bản: Access token hết hạn (401)
 ─────────────────────────────────────
 Client nhận 401 Unauthorized
   │
-  ├─ Client gửi POST /api/v1/auth/refresh { refreshToken }
+  ├─ Client gửi POST /api/v1/auth/refresh { refreshToken, tokenId } — KHÔNG cần Authorization header
+  │
+  ├─ Server resolve userId từ tokenId (✅ P0, xem §4.20) — auth:refresh:owner:{tokenId}, không đọc JWT
   │
   ├─ Server validate refresh token (rotation + RTR – current):
   │   ├─ Tồn tại trong Redis nhưng giá trị SAI → REFRESH_TOKEN_EXPIRED (không phải RTR, xem 4.12)
@@ -189,6 +197,15 @@ Thứ tự filter chain (quan trọng — được đăng ký trong `SecurityCon
 > không bao giờ thực thi (không có userId lúc chạy IP layer).
 
 Permit: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`, `/v3/api-docs/**`, `/swagger-ui/**`
+
+> 🔴 **[P0, 2026-08-06] `permitAll` ở `SecurityConfig` là điều kiện cần nhưng không đủ.**
+> `JwtAuthenticationFilter` chạy *trước* tầng authorization, và trước fix này, nó cố validate bất kỳ
+> giá trị Bearer nào tìm thấy trên **mọi** path — kể cả path `permitAll` — rồi chặn cứng bằng 401 nếu
+> thất bại, bỏ qua hoàn toàn quyết định của `authorizeHttpRequests`. Một header `Authorization`
+> rác/rỗng/cũ (vd HTTP interceptor luôn gắn bất cứ gì đang có trong storage, kể cả rỗng) vì vậy có
+> thể chặn một endpoint `permitAll`. `login`/`refresh`/`forgot-password`/`reset-password` nay nằm
+> trong tập `BYPASS_PATHS` tường minh, filter xử lý y hệt "không có token" bất kể header chứa gì —
+> xem §4.20. `logout`/`logout-all` **cố ý không** nằm trong tập đó (§4.20 giải thích lý do).
 
 > ⚠️ **[2026-08-01] Ngoại lệ:** `/api/v1/auth/me` **không** permit-all — matcher cụ thể hơn đứng
 > **trước** wildcard `/api/v1/auth/**` (`authorizeHttpRequests` khớp theo thứ tự khai báo, match đầu
@@ -685,9 +702,69 @@ auth:device:suspicious:{userId}  →  {count}  TTL=1h
 
 ---
 
+## 4.20 P0 — `/auth/refresh` Decoupled From The Access Token (2026-08-06)
+
+> **Bối cảnh**: FE báo hai lỗi P0 chặn regression suite: (1) `/auth/refresh` trả `401 TOKEN_MALFORMED`
+> khi không gửi access token, dù endpoint là `permitAll`; (2) access token hợp lệ gọi `/auth/me` được
+> nhưng cùng token gọi Company/UOM/Work Order/Sales Order lại trả `401 TOKEN_MALFORMED`.
+
+**Lỗi #1 là bug thật, nặng hơn báo cáo cho thấy.** `/auth/refresh` chỉ *permitAll trên danh nghĩa*:
+`AuthService.refresh` đọc `authenticatedUserId` từ request attribute — attribute đó **chỉ**
+`JwtAuthenticationFilter` set được, và chỉ set được khi parse **thành công** một access token từ
+header `Authorization`. Header **thiếu hẳn** → trước đây trả `401 REFRESH_TOKEN_EXPIRED` (sai nhưng
+không đúng triệu chứng báo cáo). Header **có nhưng rác/rỗng** (`"Bearer "`, `"Bearer null"` — mẫu hình
+phổ biến khi HTTP interceptor luôn gắn bất cứ gì đang có trong storage, kể cả rỗng) → filter ném
+`401 TOKEN_MALFORMED` và chặn request **trước khi** chạm tới validate refresh token thật. Dù kiểu nào,
+refresh **không** dùng được chỉ với `{refreshToken, tokenId}` như tài liệu ngầm hứa — trong khi đó
+chính là con đường phục hồi khi access token không dùng được.
+
+**Lỗi #2 không có đường code nào tái hiện được từ backend.** `JwtTokenProvider.validateAndExtractClaims`
+là hàm thuần trên chuỗi token, không tham số path nào. `handleNormalPath` giống hệt cho `/auth/me` và
+Company/UOM/WorkOrder/SalesOrder. Chỉ có **một** `SecurityFilterChain`. Đã kiểm `app.cors.allowed-
+headers` — `Authorization` **có** trong danh sách, loại trừ khả năng CORS chặn header. Cách duy nhất
+tái hiện "cùng token, endpoint này được endpoint kia không" là header **không tới được** backend ở
+những cuộc gọi đó — điều này đi qua `JwtAuthEntryPoint`, nơi **trước đây hardcode `TOKEN_MALFORMED`
+cho mọi request chưa xác thực**, bất kể là "không gửi gì" hay "gửi token hỏng" — đây chính là lý do
+lỗi #2 trông giống lỗi JWT thay vì "cuộc gọi này không gửi header".
+
+**Hai fix (không fix được lỗi #2 tận gốc — đó rất có thể là phía FE, xem bên dưới):**
+
+1. **`JwtAuthenticationFilter.BYPASS_PATHS`** — `login`/`refresh`/`forgot-password`/`reset-password`
+   được filter xử lý y hệt "không có token" bất kể header chứa gì. **`logout`/`logout-all` cố ý
+   KHÔNG có trong danh sách này** — khác 4 endpoint trên, `AuthService.logout`/`logoutAllDevices` vẫn
+   đọc `authenticatedUserId` (và `logout` đọc lại header thô để lấy `jti`) để biết revoke cái gì, và
+   **im lặng no-op** khi thiếu (`if (username == null) return;`). Bypass hai endpoint này sẽ biến
+   logout thành không-revoke-gì-cả mỗi khi có token hỏng đính kèm — đổi bug hiện tại lấy một lỗ hổng
+   bảo mật âm thầm còn tệ hơn.
+2. **`TokenStoreService.saveRefreshToken` ghi thêm `auth:refresh:owner:{tokenId}` → `userId`**
+   (§4.4) — mọi caller (login, mọi lần rotate) tự động có key này, không cần sửa call site nào khác.
+   `AuthService.refresh` giờ resolve `userId` qua `tokenStore.getTokenOwner(request.tokenId())` thay
+   vì đọc request attribute — **không** còn phụ thuộc header `Authorization` chút nào.
+   `B80`/`B81`/`B95` (RTR, absolute timeout, concurrent-race) **không đổi** — cả ba đều chạy **sau**
+   khi `principal` đã resolve xong, không quan tâm nó resolve bằng cách nào.
+3. **`JwtAuthEntryPoint`** dùng `AuthErrorCode.AUTHENTICATION_REQUIRED` thay vì `TOKEN_MALFORMED`.
+   An toàn và chính xác: đã xác nhận `JwtAuthEntryPoint` **chỉ** có thể bị gọi khi `extractToken()`
+   trả `null` (không có header, hoặc không có prefix `Bearer`) — bất kỳ token **được gửi** nào, hỏng
+   hay không, đều bị `JwtAuthenticationFilter` bắt và trả lời trực tiếp trước khi tới tầng
+   authorization của Spring Security, nên entry point này không bao giờ thấy trường hợp đó. Không cần
+   inspect `authException` — chỉ còn đúng một nguyên nhân khi đã vào tới đây.
+
+**`JwtTokenProvider.extractClaimsFromExpired` đã xoá** — orphan sau khi bỏ cơ chế "refresh path cho
+phép token hết hạn" (không còn cần thiết: refresh không đọc access token nữa). `extractJtiUnchecked`
+(dùng cho logout) **không đổi** — khác hàm, khác mục đích.
+
+**Chưa fix được (đã ghi rõ, không giấu):** nguyên nhân thật của lỗi #2 (vì sao header không tới được
+backend ở một số cuộc gọi) — rất có thể là phía client, không phải backend defect. Sau fix #3, response
+FE nhận được ở những cuộc gọi lỗi sẽ ghi `AUTHENTICATION_REQUIRED` thay vì `TOKEN_MALFORMED`, giúp lộ rõ
+nguyên nhân thật qua Network tab (so sánh header `Authorization` thực tế gửi đi giữa một cuộc gọi
+`/auth/me` thành công và một cuộc gọi Company/UOM/WorkOrder/SalesOrder thất bại, cùng token).
+
+---
+
 ## Bất biến nghiệp vụ (tách từ `CLAUDE.md` §10.6)
 
 | # | Bất biến | Test bảo vệ |
 |---|---|---|
 | B35 | Filter order: IP rate-limit **trước** JWT, USER rate-limit **sau** JWT. Request chưa auth → **401 chứ không phải 429** | `SecurityFilterChainTest` |
 | B36 | `X-Forwarded-For` chỉ được tin khi remote addr là **trusted proxy**; ngược lại dùng `remoteAddr` | `IpExtractorTest.spoofedXff_onDirectRequest_isIgnored` |
+| B37 | **[P0, 2026-08-06]** `JwtAuthenticationFilter.BYPASS_PATHS` (`login`/`refresh`/`forgot-password`/`reset-password`) không bao giờ được validate token, bất kể header chứa gì — không header, header rỗng, header rác đều xử lý y hệt "không có token". `logout`/`logout-all` **không** nằm trong tập này (§4.20) | `JwtAuthenticationFilterTest` (bypass paths ignore garbage/empty tokens; logout paths still validate) |

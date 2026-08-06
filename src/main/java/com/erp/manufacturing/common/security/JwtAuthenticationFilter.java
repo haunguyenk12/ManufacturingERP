@@ -1,12 +1,8 @@
 package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.common.exception.AppException;
-import com.erp.manufacturing.common.exception.AuthErrorCode;
-import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,20 +22,32 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Set;
 
 /**
  * JWT authentication filter – validates Bearer token and populates SecurityContext.
  *
- * <h3>Refresh-path special handling</h3>
- * <p>The {@code /api/v1/auth/refresh} endpoint intentionally accepts <em>expired</em>
- * access tokens. When the request targets that path, this filter extracts the subject
- * claim from the token even if it is expired, but still verifies the signature.
- * The actual refresh-token validity check is done in {@link
- * com.erp.manufacturing.module.auth.service.AuthService#refresh}.
+ * <h3>Bypass paths (P0 auth fix)</h3>
+ * <p>{@link #BYPASS_PATHS} are genuinely {@code permitAll} endpoints that never need a valid access
+ * token to do their job. For these, this filter behaves exactly as if no {@code Authorization} header
+ * were present at all — it does not even attempt to parse one, regardless of what the header contains.
+ * This matters because a client that always attaches whatever token it has in storage (even an empty,
+ * stale, or corrupted one) must not be able to turn a {@code permitAll} endpoint into a 401 wall; that
+ * previously happened to {@code /api/v1/auth/refresh} specifically, which is the one bypass-list entry
+ * that most needs it — refresh is the documented recovery path for exactly the case where the access
+ * token is unusable, so it cannot itself depend on that same token being parseable. It no longer does:
+ * {@link com.erp.manufacturing.module.auth.service.AuthService#refresh} resolves the caller's identity
+ * from {@code tokenId} alone via {@link TokenStoreService#getTokenOwner}, not from this filter.
  *
- * <h3>On valid (or expired-but-refresh-path) token:</h3>
+ * <p>🔴 {@code /api/v1/auth/logout} and {@code /api/v1/auth/logout-all} are deliberately <b>not</b> in
+ * the bypass list, even though they are also {@code permitAll}: unlike the endpoints above, {@code
+ * AuthService.logout}/{@code logoutAllDevices} still identify what to revoke via the {@code
+ * authenticatedUserId} attribute this filter sets from a successfully-parsed token. Bypassing them
+ * would make logout silently stop revoking anything whenever a token is present but unparseable.
+ *
+ * <h3>On valid token:</h3>
  * <ol>
- *   <li>Populates {@link SecurityContextHolder} (only for non-expired tokens)</li>
+ *   <li>Populates {@link SecurityContextHolder}</li>
  *   <li>Sets {@code authenticatedUserId} request attribute (used by RateLimitFilter + AuditLog)</li>
  *   <li>Puts {@code userId} into MDC (all subsequent log lines carry userId)</li>
  * </ol>
@@ -49,8 +57,14 @@ import java.io.IOException;
 @Slf4j
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private static final String BEARER_PREFIX   = "Bearer ";
-    private static final String REFRESH_PATH    = "/api/v1/auth/refresh";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    /** Genuinely permitAll endpoints that never need this filter to touch the Authorization header. */
+    private static final Set<String> BYPASS_PATHS = Set.of(
+            "/api/v1/auth/login",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password");
 
     private final JwtTokenProvider    jwtTokenProvider;
     private final UserDetailsService  userDetailsService;
@@ -63,20 +77,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     @NonNull FilterChain filterChain)
             throws ServletException, IOException {
 
+        if (BYPASS_PATHS.contains(request.getRequestURI())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String token = extractToken(request);
         if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        boolean isRefreshPath = REFRESH_PATH.equals(request.getRequestURI());
-
         try {
-            if (isRefreshPath) {
-                handleRefreshPath(request, token);
-            } else {
-                handleNormalPath(request, token);
-            }
+            handleNormalPath(request, token);
         } catch (AppException ex) {
             // Write error response directly – filter runs before Spring Security dispatcher
             writeAuthError(response, ex);
@@ -86,11 +99,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    // ── Normal path: full validation ─────────────────────────────────────
-
     /**
-     * Standard flow: validates signature + expiry, checks blacklist, populates SecurityContext.
-     * Throws {@link AuthException} on any failure (token expired, malformed, revoked).
+     * Validates signature + expiry, checks blacklist, populates SecurityContext.
+     * Throws {@link AppException} on any failure (token expired, malformed, revoked).
      */
     private void handleNormalPath(HttpServletRequest request, String token) {
         var claims = jwtTokenProvider.validateAndExtractClaims(token); // throws on expired/invalid
@@ -108,45 +119,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         enrichRequest(request, username, jti);
-    }
-
-    // ── Refresh path: allow expired token ────────────────────────────────
-
-    /**
-     * Refresh-specific flow:
-     * <ul>
-     *   <li>Extracts claims from the token even if expired (signature still verified).</li>
-     *   <li>Does NOT set SecurityContext (token is expired, user is not "authenticated").</li>
-     *   <li>Only sets {@code authenticatedUserId} so {@link
-     *       com.erp.manufacturing.module.auth.service.AuthService#refresh} can identify the user.</li>
-     * </ul>
-     *
-     * <p>The actual security check (valid refresh token + tokenId) happens inside AuthService.
-     */
-    private void handleRefreshPath(HttpServletRequest request, String token) {
-        Claims claims = extractClaimsAllowExpired(token);   // throws only on signature failure
-        String username = claims.getSubject();
-
-        // Do NOT set SecurityContext – token is expired. Just identify the user.
-        enrichRequest(request, username, claims.getId());
-        log.debug("[JWT] Refresh path – extracted subject from (possibly expired) token: user={}", username);
-    }
-
-    /**
-     * Parses JWT claims regardless of expiry. Still verifies the signature.
-     *
-     * @throws AppException {@link AuthErrorCode#TOKEN_MALFORMED} if signature is invalid
-     */
-    private Claims extractClaimsAllowExpired(String token) {
-        try {
-            return jwtTokenProvider.validateAndExtractClaims(token);
-        } catch (AppException e) {
-            if (AuthErrorCode.TOKEN_EXPIRED.code().equals(e.getErrorCode().code())) {
-                // Token expired but signature was valid – extract claims from the exception
-                return jwtTokenProvider.extractClaimsFromExpired(token);
-            }
-            throw e; // TOKEN_MALFORMED propagates up → writeAuthError
-        }
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────

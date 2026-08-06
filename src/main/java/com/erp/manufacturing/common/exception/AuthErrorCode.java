@@ -18,6 +18,14 @@ public enum AuthErrorCode implements ErrorCode {
     TOKEN_EXPIRED           ("TOKEN_EXPIRED",          "Access token has expired",                  HttpStatus.UNAUTHORIZED),
     TOKEN_REVOKED           ("TOKEN_REVOKED",          "Token has been revoked",                    HttpStatus.UNAUTHORIZED),
     TOKEN_MALFORMED         ("TOKEN_MALFORMED",        "Token is malformed or invalid",             HttpStatus.UNAUTHORIZED),
+    /**
+     * P0 auth fix: distinct from {@link #TOKEN_MALFORMED} — this fires only when NO credentials were
+     * presented at all (no {@code Authorization} header / not {@code Bearer}-prefixed), thrown by
+     * {@link com.erp.manufacturing.common.security.JwtAuthEntryPoint}. Any *presented* token, malformed
+     * or not, is caught and answered inside {@code JwtAuthenticationFilter} before reaching this code
+     * path, so the two codes are never ambiguous about which case actually happened.
+     */
+    AUTHENTICATION_REQUIRED ("AUTHENTICATION_REQUIRED", "Authentication is required to access this resource", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_EXPIRED   ("REFRESH_TOKEN_EXPIRED",  "Refresh token has expired or is invalid",   HttpStatus.UNAUTHORIZED),
     /** RTR (B80): a refresh token that was already rotated away came back — treated as stolen. */
     TOKEN_REUSE_DETECTED    ("TOKEN_REUSE_DETECTED",   "Suspicious activity detected. Please login again.", HttpStatus.UNAUTHORIZED),

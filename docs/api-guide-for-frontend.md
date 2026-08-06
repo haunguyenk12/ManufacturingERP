@@ -236,6 +236,15 @@ Gọi khi access token sắp/đã hết hạn (bắt `401 TOKEN_EXPIRED`).
 { "refreshToken": "b3f1…", "tokenId": "9c2e…", "deviceId": "web-chrome-01" }
 ```
 
+🔴 **[Sửa 2026-08-06] Endpoint này KHÔNG cần header `Authorization` — đừng gửi access token, kể cả
+token cũ/hỏng/hết hạn.** Trước bản sửa này, backend có bug: nếu bạn gắn một access token rỗng/hỏng
+vào header (kể cả khi endpoint là `permitAll`), request sẽ bị chặn bằng `401 TOKEN_MALFORMED` **trước
+khi** backend kịp đọc `refreshToken` trong body — đúng lúc access token hỏng lại là lúc bạn cần gọi
+endpoint này nhất. Nếu HTTP client/interceptor của bạn **tự động** gắn `Authorization: Bearer <token
+đang lưu>` vào mọi request, hãy loại trừ `/auth/refresh` khỏi interceptor đó (hoặc đảm bảo nó không
+gắn header rỗng/`"null"` khi chưa có token) — dù backend giờ đã bỏ qua header này trên endpoint này
+hoàn toàn, không còn cách nào để nó chặn request nữa.
+
 Trả về **cặp token hoàn toàn mới** (rotation) — `tokenId` cũng đổi. **Ghi đè cả 3 giá trị đã lưu.**
 
 | Lỗi | Nghĩa | FE làm gì |
@@ -1113,6 +1122,7 @@ overIssue, overrideReason`
 |---|---|---|
 | `TOKEN_EXPIRED` | Access token hết hạn | Gọi refresh, retry |
 | `TOKEN_REVOKED` / `TOKEN_MALFORMED` | Token bị logout / hỏng | Về login |
+| `AUTHENTICATION_REQUIRED` (`Sửa 2026-08-06`) | **Không** gửi `Authorization` header nào cả (khác `TOKEN_MALFORMED` — đó là "có gửi nhưng hỏng"). Nếu gặp mã này ở một request mà FE tin là đã gắn token, kiểm tra lại Network tab: header có thật sự tới được backend không | Về login (cùng cách xử lý `TOKEN_MALFORMED`, chỉ khác nguyên nhân để debug) |
 | `REFRESH_TOKEN_EXPIRED` | Refresh token hỏng | Về login |
 | `TOKEN_REUSE_DETECTED` | Refresh token đã rotate bị dùng lại ⇒ **mọi phiên đã bị thu hồi** | Về login + báo bảo mật. Xem lưu ý serialize refresh ở §`POST /auth/refresh` |
 | `SESSION_ABSOLUTE_TIMEOUT` | Phiên quá **30 ngày** kể từ login ⇒ thu hồi theo chính sách, **không** phải sự cố bảo mật | Về login với message trung tính. **Đừng** gộp message với 2 dòng trên |

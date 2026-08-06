@@ -102,31 +102,6 @@ public class JwtTokenProvider {
         }
     }
 
-    /**
-     * Extracts claims from an <em>expired</em> token without throwing on expiry.
-     * The JWT signature is still fully verified – only the expiry check is bypassed.
-     *
-     * <p>Used exclusively by {@link JwtAuthenticationFilter} on the {@code /auth/refresh}
-     * path so that clients can refresh after the access token has expired.
-     *
-     * @throws AppException {@link AuthErrorCode#TOKEN_MALFORMED} if signature is invalid
-     */
-    public Claims extractClaimsFromExpired(String token) {
-        try {
-            return Jwts.parser()
-                    .verifyWith(getSigningKey())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-        } catch (ExpiredJwtException e) {
-            // Signature was valid; expiry is expected here – return claims safely
-            log.debug("[JWT] Extracting claims from expired token (refresh path)");
-            return e.getClaims();
-        } catch (JwtException | IllegalArgumentException e) {
-            throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_MALFORMED);
-        }
-    }
-
     public long getRemainingTtlMs(String token) {
         try {
             Date expiry = validateAndExtractClaims(token).getExpiration();

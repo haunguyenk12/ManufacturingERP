@@ -64,16 +64,17 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — `C2-2` vừa xong)* |
-| **Phase trước** | **`C2-2` – Inventory Lot lifecycle API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`. Lot `HOLD` sinh từ Production Receipt chưa QC **không** thoát được qua endpoint này — chặn bằng `LotQcOriginLookupService` (`module/workorder`, entry point cross-module mới theo `C7`), không phải heuristic cùng-module (có lỗ hổng thật với lot đã QC rồi bị đưa lại `HOLD` thủ công — chốt với user qua `AskUserQuestion`). Không migration. Bất biến `B102`-`B106`. Bản ghi: **§0.37** |
-| **Phase trước đó** | **`C2-1` – Audit Logs read API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /audit-logs`, `GET /audit-logs/{id}`. `PERM_AUDIT_READ` ADMIN-only. Migration `V54`+`V55`. Bản ghi: **§0.36** |
+| **Phase đang chạy** | *(không có — bugfix P0 auth vừa xong)* |
+| **Phase trước** | **Bugfix P0 auth** ✅ **HOÀN THÀNH** (2026-08-06). FE báo 2 lỗi P0: (1) `/auth/refresh` trả `401 TOKEN_MALFORMED` dù `permitAll`; (2) access token hợp lệ dùng được ở `/auth/me` nhưng không dùng được ở endpoint khác. Nguyên nhân #1: `refresh()` bí mật phụ thuộc access token để resolve `userId` — sửa bằng reverse lookup `auth:refresh:owner:{tokenId}` (`TokenStoreService`), refresh giờ chỉ cần `{refreshToken, tokenId}`. `JwtAuthenticationFilter` thêm `BYPASS_PATHS` (login/refresh/forgot-password/reset-password — **không** gồm logout/logout-all, có lý do). Nguyên nhân #2: không tái hiện được từ code (đã loại trừ CORS) — rất có thể phía client; sửa được phần chẩn đoán sai: `JwtAuthEntryPoint` hardcode `TOKEN_MALFORMED` cho mọi request thiếu credential, nay dùng `AuthErrorCode.AUTHENTICATION_REQUIRED` mới, tách bạch "không gửi gì" khỏi "gửi nhưng hỏng". Không migration. Bất biến `B37` (`common/security`), `B107` (`module/auth`). Bản ghi: **§0.38** |
+| **Phase trước đó** | **`C2-2` – Inventory Lot lifecycle API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`. Không migration. Bất biến `B102`-`B106`. Bản ghi: **§0.37** |
+| **Phase `C2-1`** | **`C2-1` – Audit Logs read API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /audit-logs`, `GET /audit-logs/{id}`. `PERM_AUDIT_READ` ADMIN-only. Migration `V54`+`V55`. Bản ghi: **§0.36** |
 | **Phase `D8c`** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). Trả nốt 3/3 nợ #6. Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
 | **Phase kế tiếp** | *(chưa chốt)* — track `C2-*`, `P*`, `D8` đều đã đóng hết. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
 | **Migration mới nhất** | **`V55__seed_audit_permission.sql`** (`C2-1`). `C2-2` **không có migration** (pure read/write API trên dữ liệu đã tồn tại) |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → **`C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có (`searchLots`+`findByLotLotId`, **không** thêm class IT mới — vẫn 14) |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`), `§0.37` (`C2-2`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → `C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có, **không** thêm class IT mới) → **bugfix P0 auth (2026-08-06): 942 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+17` unit: `JwtAuthenticationFilterTest` +13 (mới), `JwtAuthEntryPointTest` +1 (mới), `TokenStoreServiceTest` +3, `AuthServiceTest` +2 ròng (thêm 2 case mới, 1 case đổi tên/viết lại — không xoá), `JwtTokenProviderTest` −2 (xoá 2 case `extractClaimsFromExpired`, method đã orphan); `+0` IT — không đụng repository/JPQL nào) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`), `§0.37` (`C2-2`), `§0.38` (bugfix P0 auth) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đã đóng hết, `C2-1`+`C2-2` xong 2026-08-06): cùng file §8** — bảng phase §8.1, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (roadmap) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -1969,6 +1970,90 @@ mismatch, 404), repository `*IT` (7 case mới: mỗi filter riêng + kết hợ
 sẵn). **Java positional: có** — `InventoryPermissionGuard` constructor +1 tham số
 (`InventoryLotRepository`). Test cũ dựng `InventoryPermissionGuard` đã **sửa** theo `R10`
 (`InventoryPermissionGuardTest`).
+
+---
+
+### 0.38 Bugfix P0 Auth: `/auth/refresh` Phụ Thuộc Ngầm Vào Access Token + `TOKEN_MALFORMED` Sai Nghĩa (2026-08-06)
+
+**Không** phase, **không** migration, **không** permission mới, **không** đổi request/response DTO
+trên wire. FE báo hai lỗi P0 chặn regression suite, trace `a9c41e1a07534f1d`. Đây là bugfix thứ hai
+phát hiện từ log/báo cáo thật thay vì đối chiếu spec, sau `§0.24`.
+
+| # | Lỗi FE báo | Kết luận |
+|---|---|---|
+| 1 | `POST /auth/refresh` trả `401 TOKEN_MALFORMED` khi không gửi access token | **Bug thật, đã sửa** |
+| 2 | Access token hợp lệ dùng được ở `/auth/me` nhưng không dùng được ở Company/UOM/Work Order/Sales Order | **Không tái hiện được từ backend** — đã loại trừ CORS (xem dưới), phần chẩn đoán sai đã sửa |
+
+**Lỗi #1 — nặng hơn báo cáo cho thấy.** `/auth/refresh` chỉ *permitAll trên danh nghĩa*:
+`AuthService.refresh` đọc `authenticatedUserId` từ request attribute mà **chỉ**
+`JwtAuthenticationFilter` set được, và chỉ set được khi parse **thành công** một access token từ
+header `Authorization`. Header **thiếu hẳn** → trả `401 REFRESH_TOKEN_EXPIRED` (sai, nhưng không đúng
+triệu chứng báo cáo). Header **có nhưng rác/rỗng** (`"Bearer "`, `"Bearer null"` — mẫu hình phổ biến
+khi HTTP interceptor luôn gắn bất cứ gì đang có trong storage) → filter ném `401 TOKEN_MALFORMED` và
+chặn request **trước khi** chạm validate refresh token thật. Dù kiểu nào, refresh **không** dùng được
+chỉ với `{refreshToken, tokenId}` như tài liệu ngầm hứa — đúng lúc access token hỏng lại là lúc client
+cần refresh nhất.
+
+**Lỗi #2 — đã xác nhận không có đường code nào tái hiện.** `JwtTokenProvider.validateAndExtractClaims`
+là hàm thuần trên chuỗi token, không tham số path. `JwtAuthenticationFilter.handleNormalPath` giống hệt
+cho `/auth/me` và mọi endpoint khác. Chỉ có **một** `SecurityFilterChain`. Đã kiểm `app.cors.allowed-
+headers` trong `application.yml` — `Authorization` **có** trong danh sách, loại trừ CORS chặn header.
+Cách duy nhất tái hiện triệu chứng là header **không tới được** backend ở những cuộc gọi đó — rất có
+thể phía client (một instance/interceptor HTTP khác không gắn `Authorization` cho các cuộc gọi đó),
+**không phải** backend defect. Điều **có thể** sửa từ backend: `JwtAuthEntryPoint` (nơi request thiếu
+credential rơi vào) trước đây hardcode `TOKEN_MALFORMED` cho **mọi** trường hợp — kể cả "không gửi gì
+cả" — khiến lỗi #2 trông giống lỗi JWT thay vì "cuộc gọi này thiếu header". Đã sửa (xem dưới).
+
+**Ba thay đổi:**
+
+1. **`JwtAuthenticationFilter.BYPASS_PATHS`** — `login`/`refresh`/`forgot-password`/`reset-password`
+   được filter xử lý y hệt "không có token" bất kể header chứa gì (rác, rỗng, hết hạn). 🔴
+   **`logout`/`logout-all` cố ý KHÔNG có trong danh sách này** — khác 4 endpoint trên,
+   `AuthService.logout`/`logoutAllDevices` vẫn đọc `authenticatedUserId` (và `logout` đọc lại header
+   thô để lấy `jti`) để biết revoke cái gì, và **im lặng no-op** khi thiếu. Bypass hai endpoint này sẽ
+   biến logout thành không-revoke-gì-cả mỗi khi có token hỏng đính kèm — đổi bug hiện tại lấy một lỗ
+   hổng bảo mật âm thầm còn tệ hơn. Suýt mắc lỗi này khi thiết kế fix — bắt được bằng cách đọc kỹ
+   `AuthService.logout`/`logoutAllDevices` trước khi viết `BYPASS_PATHS`, không chỉ nhìn `SecurityConfig`.
+2. **`TokenStoreService.saveRefreshToken` ghi thêm `auth:refresh:owner:{tokenId}` → `userId`** — mọi
+   caller (login, mọi lần rotate) tự động có key này, không cần sửa call site nào khác. Method mới
+   `getTokenOwner(tokenId)`. `AuthService.refresh` giờ resolve `userId` qua key này thay vì đọc request
+   attribute — **không** còn phụ thuộc header `Authorization` chút nào. Key **không** bị xoá tường minh
+   khi logout/rotate — tự hết hạn theo cùng TTL refresh token (7 ngày), giống `:used`/`:rotated`; để nó
+   sống sót ngắn hạn sau một lần xoá là vô hại vì quyết định cấp quyền thật vẫn là
+   `stored.equals(refreshToken)` so với key chính. `B80`/`B81`/`B95` (RTR, absolute timeout,
+   concurrent-race) **không đổi một dòng nào** — cả ba chạy **sau** khi `principal` đã resolve xong.
+3. **`JwtAuthEntryPoint`** dùng `AuthErrorCode.AUTHENTICATION_REQUIRED` (mới) thay vì `TOKEN_MALFORMED`.
+   An toàn: đã xác nhận handler này **chỉ** có thể bị gọi khi không có credential nào được gửi — bất kỳ
+   token **được gửi** nào, hỏng hay không, đều bị `JwtAuthenticationFilter` bắt và trả lời trực tiếp
+   trước khi tới tầng authorization của Spring Security.
+
+**`JwtTokenProvider.extractClaimsFromExpired` đã xoá** — orphan sau khi bỏ cơ chế "refresh path cho
+phép token hết hạn" (không còn cần thiết: refresh không đọc access token nữa). 2 test tương ứng trong
+`JwtTokenProviderTest` xoá theo. `extractJtiUnchecked` (dùng cho logout) **không đổi** — khác hàm,
+khác mục đích.
+
+Chi tiết đầy đủ + Redis key mới: `common/security/CLAUDE.md §4.20` (bất biến `B37`),
+`module/auth/CLAUDE.md` (bất biến `B107`). Mã lỗi mới: `.claude/rules/error-handling.md §5.3`.
+
+**Nghiệm thu:** `mvn -o clean verify` — **942 case unit + 105 case IT / 14 class IT, failures = 0,
+errors = 0** (baseline trước phase: 925 unit + 105 IT / 14 class — `+17` unit, `+0` IT vì phase này
+không đụng repository/JPQL nào; xem hàng "Baseline test" §0.1). Không nghiệm thu mutation riêng — bù
+lại bằng test mới ở đúng tầng bug xảy ra: `JwtAuthenticationFilterTest` (mới, class chưa từng có test
+trực tiếp trước đây — 13 case: bypass path bỏ qua token rác/rỗng, logout path vẫn validate bình
+thường, non-bypass path hành vi không đổi), `JwtAuthEntryPointTest` (mới), `TokenStoreServiceTest` (+3
+case reverse-lookup), `AuthServiceTest` (13 test `refresh_*` sửa theo `R10` để stub
+`tokenStore.getTokenOwner`/`userRepository.findById` thay vì request attribute, +2 case mới trong đó
+có `refresh_neverReadsAuthorizationHeader_identityComesFromTokenIdAlone` — regression guard trực tiếp
+cho lỗi #1). Xác nhận qua HTTP thật (`mvn -o spring-boot:run`, Postgres/Redis thật): login → refresh
+**không** header `Authorization` → 200 (trước fix: 401 `TOKEN_MALFORMED`) → refresh **với** header
+`Authorization: Bearer garbage-not-a-jwt` → 200 (cũng trước fix: 401) → gọi endpoint có bảo vệ không
+header → 401 `AUTHENTICATION_REQUIRED` (trước fix: `TOKEN_MALFORMED`) → gọi `/auth/logout` với header
+rác → vẫn 401 `TOKEN_MALFORMED` (xác nhận logout **không** bị bypass, hành vi giữ nguyên).
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 1 mã lỗi mới `AUTHENTICATION_REQUIRED`, không
+đổi DTO nào; hành vi `/auth/refresh` **nới lỏng** — request trước đây lỗi nay thành công, không phá
+client đang chạy đúng). **Java positional: không có** — chỉ thêm method mới trên `TokenStoreService`,
+không đổi constructor nào có sẵn.
 
 ---
 

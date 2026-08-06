@@ -233,13 +233,14 @@ class AuthServiceTest {
 
     // ── Refresh ────────────────────────────────────────────────────────────
     //
-    // Note: the request attribute is named "authenticatedUserId" but actually carries the
-    // JWT *subject*, i.e. the username – the service feeds it into loadUserByUsername().
+    // Note: identity is resolved from tokenId alone via TokenStoreService.getTokenOwner (P0 auth
+    // fix) — this endpoint no longer reads the Authorization header or any request attribute.
 
     @Test
     @DisplayName("Refresh success – rotates the token pair and extends the device session")
     void refresh_validToken_rotatesAndReturnsNewPair() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
         when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
@@ -273,7 +274,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh with a rotated-away tokenId – TOKEN_REUSE_DETECTED, every session revoked")
     void refresh_reusedToken_throwsTokenReuseDetectedAndForceLogoutAll() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
@@ -296,9 +298,9 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("Refresh without authenticated subject – REFRESH_TOKEN_EXPIRED, token store untouched")
-    void refresh_missingUserIdAttribute_throwsRefreshTokenExpired() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn(null);
+    @DisplayName("Refresh with an unknown tokenId owner – REFRESH_TOKEN_EXPIRED, nothing else touched")
+    void refresh_unknownTokenOwner_throwsRefreshTokenExpired() {
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(null);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -306,13 +308,49 @@ class AuthServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
 
-        verifyNoInteractions(tokenStore, userDetailsService);
+        verifyNoInteractions(userRepository, userDetailsService);
+        verify(tokenStore, never()).getRefreshToken(any(), any());
+    }
+
+    @Test
+    @DisplayName("Refresh with a tokenId owner that no longer exists in the user table – REFRESH_TOKEN_EXPIRED")
+    void refresh_ownerUserDeleted_throwsRefreshTokenExpired() {
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+
+        verifyNoInteractions(userDetailsService);
+        verify(tokenStore, never()).getRefreshToken(any(), any());
+    }
+
+    @Test
+    @DisplayName("Refresh never reads the Authorization header — identity comes from tokenId alone, "
+            + "so an absent/expired/garbage access token can never block it (P0 auth fix)")
+    void refresh_neverReadsAuthorizationHeader_identityComesFromTokenIdAlone() {
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
+        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("new.access");
+        when(jwtTokenProvider.generateRefreshToken()).thenReturn("new-refresh");
+        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+
+        authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+
+        verify(httpRequest, never()).getHeader("Authorization");
+        verify(httpRequest, never()).getAttribute("authenticatedUserId");
     }
 
     @Test
     @DisplayName("Refresh with unknown tokenId – REFRESH_TOKEN_EXPIRED, nothing is rotated")
     void refresh_storedTokenNull_throwsRefreshTokenExpired() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         // Never rotated away within the RTR window ⇒ this is an ordinary expiry, not a replay (B80)
@@ -331,7 +369,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh with mismatched refresh token – REFRESH_TOKEN_EXPIRED, no new token issued")
     void refresh_storedTokenMismatch_throwsRefreshTokenExpired() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("other-refresh");
 
@@ -359,7 +398,8 @@ class AuthServiceTest {
     @DisplayName("Refresh racing a just-completed rotation of the same tokenId absorbs the winner's " +
             "pair instead of throwing TOKEN_REUSE_DETECTED")
     void refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         // "old-tid" was already rotated away by a winner request moments ago.
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
@@ -387,7 +427,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh racing a just-completed rotation still extends the resolved device session")
     void refresh_concurrentDuplicate_extendsDeviceSession() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
@@ -406,7 +447,8 @@ class AuthServiceTest {
     @DisplayName("A rotation-result breadcrumb whose target pair no longer exists is ignored " +
             "(falls through to the normal reuse check instead of failing)")
     void refresh_rotationResultTargetGone_fallsThroughToReuseCheck() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
@@ -426,7 +468,8 @@ class AuthServiceTest {
             "rotation breadcrumb to absorb")
     void refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists() {
         when(tokenStore.acquireRefreshLock("old-tid")).thenReturn(false);
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         when(tokenStore.getRotationResult("old-tid")).thenReturn(null);
@@ -446,7 +489,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh of a session past the absolute timeout – SESSION_ABSOLUTE_TIMEOUT, every session revoked")
     void refresh_sessionOlderThanAbsoluteTimeout_throwsAndForceLogoutAll() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
         when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid"))
@@ -474,7 +518,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh just under the absolute timeout – still rotates normally")
     void refresh_sessionJustUnderAbsoluteTimeout_rotatesNormally() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
         when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid"))
@@ -494,7 +539,8 @@ class AuthServiceTest {
     @DisplayName("Rotation carries the ORIGINAL session start forward – it does not restart the absolute clock")
     void refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId() {
         Instant originalStart = Instant.now().minus(20, ChronoUnit.DAYS);
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
         when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid")).thenReturn(originalStart);
@@ -514,7 +560,8 @@ class AuthServiceTest {
     @Test
     @DisplayName("Refresh of a pre-D8b session (no start stamp) – treated as starting now, not as expired")
     void refresh_sessionWithoutStartStamp_isTreatedAsStartingNow() {
-        when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
+        when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("old-refresh");
         when(tokenStore.getSessionStart(testUser.getUserId(), "old-tid")).thenReturn(null);

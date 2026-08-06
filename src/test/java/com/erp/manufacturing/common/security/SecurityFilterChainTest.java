@@ -1,6 +1,7 @@
 package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.config.RateLimitProperties.Action;
@@ -136,7 +137,11 @@ class SecurityFilterChainTest {
         when(rateLimitProperties.rules()).thenReturn(List.of(IP_RULE));
 
         mockMvc.perform(get("/api/v1/test/ping"))
-               .andExpect(status().isUnauthorized()); // 401 proves USER rate-limit did NOT block
+               .andExpect(status().isUnauthorized()) // 401 proves USER rate-limit did NOT block
+               // P0 auth fix: no credentials presented at all → AUTHENTICATION_REQUIRED, not
+               // TOKEN_MALFORMED (that code is reserved for a *presented* bad token, caught inside
+               // JwtAuthenticationFilter itself — this request never presents one).
+               .andExpect(jsonPath("$.code").value(AuthErrorCode.AUTHENTICATION_REQUIRED.code()));
 
         verify(valueOps).increment(argThat(k -> k != null && k.contains("global-ip")));
         verify(valueOps, never()).increment(argThat(k -> k != null && k.contains("global-user")));

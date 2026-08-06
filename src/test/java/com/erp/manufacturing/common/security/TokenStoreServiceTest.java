@@ -96,6 +96,38 @@ class TokenStoreServiceTest {
     }
 
     @Test
+    @DisplayName("saveRefreshToken – also writes auth:refresh:owner:{tokenId} → userId (P0 auth fix)")
+    void saveRefreshToken_alsoWritesTheReverseOwnerLookup() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+
+        store.saveRefreshToken(userId, "tid-1", "refresh-token");
+
+        verify(valueOps).set(
+                eq("auth:refresh:owner:tid-1"),
+                eq(userId.toString()),
+                eq(REFRESH_EXPIRY_SEC),
+                eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("getTokenOwner – round-trips the userId written by saveRefreshToken")
+    void getTokenOwner_roundTripsTheUserId() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh:owner:tid-1")).thenReturn(userId.toString());
+
+        assertThat(store.getTokenOwner("tid-1")).isEqualTo(userId);
+    }
+
+    @Test
+    @DisplayName("getTokenOwner – unknown tokenId returns null, not an exception")
+    void getTokenOwner_unknownTokenId_returnsNull() {
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get("auth:refresh:owner:unknown")).thenReturn(null);
+
+        assertThat(store.getTokenOwner("unknown")).isNull();
+    }
+
+    @Test
     @DisplayName("getRefreshToken / deleteRefreshToken – use the same key pattern as save")
     void getAndDeleteRefreshToken_useSameKeyPattern() {
         when(redis.opsForValue()).thenReturn(valueOps);

@@ -150,22 +150,22 @@ public class AuthService {
     /**
      * Issues a new token pair using the opaque refresh token.
      *
-     * <p>The access token in the Authorization header may be expired here –
-     * {@link com.erp.manufacturing.common.security.JwtAuthenticationFilter} sets
-     * {@code authenticatedUserId} even for expired tokens on this path.
-     * Security is enforced by the opaque refresh token + tokenId pair stored in Redis.
+     * <p>Identity is resolved from {@code request.tokenId()} alone via {@link
+     * TokenStoreService#getTokenOwner} (P0 auth fix) — this endpoint no longer needs an {@code
+     * Authorization} header at all, matching its {@code permitAll} contract. Security itself is
+     * enforced by the opaque refresh token + tokenId pair stored in Redis, unchanged.
      */
     public AuthResponse refresh(RefreshRequest request, HttpServletRequest httpRequest) {
         String ip      = (String) httpRequest.getAttribute("clientIp");
         String traceId = (String) httpRequest.getAttribute("traceId");
 
-        // userId comes from the JWT subject (set by filter even for expired tokens)
-        String username = (String) httpRequest.getAttribute("authenticatedUserId");
-        if (username == null) {
+        UUID userId = tokenStore.getTokenOwner(request.tokenId());
+        if (userId == null) {
             throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
-
-        UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(username);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
+        UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(user.getUsername());
 
         // Concurrent refresh race: if another request is mid-rotation for this exact tokenId right
         // now (client retry, double-fire, etc.), give it a brief head start to finish and publish

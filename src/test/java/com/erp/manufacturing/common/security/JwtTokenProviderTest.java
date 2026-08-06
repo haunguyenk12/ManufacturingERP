@@ -149,30 +149,6 @@ class JwtTokenProviderTest {
         assertThat(provider(VALID_EXPIRY_MS).extractJtiUnchecked(foreignToken)).isNull();
     }
 
-    @Test
-    @DisplayName("extractClaimsFromExpired – expired but correctly signed token returns claims")
-    void extractClaimsFromExpired_expiredValidSignature_returnsClaims() {
-        JwtTokenProvider expiredProvider = provider(EXPIRED_EXPIRY_MS);
-        String token = expiredProvider.generateAccessToken(user());
-
-        Claims claims = expiredProvider.extractClaimsFromExpired(token);
-
-        assertThat(claims.getSubject()).isEqualTo("alice");
-        assertThat(claims.getId()).isNotBlank();
-    }
-
-    @Test
-    @DisplayName("extractClaimsFromExpired – wrong signature throws AppException TOKEN_MALFORMED")
-    void extractClaimsFromExpired_wrongSignature_throwsTokenMalformed() {
-        String foreignToken = provider(OTHER_SECRET, EXPIRED_EXPIRY_MS).generateAccessToken(user());
-        JwtTokenProvider provider = provider(VALID_EXPIRY_MS);
-
-        assertThatThrownBy(() -> provider.extractClaimsFromExpired(foreignToken))
-                .isInstanceOf(AppException.class)
-                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(AuthErrorCode.TOKEN_MALFORMED));
-    }
-
     // ── Remaining TTL ──────────────────────────────────────────────────────
 
     @Test

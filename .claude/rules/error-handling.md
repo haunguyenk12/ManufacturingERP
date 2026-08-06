@@ -121,7 +121,7 @@ TOKEN_EXPIRED, TOKEN_REVOKED, TOKEN_MALFORMED,
 REFRESH_TOKEN_EXPIRED, TOKEN_REUSE_DETECTED,
 // Auth – Credentials & Session
 INVALID_CREDENTIALS, ACCOUNT_LOCKED, SESSION_CONFLICT,
-SESSION_ABSOLUTE_TIMEOUT, SESSION_TERMINATED,
+SESSION_ABSOLUTE_TIMEOUT, SESSION_TERMINATED, AUTHENTICATION_REQUIRED,
 // Auth – Recovery
 RESET_TOKEN_INVALID, RESET_TOKEN_EXPIRED,
 // Resource
@@ -171,6 +171,20 @@ phân biệt được hai trường hợp, đúng cách `REFRESH_TOKEN_EXPIRED` 
 sách gốc ở §5.3 phía trên liệt kê cả `RESET_TOKEN_INVALID` **và** `RESET_TOKEN_EXPIRED` — chỉ vế đầu
 được implement; `RESET_TOKEN_EXPIRED` **cố ý không thêm** vì không có nhánh nào thật sự ném nó
 (`coding-rules.md §11.5`). Bất biến `B101`.
+
+**Constant thêm ở P0 (2026-08-06, bugfix):** `AuthErrorCode.AUTHENTICATION_REQUIRED` (401) — trả bởi
+`JwtAuthEntryPoint` khi request tới một endpoint cần auth mà **không** có `Authorization` header nào
+(hoặc không đúng prefix `Bearer`) — nói cách khác, "chưa gửi credential gì cả". Trước đây chỗ này
+hardcode `TOKEN_MALFORMED`, sai vì mã đó nên dành cho "đã gửi token nhưng token hỏng" (nhánh đó được
+xử lý riêng, sớm hơn, ngay trong `JwtAuthenticationFilter`, không bao giờ chạm tới
+`JwtAuthEntryPoint`). Hai mã giờ tách biệt đúng nghĩa:
+
+| `code` | Nghĩa | Ai ném |
+|---|---|---|
+| `AUTHENTICATION_REQUIRED` | Không gửi credential gì | `JwtAuthEntryPoint` |
+| `TOKEN_MALFORMED` | Có gửi, nhưng token hỏng/rác/sai chữ ký | `JwtAuthenticationFilter` (qua `JwtTokenProvider`) |
+
+Chi tiết + bối cảnh phát hiện (hai lỗi P0 FE báo): `common/security/CLAUDE.md §4.20`.
 
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,

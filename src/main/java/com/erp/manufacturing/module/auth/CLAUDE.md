@@ -8,7 +8,7 @@
 
 #### `AuthService`
 - `login` → validate credentials (constant-time) → cấp cặp token (có kiểm tra IP session)
-- `refresh` → validate refresh token → RTR check → xoay vòng atomic → trả token mới
+- `refresh` → resolve userId từ `tokenId` (không đọc access token — P0, `B107`) → validate refresh token → RTR check → xoay vòng atomic → trả token mới
 - `logout` → blacklist access token + xóa refresh token
 - `logoutAllDevices` → xóa toàn bộ refresh token của user
 - `forgotPassword(email)` → sinh reset token, gửi email (cùng response dù email tồn tại hay không)
@@ -36,6 +36,7 @@
 | B81 | **Absolute session timeout (`D8b`)**: phiên sống quá `app.jwt.absolute-session-timeout-ms` (30 ngày, đếm từ **login**) ⇒ `SESSION_ABSOLUTE_TIMEOUT` (401) + force logout **cả** refresh token **lẫn** device session. Ba vế bắt buộc: ① check nằm **sau** validate `stored`, **trước** rotate · ② rotate **carry-forward** `sessionCreatedAt` cũ sang tokenId mới, **không** stamp `now` · ③ phiên không có stamp (trước `D8b`) **fail-open**, coi như bắt đầu từ bây giờ | `AuthServiceTest.refresh_sessionOlderThanAbsoluteTimeout_throwsAndForceLogoutAll` · `.refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId` · `.refresh_sessionWithoutStartStamp_isTreatedAsStartingNow` · `.refresh_sessionJustUnderAbsoluteTimeout_rotatesNormally` · `.login_recordsTheSessionStart` |
 | B95 | **Concurrent refresh race (mở rộng `D8`)**: request đến sau, race trên **cùng** `tokenId` đã bị request khác rotate xong trong vài giây gần nhất ⇒ nhận lại **đúng** cặp token mà request thắng vừa sinh ra, **không** bị chẩn đoán thành `TOKEN_REUSE_DETECTED`, **không** rotate lần hai. Cơ chế: khoá tư vấn `acquireRefreshLock` (`SET NX PX`, TTL 2s) trước validate + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) đọc **trước** `wasRefreshTokenUsed` trong nhánh `stored == null`. **Không grace window** — token cũ vẫn chết ngay, chỉ request trùng lặp được dẫn tới cặp đã tồn tại. Breadcrumb hết hạn hoặc cặp nó trỏ tới đã mất ⇒ rơi xuống `wasRefreshTokenUsed` y hệt trước phase này, RTR thật (`B80`) không đổi | `AuthServiceTest.refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected` · `.refresh_concurrentDuplicate_extendsDeviceSession` · `.refresh_rotationResultTargetGone_fallsThroughToReuseCheck` · `.refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists` · `.refresh_validToken_rotatesAndReturnsNewPair` (`saveRotationResult` verify) |
 | B101 | **Account Recovery (`D8c`)**: `forgotPassword` trả **`void`** và không branch theo kết quả — nhánh "email không tồn tại" **không** gọi `PasswordResetTokenService`/`EmailNotificationService`, **không** audit gì, giữ hai nhánh giống hệt nhau ở mọi collaborator (account enumeration prevention thật, không chỉ cùng response text). `resetPassword` xoá token **cả hai chiều** (`auth:reset:{token}` + `auth:reset:user:{userId}`) rồi force-logout toàn bộ phiên (`deleteAllUserTokens` + `deleteAllDeviceSessions`) trước khi audit `PASSWORD_RESET`. `adminUnlockAccount` là `@PreAuthorize("hasRole('ADMIN')")` — **role-based**, không phải `PERM_*` scope-based như phần lớn service khác trong repo, cùng kiểu `UserService` đã dùng | `PasswordResetTokenServiceTest` (round-trip + invalidate-on-regenerate) · `AuthServiceTest.forgotPassword_existingEmail_generatesTokenAndSendsEmail` · `.forgotPassword_unknownEmail_doesNothingObservable` · `.resetPassword_validToken_updatesPasswordAndForcesLogoutEverywhere` · `.resetPassword_invalidToken_throwsResetTokenInvalidBeforeTouchingAnything` · `.adminUnlockAccount_resetsStatusAndFailCount` · `AuthMethodSecurityTest` (deny/allow `hasRole('ADMIN')`) |
+| B107 | **[P0, 2026-08-06]** `refresh()` resolve `userId` qua `tokenStore.getTokenOwner(request.tokenId())` (Redis `auth:refresh:owner:{tokenId}`, ghi kèm mỗi lần `saveRefreshToken`) — **không** đọc request attribute `authenticatedUserId` nữa, nên endpoint không còn phụ thuộc header `Authorization` chút nào (trước đây header thiếu/hỏng chặn cứng cả request, xem `common/security/CLAUDE.md §4.20`). `B80`/`B81`/`B95` không đổi — cả ba chạy **sau** khi `principal` đã resolve | `AuthServiceTest.refresh_neverReadsAuthorizationHeader_identityComesFromTokenIdAlone` · `.refresh_unknownTokenOwner_throwsRefreshTokenExpired` · `.refresh_ownerUserDeleted_throwsRefreshTokenExpired` · `TokenStoreServiceTest.saveRefreshToken_alsoWritesTheReverseOwnerLookup` · `.getTokenOwner_roundTripsTheUserId` |
 
 > **[`D1`, 2026-07-28] Nợ #7 đã trả.** `LoginRequest`, `RefreshRequest`, `LogoutRequest` (và
 > `CreateUserRequest`/`UpdateUserRequest` ở module `user`) đều override `toString()` che secret —
@@ -62,6 +63,14 @@
 > 3. **Fail-open cho phiên không có stamp** là quyết định, không phải sơ suất: fail-closed sẽ đăng
 >    xuất mọi user đang online ngay lúc deploy mà không tăng bảo mật (refresh TTL 7 ngày ⇒ trong một
 >    tuần mọi phiên sống đều có stamp).
+
+> **[P0, 2026-08-06] `refresh()` không còn phụ thuộc access token.** FE báo `/auth/refresh` trả
+> `401 TOKEN_MALFORMED` dù endpoint `permitAll` — hoá ra endpoint chỉ *permitAll trên danh nghĩa*: nó
+> đọc `authenticatedUserId` từ request attribute, attribute đó chỉ set được khi
+> `JwtAuthenticationFilter` parse **thành công** access token từ header. Header thiếu/rác chặn cứng
+> request trước khi chạm refresh token thật — đúng lúc access token hỏng là lúc client cần refresh
+> nhất. Đã sửa bằng reverse lookup `tokenId → userId` (`B107`, `common/security/CLAUDE.md §4.20`) —
+> refresh giờ dùng đúng `{refreshToken, tokenId, deviceId}` như tài liệu đã hứa từ đầu.
 
 > **[`D8c`, 2026-08-06] Account recovery đã implement — nợ #6 nay trả đủ 3/3.** `forgotPassword`,
 > `resetPassword`, `adminUnlockAccount` (+ `PasswordResetTokenService`, `EmailNotificationService`)
