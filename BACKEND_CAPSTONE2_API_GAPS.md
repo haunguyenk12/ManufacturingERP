@@ -264,8 +264,8 @@ OpenAPI phải mô tả rõ permission, trạng thái, reason, stock posting tim
 - [x] Auth refresh rotation và concurrent refresh pass. *(rotation/RTR/absolute timeout ✅ `D8a`/`D8b`; concurrent refresh ✅ **đã sửa 2026-08-05** — advisory lock `SET NX PX` + breadcrumb kết quả rotate, không grace window, xem `CLAUDE.md §0.32`, bất biến `B95`)*
 - [~] Không còn lỗi 500 không có trace trong core happy path. *(3 lỗi được báo đã sửa, xem `CLAUDE.md §0.24`; **chưa** rà toàn bộ endpoint nên không tuyên bố "không còn")*
 - [x] UOM CRUD/lifecycle có OpenAPI và permission. *(`C2-3`, 2026-08-04 — 7 endpoint, `V42`+`V43`)*
-- [ ] Inventory Lot list/detail/status có OpenAPI và business rules. *(`C2-2` — bị chặn, chờ FE trả lời `docs/capstone2-api-gap-response.md §5` câu 2)*
-- [ ] Audit list/detail có OpenAPI. *(`C2-1` — bị chặn, chờ FE trả lời `docs/capstone2-api-gap-response.md §5` câu 1)*
+- [ ] Inventory Lot list/detail/status có OpenAPI và business rules. *(`C2-2` — FE đã trả lời `docs/capstone2-api-gap-response.md §5` câu 2 (2026-08-06), đang làm)*
+- [ ] Audit list/detail có OpenAPI. *(`C2-1` — FE đã trả lời `docs/capstone2-api-gap-response.md §5` câu 1 (2026-08-06), đang làm)*
 - [x] Work Center CRUD/lifecycle có OpenAPI. *(`C2-6`, 2026-08-05 — 7 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.6`)*
 - [x] Shift/Calendar CRUD/lifecycle có OpenAPI. *(`C2-7`, 2026-08-05 — 14 endpoint, xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.7`)*
 - [x] Capacity Board và schedule adjustment có OpenAPI. *(`C2-8` — ✅ hoàn thành 2026-08-05: `GET /plants/{plantId}/capacity-board` + `POST /work-orders/{id}/operations/{id}/schedule-adjustments`, `V48`+`V49`. Xem `FRONTEND_ALIGNMENT_ROADMAP.md §8.7b`, `CLAUDE.md §0.30`)*

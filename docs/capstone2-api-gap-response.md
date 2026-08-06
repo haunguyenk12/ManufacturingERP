@@ -8,8 +8,9 @@
 > `C2-*` (`C2-6` Work Center, `C2-7` Shift/Work Calendar, `C2-8` Capacity Board + schedule adjustment)
 > đã **xong hết** — xem **§8** (section mới). §3 cũng vừa được sửa lại tương ứng. Nợ "concurrent
 > refresh" mà bảng nghiệm thu ở §6.1 của `BACKEND_CAPSTONE2_API_GAPS.md` từng nêu là chưa qua cũng đã
-> đóng — xem **§9**. **Danh sách câu hỏi cần FE trả lời (§5) không đổi** — vẫn đúng 2 câu đang chặn
-> (`§5` câu 1, câu 2) + 1 câu hành chính (câu 5); câu 3, câu 4 đã trả lời từ trước.
+> đóng — xem **§9**. **FE đã trả lời cả 2 câu chặn ở §5** (audit đợt 1 không cần diff, Lot `HOLD` bắt
+> buộc qua QC disposition) — `C2-1` và `C2-2` **đang được triển khai**. Chỉ còn câu 5 (hành chính,
+> snapshot OpenAPI) là chưa có phản hồi.
 
 ---
 
@@ -136,8 +137,8 @@ bộ: roadmap `C2-*`.
 | Đợt | Nội dung | Trạng thái |
 |---|---|---|
 | `C2-0` | Phản hồi này + sửa OpenAPI summary + cập nhật `api-guide-for-frontend.md` | ✅ **xong** (2026-08-04) |
-| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | 🔴 chờ FE trả lời §2.1 |
-| `C2-2` | §3.2 Inventory Lot list/detail/status | 🔴 chờ FE trả lời §2.2(c) |
+| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | FE đã xác nhận (2026-08-06) — đang làm |
+| `C2-2` | §3.2 Inventory Lot list/detail/status | FE đã xác nhận (2026-08-06) — đang làm |
 | `C2-3` | §3.1 UOM master CRUD + lifecycle | ✅ **xong** (2026-08-04) — xem §7 |
 | `C2-4` | §4.3-§4.6: `PATCH /sales-orders/{id}`, Role/Scope lifecycle, `GET /access/assignments`, chốt contract over-BOM, **+ time variance** | ✅ **xong** (2026-08-05) — xem `CLAUDE.md §0.27` |
 | `C2-5` | §5: **CORS cho origin FE**, seed 2 plant + account theo role, **+ sửa lệch RBAC seed** | ✅ **xong** (2026-08-04) — xem §6 |
@@ -323,8 +324,13 @@ Chỉ nêu ở đây để đóng đúng mục 🔴 mà bảng nghiệm thu củ
 
 ## 5. Việc cần FE trả lời để backend chạy tiếp
 
-1. **§2.1** — màn hình Audit dùng được khi `changes[]` rỗng, hay phải chờ diff capture?
-2. **§2.2(c)** — xác nhận màn hình Inventory Lots dẫn người dùng sang QC disposition cho lot `HOLD` chờ QC?
+1. ~~**§2.1** — màn hình Audit dùng được khi `changes[]` rỗng, hay phải chờ diff capture?~~ ✅ **FE xác
+   nhận (2026-08-06):** dùng được đợt 1 (không cần chờ diff capture). `C2-1` không code phase field-level
+   diff (`audit_log_changes`) — chỉ đọc dữ liệu event hiện có.
+2. ~~**§2.2(c)** — xác nhận màn hình Inventory Lots dẫn người dùng sang QC disposition cho lot `HOLD` chờ QC?~~
+   ✅ **FE xác nhận (2026-08-06):** đúng, màn hình Lots bắt buộc dẫn sang QC disposition cho lot `HOLD`
+   sinh từ production receipt. `C2-2` giữ nguyên thiết kế đã mô tả ở §2.2(c): `POST
+   /inventory/lots/{lotId}/status` trả `409 LOT_NOT_ELIGIBLE` cho lot `HOLD` chưa QC.
 3. ~~**CORS** — FE chạy same-origin proxy, hay cần backend whitelist origin?~~ ✅ **Đã giải quyết ở
    `C2-5`** (§6.1) — origin là biến môi trường, các bạn chỉ cần cho biết origin dev/demo thật để set.
 4. ~~**§4.6 over-BOM** — chọn contract nào: (1) Manager có quyền override post trực tiếp kèm

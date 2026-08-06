@@ -26,9 +26,9 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `D8c` vừa xong, đóng nốt track `D8` / nợ #6)* |
-| **Ứng viên kế tiếp** | *(không có — hai phase còn lại đều bị chặn, xem hàng dưới)* |
-| **Bị chặn** | `C2-1`, `C2-2` (chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md §5`) |
+| **Đang chạy** | `C2-1` — Audit Logs read API (FE đã trả lời câu 1/2, xem `docs/capstone2-api-gap-response.md §5`, 2026-08-06) |
+| **Ứng viên kế tiếp** | `C2-2` — Inventory Lot lifecycle API (cũng đã hết chặn, làm ngay sau `C2-1`) |
+| **Bị chặn** | *(không có)* |
 
 ---
 
@@ -41,8 +41,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 3 | ~~Concurrent refresh-token race (mở rộng `D8`)~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.32` |
 | 4 | ~~`P5` — Serial Number Tracking~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.33` |
 | 5 | ~~`P6` — WO Close/Reconcile~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.34` |
-| 6 | `C2-1` — Audit Logs read API | 🔴 Bị chặn — chờ FE câu 1 | Giữ vị trí trong roadmap để không quên |
-| 7 | `C2-2` — Inventory Lot lifecycle API | 🔴 Bị chặn — chờ FE câu 2 | Tương tự |
+| 6 | `C2-1` — Audit Logs read API | ▶️ Đang làm | FE đã trả lời câu 1 (2026-08-06) — dùng được đợt 1, không cần chờ diff |
+| 7 | `C2-2` — Inventory Lot lifecycle API | Không bị chặn — làm sau `C2-1` | FE đã trả lời câu 2 (2026-08-06) — Lot `HOLD` bắt buộc qua QC disposition |
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
@@ -112,15 +112,15 @@ bug thật: `canReserve()` là danh sách phủ định, thiếu loại trừ `C
 
 ---
 
-## 6. `C2-1` — Audit Logs read API 🔴 BỊ CHẶN
+## 6. `C2-1` — Audit Logs read API ▶️ ĐANG LÀM
 
 Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.3`.
 
-**Câu hỏi chặn** (verbatim, `docs/capstone2-api-gap-response.md §5` câu 1): màn hình Audit dùng được
-khi `changes[]` rỗng, hay phải chờ diff capture thật? Nếu FE cần diff thật thì phải mở rộng
-`AuditableAspect` để ghi field-level change (`AuditLogChange` đã tồn tại từ `V6` nhưng **0 call site
-ghi vào nó**) — phạm vi khác hẳn việc chỉ thêm read API. **Không code phase này tới khi có câu trả
-lời.**
+**Câu hỏi chặn đã có trả lời** (`docs/capstone2-api-gap-response.md §5` câu 1, FE trả lời 2026-08-06):
+màn hình Audit dùng được với `changes[]` rỗng — **không** cần chờ diff capture thật. ⇒ Phase này chỉ
+làm read API trên dữ liệu event hiện có; **không** mở rộng `AuditableAspect` để ghi field-level change
+(`AuditLogChange` vẫn tồn tại từ `V6` nhưng tiếp tục **0 call site ghi vào nó** — đó là phạm vi khác,
+chưa xếp lịch).
 
 ### Bẫy đã biết (ghi sẵn để không quên khi tới lượt làm)
 
@@ -135,16 +135,16 @@ lời.**
 
 ---
 
-## 7. `C2-2` — Inventory Lot lifecycle API 🔴 BỊ CHẶN
+## 7. `C2-2` — Inventory Lot lifecycle API Không bị chặn — làm sau `C2-1`
 
 Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.2`.
 
-**Câu hỏi chặn** (câu 2, `docs/capstone2-api-gap-response.md §5`): màn hình Inventory Lots có dẫn
-user sang QC disposition khi lot `HOLD` chờ QC không? Nếu `POST /inventory/lots/{id}/status` cho tự
-do `HOLD → AVAILABLE` thì lot của production receipt ra `AVAILABLE` **không qua QC** ⇒
-`fulfilledQuantity` của SO line không bao giờ tăng ⇒ đơn treo `IN_PROGRESS` vĩnh viễn, **không lỗi
-nào báo** — dựng lại đúng nợ #17 mà `D5` đã trả (`B62`). **Không code phase này tới khi có câu trả
-lời.**
+**Câu hỏi chặn đã có trả lời** (câu 2, `docs/capstone2-api-gap-response.md §5`, FE trả lời 2026-08-06):
+đúng, màn hình Inventory Lots **bắt buộc** dẫn user sang QC disposition khi lot `HOLD` chờ QC. ⇒ Giữ
+nguyên thiết kế đã mô tả: `POST /inventory/lots/{id}/status` **không** cho tự do `HOLD → AVAILABLE`
+cho lot sinh từ production receipt chưa QC — trả `409 LOT_NOT_ELIGIBLE`, FE phải gọi
+`POST /work-orders/{id}/production-receipts/{rid}/qc-disposition`. Tránh dựng lại nợ #17 mà `D5` đã
+trả (`B62`).
 
 ### Bẫy đã biết (ghi sẵn để không quên khi tới lượt làm)
 
@@ -237,8 +237,8 @@ repo). Không migration.
   - [x] `AuthService.forgotPassword`/`resetPassword`/`adminUnlockAccount` — nợ #6 trả đủ 3/3
   - [x] Endpoint `POST /auth/forgot-password`, `POST /auth/reset-password`, `PATCH /admin/users/{id}/unlock`
   - [x] Test (885 case unit + 89 case IT / 13 class IT) + docs
-- [ ] **`C2-1`** — Audit Logs read API *(🔴 chờ FE trả lời câu 1 — không code trước khi có câu trả lời)*
-- [ ] **`C2-2`** — Inventory Lot lifecycle API *(🔴 chờ FE trả lời câu 2 — không code trước khi có câu trả lời)*
+- [ ] **`C2-1`** — Audit Logs read API *(FE đã trả lời câu 1, 2026-08-06 — đang làm)*
+- [ ] **`C2-2`** — Inventory Lot lifecycle API *(FE đã trả lời câu 2, 2026-08-06 — làm sau `C2-1`)*
 
 ---
 
