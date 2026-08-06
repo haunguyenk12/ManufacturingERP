@@ -1,11 +1,12 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`C2-1` — Audit Logs read API** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
-> `CLAUDE.md §0.36`. `GET /audit-logs` + `GET /audit-logs/{id}`, `PERM_AUDIT_READ` ADMIN-only.
-> Migration `V54` (cột `plant_id`, schema-only) + `V55` (seed permission).
+> Phase trước: **`C2-2` — Inventory Lot lifecycle API** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
+> `CLAUDE.md §0.37`. `GET /inventory/lots` + `GET /inventory/lots/{lotId}` +
+> `POST /inventory/lots/{lotId}/status`. HOLD-escape gate qua `LotQcOriginLookupService` (cross-module
+> lookup mới, `inventory → workorder`). Không migration.
 >
-> **898 case unit + 98 case IT / 14 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V55`.
+> **925 case unit + 105 case IT / 14 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất vẫn `V55` (`C2-2` không migration).
 
 ---
 
@@ -27,8 +28,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `C2-1` vừa xong)* |
-| **Ứng viên kế tiếp** | `C2-2` — Inventory Lot lifecycle API (đã hết chặn, xem §7) |
+| **Đang chạy** | *(không có — `C2-2` vừa xong, toàn bộ track `C2-*`/`P*`/`D8` đã đóng)* |
+| **Ứng viên kế tiếp** | *(chưa chốt — xem Phụ lục cho nợ nhỏ còn mở, hoặc hỏi user)* |
 | **Bị chặn** | *(không có)* |
 
 ---
@@ -43,7 +44,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 4 | ~~`P5` — Serial Number Tracking~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.33` |
 | 5 | ~~`P6` — WO Close/Reconcile~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.34` |
 | 6 | ~~`C2-1` — Audit Logs read API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.36` |
-| 7 | `C2-2` — Inventory Lot lifecycle API | Không bị chặn — làm ngay | FE đã trả lời câu 2 (2026-08-06) — Lot `HOLD` bắt buộc qua QC disposition |
+| 7 | ~~`C2-2` — Inventory Lot lifecycle API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.37` |
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
@@ -129,29 +130,20 @@ hardcode `[]`). Phát hiện + sửa biến thể mới của lỗi `lower(bytea
 
 ---
 
-## 7. `C2-2` — Inventory Lot lifecycle API Không bị chặn — làm sau `C2-1`
+## 7. `C2-2` — Inventory Lot lifecycle API ✅ ĐÃ XONG (2026-08-06)
 
-Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.2`.
+Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.2`. FE xác nhận (`docs/capstone2-api-gap-response.md §5`
+câu 2, 2026-08-06): màn hình Inventory Lots bắt buộc dẫn user sang QC disposition khi lot `HOLD` chờ
+QC — giữ nguyên thiết kế đã mô tả. 3 endpoint: `GET /inventory/lots`, `GET /inventory/lots/{lotId}`,
+`POST /inventory/lots/{lotId}/status`. **Không migration.**
 
-**Câu hỏi chặn đã có trả lời** (câu 2, `docs/capstone2-api-gap-response.md §5`, FE trả lời 2026-08-06):
-đúng, màn hình Inventory Lots **bắt buộc** dẫn user sang QC disposition khi lot `HOLD` chờ QC. ⇒ Giữ
-nguyên thiết kế đã mô tả: `POST /inventory/lots/{id}/status` **không** cho tự do `HOLD → AVAILABLE`
-cho lot sinh từ production receipt chưa QC — trả `409 LOT_NOT_ELIGIBLE`, FE phải gọi
-`POST /work-orders/{id}/production-receipts/{rid}/qc-disposition`. Tránh dựng lại nợ #17 mà `D5` đã
-trả (`B62`).
-
-### Bẫy đã biết (ghi sẵn để không quên khi tới lượt làm)
-
-`InventoryLot` **không có** warehouse, **không có** manufacture date (đã đọc entity xác nhận —
-chỉ có `lotId`, `item`, `lotCode`, `status`, `receivedAt`, `expiresAt`). `warehouseId` bắt buộc phải
-resolve qua `stock_balances` (tái dùng `StockBalanceRepository.aggregate*`, rule C14), **không**
-thêm cột `warehouseId` lên `InventoryLot`. `manufactureDate` map từ `receivedAt` (alias, đúng pattern
-`bomCapturedAt` của `F8`) — đừng thêm cột cho giống tài liệu literal.
-
-### Khung endpoint đã biết (chưa code)
-
-`GET /inventory/lots?warehouseId=&itemId=&status=&search=&expiryFrom=&expiryTo=&page=&size=`,
-`GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`.
+Quyết định chốt với user (`AskUserQuestion`): HOLD-escape gate dùng **cross-module lookup thật**
+(`LotQcOriginLookupService` mới trong `module/workorder`, kiểm `ProductionReceiptLine` tồn tại **và**
+`QualityDisposition` chưa tồn tại), không phải heuristic cùng-module suy từ `referenceType` — heuristic
+có lỗ hổng thật với lot đã QC rồi bị đưa lại `HOLD` thủ công. Hướng phụ thuộc mới `inventory →
+workorder`, hợp lệ theo rule C7. `InventoryMovementService.changeLotStatus` (đã có từ `F2`) không đổi
+gì — gate nằm ở tầng gọi mới, luồng QC disposition hiện có không bị ảnh hưởng. Bản ghi đầy đủ (bất
+biến `B102`-`B106`, breaking changes): `CLAUDE.md §0.37`.
 
 ---
 
@@ -238,7 +230,12 @@ repo). Không migration.
   - [x] Endpoint `GET /audit-logs` + `GET /audit-logs/{id}` — migration `V54`+`V55`
   - [x] Phát hiện + sửa biến thể mới của lỗi `lower(bytea)` (`Instant` bare `IS NULL`)
   - [x] Test (898 case unit + 98 case IT / 14 class IT) + docs
-- [ ] **`C2-2`** — Inventory Lot lifecycle API *(FE đã trả lời câu 2, 2026-08-06 — làm ngay sau `C2-1`)*
+- [x] **`C2-2`** — Inventory Lot lifecycle API ✅ **2026-08-06**
+  - [x] Quyết định cơ chế HOLD-escape gate — chốt với user: cross-module lookup thật, không heuristic
+  - [x] `LotQcOriginLookupService` (mới, `module/workorder`) — entry point cross-module `inventory → workorder`
+  - [x] `InventoryLotService` (list/get/changeStatus) — reuse `InventoryMovementService.changeLotStatus`
+  - [x] Endpoint `GET /inventory/lots` + `GET /inventory/lots/{lotId}` + `POST .../status` — không migration
+  - [x] Test (925 case unit + 105 case IT / 14 class IT) + docs
 
 ---
 

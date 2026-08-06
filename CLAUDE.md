@@ -64,16 +64,17 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — `C2-1` vừa xong)* |
-| **Phase trước** | **`C2-1` – Audit Logs read API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /audit-logs`, `GET /audit-logs/{id}` (đợt 1, `changes[]` luôn rỗng — FE đã xác nhận dùng được). `AuditLogQueryService`/`AuditLogController` mới trong `common/audit/` (tách khỏi `AuditLogService`, service đó chỉ publish). `PERM_AUDIT_READ` **ADMIN-only** (chốt với user). Migration `V54` (cột `plant_id`, chỉ dừng ở schema — **không** populate real-time, quyết định phạm vi có chủ đích) + `V55` (seed permission). 🔴 Phát hiện biến thể mới của lớp lỗi `lower(bytea)` (`§0.24`): tham số `Instant` chỉ xuất hiện ở vế `IS NULL` làm Postgres không suy được type — sửa bằng `cast(:from as timestamp) IS NULL`, cùng công thức `cast(... as string)` đã dùng cho String, lần đầu áp dụng cho `Instant`. Bản ghi: **§0.36** |
-| **Phase trước đó** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). Trả nốt 3/3 nợ #6. Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
+| **Phase đang chạy** | *(không có — `C2-2` vừa xong)* |
+| **Phase trước** | **`C2-2` – Inventory Lot lifecycle API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`. Lot `HOLD` sinh từ Production Receipt chưa QC **không** thoát được qua endpoint này — chặn bằng `LotQcOriginLookupService` (`module/workorder`, entry point cross-module mới theo `C7`), không phải heuristic cùng-module (có lỗ hổng thật với lot đã QC rồi bị đưa lại `HOLD` thủ công — chốt với user qua `AskUserQuestion`). Không migration. Bất biến `B102`-`B106`. Bản ghi: **§0.37** |
+| **Phase trước đó** | **`C2-1` – Audit Logs read API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /audit-logs`, `GET /audit-logs/{id}`. `PERM_AUDIT_READ` ADMIN-only. Migration `V54`+`V55`. Bản ghi: **§0.36** |
+| **Phase `D8c`** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). Trả nốt 3/3 nợ #6. Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
-| **Phase kế tiếp** | `C2-2` — Inventory Lot lifecycle API, làm ngay sau `C2-1`. Track `P*` và `D8` đã đóng hết (nợ #6 trả đủ 3/3). Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
-| **Migration mới nhất** | **`V53__add_work_order_closed_status.sql`** (`P6`) — thêm `CLOSED` vào `chk_work_orders_status` + cột `work_orders.closed_at`. `D8c` **không có migration** (thuần Redis) |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → **`C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
-| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
+| **Phase kế tiếp** | *(chưa chốt)* — track `C2-*`, `P*`, `D8` đều đã đóng hết. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
+| **Migration mới nhất** | **`V55__seed_audit_permission.sql`** (`C2-1`). `C2-2` **không có migration** (pure read/write API trên dữ liệu đã tồn tại) |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → **`C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có (`searchLots`+`findByLotLotId`, **không** thêm class IT mới — vẫn 14) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`), `§0.37` (`C2-2`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đã đóng hết, `C2-1`+`C2-2` xong 2026-08-06): cùng file §8** — bảng phase §8.1, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (roadmap) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
 > **ngược từ frontend đã implement**, nên field name + business rule là phần cố định, tên endpoint
@@ -1898,6 +1899,76 @@ repository `*IT` (8 case, mỗi filter riêng + kết hợp), `FlywayMigrationIT
 **Breaking changes — wire: KHÔNG có** (thuần additive: 2 endpoint mới, 1 permission mới, 1 cột mới
 trên `audit_logs`). **Java positional: không có** — chỉ thêm field/method mới, không đổi constructor
 nào có sẵn.
+
+---
+
+### 0.37 C2-2 – Inventory Lot Lifecycle API (ĐÃ HOÀN THÀNH 2026-08-06)
+
+Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.2`. FE xác nhận (`docs/capstone2-api-gap-response.md §5`
+câu 2, 2026-08-06): màn hình Inventory Lots bắt buộc dẫn user sang QC disposition khi lot `HOLD` chờ
+QC — giữ nguyên thiết kế đã mô tả từ trước (`NEXT_PHASE_PLAN.md §7`). **Không migration** — module
+mới chỉ là read/write API trên dữ liệu `InventoryLot`/`StockBalance`/`StockMovement` đã tồn tại từ
+trước, không thêm cột/bảng nào.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status` | `module/inventory/controller/InventoryLotController.java` (mới) |
+| `InventoryLotService` (list/get/changeStatus) — reuse `InventoryMovementService.changeLotStatus` (đã có từ `F2`) | `module/inventory/service/` |
+| `LotQcOriginLookupService` — entry point cross-module mới, `inventory → workorder` | `module/workorder/service/query/` (mới) |
+| `InventoryPermissionGuard.hasLotAccess` — resolve `lot → item → company`, mirror `hasItemAccess` | `module/inventory/service/InventoryPermissionGuard.java` |
+| `AuditAction.INVENTORY_LOT_STATUS_CHANGED` (mới) | `common/audit/AuditAction.java` |
+
+**Quyết định chốt với user (`AskUserQuestion`) trước khi viết code:** cơ chế phát hiện "lot này có
+phải qua QC trước khi thoát `HOLD` không" là **cross-module lookup thật** (`LotQcOriginLookupService`,
+kiểm `ProductionReceiptLine` tồn tại **và** `QualityDisposition` chưa tồn tại cho lot đó), **không**
+phải heuristic cùng-module (suy nguồn gốc từ `referenceType` của `RECEIVE` movement sớm nhất). Lý do:
+heuristic có lỗ hổng thật — một lot đã QC hợp lệ một lần (thoát `HOLD`) rồi bị đưa lại `HOLD` thủ công
+qua chính endpoint mới này sẽ bị heuristic chặn **vĩnh viễn** khỏi thoát `HOLD` lần nữa, vì nó không
+biết QC đã từng xảy ra. Cross-module lookup không có lỗ hổng đó.
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Hướng phụ thuộc mới `inventory → workorder`** — ngược với phần lớn quan hệ hiện có (`workorder`
+   thường gọi **vào** `inventory`, vd `MaterialIssueService` → `InventoryMovementService`). Hợp lệ
+   theo rule `C7` (đi qua lookup service, không phải repository), cùng tiền lệ `planning →
+   purchasing` (`D4`) và `planning → routing` (`F5-B`). Chi tiết đầy đủ: `module/inventory/CLAUDE.md`
+   B102-B103, `module/workorder/CLAUDE.md` "Entry point cho module khác".
+2. **`InventoryMovementService.changeLotStatus` (đã có từ `F2`) không đổi một dòng nào.** Gate mới
+   nằm ở tầng gọi (`InventoryLotService.changeStatus`, method mới), chạy **trước khi** delegate xuống
+   — nhờ vậy luồng QC disposition hiện có (`ProductionReceiptService.dispositionLots`, cũng là một
+   cách hợp lệ để thoát `HOLD`) hoàn toàn không bị ảnh hưởng, không cần sửa test nào của nó.
+3. **Một lot có thể tồn tại ở nhiều warehouse** — `uk_stock_balances_item_warehouse_lot` unique theo
+   `(item, warehouse, lot)`, không phải `(item, lot)`. `GET /inventory/lots` **bắt buộc**
+   `warehouseId` (đúng tiền lệ `/inventory/balances`/`/inventory/movements`); `GET
+   /inventory/lots/{lotId}` không nêu warehouse, trả `balances[]` — mảng theo từng kho.
+4. **`InventoryLot` không thêm cột nào** — `manufactureDate` trên response là alias của `receivedAt`
+   (đúng pattern `bomCapturedAt` của `F8`); `warehouseId` luôn resolve qua `StockBalance` (rule C14).
+5. `POST /inventory/lots/{lotId}/status` chỉ nhận target ∈ {`AVAILABLE`, `HOLD`, `REJECTED`} —
+   `EXPIRED` bị từ chối (`OPERATION_NOT_ALLOWED`, 422), chưa có luồng chuyển-tay-sang-`EXPIRED` nào
+   đã xác lập trong repo (`coding-rules.md §11.5`, tránh code speculative).
+6. **Không permission mới** — tái dùng `PERM_INVENTORY_READ` (list, get) và `PERM_INVENTORY_MOVE`
+   (changeStatus, cùng quyền gác `receive`/`issue`/`adjust`). Không migration seed, không đụng
+   `docs/roles-and-permissions.md` (`coding-rules.md C10` chỉ bắt buộc khi có permission **mới**).
+7. `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` trên response lot lấy từ
+   `RECEIVE` `StockMovement` **sớm nhất** của lot — thuần trong `module/inventory`, chỉ phục vụ hiển
+   thị "nguồn gốc" cho FE, **không** dùng để quyết định gate thoát `HOLD` (đó là lý do quyết định #1
+   ở trên tồn tại — cùng loại tín hiệu này KHÔNG đủ chính xác cho việc gác cổng).
+
+**Nghiệm thu:** `mvn -o clean verify` — **925 case unit + 105 case IT / 14 class IT, failures = 0,
+errors = 0** (baseline trước phase: 898 unit + 98 IT / 14 class — `+27` unit
+(`InventoryLotServiceTest` 9 + `LotQcOriginLookupServiceTest` 3 + `InventoryLotMethodSecurityTest` 6 +
+`InventoryLotControllerTest` 7 + `InventoryPermissionGuardTest` +2), `+7` IT trong
+`StockBalanceRepositoryIT` đã có (`searchLots` 6 case + `findByLotLotId` 1 case) — **không** thêm
+class IT mới, vẫn 14; xem hàng "Baseline test" §0.1). Không nghiệm thu mutation riêng — bù lại bằng
+test ở mọi tầng: service (HOLD-gate cả ba nhánh: blocked/allowed/never-consulted, EXPIRED rejected
+trước khi chạm bất cứ thứ gì), lookup service riêng (4 case, cả hai boolean), method-security
+(deny+allow cho cả `PERM_INVENTORY_READ` lẫn `PERM_INVENTORY_MOVE`), controller (envelope, 400 type-
+mismatch, 404), repository `*IT` (7 case mới: mỗi filter riêng + kết hợp + multi-warehouse lot).
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 3 endpoint mới, không đổi DTO/permission có
+sẵn). **Java positional: có** — `InventoryPermissionGuard` constructor +1 tham số
+(`InventoryLotRepository`). Test cũ dựng `InventoryPermissionGuard` đã **sửa** theo `R10`
+(`InventoryPermissionGuardTest`).
 
 ---
 

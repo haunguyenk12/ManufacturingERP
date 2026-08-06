@@ -950,6 +950,35 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > **`action` là enum `AuditAction`** (danh sách đầy đủ: xem `@Tag "Audit Logs"` trong Swagger) — gửi
 > giá trị không hợp lệ trả `400 VALIDATION_ERROR`, không phải mảng rỗng.
 
+### Inventory Lots *(`C2-2`, 2026-08-06)*
+
+| Việc | Endpoint |
+|---|---|
+| Danh sách lot trong một kho | `GET /inventory/lots?warehouseId=&itemId=&status=&search=&expiryFrom=&expiryTo=&page=&size=&sortBy=&sortDir=` (`warehouseId` **bắt buộc**, mọi filter khác tuỳ chọn) |
+| Chi tiết một lot — số lượng theo **từng kho** | `GET /inventory/lots/{lotId}` |
+| Đổi trạng thái lot (`AVAILABLE`/`HOLD`/`REJECTED`) | `POST /inventory/lots/{lotId}/status` — body `{warehouseId, newStatus, reason, referenceType?, referenceId?}`, header `Idempotency-Key` tuỳ chọn |
+
+> 🔴 **Một lot có thể có hàng ở nhiều kho** — bảng `stock_balances` unique theo `(item, warehouse,
+> lot)`, không phải `(item, lot)`. Vì vậy list bắt buộc `warehouseId` (giống `/inventory/balances`),
+> còn detail không nêu kho — trả `balances[]`, mỗi phần tử một kho, thay vì đoán một kho duy nhất.
+>
+> 🔴 **`POST .../status` không cho lot `HOLD` từ Production Receipt tự do thoát `HOLD`.** Nếu lot
+> đang `HOLD` vì vừa được sản xuất ra và chưa qua QC, gọi endpoint này với `newStatus` khác `HOLD` sẽ
+> trả `409 LOT_NOT_ELIGIBLE` — phải gọi
+> `POST /work-orders/{id}/production-receipts/{rid}/qc-disposition` (đã có từ `F2`) thay vào đó. Lot
+> đã qua QC một lần rồi (dù sau đó bị đưa lại `HOLD` thủ công qua chính endpoint này) thì **không**
+> bị chặn nữa — hệ thống nhớ đúng "lot này đã từng được QC chưa", không chỉ "lot này có phải hàng sản
+> xuất không".
+>
+> `newStatus` chỉ nhận `AVAILABLE`/`HOLD`/`REJECTED` — gửi `EXPIRED` trả `422
+> OPERATION_NOT_ALLOWED` (chưa có luồng nghiệp vụ nào chuyển tay sang `EXPIRED`).
+>
+> `manufactureDate` trên response là alias của ngày nhận hàng (`receivedAt`), không phải cột riêng.
+> `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` cho biết lot này sinh ra
+> từ đâu (vd `referenceType="WORK_ORDER"` + `referenceId` là `workOrderId` nếu sinh từ production
+> receipt, `referenceType="GOODS_RECEIPT"` nếu nhận từ PO) — có thể `null` nếu không tìm thấy movement
+> `RECEIVE` gốc.
+
 ---
 
 ## 6. Tham chiếu DTO

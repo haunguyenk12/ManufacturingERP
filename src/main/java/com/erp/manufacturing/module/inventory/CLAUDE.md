@@ -78,3 +78,40 @@
 > **Nợ đã trả kèm ở `V26`:** `chk_stock_movements_type` (V8) chưa bao giờ liệt kê `REVERSAL`, dù
 > `reverseReceive()` đã sinh loại movement này từ lúc có tính năng cancel goods receipt ⇒ mọi lần
 > cancel sẽ bị DB từ chối. `V26` vá luôn vì phải `DROP/ADD` đúng constraint đó.
+
+## Bất Biến Lot Lifecycle API (C2-2, 2026-08-06)
+
+Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.2`. **Không migration** — module mới chỉ là read/write API
+trên dữ liệu `InventoryLot`/`StockBalance`/`StockMovement` đã tồn tại. 3 endpoint mới:
+`GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`
+(`module/inventory/controller/InventoryLotController.java`).
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B102 | 🔴 **`POST /inventory/lots/{lotId}/status` không cho lot `HOLD` sinh từ Production Receipt chưa QC tự do thoát `HOLD`** — FE xác nhận (`docs/capstone2-api-gap-response.md §5` câu 2, 2026-08-06). Tín hiệu đúng **không** nằm trong `module/inventory` một mình: heuristic cùng-module (suy nguồn gốc từ `referenceType` của `RECEIVE` movement sớm nhất) có lỗ hổng thật — lot đã QC hợp lệ một lần (thoát `HOLD`) rồi bị thủ công đưa lại `HOLD` qua **chính** endpoint này sẽ bị chặn vĩnh viễn, vì heuristic không biết QC đã từng xảy ra. Đóng bằng lookup cross-module thật (xem B103) | `InventoryLotServiceTest.changeStatus_holdEscapeBlockedWhenQcRequired`, `.changeStatus_holdEscapeAllowedWhenQcNotRequired`, `.changeStatus_intoHold_neverConsultsQcLookup` |
+| B103 | Gate ở B102 gọi `LotQcOriginLookupService.requiresQcDispositionBeforeRelease(lotId)` (`module/workorder/service/query/`, entry point cross-module theo `C7`) — **chỉ** đúng khi lot có dòng `ProductionReceiptLine` tham chiếu **và** chưa từng có `QualityDisposition`. Gate **chỉ** được gọi khi `current == HOLD && target != HOLD` — mọi chuyển **vào** `HOLD`, hoặc chuyển trạng thái của lot chưa từng qua sản xuất, không consult lookup này | `LotQcOriginLookupServiceTest` (4 case, cả 2 boolean) |
+| B104 | `InventoryMovementService.changeLotStatus` (đã có từ `F2`) **không đổi một dòng nào** — gate B102 nằm ở tầng gọi (`InventoryLotService`, method mới), gọi **trước khi** delegate xuống. Nhờ vậy luồng QC disposition hiện có (`ProductionReceiptService.dispositionLots`, cũng là một cách hợp lệ để thoát `HOLD`) hoàn toàn không bị ảnh hưởng | Không có test regression nào đỏ trong `ProductionReceiptServiceTest`/`ProductionFlowE2EIT` sau phase này — bằng chứng bằng cách không đổi |
+| B105 | Một lot có thể tồn tại ở **nhiều warehouse** (`uk_stock_balances_item_warehouse_lot` unique theo `(item, warehouse, lot)`, không phải `(item, lot)`) — `GET /inventory/lots` **bắt buộc** `warehouseId` (đúng tiền lệ `/inventory/balances`/`/inventory/movements`); `GET /inventory/lots/{lotId}` không nêu warehouse, trả `balances[]` — mảng theo từng kho, không đoán một kho duy nhất | `StockBalanceRepositoryIT.findByLotLotId_returnsAllWarehouseRowsForALotThatSpansTwoWarehouses`, `InventoryLotServiceTest.get_returnsRealBalancesAcrossWarehouses` |
+| B106 | `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` trên response lot lấy từ `RECEIVE` `StockMovement` **sớm nhất** của lot (`StockMovementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc`) — thuần trong `module/inventory`, không cần cross-module. Đây **chỉ** phục vụ hiển thị "nguồn gốc" cho FE; **không** dùng để quyết định gate B102 (xem lý do ở B102) | `InventoryLotServiceTest.list_mapsRowsAndResolvesOrigin` |
+
+**Quyết định cần nhớ:**
+
+1. 🔴 **Hướng phụ thuộc mới `inventory → workorder`** (qua `LotQcOriginLookupService`, một lookup
+   service — không phải repository, đúng rule `C7`). Đây là hướng **ngược** với phần lớn quan hệ
+   hiện có trong repo (`workorder` thường gọi **vào** `inventory`, ví dụ `MaterialIssueService` →
+   `InventoryMovementService`) — hợp lệ vì `C7` không cấm hướng, chỉ cấm gọi thẳng repository của
+   module khác. Cùng tiền lệ `planning → purchasing` (`D4`) và `planning → routing` (`F5-B`): mỗi
+   hướng mới đều đi qua đúng một lookup service hẹp, không mở rộng bề mặt hơn cần thiết.
+2. **`InventoryLot`/`manufactureDate`/`warehouseId` không có cột mới** — `manufactureDate` trên
+   response là alias của `receivedAt` (đúng pattern `bomCapturedAt` của `F8`); `warehouseId` luôn
+   resolve qua `StockBalance` (B105), không thêm cột lên `InventoryLot`.
+3. `POST /inventory/lots/{lotId}/status` chỉ nhận target ∈ {`AVAILABLE`, `HOLD`, `REJECTED`} —
+   `EXPIRED` bị từ chối (`OPERATION_NOT_ALLOWED`, 422) vì chưa có luồng chuyển-tay-sang-`EXPIRED`
+   nào đã xác lập trong repo (`coding-rules.md §11.5`, tránh code speculative).
+4. Permission tái dùng nguyên vẹn: `PERM_INVENTORY_READ` (list, get — get qua
+   `InventoryPermissionGuard.hasLotAccess`, resolve `lot → item → company`, mirror `hasItemAccess`),
+   `PERM_INVENTORY_MOVE` (changeStatus — cùng quyền gác `receive`/`issue`/`adjust`). **Không**
+   permission mới ⇒ không migration seed, không đụng `docs/roles-and-permissions.md`.
+5. `@Auditable(action = AuditAction.INVENTORY_LOT_STATUS_CHANGED, ...)` là action **mới**, tách khỏi
+   `QC_DISPOSITION_RECORDED` — hai hành động khác nhau dù cùng đổi `lot.status`: một cái đi qua QC,
+   một cái là thao tác kho thủ công.

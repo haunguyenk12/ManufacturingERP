@@ -9,8 +9,8 @@
 > đã **xong hết** — xem **§8** (section mới). §3 cũng vừa được sửa lại tương ứng. Nợ "concurrent
 > refresh" mà bảng nghiệm thu ở §6.1 của `BACKEND_CAPSTONE2_API_GAPS.md` từng nêu là chưa qua cũng đã
 > đóng — xem **§9**. **FE đã trả lời cả 2 câu chặn ở §5** (audit đợt 1 không cần diff, Lot `HOLD` bắt
-> buộc qua QC disposition). `C2-1` **đã xong** — xem **§10**. `C2-2` đang làm tiếp theo. Chỉ còn câu 5
-> (hành chính, snapshot OpenAPI) là chưa có phản hồi.
+> buộc qua QC disposition). `C2-1` **đã xong** — xem **§10**. `C2-2` **đã xong** — xem **§11**. Chỉ
+> còn câu 5 (hành chính, snapshot OpenAPI) là chưa có phản hồi.
 
 ---
 
@@ -141,7 +141,7 @@ bộ: roadmap `C2-*`.
 |---|---|---|
 | `C2-0` | Phản hồi này + sửa OpenAPI summary + cập nhật `api-guide-for-frontend.md` | ✅ **xong** (2026-08-04) |
 | `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | ✅ **xong** (2026-08-06) — xem §10 |
-| `C2-2` | §3.2 Inventory Lot list/detail/status | FE đã xác nhận (2026-08-06) — đang làm |
+| `C2-2` | §3.2 Inventory Lot list/detail/status | ✅ **xong** (2026-08-06) — xem §11 |
 | `C2-3` | §3.1 UOM master CRUD + lifecycle | ✅ **xong** (2026-08-04) — xem §7 |
 | `C2-4` | §4.3-§4.6: `PATCH /sales-orders/{id}`, Role/Scope lifecycle, `GET /access/assignments`, chốt contract over-BOM, **+ time variance** | ✅ **xong** (2026-08-05) — xem `CLAUDE.md §0.27` |
 | `C2-5` | §5: **CORS cho origin FE**, seed 2 plant + account theo role, **+ sửa lệch RBAC seed** | ✅ **xong** (2026-08-04) — xem §6 |
@@ -149,8 +149,8 @@ bộ: roadmap `C2-*`.
 | `C2-7` | §3.5 Shift + Work Calendar CRUD + lifecycle | ✅ **xong** (2026-08-05) — xem §8 |
 | `C2-8` | §3.6 Capacity Board + schedule adjustment | ✅ **xong** (2026-08-05) — xem §8 |
 
-⇒ **Toàn bộ track `C2-*` đã đóng**, chỉ còn `C2-1`/`C2-2` đang chờ hai câu trả lời ở §2 (lặp lại ở §5
-để dễ tìm). Không còn hạng mục nào trong `C2-*` đang "chưa bắt đầu".
+⇒ **Toàn bộ track `C2-*` đã đóng**, kể cả `C2-1` và `C2-2` (cả hai từng chờ câu trả lời ở §2, FE đã
+trả lời 2026-08-06). Không còn hạng mục nào trong `C2-*` đang "chưa bắt đầu" hoặc "đang làm".
 
 ✅ **Về CORS (đã xong, không cần theo dõi nữa):** lúc viết bản 2026-08-04, backend chưa có dòng cấu
 hình CORS nào. Đã đóng ở `C2-5` (§6.1) — origin whitelist qua biến môi trường `CORS_ALLOWED_ORIGINS`.
@@ -345,6 +345,34 @@ Chỉ nêu ở đây để đóng đúng mục 🔴 mà bảng nghiệm thu củ
    có code nào ghi giá trị thật vào đó lúc audit log được tạo. Đóng nốt việc này là phase riêng, chưa
    xếp lịch. Nếu màn hình Audit của các bạn có bộ lọc theo plant, tạm thời nó sẽ luôn trả danh sách
    rỗng — không phải bug phía các bạn.
+
+---
+
+## 11. `C2-2` đã xong (2026-08-06) — Inventory Lot lifecycle API
+
+§3.2, đúng thiết kế đã mô tả ở §2.2(c) — **không có gì đổi** so với những gì đã hứa: lot `HOLD` sinh từ
+Production Receipt vẫn phải qua QC disposition, không có đường tắt nào mới. Field list đầy đủ:
+`docs/api-guide-for-frontend.md` mục "Inventory Lots".
+
+| Việc | Endpoint |
+|---|---|
+| Danh sách lot trong một kho | `GET /inventory/lots?warehouseId=&itemId=&status=&search=&expiryFrom=&expiryTo=&page=&size=` |
+| Chi tiết một lot | `GET /inventory/lots/{lotId}` |
+| Đổi trạng thái | `POST /inventory/lots/{lotId}/status` |
+
+**Ba điều cần biết trước khi code UI:**
+
+1. **`warehouseId` bắt buộc cho danh sách, không bắt buộc cho chi tiết.** Một lot có thể có hàng ở
+   nhiều kho (đúng schema DB, không phải giả định) — danh sách luôn scope theo một kho (giống
+   `/inventory/balances`), còn chi tiết trả `balances[]` — mảng, mỗi phần tử một kho.
+2. **`POST .../status` giữ nguyên rule đã hứa: lot `HOLD` chưa qua QC trả `409 LOT_NOT_ELIGIBLE`.**
+   Nhưng có một tinh chỉnh quan trọng các bạn nên biết: nếu một lot **đã** qua QC một lần (dù sau đó
+   bị đưa lại `HOLD` bằng tay qua chính endpoint này, ví dụ để cách ly tạm thời), nó **không** bị chặn
+   nữa — hệ thống nhớ đúng lịch sử QC, không chỉ nhìn "lot này có nguồn gốc sản xuất không". Nếu màn
+   hình của các bạn cho phép thao tác "tạm giữ" một lot đã bán được rồi thả lại, hành vi này sẽ đúng
+   như mong đợi.
+3. **`newStatus` chỉ nhận `AVAILABLE`/`HOLD`/`REJECTED`** — gửi `EXPIRED` trả `422
+   OPERATION_NOT_ALLOWED` (chưa có nghiệp vụ nào chuyển tay sang hết hạn).
 
 ---
 

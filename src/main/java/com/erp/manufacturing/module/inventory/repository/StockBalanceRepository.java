@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,51 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
     Page<StockBalance> findByWarehouseWarehouseId(UUID warehouseId, Pageable pageable);
 
     Page<StockBalance> findByWarehouseWarehouseIdAndItemItemId(UUID warehouseId, UUID itemId, Pageable pageable);
+
+    /**
+     * All warehouse rows for one lot (C2-2). {@code uk_stock_balances_item_warehouse_lot} is unique
+     * per {@code (item, warehouse, lot)}, not per {@code (item, lot)} — a lot can legitimately have
+     * stock in more than one warehouse, so this returns a list, not an {@code Optional}.
+     */
+    List<StockBalance> findByLotLotId(UUID lotId);
+
+    /**
+     * Lot list/search (C2-2). {@code warehouseId} is required — same convention as
+     * {@link #findByWarehouseWarehouseId} and every other endpoint in this module that reads
+     * {@code stock_balances}. {@code l is not null} excludes non-lot-tracked balances, which have
+     * nothing to list here. {@code join fetch} on {@code lot}/{@code item}/{@code warehouse} is safe
+     * with pagination because all three are {@code @ManyToOne} (to-one), not collections (rule C13).
+     * <p>
+     * {@code cast(:search as string)} / {@code cast(:expiryFrom as timestamp)} /
+     * {@code cast(:expiryTo as timestamp)} are mandatory, not defensive — a bare nullable
+     * {@code String} inside {@code lower(... || ... || ...)} makes Postgres pick the {@code bytea}
+     * overload of {@code ||} and fail at parse time ({@code lower(bytea)}, {@code CLAUDE.md §0.24}),
+     * and a bare {@code Instant} that only appears in an {@code IS NULL} check has no other type
+     * context to infer from ({@code CLAUDE.md §0.36}). Both fail the *entire* query, not just the
+     * filter, whenever the parameter is {@code null} — which is the common case here.
+     */
+    @Query("""
+            select b
+            from StockBalance b
+            join fetch b.lot l
+            join fetch b.item i
+            join fetch b.warehouse w
+            where b.warehouse.warehouseId = :warehouseId
+              and l is not null
+              and (:itemId is null or i.itemId = :itemId)
+              and (:status is null or l.status = :status)
+              and (cast(:search as string) is null
+                   or lower(l.lotCode) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:expiryFrom as timestamp) is null or l.expiresAt >= :expiryFrom)
+              and (cast(:expiryTo as timestamp) is null or l.expiresAt <= :expiryTo)
+            """)
+    Page<StockBalance> searchLots(@Param("warehouseId") UUID warehouseId,
+                                  @Param("itemId") UUID itemId,
+                                  @Param("status") LotStatus status,
+                                  @Param("search") String search,
+                                  @Param("expiryFrom") Instant expiryFrom,
+                                  @Param("expiryTo") Instant expiryTo,
+                                  Pageable pageable);
 
     /**
      * Issuable balances of one item across a set of warehouses, in FEFO order — earliest expiry

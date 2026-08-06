@@ -33,6 +33,18 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, UU
     Page<StockMovement> findByWarehouseWarehouseIdAndItemItemIdAndLotLotId(
             UUID warehouseId, UUID itemId, UUID lotId, Pageable pageable);
 
+    /**
+     * The earliest {@code RECEIVE} movement for a lot is treated as its origin (C2-2) — used to
+     * surface {@code sourceMovementType}/{@code sourceReferenceType}/{@code sourceReferenceId} on the
+     * lot detail/list response. Display-only: this does <b>not</b> back the HOLD-escape gate on
+     * {@code POST /inventory/lots/{lotId}/status}, which uses
+     * {@code LotQcOriginLookupService} instead (module/workorder/CLAUDE.md) because a
+     * {@code referenceType} heuristic alone cannot tell a lot that was already properly QC'd once
+     * apart from one that never went through QC.
+     */
+    Optional<StockMovement> findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+            UUID lotId, MovementType movementType);
+
     @Query("""
             select m
             from StockMovement m

@@ -16,6 +16,14 @@ public interface ProductionReceiptLineRepository extends JpaRepository<Productio
     @EntityGraph(attributePaths = {"receipt", "item", "warehouse", "lot", "stockMovement"})
     List<ProductionReceiptLine> findByReceiptReceiptIdIn(Collection<UUID> receiptIds);
 
+    /**
+     * Whether a lot was produced by (at least) one production receipt line — used by
+     * {@code LotQcOriginLookupService} (C2-2) to decide if a lot stuck at {@code HOLD} must go
+     * through QC disposition before {@code module/inventory}'s generic status-change endpoint may
+     * release it.
+     */
+    boolean existsByLotLotId(UUID lotId);
+
     @Query("""
             select coalesce(sum(l.quantity), 0)
             from ProductionReceiptLine l

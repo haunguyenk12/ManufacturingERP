@@ -81,6 +81,19 @@ cộng `CANCELLED` (chưa dùng). `POSTED` **đã bị đổi tên** thành `APP
 | B40 | **[D5 – tách đôi]** QC áp dụng cho **mọi** output; điều kiện rẽ nhánh là **cấp dòng** (`line.lot != null`), **không** phải cờ `item.lotTracked`. **Có lot** ⇒ mọi lot phải đang ở `HOLD`, validate **toàn bộ** lot trước khi đổi lot đầu tiên ⇒ không tồn tại receipt bị QC dở dang (nguyên văn cũ, **giữ nguyên**). **Không lot** ⇒ phán quyết ghi trên **receipt** (`qc_result`/`qc_reason`/`qc_at`/`qc_by`), **không** sinh `LOT_STATUS_CHANGE`, **không** ghi dòng `quality_dispositions` | `ProductionReceiptServiceTest.qcDisposition_lotNoLongerOnHold_shouldThrowLotNotEligibleBeforeAnyChange`, `.qcDisposition_available_onOutputWithoutALot_fulfilsWithoutTouchingLotsOrStock`, `.qcDisposition_onOutputWithoutALot_*` (3 case B38) |
 | B41 | Receipt của item lot-tracked **bắt buộc** có `lotCode`/`lotId` ngay ở bước `post` (`LOT_REQUIRED`, 400) — không có lot thì output không bao giờ ra khỏi `HOLD` được | `ProductionReceiptServiceTest.post_lotTrackedOutputWithoutLot_shouldThrowLotRequired` |
 
+### Entry point cho module khác (`C2-2`, 2026-08-06)
+
+`LotQcOriginLookupService` (`service/query/`) là **cách duy nhất** module khác đọc "lot này có phải
+QC trước khi thoát `HOLD` không" — `module/inventory` gọi nó từ `InventoryLotService.changeStatus`
+để gác `POST /inventory/lots/{lotId}/status` (rule `C7`; bất biến **B102-B103** ở
+`module/inventory/CLAUDE.md`). Chỉ một method: `requiresQcDispositionBeforeRelease(UUID lotId)` —
+`true` khi lot có `ProductionReceiptLine` tham chiếu **và** chưa từng có `QualityDisposition`. Đây là
+hướng phụ thuộc **mới** `inventory → workorder`, ngược với phần lớn quan hệ hiện có (`workorder`
+thường gọi vào `inventory`) — hợp lệ theo `C7` vì đi qua lookup service, không phải repository.
+`ProductionReceiptLineRepository.existsByLotLotId`/`QualityDispositionRepository.existsByLotLotId`
+là hai derived query mới hỗ trợ nó, không có `*IT` riêng (derived query đơn giản, không phải `@Query`
+JPQL phức tạp — `R7` không áp dụng).
+
 ## Bất Biến Production Execution + Work Order Operations (F5)
 
 | # | Bất biến | Test bảo vệ |

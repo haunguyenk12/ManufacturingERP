@@ -17,10 +17,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -90,10 +92,14 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
     }
 
     private InventoryLot persistLot(Item item, LotStatus status) {
-        String suffix = UUID.randomUUID().toString();
+        return persistLot(item, status, "LOT_" + UUID.randomUUID(), null);
+    }
+
+    private InventoryLot persistLot(Item item, LotStatus status, String lotCode, Instant expiresAt) {
         Instant now = Instant.now();
 
-        InventoryLot lot = InventoryLot.builder().item(item).lotCode("LOT_" + suffix).status(status).build();
+        InventoryLot lot = InventoryLot.builder().item(item).lotCode(lotCode).status(status)
+                .receivedAt(now).expiresAt(expiresAt).build();
         lot.setCreatedAt(now);
         lot.setUpdatedAt(now);
         return entityManager.persistFlushFind(lot);
@@ -205,5 +211,135 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         copy1.setQuantity(new BigDecimal("30.000000"));
         assertThatThrownBy(() -> repository.saveAndFlush(copy1))
                 .isInstanceOf(ObjectOptimisticLockingFailureException.class);
+    }
+
+    /**
+     * C2-2. Every filter here defaults to {@code null} in the common case (no filter applied), which
+     * is exactly the shape that has twice broken this query family at parse time rather than just
+     * mis-filtering ({@code lower(bytea)}, {@code CLAUDE.md §0.24}/{@code §0.36}) — this "no filters"
+     * case is the regression guard for that, not just a happy-path smoke test.
+     */
+    @Test
+    void searchLots_withoutFilters_returnsEveryLotInTheWarehouse() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE), BigDecimal.TEN, BigDecimal.ZERO);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.HOLD), BigDecimal.ONE, BigDecimal.ZERO);
+        // Non-lot-tracked balance must not appear in a lot listing.
+        persistBalance(item, warehouse, null, BigDecimal.TEN, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), null, null, null, null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).hasSize(2);
+    }
+
+    @Test
+    void searchLots_filtersByItemId() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Item wanted = persistItem(company);
+        Item other = persistItem(company);
+        persistBalance(wanted, warehouse, persistLot(wanted, LotStatus.AVAILABLE), BigDecimal.ONE, BigDecimal.ZERO);
+        persistBalance(other, warehouse, persistLot(other, LotStatus.AVAILABLE), BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), wanted.getItemId(), null, null, null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(b -> b.getItem().getItemId())
+                .containsExactly(wanted.getItemId());
+    }
+
+    @Test
+    void searchLots_filtersByStatus() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        InventoryLot wanted = persistLot(item, LotStatus.HOLD);
+        persistBalance(item, warehouse, wanted, BigDecimal.ONE, BigDecimal.ZERO);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE), BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), null, LotStatus.HOLD, null, null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(b -> b.getLot().getLotId()).containsExactly(wanted.getLotId());
+    }
+
+    @Test
+    void searchLots_filtersBySearchOnLotCodeCaseInsensitivePartialMatch() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        InventoryLot wanted = persistLot(item, LotStatus.AVAILABLE, "LOT-ABC-123", null);
+        persistBalance(item, warehouse, wanted, BigDecimal.ONE, BigDecimal.ZERO);
+        InventoryLot other = persistLot(item, LotStatus.AVAILABLE, "LOT-XYZ-999", null);
+        persistBalance(item, warehouse, other, BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), null, null, "abc", null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(b -> b.getLot().getLotId()).containsExactly(wanted.getLotId());
+    }
+
+    @Test
+    void searchLots_filtersByExpiryRange() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        Instant now = Instant.now();
+        InventoryLot tooSoon = persistLot(item, LotStatus.AVAILABLE, "LOT_" + UUID.randomUUID(),
+                now.plus(1, ChronoUnit.DAYS));
+        InventoryLot inRange = persistLot(item, LotStatus.AVAILABLE, "LOT_" + UUID.randomUUID(),
+                now.plus(10, ChronoUnit.DAYS));
+        InventoryLot tooLate = persistLot(item, LotStatus.AVAILABLE, "LOT_" + UUID.randomUUID(),
+                now.plus(100, ChronoUnit.DAYS));
+        persistBalance(item, warehouse, tooSoon, BigDecimal.ONE, BigDecimal.ZERO);
+        persistBalance(item, warehouse, inRange, BigDecimal.ONE, BigDecimal.ZERO);
+        persistBalance(item, warehouse, tooLate, BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), null, null, null,
+                now.plus(5, ChronoUnit.DAYS), now.plus(20, ChronoUnit.DAYS), PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(b -> b.getLot().getLotId()).containsExactly(inRange.getLotId());
+    }
+
+    @Test
+    void searchLots_combinesItemAndStatusFilters() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Item item = persistItem(company);
+        InventoryLot wanted = persistLot(item, LotStatus.AVAILABLE);
+        persistBalance(item, warehouse, wanted, BigDecimal.ONE, BigDecimal.ZERO);
+        // Same item, different status — must be excluded once status is added to the filter set.
+        persistBalance(item, warehouse, persistLot(item, LotStatus.HOLD), BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+
+        var result = repository.searchLots(warehouse.getWarehouseId(), item.getItemId(), LotStatus.AVAILABLE,
+                null, null, null, PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(b -> b.getLot().getLotId()).containsExactly(wanted.getLotId());
+    }
+
+    /**
+     * {@code uk_stock_balances_item_warehouse_lot} is unique per {@code (item, warehouse, lot)}, not
+     * per {@code (item, lot)} — a lot can legitimately hold stock in more than one warehouse.
+     */
+    @Test
+    void findByLotLotId_returnsAllWarehouseRowsForALotThatSpansTwoWarehouses() {
+        Warehouse warehouseA = persistWarehouse();
+        Warehouse warehouseB = persistWarehouse();
+        Item item = persistItem(warehouseA.getPlant().getCompany());
+        InventoryLot lot = persistLot(item, LotStatus.AVAILABLE);
+        persistBalance(item, warehouseA, lot, new BigDecimal("5"), BigDecimal.ZERO);
+        persistBalance(item, warehouseB, lot, new BigDecimal("7"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        List<StockBalance> result = repository.findByLotLotId(lot.getLotId());
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(b -> b.getWarehouse().getWarehouseId())
+                .containsExactlyInAnyOrder(warehouseA.getWarehouseId(), warehouseB.getWarehouseId());
     }
 }
