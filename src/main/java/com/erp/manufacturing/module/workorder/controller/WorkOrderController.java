@@ -107,6 +107,16 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.cancel(workOrderId, request)));
     }
 
+    @PostMapping("/api/v1/work-orders/{workOrderId}/close")
+    @Operation(summary = "Close work order",
+            description = "Reconciles and permanently locks a COMPLETED work order — releases any "
+                    + "leftover ACTIVE reservation back to available stock, then locks it against "
+                    + "every further write (reserve, issue, receipt, adjust). Only allowed from "
+                    + "COMPLETED; anything else returns 409 STATE_CONFLICT.")
+    public ResponseEntity<ApiResponse<WorkOrderResponse>> close(@PathVariable UUID workOrderId) {
+        return ResponseEntity.ok(ApiResponse.ok(workOrderService.close(workOrderId)));
+    }
+
     @PostMapping("/api/v1/work-orders/{workOrderId}/component-issues")
     @Operation(summary = "Issue work order component",
             description = "Convenience endpoint for a single component line. It does NOT support "

@@ -556,6 +556,56 @@ class WorkOrderServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
     }
 
+    /**
+     * P6: closing is also the "Reconcile" step — any material still sitting in an ACTIVE reservation
+     * (over-reserved component never issued) must be released back to available stock, because once
+     * CLOSED the work order can never be touched again to free it any other way.
+     */
+    @Test
+    void close_completedWorkOrder_succeedsAndReleasesActiveReservations() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.COMPLETED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        service.close(workOrder.getWorkOrderId());
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CLOSED);
+        assertThat(workOrder.getClosedAt()).isNotNull();
+        verify(materialReservationService).cancelActiveReservations(workOrder);
+    }
+
+    @Test
+    void close_notCompletedWorkOrder_throwsStateConflictBeforeTouchingAnything() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.close(workOrderId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
+        verify(workOrderRepository, never()).save(any());
+        verifyNoInteractions(materialReservationService);
+    }
+
+    @Test
+    void close_alreadyClosedWorkOrder_throwsStateConflict() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.CLOSED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.close(workOrderId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verifyNoInteractions(materialReservationService);
+    }
+
     private WorkOrder workOrder(WorkOrderStatus status, BigDecimal plannedQuantity) {
         UUID companyId = UUID.randomUUID();
         Plant plant = plant(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);

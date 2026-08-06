@@ -32,8 +32,10 @@
 | **[x]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
 | **[x]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
 | **[x]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
-| **[~]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
-> `P6`: Sales Order (`F3`) + Fulfillment allocation (`F6`) ✅ **xong 2026-07-28**. Còn lại **WO Close/reconcile** (status `CLOSED` do manager) — chưa xếp lịch.
+| **[x]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
+> `P6`: Sales Order (`F3`) + Fulfillment allocation (`F6`) ✅ **xong 2026-07-28**. **WO Close/reconcile**
+> (status `CLOSED`, khoá hoàn toàn, do manager qua `POST /work-orders/{id}/close`) ✅ **xong
+> 2026-08-06** — bất biến `B100`, migration `V53`. Bản ghi đầy đủ: `CLAUDE.md §0.34`.
 | **[ ]** | **P-Deferred** | MES/ISA-95, OEE, WIP real-time, CRP động | Industry 4.0 | Tầng OT | — | **Có** |
 
 ### 2.1 Bảng Theo Dõi Tiến Độ  *(cập nhật: 2026-07-28)*
@@ -102,11 +104,14 @@
         của `D5`, tránh phải viết lại `StockBalanceRepository.aggregate*`)
   - [ ] Goods Receipt (`module/purchasing`) — **chưa nối**, nợ có chủ đích, xem `module/purchasing/CLAUDE.md`
   - Chi tiết + bất biến B96-B99: `CLAUDE.md §0.33`
-- [ ] **P6 – Sales Order & Fulfillment + WO Close** — *nửa đầu xong 2026-07-26 (`F3`), nửa sau xong 2026-07-28 (`F6`); chỉ còn WO Close*
+- [x] **P6 – Sales Order & Fulfillment + WO Close** — *`F3` 2026-07-26, `F6` 2026-07-28, WO Close 2026-08-06*
   - [x] **[F6]** `WorkOrderDemandAllocation` (`V35`) — nối WO ↔ SO line lúc convert proposal MAKE level-0
   - [x] **[F6]** Fulfillment chỉ chạy khi QC `AVAILABLE` commit (spec §7.1); `REJECTED`/`approve` không chạm
   - [x] **[F6]** Roll-up `IN_PRODUCTION` → `PARTIALLY_FULFILLED` → `FULFILLED`; `WorkOrderResponse.allocations[]`
-  - [ ] **WO Close/reconcile** (node 25): status `CLOSED` + bước đối chiếu tường minh do manager — **chưa làm**
+  - [x] **WO Close/reconcile** (node 25, 2026-08-06): `WorkOrderStatus.CLOSED` chỉ vào từ `COMPLETED`, khoá
+        hoàn toàn (chốt với user); `close()` cũng giải phóng reservation `ACTIVE` còn sót (bước
+        "Reconcile"). Migration `V53`, bất biến `B100`. Bug thật phát hiện + sửa cùng phase: `canReserve()`
+        là danh sách phủ định, thiếu loại trừ `CLOSED`. Chi tiết: `CLAUDE.md §0.34`
   - [x] Module `module/sales`: `SalesOrder` + `SalesOrderLine`, 6 trạng thái, `lineNo` do server cấp
   - [x] `confirm` ⇒ sinh independent demand (`PlanningDemand`, `demandType = SALES_ORDER`); `cancel` ⇒ huỷ demand `OPEN`
   - [x] `GET /sales-orders/planning-demands` — 4 điều kiện eligibility spec §2.1 trong 1 aggregate query
@@ -314,6 +319,15 @@ serial; test; build + test PASS.
 ---
 
 ### P6 — Sales Order & Fulfillment + WO Close/Reconcile
+
+> ✅ **Đã xong (2026-08-06).** Phần dưới đây là **thiết kế phác thảo gốc** cho "WO Close/reconcile"
+> (Sales Order + Fulfillment đã xong sớm hơn ở `F3`/`F6`), giữ lại làm lịch sử — triển khai thật khớp
+> phác thảo, chỉ thêm một chi tiết chốt với user trước khi viết kế hoạch chi tiết: `CLOSED` **khoá
+> hoàn toàn**, không có carve-out đọc/ghi nào (phương án đơn giản hơn trong hai phương án được hỏi).
+> "Bước đối chiếu tường minh" ở dòng dưới chính là `close()` gọi lại
+> `materialReservationService.cancelActiveReservations(...)` — giải phóng reservation `ACTIVE` còn sót
+> về lại tồn khả dụng trước khi khoá vĩnh viễn. Migration `V53`, bất biến `B100`. Bản ghi đầy đủ:
+> `CLAUDE.md §0.34`.
 
 **Mục tiêu:** Đóng vòng end-to-end như đầu và cuối `business_flow` (node 3, 10, 24, 25). Hiện chỉ
 có `PlanningDemand` với enum type `SALES_ORDER` — chưa có entity SO thật.

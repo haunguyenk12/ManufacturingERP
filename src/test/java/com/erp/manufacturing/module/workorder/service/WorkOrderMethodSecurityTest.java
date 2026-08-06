@@ -141,6 +141,32 @@ class WorkOrderMethodSecurityTest {
         verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_EXECUTE"), eq(workOrderId));
     }
 
+    @Test
+    void close_deniedWhenManageScopeMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> workOrderService.close(workOrderId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(workOrderRepository);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId));
+    }
+
+    @Test
+    void close_allowedWhenManageScopePresent() {
+        WorkOrder workOrder = workOrder();
+        workOrder.setStatus(WorkOrderStatus.COMPLETED);
+        when(workOrderPermissionGuard.hasWorkOrderAccess(
+                any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrder.getWorkOrderId()))).thenReturn(true);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+
+        assertThatCode(() -> workOrderService.close(workOrder.getWorkOrderId())).doesNotThrowAnyException();
+    }
+
     private WorkOrder workOrder() {
         Company company = Company.builder()
                 .companyId(UUID.randomUUID())

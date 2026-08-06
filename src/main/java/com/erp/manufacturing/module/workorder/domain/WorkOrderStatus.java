@@ -13,5 +13,11 @@ public enum WorkOrderStatus {
     RELEASED,
     IN_PROGRESS,
     COMPLETED,
-    CANCELLED
+    CANCELLED,
+    /**
+     * Terminal reconciliation state (P6). Reachable only from {@code COMPLETED}, via an explicit
+     * manager action — never automatic. Locks the work order completely: no further reservation,
+     * issue, receipt, or adjustment is possible (invariant B100).
+     */
+    CLOSED
 }

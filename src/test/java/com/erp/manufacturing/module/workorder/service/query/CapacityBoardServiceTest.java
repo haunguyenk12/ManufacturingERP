@@ -137,6 +137,25 @@ class CapacityBoardServiceTest {
         assertThat(line.calendarExceptionApplies()).isTrue();
     }
 
+    /**
+     * P6: a CLOSED work order's schedule still represents real historical load, the same reasoning
+     * that keeps COMPLETED in this list — closing must not silently rewrite a day's already-reported
+     * utilization. Asserted against the literal enum values, not {@code CapacityBoardService
+     * .LOAD_STATUSES} itself — {@link #stubLoad} references that same constant, so comparing the
+     * constant to itself would be a tautology (rule R6/D7b.3).
+     */
+    @Test
+    @DisplayName("existing load is computed across RELEASED/IN_PROGRESS/COMPLETED/CLOSED, and CANCELLED is excluded")
+    void loadStatuses_includesClosedAndCompletedExcludesCancelled() {
+        assertThat(CapacityBoardService.LOAD_STATUSES)
+                .containsExactlyInAnyOrder(
+                        WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS,
+                        WorkOrderStatus.COMPLETED, WorkOrderStatus.CLOSED)
+                .doesNotContain(
+                        WorkOrderStatus.CANCELLED, WorkOrderStatus.DRAFT,
+                        WorkOrderStatus.PLANNED, WorkOrderStatus.BLOCKED);
+    }
+
     @Test
     @DisplayName("from after to is rejected before the repository is ever queried")
     void getBoard_fromAfterTo_throwsBeforeQuerying() {

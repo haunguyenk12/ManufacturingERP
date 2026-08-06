@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V52) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V53) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -45,7 +45,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("52");
+        assertThat(current.getVersion().getVersion()).isEqualTo("53");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);

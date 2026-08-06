@@ -95,7 +95,7 @@ class MaterialReservationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = WorkOrderStatus.class, names = {"COMPLETED", "CANCELLED"})
+    @EnumSource(value = WorkOrderStatus.class, names = {"COMPLETED", "CANCELLED", "CLOSED"})
     void reserve_onClosedWorkOrder_shouldThrowBeforeTouchingStock(WorkOrderStatus status) {
         WorkOrder workOrder = workOrder(status, new BigDecimal("10"));
         WorkOrderComponentLine line = workOrder.getComponentLines().get(0);

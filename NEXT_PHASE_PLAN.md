@@ -1,10 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`P5` — Serial Number Tracking** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
-> `CLAUDE.md §0.33`.
+> Phase trước: **`P6` — WO Close/Reconcile** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
+> `CLAUDE.md §0.34`. Đóng nốt track `P*` — chỉ còn `P-Deferred` (chờ tầng OT, ngoài phạm vi).
 >
-> **850 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V52`.
+> **864 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V53`.
 
 ---
 
@@ -26,8 +26,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `P5` vừa xong)* |
-| **Ứng viên kế tiếp** | `P6` phần còn lại — WO Close/Reconcile — xem §5 |
+| **Đang chạy** | *(không có — `P6` vừa xong, đóng nốt track `P*`)* |
+| **Ứng viên kế tiếp** | *(không có — mọi ứng viên còn lại đều bị chặn, xem hàng dưới)* |
 | **Bị chặn** | `C2-1`, `C2-2` (chờ FE), `D8c` (chờ quyết định hạ tầng email) |
 
 ---
@@ -40,7 +40,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 2 | ~~`P3` — Costing Engine~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.31` |
 | 3 | ~~Concurrent refresh-token race (mở rộng `D8`)~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.32` |
 | 4 | ~~`P5` — Serial Number Tracking~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.33` |
-| 5 | `P6` phần còn lại — WO Close/Reconcile | Không bị chặn | Nhỏ, đóng nốt track `P6` |
+| 5 | ~~`P6` — WO Close/Reconcile~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.34` |
 | 6 | `C2-1` — Audit Logs read API | 🔴 Bị chặn — chờ FE câu 1 | Giữ vị trí trong roadmap để không quên |
 | 7 | `C2-2` — Inventory Lot lifecycle API | 🔴 Bị chặn — chờ FE câu 2 | Tương tự |
 | 8 | `D8c` — Forgot-password / Account Recovery | 🔴 Bị chặn — chờ quyết định hạ tầng email | Thiết kế đã có sẵn, chỉ chờ chốt `spring-boot-starter-mail` hay dịch vụ ngoài |
@@ -98,33 +98,17 @@ thay `quantity`). Migration `V52`.
 
 ---
 
-## 5. `P6` phần còn lại — WO Close/Reconcile
+## 5. `P6` — WO Close/Reconcile ✅ ĐÃ XONG (2026-08-06)
 
-Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P6). Nhỏ, đóng nốt track `P6` (Sales Order + Fulfillment
-đã xong ở `F3`/`F6`).
-
-### Quyết định phải chốt với user TRƯỚC khi viết kế hoạch chi tiết
-
-`CLOSED` có khoá hoàn toàn (không receipt/adjust thêm được) hay vẫn cho phép một số thao tác đọc/
-điều chỉnh nhẹ?
-
-### Thiết kế phác thảo (đối chiếu code thật)
-
-`WorkOrderStatus` hiện tại (đã đọc enum, xác nhận): `DRAFT, PLANNED, BLOCKED, RELEASED, IN_PROGRESS,
-COMPLETED, CANCELLED` — **chưa có `CLOSED`**. Thêm `CLOSED` là breaking change ngầm theo đúng
-checklist `.claude/rules/coding-rules.md §11.3`: rà **mọi** switch/so sánh status hiện có (đặc biệt
-`WorkOrderService`, `WorkOrderSupplyService` — nơi `COMPLETED` đang được coi là trạng thái cuối), sửa
-CHECK constraint, xét cả nhánh vào lẫn ra của status mới. `CLOSED` khác `COMPLETED` (tự động theo số
-lượng) ở chỗ cần **bước reconcile do manager thực hiện tường minh**.
-
-Endpoint: `POST /work-orders/{workOrderId}/close` — chỉ cho phép từ `COMPLETED`, permission tái dùng
-`PERM_WORK_ORDER_MANAGE` hay permission mới (`PERM_WORK_ORDER_CLOSE`?) tuỳ mức độ nhạy cảm nghiệp vụ
-đã chốt.
-
-### Test bắt buộc
-
-Test cả nhánh vào (`COMPLETED → CLOSED`) và nhánh ra (không được vào từ status khác), test các thao
-tác bị chặn sau `CLOSED` theo đúng phạm vi đã chốt.
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P6). Đóng nốt track `P6` (Sales Order + Fulfillment đã
+xong ở `F3`/`F6`) — và đóng nốt **toàn bộ** track `P*` (chỉ còn `P-Deferred`, chờ tầng OT, ngoài phạm
+vi). Bản ghi đầy đủ (thiết kế, bất biến B100, breaking changes): `CLAUDE.md §0.34`. Quyết định chốt
+với user trước khi viết kế hoạch chi tiết: `CLOSED` **khoá hoàn toàn** — không carve-out đọc/ghi nào
+sau khi đóng (phương án đơn giản hơn trong hai phương án được hỏi). `close()` cũng là bước "Reconcile"
+tường minh: giải phóng mọi reservation `ACTIVE` còn sót về lại tồn khả dụng trước khi khoá vĩnh viễn
+— tái dùng đúng `materialReservationService.cancelActiveReservations(...)` mà `cancel()` đã có sẵn.
+Tái dùng `PERM_WORK_ORDER_MANAGE`, không permission mới. Migration `V53`. Phase phát hiện và sửa một
+bug thật: `canReserve()` là danh sách phủ định, thiếu loại trừ `CLOSED` tường minh.
 
 ---
 
@@ -246,11 +230,14 @@ viết dòng code đầu tiên. **Không code phase này tới khi có quyết �
   - [x] Nối vào `InventoryMovementService` (receive/issue/adjust) + `MaterialIssueService` +
         `ProductionReceiptService` (post/approve/qcDisposition) — **additive, không breaking**
   - [x] Test (850 case unit + 89 case IT / 13 class IT) + docs
-- [ ] **`P6`** — WO Close/Reconcile
-  - [ ] Quyết định phạm vi khoá của `CLOSED` — đã chốt với user
-  - [ ] `WorkOrderStatus.CLOSED` + rà switch/so sánh status hiện có (checklist `coding-rules.md §11.3`)
-  - [ ] Endpoint `POST /work-orders/{id}/close`
-  - [ ] Test (nhánh vào + nhánh ra) + docs
+- [x] **`P6`** — WO Close/Reconcile ✅ **2026-08-06**
+  - [x] Quyết định phạm vi khoá của `CLOSED` — chốt với user: khoá hoàn toàn
+  - [x] `WorkOrderStatus.CLOSED` + rà switch/so sánh status hiện có (checklist `coding-rules.md §11.3`)
+        — phát hiện + sửa bug thật: `canReserve()` là danh sách phủ định, thiếu loại trừ `CLOSED`
+  - [x] `close()` reconcile: giải phóng reservation `ACTIVE` còn sót (`materialReservationService
+        .cancelActiveReservations`), tái dùng `PERM_WORK_ORDER_MANAGE`, không permission mới
+  - [x] Endpoint `POST /work-orders/{id}/close` — migration `V53`
+  - [x] Test (nhánh vào + nhánh ra + regression mỗi gate ghi) — 864 case unit + 89 case IT / 13 class IT + docs
 - [ ] **`C2-1`** — Audit Logs read API *(🔴 chờ FE trả lời câu 1 — không code trước khi có câu trả lời)*
 - [ ] **`C2-2`** — Inventory Lot lifecycle API *(🔴 chờ FE trả lời câu 2 — không code trước khi có câu trả lời)*
 - [ ] **`D8c`** — Forgot-password / Account Recovery *(🔴 chờ quyết định hạ tầng email — không code trước khi có quyết định)*

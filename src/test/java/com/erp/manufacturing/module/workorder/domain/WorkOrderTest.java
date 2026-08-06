@@ -87,6 +87,46 @@ class WorkOrderTest {
         assertThat(workOrder.completionPercent()).isEqualByComparingTo("100.00");
     }
 
+    /** P6: only a completed work order may be closed — never automatic, never from any other status. */
+    @Test
+    void canClose_onlyTrueWhenCompleted() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10.000000"));
+
+        workOrder.setStatus(WorkOrderStatus.RELEASED);
+        assertThat(workOrder.canClose()).isFalse();
+
+        workOrder.setStatus(WorkOrderStatus.COMPLETED);
+        assertThat(workOrder.canClose()).isTrue();
+
+        workOrder.setStatus(WorkOrderStatus.CLOSED);
+        assertThat(workOrder.canClose()).isFalse();
+    }
+
+    @Test
+    void close_setsStatusAndClosedAt() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10.000000"));
+        workOrder.setStatus(WorkOrderStatus.COMPLETED);
+        Instant now = Instant.parse("2026-08-06T10:00:00Z");
+
+        workOrder.close(now);
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CLOSED);
+        assertThat(workOrder.getClosedAt()).isEqualTo(now);
+    }
+
+    /**
+     * P6 gate-bug regression: {@code canReserve()} was a negative list
+     * ({@code != COMPLETED && != CANCELLED}) that did not yet know about {@code CLOSED} — a brand new
+     * status value is allowed by a negative list unless explicitly excluded.
+     */
+    @Test
+    void canReserve_isFalseOnceClosed() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10.000000"));
+        workOrder.setStatus(WorkOrderStatus.CLOSED);
+
+        assertThat(workOrder.canReserve()).isFalse();
+    }
+
     private WorkOrder workOrder(BigDecimal plannedQuantity) {
         return WorkOrder.builder()
                 .plannedQuantity(plannedQuantity)

@@ -324,6 +324,26 @@ public class WorkOrderService {
         return toResponse(workOrderRepository.save(workOrder));
     }
 
+    /**
+     * Reconciles and permanently locks a completed work order (P6). Any material still sitting in an
+     * {@code ACTIVE} reservation (over-reserved component that was never issued) is released back to
+     * available stock — the same reconciliation {@link #cancel} already performs — because once
+     * {@code CLOSED} the work order can never be touched again to free it any other way.
+     */
+    @Transactional
+    @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
+    @Auditable(action = AuditAction.WORK_ORDER_CLOSED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    public WorkOrderResponse close(UUID workOrderId) {
+        WorkOrder workOrder = findWorkOrder(workOrderId);
+        if (!workOrder.canClose()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Only completed work orders can be closed");
+        }
+        materialReservationService.cancelActiveReservations(workOrder);
+        workOrder.close(Instant.now());
+        return toResponse(workOrderRepository.save(workOrder));
+    }
+
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_EXECUTE', #workOrderId)")
     @Auditable(action = AuditAction.WORK_ORDER_COMPONENT_ISSUED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")

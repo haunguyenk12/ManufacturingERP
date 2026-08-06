@@ -90,7 +90,8 @@ public class WorkOrderMapper {
                 workOrder.getUpdatedAt(),
                 lines,
                 operations,
-                allocations == null ? List.of() : allocations);
+                allocations == null ? List.of() : allocations,
+                workOrder.getClosedAt());
     }
 
     public WorkOrderOperationResponse toResponse(WorkOrderOperation operation) {

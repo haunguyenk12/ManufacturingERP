@@ -512,6 +512,27 @@ class ProductionReceiptServiceTest {
         verify(receiptRepository, never()).save(any());
     }
 
+    /** P6: a CLOSED work order is reconciled and locked completely — no further receipt, ever. */
+    @Test
+    void post_onClosedWorkOrder_shouldThrow() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.CLOSED, new BigDecimal("10"));
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(receiptRepository.findWithLinesByIdempotencyKey("KEY-CLOSED")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        ProductionReceiptPostRequest request = receiptRequest(warehouse, new BigDecimal("5"));
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-CLOSED"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(movementService, wipTransactionService);
+        verify(receiptRepository, never()).save(any());
+    }
+
     /**
      * The whole receipt lifecycle had to move to the new gate, not just {@code post}: leaving
      * {@code submit} or {@code approve} on {@code canExecute()} would let a draft be created on a

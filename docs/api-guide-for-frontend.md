@@ -688,8 +688,15 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Lên lịch | `POST /work-orders/{id}/plan` | `PERM_WORK_ORDER_MANAGE` |
 | Release | `POST /work-orders/{id}/release` | `PERM_WORK_ORDER_MANAGE` |
 | Huỷ (**bắt buộc** `{reason}`) | `POST /work-orders/{id}/cancel` | `PERM_WORK_ORDER_MANAGE` |
+| Đóng/chốt sổ (chỉ từ `COMPLETED`, **không** body) | `POST /work-orders/{id}/close` | `PERM_WORK_ORDER_MANAGE` |
 | Sẵn sàng vật tư | `GET /work-orders/{id}/material-readiness` | `PERM_WORK_ORDER_READ` |
 | Variance | `GET /work-orders/{id}/variance` | `PERM_WORK_ORDER_VARIANCE_READ` |
+
+> 🔴 **`close` khoá vĩnh viễn (P6).** Một work order `CLOSED` không còn nhận reserve/issue/receipt/
+> adjust nào nữa — không có ngoại lệ đọc/ghi nào khác. `close` cũng giải phóng mọi reservation
+> `ACTIVE` còn sót (component bị đặt trước nhưng chưa issue) về lại tồn khả dụng — đây là bước
+> "Reconcile" trước khi khoá. `WorkOrderResponse.closedAt` (`null` cho tới khi `CLOSED`) cho biết khi
+> nào việc này xảy ra.
 
 `search` là free-text trên **số WO + SKU thành phẩm**.
 
@@ -893,7 +900,7 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 
 Chỉ liệt kê DTO trên luồng chính. Schema đầy đủ: Swagger UI.
 
-### `WorkOrderResponse` (43 field)
+### `WorkOrderResponse` (44 field)
 ```
 workOrderId, companyId, plantId, plantCode, workOrderNo,
 productItemId, productItemCode, productItemName, outputUom,
@@ -906,7 +913,7 @@ actualGoodQuantity, actualScrapQuantity, actualReworkQuantity, availableToReceip
 status, plannedStartAt, plannedEndAt, releasedAt,
 executionStartedAt, executionCompletedAt, completedAt,
 cancelledAt, cancelReason, blockedAt, blockReason, notes, createdAt, updatedAt,
-componentLines[], operations[], allocations[]
+componentLines[], operations[], allocations[], closedAt
 ```
 
 🔴 **Ba cột số lượng dễ nhầm nhất — hiển thị sai là sai nghiệp vụ:**
@@ -977,7 +984,7 @@ overIssue, overrideReason`
 
 | Enum | Giá trị |
 |---|---|
-| `WorkOrderStatus` | `DRAFT` `PLANNED` `BLOCKED` `RELEASED` `IN_PROGRESS` `COMPLETED` `CANCELLED` |
+| `WorkOrderStatus` | `DRAFT` `PLANNED` `BLOCKED` `RELEASED` `IN_PROGRESS` `COMPLETED` `CANCELLED` `CLOSED` (P6, terminal — khoá hoàn toàn, chỉ vào được từ `COMPLETED` qua `POST .../close`) |
 | `ProductionReceiptStatus` | `DRAFT` `PENDING_APPROVAL` `APPROVED` `REJECTED` `CANCELLED` |
 | `SalesOrderStatus` | `DRAFT` `CONFIRMED` `IN_PRODUCTION` `PARTIALLY_FULFILLED` `FULFILLED` `CANCELLED` |
 | `MaterialReservationStatus` | `ACTIVE` `RELEASED` `CONSUMED` `CANCELLED` |

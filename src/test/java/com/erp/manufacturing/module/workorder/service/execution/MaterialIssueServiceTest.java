@@ -290,6 +290,29 @@ class MaterialIssueServiceTest {
         verify(issueRepository, never()).save(any());
     }
 
+    /** P6: a CLOSED work order must not be able to issue material — it is locked completely. */
+    @Test
+    void post_onClosedWorkOrder_shouldThrow() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.CLOSED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-CLOSED")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, BigDecimal.ONE, null)));
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-CLOSED"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(movementService);
+        verify(issueRepository, never()).save(any());
+    }
+
     @Test
     void issue_withinRemaining_noOverrideNeeded() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));

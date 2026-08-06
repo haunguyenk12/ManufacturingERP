@@ -94,7 +94,7 @@ class WorkOrderControllerTest {
                 // executionCompletedAt (F8), completedAt, cancelledAt, cancelReason, blockedAt,
                 // blockReason, notes, createdAt, updatedAt, componentLines, operations, allocations
                 "DRAFT", null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     @Test
@@ -132,6 +132,29 @@ class WorkOrderControllerTest {
                         "Reservation does not fully cover component requirements"));
 
         mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/release"))
+                .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
+    }
+
+    @Test
+    @DisplayName("close: completed work order returns 200 with the response envelope")
+    void closeWorkOrder_completed_returns200() throws Exception {
+        when(workOrderService.close(WORK_ORDER_ID)).thenReturn(sampleResponse());
+
+        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/close"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.workOrderId").value(WORK_ORDER_ID.toString()));
+    }
+
+    @Test
+    @DisplayName("close: not-completed work order returns 409 STATE_CONFLICT")
+    void closeWorkOrder_notCompleted_returns409() throws Exception {
+        when(workOrderService.close(WORK_ORDER_ID))
+                .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
+                        "Only completed work orders can be closed"));
+
+        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/close"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -176,7 +199,7 @@ class WorkOrderControllerTest {
                 base.executionStartedAt(), base.executionCompletedAt(), base.completedAt(),
                 base.cancelledAt(), base.cancelReason(), base.blockedAt(), base.blockReason(),
                 base.notes(), base.createdAt(), base.updatedAt(),
-                List.of(line), List.of(), List.of());
+                List.of(line), List.of(), List.of(), base.closedAt());
     }
 
     @Test

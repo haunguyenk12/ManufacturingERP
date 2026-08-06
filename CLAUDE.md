@@ -64,15 +64,15 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — `P5` vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
-| **Phase trước** | **`P5` – Serial Number Tracking** ✅ **HOÀN THÀNH** (2026-08-06). `SerialNumber` (module `inventory`, mirror `InventoryLot` nhưng luôn quantity = 1) + `Item.serialTracked` (loại trừ `lotTracked`, chốt với user). Nối vào Material Issue + Production Receipt (`module/workorder`); Goods Receipt (`purchasing`) **chưa** nối — nợ có ghi chú. Quyết định lớn nhất: serial-tracked output **không** có HOLD chờ QC (mirror non-lot-tracked của `D5`), tránh phải thêm `serial_id` vào `stock_balances` + viết lại aggregate query. Migration **`V52`**. **Không breaking change trên wire** — mọi field mới đều additive. Bất biến `B96`-`B99`. Bản ghi: **§0.33** |
-| **Phase trước đó** | **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt giới hạn "race double-submit" mà `D8a` từng chấp nhận. Advisory lock `acquireRefreshLock` (`SET NX PX`, TTL 2s) + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) trong `AuthService.refresh`. **Không grace window** (quyết định user). Bất biến **`B95`**. Bản ghi: **§0.32** |
+| **Phase đang chạy** | *(không có — `P6` vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
+| **Phase trước** | **`P6` – WO Close/Reconcile** ✅ **HOÀN THÀNH** (2026-08-06). `WorkOrderStatus.CLOSED` chỉ vào từ `COMPLETED`, qua hành động tường minh `POST /work-orders/{id}/close` (`PERM_WORK_ORDER_MANAGE`, không permission mới) — **khoá hoàn toàn**, không carve-out đọc/ghi (chốt với user). `close()` cũng là bước "Reconcile": giải phóng mọi reservation `ACTIVE` còn sót về lại tồn khả dụng. 🔴 Phase phát hiện và sửa một bug thật: `canReserve()` là danh sách phủ định (`!= COMPLETED && != CANCELLED`) không tự loại trừ giá trị enum mới, nên thiếu `&& != CLOSED` thì WO đã đóng vẫn nhận reserve được. Migration **`V53`**. **Không breaking change trên wire** — field mới `closedAt` + endpoint mới đều additive. Bất biến `B100`. Đóng nốt track `P*` (chỉ còn `P-Deferred`, chờ tầng OT, ngoài phạm vi). Bản ghi: **§0.34** |
+| **Phase trước đó** | **`P5` – Serial Number Tracking** ✅ **HOÀN THÀNH** (2026-08-06). `SerialNumber` (module `inventory`, mirror `InventoryLot` nhưng luôn quantity = 1) + `Item.serialTracked` (loại trừ `lotTracked`, chốt với user). Serial-tracked output **không** có HOLD chờ QC (mirror non-lot-tracked của `D5`). Migration `V52`. Bất biến `B96`-`B99`. Bản ghi: **§0.33** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
-| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. `P5` serial tracking ✅ đã xong — xem §0.33. |
-| **Migration mới nhất** | **`V52__create_serial_numbers.sql`** (`P5`) — bảng `serial_numbers` + `items.serial_tracked` + FK `serial_id` trên `stock_movements`/`material_issue_lines`/`production_receipt_lines` |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → **`P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+19` unit: `ItemServiceTest` +2, `InventoryMovementServiceTest` +9, `MaterialIssueServiceTest` +2, `ProductionReceiptServiceTest` +6; `+1` IT: `FlywayMigrationIT.migrate_v52_rejectsAnItemThatIsBothLotAndSerialTracked`, không thêm class IT mới) |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase kế tiếp** | **Chưa chốt.** Track `P*` đã **đóng hết** (chỉ còn `P-Deferred`, chờ tầng OT, ngoài phạm vi). `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
+| **Migration mới nhất** | **`V53__add_work_order_closed_status.sql`** (`P6`) — thêm `CLOSED` vào `chk_work_orders_status` + cột `work_orders.closed_at` |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → **`P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+14` unit: `WorkOrderTest` +3, `WorkOrderServiceTest` +3, `WorkOrderMethodSecurityTest` +2, `WorkOrderControllerTest` +2, `MaterialIssueServiceTest` +1, `ProductionReceiptServiceTest` +1, `CapacityBoardServiceTest` +1, `MaterialReservationServiceTest` +1 tham số hoá thêm vào `@EnumSource` sẵn có; `+0` IT ròng — `FlywayMigrationIT` chỉ bump version assertion, không thêm case, không thêm class IT mới) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -1690,6 +1690,75 @@ MaterialIssueService/ProductionReceiptService) + `FlywayMigrationIT` cho CHECK c
 `InventoryReceiveCommand`/`InventoryIssueCommand`/`InventoryAdjustCommand` +2 component mỗi record
 (`serialId`, `serialCode`); `InventoryMovementService`/`MaterialIssueService.issueCommand` constructor/
 signature đổi. Test cũ dựng các record/constructor này đã **sửa** theo `R10`.
+
+---
+
+### 0.34 P6 – WO Close/Reconcile (ĐÃ HOÀN THÀNH 2026-08-06)
+
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P6). Đóng nốt track `P*` — chỉ còn `P-Deferred` (chờ
+tầng OT, ngoài phạm vi dự án). Migration **`V53`**. Bất biến: **`B100`**.
+
+**Quyết định chốt với user (`AskUserQuestion`) trước khi viết kế hoạch chi tiết:** `CLOSED` **khoá
+hoàn toàn** — không carve-out đọc/ghi nào sau khi đóng, thay vì phương án "cho phép điều chỉnh nhẹ"
+cũng được đưa ra cân nhắc.
+
+**Thiết kế cốt lõi:** `WorkOrderStatus.CLOSED` chỉ vào được từ `COMPLETED`, qua hành động tường minh
+`WorkOrderService.close` — **không bao giờ tự động** (khác `COMPLETED`, tự sinh khi cumulative good
+chạm plan, `B53`). Đây là nửa "Reconcile" của tên phase: `close()` gọi lại **đúng**
+`materialReservationService.cancelActiveReservations(workOrder)` mà `cancel()` đã dùng — giải phóng
+mọi reservation `ACTIVE` còn sót (component bị over-reserve nhưng chưa bao giờ issue) về lại tồn khả
+dụng, vì một khi `CLOSED` thì WO không còn cách nào khác để giải phóng nó nữa.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `canClose()` (chỉ `COMPLETED`) + `close(Instant)` (set `CLOSED` + `closedAt`) | `WorkOrder` |
+| `WorkOrderService.close(UUID)` — `STATE_CONFLICT` (409) nếu không `COMPLETED`, reconcile rồi khoá | `WorkOrderService` |
+| `POST /work-orders/{id}/close` — không nhận body, tái dùng `PERM_WORK_ORDER_MANAGE` | `WorkOrderController` |
+| `WorkOrderResponse.closedAt` (additive, field cuối cùng) | DTO/mapper |
+| `WorkOrderAuditAction.WORK_ORDER_CLOSED` | `AuditAction` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Bug thật do phase này phát hiện và sửa, không phải giả định.** `canReserve()` trước phase là
+   **danh sách phủ định** `status != COMPLETED && status != CANCELLED`. Một giá trị enum mới không tự
+   động bị một danh sách phủ định loại trừ — nếu không sửa, một WO `CLOSED` vẫn nhận reserve mới được,
+   đúng loại lỗ hổng checklist `coding-rules.md §11.3` được viết ra để bắt. Đã thêm
+   `&& status != CLOSED` tường minh, có test regression riêng (`WorkOrderTest.canReserve_isFalseOnceClosed`)
+   và tham số hoá vào `@EnumSource` sẵn có của `MaterialReservationServiceTest`.
+2. **Mọi gate khác tự động đúng, không cần sửa.** `canExecute()`, `canReceipt()`, `canRelease()`,
+   `canPlan()`, và danh sách status tường minh trong `cancel()` đều là **danh sách khẳng định**
+   (positive list) — một WO đã chuyển `CLOSED` (không còn là `RELEASED`/`IN_PROGRESS`/`COMPLETED`/…)
+   tự động fail mọi điều kiện đó mà không cần đụng một dòng code. Đã rà đủ theo
+   `grep -rn "WorkOrderStatus\." src/main`.
+3. **`CapacityBoardService.LOAD_STATUSES` (đọc, không phải gate ghi) có sửa** — thêm `CLOSED` cạnh
+   `COMPLETED`: lịch của một WO đã đóng vẫn là load lịch sử **thật**, đóng WO không được âm thầm viết
+   lại utilization của một ngày đã báo cáo trước đó. `CANCELLED` vẫn bị loại (lý do khác: lịch của WO
+   bị huỷ chưa từng là load thật). Test literal (không tautology, không so sánh hằng số với chính nó):
+   `CapacityBoardServiceTest.loadStatuses_includesClosedAndCompletedExcludesCancelled`.
+4. **Không permission mới** — tái dùng `PERM_WORK_ORDER_MANAGE`, cùng quyền đã gác `cancel`/`plan`/
+   `release`/`update`. Không migration seed, không đụng `docs/roles-and-permissions.md`
+   (`coding-rules.md C10` chỉ bắt buộc khi có permission **mới**).
+5. **`closedAt` mirror `cancelledAt`/`completedAt`** — cột nullable đơn giản, **không** có `closedBy`
+   riêng: ai đóng đã được `updatedBy` (JPA auditing) ghi lại, đúng cách mọi status transition khác
+   trên entity này đã làm từ trước.
+6. **Endpoint không nhận body** — đóng không đối kháng như cancel (spec/quyết định của user chỉ nói
+   "khoá hoàn toàn", không nói gì về lý do), nên **không** thêm `reason` bắt buộc như
+   `WorkOrderCancelRequest` (`F7`). Không mở rộng phạm vi ngoài yêu cầu.
+
+**Nghiệm thu:** `mvn -o clean verify` — **864 case unit + 89 case IT / 13 class IT, failures = 0,
+errors = 0** (baseline trước phase: 850 unit + 89 IT / 13 class — `+14` unit, `+0` IT ròng vì phase
+này không thêm case IT mới, chỉ bump version assertion trong `FlywayMigrationIT`; xem hàng "Baseline
+test" §0.1 để biết đúng test nào cộng vào đâu). Không nghiệm thu mutation riêng — bù lại bằng test ở
+mọi tầng bị ảnh hưởng: domain (`WorkOrderTest`), service (`WorkOrderServiceTest`), method-security
+(`WorkOrderMethodSecurityTest`), controller (`WorkOrderControllerTest`), và **một test quy hồi cho mỗi
+gate ghi** (`MaterialReservationServiceTest`, `MaterialIssueServiceTest`, `ProductionReceiptServiceTest`)
+chứng minh `CLOSED` bị chặn — đúng tinh thần bug thật ở hệ quả #1: gate ghi là nơi một dòng code thiếu
+mới thực sự gây hại.
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 1 endpoint mới, 1 field mới `closedAt` trên
+`WorkOrderResponse`). **Java positional:** `WorkOrderResponse` +1 component (`closedAt`, cuối cùng).
+Test cũ dựng `WorkOrderResponse` theo vị trí (`WorkOrderControllerTest`, `SupplySuggestionServiceTest`)
+đã **sửa** theo `R10`.
 
 ---
 

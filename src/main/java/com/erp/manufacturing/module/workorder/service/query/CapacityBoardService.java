@@ -47,10 +47,14 @@ public class CapacityBoardService {
      * row filter — the filter narrows which rows are *shown*, not the load denominator, so
      * utilization numbers stay consistent across differently-filtered board views. {@code CANCELLED}
      * is excluded (its schedule no longer represents real load); {@code DRAFT}/{@code PLANNED}/
-     * {@code BLOCKED} never have a schedule at all (only {@code release()} writes one).
+     * {@code BLOCKED} never have a schedule at all (only {@code release()} writes one). {@code CLOSED}
+     * (P6) stays in alongside {@code COMPLETED} for the same reason {@code COMPLETED} is here: its
+     * schedule still represents real historical load — closing a work order must not silently rewrite
+     * a day's already-reported capacity utilization by making its operations disappear.
      */
-    static final List<WorkOrderStatus> LOAD_STATUSES =
-            List.of(WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS, WorkOrderStatus.COMPLETED);
+    static final List<WorkOrderStatus> LOAD_STATUSES = List.of(
+            WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS,
+            WorkOrderStatus.COMPLETED, WorkOrderStatus.CLOSED);
 
     private final WorkOrderOperationRepository workOrderOperationRepository;
     private final WorkCalendarLookupService workCalendarLookupService;

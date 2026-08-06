@@ -80,5 +80,7 @@ public record WorkOrderResponse(
         List<WorkOrderComponentLineResponse> componentLines,
         List<WorkOrderOperationResponse> operations,
         /** Sales order lines this output is earmarked for (F6). Empty for unallocated work orders. */
-        List<WorkOrderDemandAllocationResponse> allocations
+        List<WorkOrderDemandAllocationResponse> allocations,
+        /** When this work order was reconciled and locked (P6). Null until {@code CLOSED}. */
+        Instant closedAt
 ) {}

@@ -193,6 +193,41 @@ vì serial không cần sinh dòng ledger `LOT_STATUS_CHANGE`-tương-đương |
 3. `SerialNumber` không có FK `warehouse` (giống `InventoryLot`) — vị trí kho suy ra từ
    `StockMovement.warehouse`/`stock_balances`, không lưu trùng trên serial.
 
+## Bất Biến Close/Reconcile (P6, 2026-08-06)
+
+Trả nợ track `P6` cuối cùng (Sales Order + Fulfillment đã xong ở `F3`/`F6`). Migration `V53`. Quyết
+định chốt với user (`AskUserQuestion`): **`CLOSED` khoá hoàn toàn** — không carve-out đọc/ghi nào,
+khác phương án "cho phép điều chỉnh nhẹ" từng cân nhắc.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B100 | `CLOSED` chỉ vào được từ `COMPLETED` (`canClose()`), qua hành động tường minh
+`WorkOrderService.close` — **không bao giờ tự động**. Đây là nửa "Reconcile" của tên phase: `close()`
+gọi lại **đúng** `materialReservationService.cancelActiveReservations(workOrder)` mà `cancel()` đã
+dùng từ trước — giải phóng mọi reservation `ACTIVE` còn sót (component bị over-reserve nhưng chưa bao
+giờ issue) về lại available, vì một khi `CLOSED` thì WO không còn cách nào khác để giải phóng nó nữa.
+🔴 **Bug thật do phase này phát hiện và sửa**: `canReserve()` (trước phase) là **danh sách phủ định**
+`!= COMPLETED && != CANCELLED` — một giá trị enum mới không tự động bị loại trừ khỏi danh sách phủ
+định, nên nếu không sửa, một WO `CLOSED` vẫn nhận reserve mới được. Đã thêm `&& != CLOSED` tường minh.
+Mọi gate khác (`canExecute()`, `canReceipt()`, `canRelease()`, `canPlan()`, danh sách status tường
+minh trong `cancel()`) là **danh sách khẳng định** (positive list) nên tự động loại `CLOSED` mà không
+cần sửa gì — đã rà đủ theo checklist `coding-rules.md §11.3` (`grep -rn "WorkOrderStatus\."
+src/main`). `CapacityBoardService.LOAD_STATUSES` (đọc, không phải gate ghi) **có sửa**: `CLOSED` được
+thêm cạnh `COMPLETED` vì lịch của một WO đã đóng vẫn là load lịch sử thật — đóng WO không được âm
+thầm viết lại utilization của một ngày đã báo cáo trước đó | `WorkOrderTest.canClose_onlyTrueWhenCompleted`, `.close_setsStatusAndClosedAt`, `.canReserve_isFalseOnceClosed`; `WorkOrderServiceTest.close_completedWorkOrder_succeedsAndReleasesActiveReservations`, `.close_notCompletedWorkOrder_throwsStateConflictBeforeTouchingAnything`, `.close_alreadyClosedWorkOrder_throwsStateConflict`; `MaterialReservationServiceTest.reserve_onClosedWorkOrder_shouldThrowBeforeTouchingStock` (nay thêm `CLOSED` vào `@EnumSource`); `MaterialIssueServiceTest.post_onClosedWorkOrder_shouldThrow`; `ProductionReceiptServiceTest.post_onClosedWorkOrder_shouldThrow`; `CapacityBoardServiceTest.loadStatuses_includesClosedAndCompletedExcludesCancelled` |
+
+**Quyết định cần nhớ:**
+
+1. Endpoint `POST /work-orders/{id}/close` **không nhận body** — đóng không đối kháng như cancel
+   (spec không đòi lý do, quyết định của user chỉ nói "khoá hoàn toàn", không nói gì về reason), nên
+   không thêm `reason` bắt buộc như `WorkOrderCancelRequest` (`F7`). Không thêm scope ngoài yêu cầu.
+2. Tái dùng `PERM_WORK_ORDER_MANAGE` — cùng quyền đã gác `cancel`/`plan`/`release`/`update`, mọi hành
+   động đổi vòng đời trên aggregate này. **Không** permission mới ⇒ không migration seed, không đụng
+   `docs/roles-and-permissions.md` (`coding-rules.md C10` chỉ bắt buộc khi có permission **mới**).
+3. `closedAt` mirror `cancelledAt`/`completedAt` — cột nullable đơn giản, **không** có `closedBy`
+   riêng: ai đóng đã được `updatedBy` (JPA auditing) ghi lại, đúng cách mọi status transition khác
+   trên entity này đã làm.
+
 ## Bất Biến Fulfillment Allocation (F6)
 
 | # | Bất biến | Test bảo vệ |

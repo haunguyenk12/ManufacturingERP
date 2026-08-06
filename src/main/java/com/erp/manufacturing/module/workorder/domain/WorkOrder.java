@@ -147,6 +147,10 @@ public class WorkOrder extends BaseEntity {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    /** When this work order was reconciled and locked (P6, invariant B100). Null until {@link #close}. */
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
     @Column(name = "blocked_at")
     private Instant blockedAt;
 
@@ -213,7 +217,14 @@ public class WorkOrder extends BaseEntity {
      * Everything up to the point the work order stops being alive may reserve.
      */
     public boolean canReserve() {
-        return status != WorkOrderStatus.COMPLETED && status != WorkOrderStatus.CANCELLED;
+        return status != WorkOrderStatus.COMPLETED
+                && status != WorkOrderStatus.CANCELLED
+                && status != WorkOrderStatus.CLOSED;
+    }
+
+    /** Only a completed work order may be closed (P6, invariant B100) — never automatic. */
+    public boolean canClose() {
+        return status == WorkOrderStatus.COMPLETED;
     }
 
     /**
@@ -341,5 +352,15 @@ public class WorkOrder extends BaseEntity {
         status = WorkOrderStatus.CANCELLED;
         cancelledAt = now;
         cancelReason = reason;
+    }
+
+    /**
+     * Reconciles and permanently locks a completed work order (P6). Who closed it is captured by
+     * {@code updatedBy} via JPA auditing, the same as every other status transition on this entity —
+     * no separate {@code closedBy} column.
+     */
+    public void close(Instant now) {
+        status = WorkOrderStatus.CLOSED;
+        closedAt = now;
     }
 }

@@ -336,7 +336,8 @@ class SupplySuggestionServiceTest {
                 null,
                 List.of(),
                 List.of(),
-                List.of());
+                List.of(),
+                null);
     }
 
     private SupplySuggestion suggestion(SupplySuggestionType type, SupplySuggestionStatus status) {
