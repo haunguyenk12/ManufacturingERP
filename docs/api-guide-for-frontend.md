@@ -926,6 +926,30 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > chỉ nhận `name`/`description`. Cùng permission `PERM_ACCESS_MANAGE` cho cả 9 endpoint — **không**
 > có permission mới.
 
+### Audit Logs *(`C2-1`, 2026-08-06)*
+
+| Việc | Endpoint |
+|---|---|
+| Danh sách audit trail | `GET /audit-logs?actorUserId=&entityType=&entityId=&action=&plantId=&traceId=&from=&to=&page=&size=&sortBy=&sortDir=` (mọi filter tuỳ chọn, default sort `createdAt,desc`) |
+| Chi tiết một audit log, kèm `changes[]` | `GET /audit-logs/{auditLogId}` |
+
+> 🔴 **`PERM_AUDIT_READ` — ADMIN only**, không cấp cho MANAGER/OPERATOR (chốt với user). Gác bằng
+> `hasPermission` (kiểm tra global), không `hasResourceAccess` — audit trail không thuộc về một
+> company/plant cụ thể, nên **không** có cross-check `X-Plant-Id` trên filter `plantId` (khác
+> `PlanningDemandController`, nơi header có ý nghĩa vì có hai nguồn plant để đối chiếu).
+>
+> **`changes[]` trên response chi tiết luôn rỗng hôm nay** — bảng `audit_log_changes` tồn tại từ lâu
+> (migration `V6`) nhưng chưa có dòng code nào ghi field-level diff vào đó (đợt 2, chưa xếp lịch). FE
+> đã xác nhận màn hình Audit dùng được với `changes[]` rỗng.
+>
+> **`plantId` trên mọi dòng — kể cả dòng mới tạo hôm nay — vẫn là `null`.** Cột thêm ở `V54` nhưng chỉ
+> dừng ở mức schema; chưa có code nào populate nó lúc ghi audit log (việc đó chạm `RequestContext`/
+> `AuditableAspect` — phạm vi khác, chưa xếp lịch). Lọc theo `plantId` hôm nay sẽ luôn trả **rỗng**,
+> không phải bug.
+>
+> **`action` là enum `AuditAction`** (danh sách đầy đủ: xem `@Tag "Audit Logs"` trong Swagger) — gửi
+> giá trị không hợp lệ trả `400 VALIDATION_ERROR`, không phải mảng rỗng.
+
 ---
 
 ## 6. Tham chiếu DTO

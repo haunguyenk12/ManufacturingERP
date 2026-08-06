@@ -9,8 +9,8 @@
 > đã **xong hết** — xem **§8** (section mới). §3 cũng vừa được sửa lại tương ứng. Nợ "concurrent
 > refresh" mà bảng nghiệm thu ở §6.1 của `BACKEND_CAPSTONE2_API_GAPS.md` từng nêu là chưa qua cũng đã
 > đóng — xem **§9**. **FE đã trả lời cả 2 câu chặn ở §5** (audit đợt 1 không cần diff, Lot `HOLD` bắt
-> buộc qua QC disposition) — `C2-1` và `C2-2` **đang được triển khai**. Chỉ còn câu 5 (hành chính,
-> snapshot OpenAPI) là chưa có phản hồi.
+> buộc qua QC disposition). `C2-1` **đã xong** — xem **§10**. `C2-2` đang làm tiếp theo. Chỉ còn câu 5
+> (hành chính, snapshot OpenAPI) là chưa có phản hồi.
 
 ---
 
@@ -94,9 +94,12 @@ Chúng tôi tách làm hai đợt:
 **Cần FE xác nhận:** màn hình Audit của các bạn có dùng được với đợt 1 (không có diff) hay bắt buộc phải
 chờ đợt 2? Câu trả lời quyết định thứ tự làm.
 
-Thêm: `audit_logs` **không có cột `plant_id`** mà filter §3.3 yêu cầu. Chúng tôi sẽ thêm cột, nhưng
-**mọi dòng lịch sử sẽ là `null`** (audit là append-only, không backfill được). ⇒ filter `plantId` chỉ
-lọc đúng cho dòng sinh **sau** khi deploy.
+✅ **`C2-1` đã xong (2026-08-06)** — `GET /audit-logs` + `/audit-logs/{id}` đã có, xem §8a. 🔴 **Sửa lại
+lời hứa ở bản 2026-08-04:** cột `plant_id` đã thêm (`V54`), nhưng **chỉ dừng ở schema** — không chỉ
+dòng lịch sử mà **cả dòng mới tạo hôm nay cũng vẫn `null`**, vì chưa có code nào populate nó lúc ghi
+audit log (việc đó chạm `RequestContext`/`AuditableAspect` ở nhiều call site, phạm vi khác, chưa xếp
+lịch). Lọc theo `plantId` hôm nay sẽ luôn trả **rỗng** — đây là nói lại chính xác hơn dòng cũ, không
+phải thay đổi kế hoạch.
 
 ### 2.2 §3.2 Inventory Lot — `warehouseId` không nằm trên lot, và có một ràng buộc nghiệp vụ cứng
 
@@ -137,7 +140,7 @@ bộ: roadmap `C2-*`.
 | Đợt | Nội dung | Trạng thái |
 |---|---|---|
 | `C2-0` | Phản hồi này + sửa OpenAPI summary + cập nhật `api-guide-for-frontend.md` | ✅ **xong** (2026-08-04) |
-| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | FE đã xác nhận (2026-08-06) — đang làm |
+| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | ✅ **xong** (2026-08-06) — xem §10 |
 | `C2-2` | §3.2 Inventory Lot list/detail/status | FE đã xác nhận (2026-08-06) — đang làm |
 | `C2-3` | §3.1 UOM master CRUD + lifecycle | ✅ **xong** (2026-08-04) — xem §7 |
 | `C2-4` | §4.3-§4.6: `PATCH /sales-orders/{id}`, Role/Scope lifecycle, `GET /access/assignments`, chốt contract over-BOM, **+ time variance** | ✅ **xong** (2026-08-05) — xem `CLAUDE.md §0.27` |
@@ -319,6 +322,29 @@ bị đánh cắp — cơ chế cũ (`TOKEN_REUSE_DETECTED` sau khi bị rotate 
 
 🔴 **Không có gì để FE đổi ở client** — đây là sửa lỗi phía trong, response shape/mã lỗi không đổi.
 Chỉ nêu ở đây để đóng đúng mục 🔴 mà bảng nghiệm thu của các bạn đã gắn cờ.
+
+---
+
+## 10. `C2-1` đã xong (2026-08-06) — Audit Logs read API
+
+§3.3, đợt 1 (đọc dữ liệu event đang có, không có field-level diff — đúng theo câu trả lời của các bạn
+ở §2.1). Field list đầy đủ: `docs/api-guide-for-frontend.md` mục "Audit Logs".
+
+| Việc | Endpoint |
+|---|---|
+| Danh sách | `GET /audit-logs?actorUserId=&entityType=&entityId=&action=&plantId=&traceId=&from=&to=&page=&size=` |
+| Chi tiết + `changes[]` | `GET /audit-logs/{auditLogId}` |
+
+**Ba điều cần biết trước khi code UI:**
+
+1. **`PERM_AUDIT_READ` — ADMIN only.** Không cấp cho MANAGER/OPERATOR — audit trail lộ IP/user-agent/
+   lịch sử hành động của **mọi** user, cùng nhóm nhạy cảm với hai quyền cấu hình hệ thống hiện có.
+2. **`changes[]` luôn rỗng hôm nay** — đúng như đã báo ở §2.1, đây **không phải** lỗi.
+3. 🔴 **`plantId` KHÔNG lọc được gì hôm nay — kể cả với audit log tạo mới sau khi tính năng này đã
+   deploy.** Sửa lại lời hứa ở bản 2026-08-04 (§2.1): cột `plant_id` (`V54`) chỉ dừng ở schema, chưa
+   có code nào ghi giá trị thật vào đó lúc audit log được tạo. Đóng nốt việc này là phase riêng, chưa
+   xếp lịch. Nếu màn hình Audit của các bạn có bộ lọc theo plant, tạm thời nó sẽ luôn trả danh sách
+   rỗng — không phải bug phía các bạn.
 
 ---
 

@@ -64,15 +64,15 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`C2-1` – Audit Logs read API.** FE đã trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md §5` (2026-08-06) — cả `C2-1` và `C2-2` hết bị chặn. Xem `NEXT_PHASE_PLAN.md §6`. |
-| **Phase trước** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). `POST /auth/forgot-password`, `POST /auth/reset-password`, `PATCH /admin/users/{id}/unlock` (role `ADMIN`, controller `/admin` đầu tiên trong repo). Reset token qua `PasswordResetTokenService` (Redis `auth:reset:{token}` + reverse index, TTL 15m, single-use). Quyết định hạ tầng chốt với user: gửi email bằng **mock/log console** — không `spring-boot-starter-mail`, không SMTP/SES, không interface cho một implementation. `forgotPassword` trả `void` và byte-identical trên cả hai nhánh (email tồn tại hay không) — phòng account enumeration thật, không chỉ cùng response text. Trả **nốt 3/3** nợ #6 (`D8a`+`D8b` đã trả 2/3 trước đó). Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
-| **Phase trước đó** | **`P6` – WO Close/Reconcile** ✅ **HOÀN THÀNH** (2026-08-06). `WorkOrderStatus.CLOSED` chỉ vào từ `COMPLETED`, khoá hoàn toàn qua `POST /work-orders/{id}/close`. Đóng nốt track `P*`. Migration `V53`. Bất biến `B100`. Bản ghi: **§0.34** |
+| **Phase đang chạy** | *(không có — `C2-1` vừa xong)* |
+| **Phase trước** | **`C2-1` – Audit Logs read API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /audit-logs`, `GET /audit-logs/{id}` (đợt 1, `changes[]` luôn rỗng — FE đã xác nhận dùng được). `AuditLogQueryService`/`AuditLogController` mới trong `common/audit/` (tách khỏi `AuditLogService`, service đó chỉ publish). `PERM_AUDIT_READ` **ADMIN-only** (chốt với user). Migration `V54` (cột `plant_id`, chỉ dừng ở schema — **không** populate real-time, quyết định phạm vi có chủ đích) + `V55` (seed permission). 🔴 Phát hiện biến thể mới của lớp lỗi `lower(bytea)` (`§0.24`): tham số `Instant` chỉ xuất hiện ở vế `IS NULL` làm Postgres không suy được type — sửa bằng `cast(:from as timestamp) IS NULL`, cùng công thức `cast(... as string)` đã dùng cho String, lần đầu áp dụng cho `Instant`. Bản ghi: **§0.36** |
+| **Phase trước đó** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). Trả nốt 3/3 nợ #6. Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
 | **Phase kế tiếp** | `C2-2` — Inventory Lot lifecycle API, làm ngay sau `C2-1`. Track `P*` và `D8` đã đóng hết (nợ #6 trả đủ 3/3). Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
 | **Migration mới nhất** | **`V53__add_work_order_closed_status.sql`** (`P6`) — thêm `CLOSED` vào `chk_work_orders_status` + cột `work_orders.closed_at`. `D8c` **không có migration** (thuần Redis) |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → **`D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → **`C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -1828,6 +1828,76 @@ service (`AuthServiceTest`, cả hai nhánh forgot-password + reset-password + u
 **Breaking changes — wire: KHÔNG có** (thuần additive: 3 endpoint mới, 1 mã lỗi mới, 2 audit action
 mới). **Java positional: có** — `AuthService` constructor +2 tham số (`PasswordResetTokenService`,
 `EmailNotificationService`). Test cũ dựng `AuthService`/`AuthServiceTest` đã **sửa** theo `R10`.
+
+---
+
+### 0.36 C2-1 – Audit Logs Read API (ĐÃ HOÀN THÀNH 2026-08-06)
+
+Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.3`. FE xác nhận (`docs/capstone2-api-gap-response.md §5`
+câu 1, 2026-08-06): màn hình Audit dùng được với `changes[]` rỗng — đợt 1 (event-level, đã ghi từ lâu)
+là đủ, **không** cần chờ đợt 2 (field-level diff qua `AuditableAspect`, vẫn chưa xếp lịch). Phase này
+chỉ là read API trên dữ liệu `audit_logs` đã tồn tại và đang được ghi. Migration **`V54`** (schema) +
+**`V55`** (seed permission).
+
+**Quyết định chốt với user (`AskUserQuestion`) trước khi viết code:** `PERM_AUDIT_READ` là
+**ADMIN-only** — audit trail lộ IP/user-agent/lịch sử hành động của mọi user, cùng tầng nhạy cảm với
+`PERM_ORG_MANAGE`/`PERM_ACCESS_MANAGE` (cả hai đã ADMIN-only), không phải tầng `PERM_COSTING_READ`
+(ADMIN+MANAGER).
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `AuditLog.plantId` (mới, nullable, FK `plants`) | `common/audit/AuditLog.java`, `V54` |
+| `AuditLogQueryService` (mới) — `list`/`get`, tách khỏi `AuditLogService` (service đó chỉ publish, fire-and-forget) | `common/audit/` |
+| `AuditLogRepository.search(...)` — 8 filter, tất cả exact-match | `common/audit/AuditLogRepository.java` |
+| `AuditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc` (mới) | `common/audit/AuditLogChangeRepository.java` |
+| `GET /audit-logs` (list, không `changes[]`), `GET /audit-logs/{id}` (detail, có `changes[]`) | `common/audit/controller/AuditLogController.java` (mới) |
+| `PERM_AUDIT_READ` — chỉ `ADMIN` | `V55` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Cột `plant_id` chỉ dừng ở schema — quyết định phạm vi có chủ đích, không phải thiếu sót.**
+   `V54` thêm cột nhưng **không** wiring populate real-time: không đụng `RequestContext`,
+   `AuditLogEvent`, `AuditableAspect`, hay bất kỳ call site `@Auditable`/`auditLogService.log*()` nào.
+   Mọi dòng — **cả lịch sử lẫn dòng mới tạo hôm nay** — vẫn `plant_id = NULL` cho tới khi có phase
+   riêng wiring nó. Lọc theo `plantId` hôm nay **luôn trả rỗng**. Bản 2026-08-04 của
+   `docs/capstone2-api-gap-response.md` từng hứa nhẹ hơn ("dòng mới sẽ có") — đã sửa lại cho khớp thật.
+2. 🔴 **`changes[]` trên `GET /audit-logs/{id}` là JOIN THẬT, không phải hardcode `[]`.** Nó gọi
+   `AuditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc` — bảng `audit_log_changes` **đã tồn
+   tại từ `V6`** (đính chính: `common/audit/CLAUDE.md` trước đây ghi sai là "chưa implement", xem
+   §9.12 file đó) nhưng **0 call site nào ghi vào nó** (đợt 2, ngoài phạm vi). Kết quả hôm nay luôn
+   rỗng, nhưng sẽ tự động có dữ liệu thật ngay khi đợt 2 triển khai — không cần sửa code ở đây.
+3. **List endpoint cố ý KHÔNG kèm `changes[]` mỗi dòng** — batch-query một kết quả luôn-rỗng cho mọi
+   trang là lãng phí vô nghĩa. Chỉ detail endpoint mới join.
+4. 🔴 **Phát hiện biến thể MỚI của lỗi `lower(bytea)` (`§0.24`), lần đầu KHÔNG liên quan `concat`/
+   `like`.** Tham số `Instant` (`:from`/`:to`) chỉ xuất hiện ở vế `IS NULL` — Hibernate sinh một `?`
+   positional **riêng** cho mỗi lần xuất hiện tên tham số, nên vế đó không có ngữ cảnh type nào khác
+   để Postgres suy ra ⇒ `could not determine data type of parameter`. Khác lỗi cũ (toàn bộ endpoint
+   500 do `concat`), lỗi này chỉ nổ khi filter đó **được dùng** (`from`/`to` khác null). Sửa bằng
+   `cast(:from as timestamp) IS NULL OR a.createdAt >= :from` — chỉ cast vế `IS NULL`, giữ nguyên vế
+   so sánh (tránh đụng ngữ nghĩa `timestamptz`). Test `AuditLogRepositoryIT.search_filtersByCreatedAtRange`
+   là nơi duy nhất bắt được (`AuditLogQueryServiceTest` dùng mock, không thấy). Xác nhận filter
+   UUID/String cùng query (`actorUserId`, `entityType`...) **không** cần cast — đã có tiền lệ hoạt động
+   đúng ở `WorkOrderRepository.productItemId`/`UomRepository.status`. Ghi chi tiết:
+   `common/audit/CLAUDE.md §9.12`.
+5. **Không `X-Plant-Id` cross-check trên filter `plantId`** — endpoint gác bằng permission global
+   ADMIN-only, không phải plant scope; cơ chế cross-check (`error-handling.md §5.6.1`) tồn tại để giữ
+   session/URL của caller plant-scoped nhất quán, không áp dụng cho một read xuyên-plant.
+6. `AuditLogController` đặt trong `common/audit/controller/` (subpackage mới), không phải
+   `module/audit/` riêng — `common/audit` đã là nơi chứa mọi thứ audit, thêm module riêng cho 2
+   endpoint là quá tay.
+
+**Nghiệm thu:** `mvn -o clean verify` — **898 case unit + 98 case IT / 14 class IT, failures = 0,
+errors = 0** (baseline trước phase: 885 unit + 89 IT / 13 class — `+13` unit
+(`AuditLogQueryServiceTest` 5 + `AuditLogMethodSecurityTest` 4 + `AuditLogControllerTest` 4), `+9` IT
+từ `AuditLogRepositoryIT` (**class IT thứ 14**, mới) + `+1` case trong `FlywayMigrationIT`
+(`migrate_v55_grantsAuditReadToAdminOnly`); xem hàng "Baseline test" §0.1). Không nghiệm thu mutation
+riêng — bù lại bằng test ở mọi tầng: service (filter forwarding, detail 404, `changes[]` từ repo thật
+không hardcode), method-security (deny+allow), controller (envelope, 400 type-mismatch, 404),
+repository `*IT` (8 case, mỗi filter riêng + kết hợp), `FlywayMigrationIT` (ma trận grant ADMIN-only).
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 2 endpoint mới, 1 permission mới, 1 cột mới
+trên `audit_logs`). **Java positional: không có** — chỉ thêm field/method mới, không đổi constructor
+nào có sẵn.
 
 ---
 

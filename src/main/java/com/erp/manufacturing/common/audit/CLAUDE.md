@@ -53,9 +53,15 @@ Auth events → AuditLogService.logAuth() trực tiếp (không dùng AOP)
 
 ## 9.2 Database Schema
 
-> **Current (implemented)**: chỉ có bảng `audit_logs`.
-> **Planned Phase 2**: thêm bảng `audit_log_changes` cho chi tiết field-level changes.
-> Migration hiện tại: `V5__create_audit_logs.sql` chỉ tạo `audit_logs`.
+> 🔴 **Sửa (`C2-1`, 2026-08-06): đoạn dưới đây từng ghi sai.** Cả hai bảng `audit_logs` **và**
+> `audit_log_changes` đã tồn tại từ **`V6`** (không phải chỉ `audit_logs` từ `V5`, và không phải
+> "chưa có migration" cho `audit_log_changes` như dòng cũ ghi). Cái thật sự chưa có là **code ghi vào**
+> `audit_log_changes` — `AuditableAspect` chưa collect field-level diff, `0` call site insert
+> (§9.6/§9.8 đúng ở điểm này). `C2-1` thêm được **phía đọc**: `GET /audit-logs/{id}` join thật vào
+> bảng này qua `AuditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc` — `changes[]` genuinely
+> rỗng hôm nay vì chưa ai ghi, không phải vì bảng không tồn tại hay vì hardcode `[]`.
+> `AuditLogController`/`AuditLogQueryService` mới nằm ở `common/audit/controller/`,
+> `common/audit/` (tách khỏi `AuditLogService` — service đó chỉ publish, không đọc).
 
 ### 9.2.1 Bảng Hiện Tại – `audit_logs`
 
@@ -87,12 +93,15 @@ CREATE INDEX idx_audit_trace_id   ON audit_logs(trace_id);
 CREATE INDEX idx_audit_user_time  ON audit_logs(user_id, created_at DESC);
 ```
 
-#### [🔜 Phase 2] Bảng `audit_log_changes` (Chi tiết field – chưa implement)
+#### Bảng `audit_log_changes` (Chi tiết field – **bảng đã có từ `V6`, code ghi vẫn chưa có**)
 
-> **Chưa có migration** cho bảng này. Sẽ thêm trong Phase 2 khi implement AOP `@Auditable`.
+> 🔴 Sketch dưới đây là **bản phác thảo gốc, lệch schema thật** — giữ lại chỉ để thấy ý định ban đầu.
+> Bảng thật (`V6`, xem `AuditLogChange.java`) dùng `change_type` **enum** (`CREATE`/`UPDATE`/`DELETE`,
+> không phải `value_type VARCHAR` tự do) và `old_value`/`new_value` kiểu `jsonb` (không phải `TEXT`).
+> Việc còn thiếu là **ghi dữ liệu vào bảng này**, không phải tạo bảng.
 
 ```sql
--- [TODO Phase 2] V6__create_audit_log_changes.sql
+-- Bản phác thảo gốc (lệch thật, xem cảnh báo ở trên) — schema thật nằm trong V6, không sửa ở đây (C5)
 CREATE TABLE audit_log_changes (
     change_id   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     audit_id    UUID        NOT NULL REFERENCES audit_logs(audit_id) ON DELETE CASCADE,
@@ -242,7 +251,9 @@ Controller / Service
 | Thay đổi | Trạng thái | Lý do |
 |---|---|---|
 | Bảng `audit_logs` | ✅ Current | Ghi mọi action (LOGIN, LOGOUT, entity events) |
-| `audit_log_changes` (chi tiết field) | 🔜 Phase 2 | Tách khái quát và chi tiết; dùng khi mở rộng `@Auditable` để collect `FieldChange` |
+| `GET /audit-logs`, `GET /audit-logs/{id}` (đọc) | ✅ Current (`C2-1`) | `AuditLogQueryService` + `AuditLogController` (`common/audit/`), `PERM_AUDIT_READ` ADMIN-only. `plant_id` filter thêm ở `V54` (nullable, không backfill, không populate real-time — xem javadoc `AuditLog.plantId`) |
+| `audit_log_changes` (bảng + đọc) | ✅ Current (`V6` + `C2-1`) | Bảng đã tồn tại từ `V6`; `GET /audit-logs/{id}.changes[]` join thật vào nó từ `C2-1`. Rỗng hôm nay vì chưa ai ghi |
+| `audit_log_changes` (**ghi** — field-level diff capture) | 🔜 Phase 2 | Mở rộng `@Auditable`/`AuditableAspect` để collect `FieldChange` — chưa xếp lịch, ngoài phạm vi `C2-1` |
 | `JwtAuthFilter` set `authenticatedUserId` vào MDC + attr | ✅ Current | `RequestContext.capture()` cần userId |
 | `TraceIdFilter` set `clientIp` vào attr | ✅ Current | Không cần inject `HttpServletRequest` khắp nơi |
 | `BaseEntity` có `updatedBy` | ✅ Current | JPA Auditing tự điền người sửa cuối |
@@ -253,3 +264,32 @@ Controller / Service
 | RTR – key `auth:refresh:used:{tokenId}` | ✅ Current (`D8a`) | Phát hiện token bị đánh cắp và reuse → audit `SUSPICIOUS_TOKEN_REUSE` (status `FAILURE`, qua `logAuthFailure`) |
 | `auth:reset:{token}` trong Redis | ✅ Current (`D8c`) | Forgot password flow single-use, TTL 15m, + reverse index `auth:reset:user:{userId}` để request mới invalidate token cũ. Audit `PASSWORD_RESET`/`ACCOUNT_UNLOCKED` |
 | Absolute session timeout 30 ngày | ✅ Current (`D8b`) | Ngăn session sống mãi dù user vẫn active → audit `SESSION_ABSOLUTE_TIMEOUT` (status `FAILURE`, qua `logAuthFailure` — request refresh đó **đã thất bại**, dù nguyên nhân là chính sách chứ không phải tấn công) |
+
+## 9.12 C2-1 — Audit Logs Read API (2026-08-06)
+
+`BACKEND_CAPSTONE2_API_GAPS.md §3.3`, đợt 1 (đọc dữ liệu event đang có — FE xác nhận `changes[]` rỗng
+dùng được, không cần chờ diff capture, xem `docs/capstone2-api-gap-response.md §5` câu 1). Migration
+`V54` (cột `plant_id`) + `V55` (seed `PERM_AUDIT_READ`, ADMIN-only — chốt với user).
+
+**Kiến trúc:** `AuditLogQueryService` (mới) tách khỏi `AuditLogService` — service cũ tài liệu rõ là
+facade **chỉ publish**, không đọc; giữ tách đúng như `TokenStoreService`/`AuthService` đã tách
+read/write hạ tầng khỏi service nghiệp vụ. `AuditLogController` nằm ở `common/audit/controller/` —
+`common/*` trước đó chưa có controller nào (auth controllers nằm ở `module/auth`), nhưng audit không
+thuộc về module nghiệp vụ nào, nên đặt cạnh phần còn lại của package `common/audit` là ít xáo trộn
+nhất, không phải dựng `module/audit/` mới cho một cặp endpoint.
+
+🔴 **Bug thật phát hiện khi viết `AuditLogRepositoryIT`, biến thể MỚI của lớp lỗi `lower(bytea)`
+(`CLAUDE.md §0.24`, đã bắt được 3 lần trước ở `concat`/`like`).** Lần này **không** liên quan
+`concat`/`like` — filter `from`/`to` là so sánh thuần `>=`/`<=`. Một tham số `Instant` **chỉ** xuất
+hiện ở vế `:from IS NULL` (không có occurrence nào khác cho Postgres suy type) làm nổ
+`could not determine data type of parameter` ngay ở bước Parse, **trước khi** Hibernate kịp gán type
+qua `setObject`. Cùng gốc rễ (Postgres không tự suy được type cho placeholder đứng một mình), khác
+biểu hiện (không cần `concat`/`like` để kích hoạt — bất kỳ tham số nào CHỈ xuất hiện trong `IS NULL`
+đều có nguy cơ, tuỳ driver/version). Sửa bằng đúng công thức đã có: `cast(:from as timestamp) IS NULL`
+— chỉ cast vế `IS NULL`, **không** cast vế so sánh `a.createdAt >= :from` (giữ nguyên semantics
+`timestamptz`). Các filter UUID/String khác trong cùng query **không** cần cast — đã có tiền lệ y hệt
+(`WorkOrderRepository.productItemId`, `UomRepository`'s `status`) chạy đúng ở dạng bare `IS NULL`
+nhiều năm nay, nên đây không phải quy tắc "luôn cast mọi filter" mà là "cast khi tham số không có
+occurrence nào khác cho Postgres bám vào" — với `Instant`/timestamp so sánh bằng `>=`/`<=` (không phải
+`=`), rủi ro này lộ ra rõ hơn. Test bảo vệ: `AuditLogRepositoryIT.search_filtersByCreatedAtRange`
+(mock repository — `AuditLogQueryServiceTest` — **không** bắt được lỗi này, đúng bài học `R7`).

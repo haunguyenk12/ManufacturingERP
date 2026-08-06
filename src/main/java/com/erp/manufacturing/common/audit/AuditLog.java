@@ -24,7 +24,8 @@ import java.util.UUID;
         @Index(name = "idx_audit_entity",     columnList = "entity_type, entity_id"),
         @Index(name = "idx_audit_created_at", columnList = "created_at DESC"),
         @Index(name = "idx_audit_trace_id",   columnList = "trace_id"),
-        @Index(name = "idx_audit_user_time",  columnList = "user_id, created_at DESC")
+        @Index(name = "idx_audit_user_time",  columnList = "user_id, created_at DESC"),
+        @Index(name = "idx_audit_plant_id",   columnList = "plant_id")
 })
 @Immutable
 @Getter
@@ -72,6 +73,14 @@ public class AuditLog {
 
     @Column(name = "trace_id", length = 32)
     private String traceId;
+
+    /**
+     * C2-1: added by {@code V54}, nullable, never backfilled — every historical row is {@code null},
+     * and (scope decision) so is every new row until a follow-up phase wires real-time population
+     * from the audited call sites. Filtering by it today is a correct no-op, not a bug.
+     */
+    @Column(name = "plant_id")
+    private UUID plantId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default

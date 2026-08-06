@@ -170,6 +170,16 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 > Endpoint `GET /sales-orders/planning-demands` **không** dùng quyền sales — nó là màn hình của
 > planner nên gác bằng `PERM_MRP_RUN` (spec §2.2 gán `PLANNING_RUN` cho endpoint này).
 
+### Audit Logs
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_AUDIT_READ` | Xem audit trail (`GET /audit-logs`, `GET /audit-logs/{id}`) (`C2-1`, `V55`) |
+
+> 🔴 **ADMIN-only, không cấp cho MANAGER hay OPERATOR** — cùng nhóm nhạy cảm với `PERM_ORG_MANAGE`/
+> `PERM_ACCESS_MANAGE` (audit trail lộ IP/user-agent/lịch sử hành động của **mọi** user), khác nhóm
+> `PERM_COSTING_READ` (ADMIN+MANAGER). Gác bằng `hasPermission` (kiểm tra global), không
+> `hasResourceAccess` — audit trail không thuộc về một company/plant cụ thể.
+
 ### Planning & MRP
 | Quyền | Mô tả |
 |-------|-------|

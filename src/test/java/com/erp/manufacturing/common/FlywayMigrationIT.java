@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V53) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V55) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -45,7 +45,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("53");
+        assertThat(current.getVersion().getVersion()).isEqualTo("55");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -67,10 +67,12 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
      */
     @Test
     void migrate_v41_leavesNoCorePermissionGrantedToAdminAlone() throws Exception {
-        // The complete admin-only set after V41: the two "configure the system" permissions
+        // The complete admin-only set: the two "configure the system" permissions
         // docs/roles-and-permissions.md reserves for ADMIN ("MANAGER xem master data nhưng không
-        // cấu hình hệ thống"). Adding to this list is a security decision, not a formality.
-        Set<String> adminOnlyByDesign = Set.of("PERM_ORG_MANAGE", "PERM_ACCESS_MANAGE");
+        // cấu hình hệ thống"), plus PERM_AUDIT_READ added at C2-1/V55 (audit trail exposes every
+        // user's IP/user-agent/action history — same sensitivity class, confirmed with user).
+        // Adding to this list is a security decision, not a formality.
+        Set<String> adminOnlyByDesign = Set.of("PERM_ORG_MANAGE", "PERM_ACCESS_MANAGE", "PERM_AUDIT_READ");
 
         migratePublicSchema();
 
@@ -332,6 +334,41 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                      JOIN roles r ON r.role_id = rp.role_id
                      JOIN permissions p ON p.permission_id = rp.permission_id
                      WHERE r.code = '%s' AND p.code IN ('PERM_COSTING_READ', 'PERM_COSTING_MANAGE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * C2-1: {@code PERM_AUDIT_READ} — ADMIN only, NO grant to MANAGER or OPERATOR at all (same
+     * "cấm" shape as {@code migrate_v51_*}, not the OPERATOR-gets-read-only shape of
+     * {@code migrate_v45_*}/{@code migrate_v47_*}/{@code migrate_v49_*}). {@code PermissionCatalogTest}
+     * only proves the permission exists, never that MANAGER/OPERATOR are excluded from it — only a
+     * real database answers that (same lesson as {@code migrate_v41_*}).
+     */
+    @Test
+    void migrate_v55_grantsAuditReadToAdminOnly() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedAuditPermissions("ADMIN")).containsExactly("PERM_AUDIT_READ");
+        assertThat(grantedAuditPermissions("MANAGER")).isEmpty();
+        assertThat(grantedAuditPermissions("OPERATOR")).isEmpty();
+    }
+
+    private Set<String> grantedAuditPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code = 'PERM_AUDIT_READ'
                      """.formatted(roleCode))) {
             while (rows.next()) {
                 granted.add(rows.getString("code"));

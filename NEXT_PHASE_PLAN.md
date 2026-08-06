@@ -1,10 +1,11 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`D8c` — Forgot-password / Account Recovery** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi
-> đầy đủ: `CLAUDE.md §0.35`. Trả nốt 3/3 nợ #6 (`D8a`+`D8b` đã trả 2/3 trước đó). Không migration.
+> Phase trước: **`C2-1` — Audit Logs read API** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
+> `CLAUDE.md §0.36`. `GET /audit-logs` + `GET /audit-logs/{id}`, `PERM_AUDIT_READ` ADMIN-only.
+> Migration `V54` (cột `plant_id`, schema-only) + `V55` (seed permission).
 >
-> **885 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất vẫn `V53` (`D8c` không migration).
+> **898 case unit + 98 case IT / 14 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V55`.
 
 ---
 
@@ -26,8 +27,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | `C2-1` — Audit Logs read API (FE đã trả lời câu 1/2, xem `docs/capstone2-api-gap-response.md §5`, 2026-08-06) |
-| **Ứng viên kế tiếp** | `C2-2` — Inventory Lot lifecycle API (cũng đã hết chặn, làm ngay sau `C2-1`) |
+| **Đang chạy** | *(không có — `C2-1` vừa xong)* |
+| **Ứng viên kế tiếp** | `C2-2` — Inventory Lot lifecycle API (đã hết chặn, xem §7) |
 | **Bị chặn** | *(không có)* |
 
 ---
@@ -41,8 +42,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 3 | ~~Concurrent refresh-token race (mở rộng `D8`)~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.32` |
 | 4 | ~~`P5` — Serial Number Tracking~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.33` |
 | 5 | ~~`P6` — WO Close/Reconcile~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.34` |
-| 6 | `C2-1` — Audit Logs read API | ▶️ Đang làm | FE đã trả lời câu 1 (2026-08-06) — dùng được đợt 1, không cần chờ diff |
-| 7 | `C2-2` — Inventory Lot lifecycle API | Không bị chặn — làm sau `C2-1` | FE đã trả lời câu 2 (2026-08-06) — Lot `HOLD` bắt buộc qua QC disposition |
+| 6 | ~~`C2-1` — Audit Logs read API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.36` |
+| 7 | `C2-2` — Inventory Lot lifecycle API | Không bị chặn — làm ngay | FE đã trả lời câu 2 (2026-08-06) — Lot `HOLD` bắt buộc qua QC disposition |
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
@@ -112,26 +113,19 @@ bug thật: `canReserve()` là danh sách phủ định, thiếu loại trừ `C
 
 ---
 
-## 6. `C2-1` — Audit Logs read API ▶️ ĐANG LÀM
+## 6. `C2-1` — Audit Logs read API ✅ ĐÃ XONG (2026-08-06)
 
-Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.3`.
-
-**Câu hỏi chặn đã có trả lời** (`docs/capstone2-api-gap-response.md §5` câu 1, FE trả lời 2026-08-06):
-màn hình Audit dùng được với `changes[]` rỗng — **không** cần chờ diff capture thật. ⇒ Phase này chỉ
-làm read API trên dữ liệu event hiện có; **không** mở rộng `AuditableAspect` để ghi field-level change
-(`AuditLogChange` vẫn tồn tại từ `V6` nhưng tiếp tục **0 call site ghi vào nó** — đó là phạm vi khác,
-chưa xếp lịch).
-
-### Bẫy đã biết (ghi sẵn để không quên khi tới lượt làm)
-
-`audit_logs` **không có cột `plant_id`** mà filter theo spec đòi hỏi. Thêm cột ⇒ mọi dòng lịch sử
-`NULL` (audit append-only, không backfill được) ⇒ filter chỉ đúng cho dòng mới, phải ghi tường minh
-`NULL = "trước C2-1"` — đúng tiền lệ `cancel_reason` của `F7`.
-
-### Khung endpoint đã biết (chưa code)
-
-`GET /audit-logs?entityType=&entityId=&action=&actorUserId=&plantId=&traceId=&from=&to=&page=&size=`,
-`GET /audit-logs/{auditLogId}`.
+Nguồn: `BACKEND_CAPSTONE2_API_GAPS.md §3.3`. FE xác nhận (`docs/capstone2-api-gap-response.md §5`
+câu 1, 2026-08-06): màn hình Audit dùng được với `changes[]` rỗng — đợt 1 không cần chờ diff capture
+thật (đợt 2, `AuditableAspect` field-level, vẫn chưa xếp lịch). `PERM_AUDIT_READ` **ADMIN-only**
+(chốt với user qua `AskUserQuestion`). Cột `plant_id` thêm vào `audit_logs` (`V54`) nhưng **chỉ dừng
+ở schema** — không wiring populate real-time, mọi dòng (cũ lẫn mới) vẫn `NULL` cho tới phase riêng.
+2 endpoint: `GET /audit-logs` (list, không `changes[]`), `GET /audit-logs/{id}` (detail, `changes[]`
+join thật vào `AuditLogChangeRepository`, luôn rỗng hôm nay vì chưa ai ghi vào bảng đó — không phải
+hardcode `[]`). Phát hiện + sửa biến thể mới của lỗi `lower(bytea)` (`CLAUDE.md §0.24`): tham số
+`Instant` chỉ xuất hiện ở vế `IS NULL` khiến Postgres không suy được type — sửa bằng
+`cast(:from as timestamp) IS NULL`. Migration `V54`+`V55`. Bản ghi đầy đủ: `CLAUDE.md §0.36`,
+`common/audit/CLAUDE.md §9.12`.
 
 ---
 
@@ -237,8 +231,14 @@ repo). Không migration.
   - [x] `AuthService.forgotPassword`/`resetPassword`/`adminUnlockAccount` — nợ #6 trả đủ 3/3
   - [x] Endpoint `POST /auth/forgot-password`, `POST /auth/reset-password`, `PATCH /admin/users/{id}/unlock`
   - [x] Test (885 case unit + 89 case IT / 13 class IT) + docs
-- [ ] **`C2-1`** — Audit Logs read API *(FE đã trả lời câu 1, 2026-08-06 — đang làm)*
-- [ ] **`C2-2`** — Inventory Lot lifecycle API *(FE đã trả lời câu 2, 2026-08-06 — làm sau `C2-1`)*
+- [x] **`C2-1`** — Audit Logs read API ✅ **2026-08-06**
+  - [x] Quyết định phạm vi permission — chốt với user: `PERM_AUDIT_READ` ADMIN-only
+  - [x] Quyết định phạm vi cột `plant_id` — chốt: schema-only, không wiring populate real-time
+  - [x] `AuditLogQueryService` (tách khỏi `AuditLogService`) + `AuditLogRepository.search`
+  - [x] Endpoint `GET /audit-logs` + `GET /audit-logs/{id}` — migration `V54`+`V55`
+  - [x] Phát hiện + sửa biến thể mới của lỗi `lower(bytea)` (`Instant` bare `IS NULL`)
+  - [x] Test (898 case unit + 98 case IT / 14 class IT) + docs
+- [ ] **`C2-2`** — Inventory Lot lifecycle API *(FE đã trả lời câu 2, 2026-08-06 — làm ngay sau `C2-1`)*
 
 ---
 
