@@ -6,10 +6,12 @@ import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.organization.domain.Role;
 import com.erp.manufacturing.module.organization.dto.MyAccessScopeResponse;
 import com.erp.manufacturing.module.organization.service.AccessControlService;
@@ -33,6 +35,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -62,6 +65,8 @@ class AuthServiceTest {
     @Mock private com.erp.manufacturing.config.JwtProperties jwtProperties;
     @Mock private AccessControlService            accessControlService;
     @Mock private UserRepository                  userRepository;
+    @Mock private PasswordResetTokenService       passwordResetTokenService;
+    @Mock private EmailNotificationService        emailNotificationService;
 
     @InjectMocks
     private AuthService authService;
@@ -610,6 +615,81 @@ class AuthServiceTest {
         verifyNoInteractions(tokenStore, userDetailsService, auditLogService);
     }
 
+    // ── Account Recovery (D8c) ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("forgotPassword – existing email generates a token and sends the mock email")
+    void forgotPassword_existingEmail_generatesTokenAndSendsEmail() {
+        when(userRepository.findByEmail("test@erp.local")).thenReturn(Optional.of(testUser));
+        when(passwordResetTokenService.generateToken(testUser.getUserId())).thenReturn("reset-tok-1");
+
+        authService.forgotPassword(new ForgotPasswordRequest("test@erp.local"));
+
+        verify(passwordResetTokenService).generateToken(testUser.getUserId());
+        verify(emailNotificationService).sendPasswordResetEmail("test@erp.local", "reset-tok-1");
+    }
+
+    /**
+     * Account enumeration prevention (§4.13): a miss must be byte-identical in behaviour to a hit as
+     * far as any collaborator is concerned — nothing is generated, nothing is sent.
+     */
+    @Test
+    @DisplayName("forgotPassword – unknown email touches neither the token service nor the mailer")
+    void forgotPassword_unknownEmail_doesNothingObservable() {
+        when(userRepository.findByEmail("nobody@erp.local")).thenReturn(Optional.empty());
+
+        authService.forgotPassword(new ForgotPasswordRequest("nobody@erp.local"));
+
+        verifyNoInteractions(passwordResetTokenService, emailNotificationService);
+    }
+
+    @Test
+    @DisplayName("resetPassword – valid token updates the password and force-logs-out every session")
+    void resetPassword_validToken_updatesPasswordAndForcesLogoutEverywhere() {
+        when(passwordResetTokenService.resolveUserId("reset-tok-1"))
+                .thenReturn(Optional.of(testUser.getUserId()));
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
+        when(passwordEncoder.encode("NewPassw0rd!")).thenReturn("$2a$12$newEncodedPassword");
+
+        authService.resetPassword(
+                new ResetPasswordRequest("reset-tok-1", "NewPassw0rd!"), httpRequest);
+
+        assertThat(testUser.getPassword()).isEqualTo("$2a$12$newEncodedPassword");
+        verify(userRepository).save(testUser);
+        verify(passwordResetTokenService).invalidate("reset-tok-1", testUser.getUserId());
+        verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
+        verify(tokenStore).deleteAllDeviceSessions(testUser.getUserId());
+        verify(auditLogService).logAuth(eq(testUser.getUserId()), eq("testuser"),
+                anyString(), anyString(), eq(AuditAction.PASSWORD_RESET), anyString());
+    }
+
+    @Test
+    @DisplayName("resetPassword – unknown/expired token throws RESET_TOKEN_INVALID before touching anything")
+    void resetPassword_invalidToken_throwsResetTokenInvalidBeforeTouchingAnything() {
+        when(passwordResetTokenService.resolveUserId("bad-tok")).thenReturn(Optional.empty());
+
+        ResetPasswordRequest request = new ResetPasswordRequest("bad-tok", "NewPassw0rd!");
+        assertThatThrownBy(() -> authService.resetPassword(request, httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.RESET_TOKEN_INVALID));
+
+        verifyNoInteractions(userRepository, tokenStore, auditLogService);
+    }
+
+    @Test
+    @DisplayName("adminUnlockAccount – reactivates the account and clears the Redis fail-counter")
+    void adminUnlockAccount_resetsStatusAndFailCount() {
+        testUser.setStatus(UserStatus.LOCKED);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
+
+        authService.adminUnlockAccount(testUser.getUserId());
+
+        assertThat(testUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(userRepository).save(testUser);
+        verify(tokenStore).resetFailCount("testuser");
+    }
+
     // ── Me ────────────────────────────────────────────────────────────────
     //
     // /me is only reachable with a valid, unexpired token (SecurityConfig carves it out of
@@ -624,7 +704,7 @@ class AuthServiceTest {
 
         when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(principalWithPermissions);
-        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.of(testUser));
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
 
         MyAccessScopeResponse plantScope = new MyAccessScopeResponse(
                 "PLANT", UUID.randomUUID(), "CO-01", UUID.randomUUID(), "PL-HN",
@@ -653,7 +733,7 @@ class AuthServiceTest {
 
         when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(principalWithPermissions);
-        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.of(testUser));
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(accessControlService.resolveMyScopes(testUser.getUserId()))
                 .thenReturn(new AccessControlService.UserAccessScopesResult(List.of(), null));
 
@@ -670,7 +750,7 @@ class AuthServiceTest {
     void me_userNotFoundInRepository_throwsResourceNotFound() {
         when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
-        when(userRepository.findById(testUser.getUserId())).thenReturn(java.util.Optional.empty());
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> authService.me(httpRequest))
                 .isInstanceOf(AppException.class)

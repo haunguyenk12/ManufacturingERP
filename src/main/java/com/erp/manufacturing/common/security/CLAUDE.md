@@ -415,38 +415,62 @@ dọn. Trường hợp 3 request đụng độ thật sự cùng lúc, request t
 
 ---
 
-## 4.14 Account Recovery Flow [🔜 Phase 2 – chưa implement]
+## 4.14 Account Recovery Flow [✅ `D8c`, 2026-08-06]
 
-> **Trạng thái**: Thiết kế bên dưới là planned. Hiện tại chưa có endpoint `/auth/forgot-password` hay `/auth/reset-password` trong code.
+> **Trạng thái**: đã implement trong `AuthService.forgotPassword`/`resetPassword`/`adminUnlockAccount`
+> + `PasswordResetTokenService` (module `auth`). Bất biến **`B101`** ở `module/auth/CLAUDE.md`.
+
+**Quyết định hạ tầng chốt với user (2026-08-06):** gửi email bằng **mock/log console** — không có
+dependency `spring-boot-starter-mail`, không SMTP/SES/SendGrid nào được tích hợp. `EmailNotification
+Service` chỉ log dòng chứa reset link ở mức INFO; không có interface (chỉ một implementation tồn tại,
+`coding-rules.md §11.5` cấm abstraction speculative). Nếu sau này quyết định gửi email thật, đó mới là
+lúc thêm interface + implementation thứ hai — không làm trước.
 
 #### Forgot Password
 ```
 1. POST /api/v1/auth/forgot-password { email }
    → Tìm user theo email (không báo kết quả)
-   → Nếu tồn tại: sinh token UUID, lưu auth:reset:{token} → { userId } TTL=15m
-   → Gửi email chứa link: https://app.com/reset-password?token={token}
+   → Nếu tồn tại: sinh token UUID, lưu auth:reset:{token} → userId TTL=15m
+     (đồng thời auth:reset:user:{userId} → token, TTL=15m — reverse index để request mới
+     invalidate token cũ, không cho tích lũy)
+   → "Gửi" email (mock/log console — xem quyết định ở trên)
    → Luôn trả: 200 { code: SUCCESS, message: "If this email exists, a reset link has been sent" }
+```
+🔴 **`forgotPassword` trả `void` có chủ đích** — controller tự soạn message cố định, không branch theo
+kết quả service. Nhánh "không tìm thấy email" **không** audit, **không** gọi `PasswordResetTokenService`/
+`EmailNotificationService` — hai nhánh phải giống hệt nhau ở mọi collaborator, đó mới là phòng chống
+account enumeration thật, không chỉ là "cùng câu chữ response".
 
+```
 2. POST /api/v1/auth/reset-password { token, newPassword }
    → Lấy userId từ Redis bằng token
-   → Nếu không tìm thấy → 401 RESET_TOKEN_INVALID (hết hạn hoặc đã dùng)
-   → Validate password policy
+   → Nếu không tìm thấy → 401 RESET_TOKEN_INVALID (hết hạn hoặc đã dùng — Redis TTL không phân biệt
+     được hai trường hợp, giống REFRESH_TOKEN_EXPIRED cho refresh token)
+   → Validate password policy (@Size(min=8), giống CreateUserRequest)
    → Đặt mật khẩu mới (BCrypt)
-   → XÓA token ngay (single-use)
-   → Xóa toàn bộ refresh token của user (force logout)
+   → XÓA token ngay (single-use, cả 2 key thuận/nghịch)
+   → Xóa toàn bộ refresh token + device session của user (force logout mọi phiên)
    → Ghi audit: PASSWORD_RESET
 ```
 
 #### Admin Manual Unlock
 ```
 PATCH /api/v1/admin/users/{userId}/unlock
-  → Yêu cầu role ADMIN
+  → Yêu cầu role ADMIN (@PreAuthorize("hasRole('ADMIN')"), giống UserService)
   → Xóa auth:failcount:{username} trong Redis
-  → Cập nhật users.status = ACTIVE
+  → Cập nhật users.status = ACTIVE (User.activate(), có sẵn từ trước)
   → Ghi audit: ACCOUNT_UNLOCKED
 ```
+`AdminController` (`/api/v1/admin/users`) là controller `/admin` đầu tiên trong repo — gọi thẳng
+`AuthService.adminUnlockAccount`, không đi qua `UserService` dù nó thao tác lên `User`: ba hành động
+account-recovery (forgot/reset/unlock) được nhóm cùng một service theo đúng thiết kế đã viết sẵn ở
+`module/auth/CLAUDE.md`, thay vì tách theo "ai sở hữu entity nào".
 
 > **Lưu ý**: Tự động unlock qua TTL Redis vẫn giữ (sau 15 phút). Admin unlock là cơ chế bổ sung.
+> `User.lock()`/`UserStatus.LOCKED` tồn tại từ trước nhưng **không có call site nào** — khoá tự động
+> hiện tại thuần Redis fail-count, không đụng `users.status`. `adminUnlockAccount` gọi `activate()`
+> đúng theo thiết kế đã chốt; nó cũng hữu ích để khôi phục một user bị `UserService.delete()` đưa về
+> `INACTIVE`, không chỉ cho trường hợp `LOCKED`.
 
 ---
 

@@ -165,6 +165,13 @@ bị thu hồi dù vẫn đang hoạt động. Đây là mã **thứ ba** cùng 
 ⇒ HTTP status **không** phân biệt được ba trường hợp này. Client **phải** rẽ theo `code` (`A7`).
 Bất biến `B81`.
 
+**Constant thêm ở `D8c`:** `AuthErrorCode.RESET_TOKEN_INVALID` (401) trên `POST /auth/reset-password`
+— **chỉ một** mã cho cả "token chưa từng tồn tại" lẫn "token đã hết hạn/đã dùng" (Redis TTL không
+phân biệt được hai trường hợp, đúng cách `REFRESH_TOKEN_EXPIRED` đã xử lý cho refresh token). Danh
+sách gốc ở §5.3 phía trên liệt kê cả `RESET_TOKEN_INVALID` **và** `RESET_TOKEN_EXPIRED` — chỉ vế đầu
+được implement; `RESET_TOKEN_EXPIRED` **cố ý không thêm** vì không có nhánh nào thật sự ném nó
+(`coding-rules.md §11.5`). Bất biến `B101`.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

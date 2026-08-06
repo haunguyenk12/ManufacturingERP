@@ -32,6 +32,13 @@ public enum AuthErrorCode implements ErrorCode {
      */
     SESSION_ABSOLUTE_TIMEOUT("SESSION_ABSOLUTE_TIMEOUT", "Session expired. Please login again.",    HttpStatus.UNAUTHORIZED),
 
+    // ── Account Recovery (D8c) ────────────────────────────────────────────
+    /**
+     * D8c: covers both "token never existed" and "token expired" — Redis TTL makes the two
+     * indistinguishable, same as {@link #REFRESH_TOKEN_EXPIRED} for refresh tokens.
+     */
+    RESET_TOKEN_INVALID     ("RESET_TOKEN_INVALID",    "Reset token is invalid or has expired",     HttpStatus.UNAUTHORIZED),
+
     // ── Authorization ──────────────────────────────────────────────────────
     ACCESS_DENIED           ("PERMISSION_DENIED",      "Insufficient permissions",                  HttpStatus.FORBIDDEN);
 

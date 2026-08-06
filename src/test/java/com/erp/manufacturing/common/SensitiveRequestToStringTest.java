@@ -3,6 +3,7 @@ package com.erp.manufacturing.common;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.user.dto.CreateUserRequest;
 import com.erp.manufacturing.module.user.dto.UpdateUserRequest;
 import org.junit.jupiter.api.DisplayName;
@@ -75,6 +76,29 @@ class SensitiveRequestToStringTest {
         // must not collapse them into the same output.
         assertThat(new UpdateUserRequest("operator1@erp.local", null).toString())
                 .contains("password=null")
+                .doesNotContain("***");
+    }
+
+    /**
+     * D8c: unlike {@code RefreshRequest.tokenId} (a lookup key next to a separately-compared
+     * secret), {@code ResetPasswordRequest.token} IS the credential — knowing it alone lets anyone
+     * reset that account's password — so it gets the same {@code ***} treatment as the new password.
+     */
+    @Test
+    @DisplayName("ResetPasswordRequest hides both the token and the new password")
+    void resetPasswordRequest_hidesTokenAndNewPassword() {
+        String rendered = new ResetPasswordRequest("reset-token-42", RAW_PASSWORD).toString();
+
+        assertThat(rendered)
+                .doesNotContain("reset-token-42", RAW_PASSWORD)
+                .contains("token=***", "newPassword=***");
+    }
+
+    @Test
+    @DisplayName("ResetPasswordRequest keeps a missing token/password visible as null, not hidden")
+    void resetPasswordRequest_keepsAbsenceVisible() {
+        assertThat(new ResetPasswordRequest(null, null).toString())
+                .contains("token=null", "newPassword=null")
                 .doesNotContain("***");
     }
 }

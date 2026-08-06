@@ -14,10 +14,14 @@ public enum AuditAction {
     SESSION_KICKED,
     LOGIN_FAILED,
     ACCOUNT_LOCKED,
+    /** D8c: admin manually cleared a fail-count lockout and reactivated the account. */
+    ACCOUNT_UNLOCKED,
     /** RTR (D8a): a refresh token that was already rotated away came back — all sessions revoked. */
     SUSPICIOUS_TOKEN_REUSE,
     /** B81 (D8b): a session outlived the absolute timeout and was retired even though it was in use. */
     SESSION_ABSOLUTE_TIMEOUT,
+    /** D8c: password changed via the forgot-password / reset-token flow. */
+    PASSWORD_RESET,
 
     // ── User Management ────────────────────────────────────────────────────
     USER_CREATED,

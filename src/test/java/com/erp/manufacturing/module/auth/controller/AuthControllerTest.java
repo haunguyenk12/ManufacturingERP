@@ -8,9 +8,11 @@ import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
+import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.auth.service.AuthService;
 import com.erp.manufacturing.module.organization.dto.MyAccessScopeResponse;
 import org.junit.jupiter.api.DisplayName;
@@ -30,6 +32,8 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -206,5 +210,76 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.result.username").value("admin"))
                 .andExpect(jsonPath("$.result.scopes[0].scopeType").value("PLANT"))
                 .andExpect(jsonPath("$.result.defaultPlantId").value(plantId.toString()));
+    }
+
+    @Test
+    @DisplayName("forgot-password: valid email returns 200 with the fixed enumeration-safe message")
+    void forgotPassword_validEmail_returns200() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"alice@erp.local"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result").doesNotExist());
+
+        verify(authService).forgotPassword(any(ForgotPasswordRequest.class));
+    }
+
+    @Test
+    @DisplayName("forgot-password: malformed email fails @Valid before reaching the service")
+    void forgotPassword_malformedEmail_returns400ValidationFailed() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"not-an-email"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    @DisplayName("reset-password: valid token returns 200 with null result")
+    void resetPassword_validToken_returns200() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"reset-tok-1","newPassword":"NewPassw0rd!"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("reset-password: invalid/expired token returns 401 RESET_TOKEN_INVALID")
+    void resetPassword_invalidToken_returns401ResetTokenInvalid() throws Exception {
+        doThrow(new AppException(AuthErrorCode.RESET_TOKEN_INVALID))
+                .when(authService).resetPassword(any(ResetPasswordRequest.class), any());
+
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"bad-tok","newPassword":"NewPassw0rd!"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(AuthErrorCode.RESET_TOKEN_INVALID.code()));
+    }
+
+    @Test
+    @DisplayName("reset-password: password shorter than 8 chars fails @Valid before reaching the service")
+    void resetPassword_shortPassword_returns400ValidationFailed() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"reset-tok-1","newPassword":"short"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(authService);
     }
 }

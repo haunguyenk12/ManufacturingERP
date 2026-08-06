@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.auth.service;
 
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
@@ -9,10 +10,12 @@ import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.JwtProperties;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
+import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.organization.service.AccessControlService;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
@@ -21,6 +24,7 @@ import com.erp.manufacturing.module.user.service.UserDetailsServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -71,6 +75,8 @@ public class AuthService {
     private final JwtProperties          jwtProperties;
     private final AccessControlService   accessControlService;
     private final UserRepository         userRepository;
+    private final PasswordResetTokenService passwordResetTokenService;
+    private final EmailNotificationService  emailNotificationService;
 
     // ── Login ─────────────────────────────────────────────────────────────
 
@@ -303,6 +309,60 @@ public class AuthService {
         auditLogService.logAuth(principal.getUserId(), principal.getUsername(), ip, traceId,
                 AuditAction.LOGOUT_ALL, "Logout from all devices");
         log.info("[AUTH] Logout-all: user={}", username);
+    }
+
+    // ── Account Recovery (D8c) ───────────────────────────────────────────
+
+    /**
+     * Account enumeration prevention (§4.13): the caller gets the exact same 200 response whether or
+     * not {@code email} belongs to a real account, so this method deliberately returns {@code void}
+     * and does nothing observable on a miss — the fixed message is composed by the controller, not by
+     * branching on this method's outcome.
+     */
+    public void forgotPassword(ForgotPasswordRequest request) {
+        userRepository.findByEmail(request.email()).ifPresent(user -> {
+            String token = passwordResetTokenService.generateToken(user.getUserId());
+            emailNotificationService.sendPasswordResetEmail(user.getEmail(), token);
+            log.info("[AUTH] Password reset requested: user={}", user.getUsername());
+        });
+    }
+
+    /**
+     * Resolves the reset token, sets the new password, and — like a stolen-credential response —
+     * force-logs-out every device: whoever asked for this reset no longer trusts whatever sessions
+     * were live before it.
+     */
+    public void resetPassword(ResetPasswordRequest request, HttpServletRequest httpRequest) {
+        String ip      = (String) httpRequest.getAttribute("clientIp");
+        String traceId = (String) httpRequest.getAttribute("traceId");
+
+        UUID userId = passwordResetTokenService.resolveUserId(request.token())
+                .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.RESET_TOKEN_INVALID));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.RESET_TOKEN_INVALID));
+
+        user.setPassword(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
+        passwordResetTokenService.invalidate(request.token(), userId);
+
+        tokenStore.deleteAllUserTokens(userId);
+        tokenStore.deleteAllDeviceSessions(userId);
+
+        auditLogService.logAuth(userId, user.getUsername(), ip, traceId,
+                AuditAction.PASSWORD_RESET, "Password reset via forgot-password flow");
+        log.info("[AUTH] Password reset completed: user={}", user.getUsername());
+    }
+
+    /** Admin-only manual unlock: clears the Redis fail-counter and reactivates the account. */
+    @PreAuthorize("hasRole('ADMIN')")
+    @Auditable(action = AuditAction.ACCOUNT_UNLOCKED, entityType = "User", entityIdExpression = "userId.toString()")
+    public void adminUnlockAccount(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
+        user.activate();
+        userRepository.save(user);
+        tokenStore.resetFailCount(user.getUsername());
+        log.info("[AUTH] Account manually unlocked: user={}", user.getUsername());
     }
 
     // ── Me ────────────────────────────────────────────────────────────────

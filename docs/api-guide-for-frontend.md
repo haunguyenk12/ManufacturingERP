@@ -291,6 +291,34 @@ nếu FE muốn ẩn/hiện nút ngay mà không đợi round-trip — nhưng ch
 Chi tiết đầy đủ (code mẫu TypeScript, cách chọn plant từ `scopes[]`, và bằng chứng chạy thật):
 **[`fe-session-bootstrap.md`](./fe-session-bootstrap.md)**.
 
+### `POST /api/v1/auth/forgot-password` / `POST /api/v1/auth/reset-password` (`D8c`)
+
+```jsonc
+// POST /auth/forgot-password { "email": "user@erp.local" }
+// Response 200 — LUÔN cùng shape này, dù email có tồn tại hay không (chống dò email)
+{ "code": "SUCCESS", "result": null, "message": "If this email exists, a reset link has been sent" }
+```
+🔴 **Đừng suy luận từ response** rằng email có tồn tại hay không — server cố ý trả **y hệt** dù có
+hay không tìm thấy tài khoản. Reset link/token hiện tại chỉ được **log ra server console** (chưa nối
+SMTP/dịch vụ email thật — quyết định hạ tầng của `D8c`), nên trong môi trường dev/test phải lấy token
+từ log backend, không phải từ hộp thư thật.
+
+```jsonc
+// POST /auth/reset-password { "token": "…", "newPassword": "…" }
+// Response 200 khi hợp lệ
+{ "code": "SUCCESS", "result": null, "message": "Password reset successfully" }
+// 401 khi token sai/hết hạn/đã dùng
+{ "code": "RESET_TOKEN_INVALID", "result": null, "message": "Reset token is invalid or has expired" }
+```
+Token chỉ dùng được **một lần**, sống **15 phút**, và một request forgot-password mới sẽ **vô hiệu**
+token cũ (không tích luỹ nhiều token sống cùng lúc). Reset thành công đăng xuất **mọi thiết bị** —
+FE phải điều hướng về màn login sau khi reset, không chỉ đóng modal.
+
+### `PATCH /api/v1/admin/users/{userId}/unlock` (`D8c`) — không body, role `ADMIN`
+
+Xoá bộ đếm brute-force trong Redis và đưa tài khoản về `ACTIVE`. `200 { result: null }` khi thành
+công; `403` nếu người gọi không có role `ADMIN`.
+
 ### Gợi ý interceptor
 
 ```ts
@@ -664,6 +692,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Refresh token | `POST /auth/refresh` | permitAll |
 | Logout / logout tất cả thiết bị | `POST /auth/logout` · `/auth/logout-all` | permitAll |
 | Profile + permissions + scope hiện tại | `GET /auth/me` | đã đăng nhập (không cần `PERM_*` cụ thể) |
+| Quên mật khẩu (`D8c`) | `POST /auth/forgot-password` — body `{email}` | permitAll |
+| Đặt lại mật khẩu (`D8c`) | `POST /auth/reset-password` — body `{token, newPassword}` | permitAll |
+| Admin mở khoá tài khoản (`D8c`) | `PATCH /admin/users/{userId}/unlock` — không body | role `ADMIN` |
 
 ### Planning
 | Việc | Endpoint | Quyền |
@@ -1031,6 +1062,7 @@ overIssue, overrideReason`
 | `REFRESH_TOKEN_EXPIRED` | Refresh token hỏng | Về login |
 | `TOKEN_REUSE_DETECTED` | Refresh token đã rotate bị dùng lại ⇒ **mọi phiên đã bị thu hồi** | Về login + báo bảo mật. Xem lưu ý serialize refresh ở §`POST /auth/refresh` |
 | `SESSION_ABSOLUTE_TIMEOUT` | Phiên quá **30 ngày** kể từ login ⇒ thu hồi theo chính sách, **không** phải sự cố bảo mật | Về login với message trung tính. **Đừng** gộp message với 2 dòng trên |
+| `RESET_TOKEN_INVALID` (`D8c`) | Token reset-password sai/hết hạn/đã dùng — một mã dùng chung cho cả ba trường hợp | Hiện lỗi chung, cho phép request forgot-password lại |
 | `INVALID_CREDENTIALS` | Sai user/mật khẩu | Hiện lỗi chung, **không** nói field nào sai |
 | `ACCOUNT_LOCKED` (423) | 5 lần sai liên tiếp → khoá 15 phút | |
 | `ACCOUNT_INACTIVE` (403) | Tài khoản bị vô hiệu | |

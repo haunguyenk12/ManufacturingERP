@@ -35,6 +35,7 @@
 | B80 | **RTR (`D8a`)**: refresh token đã bị rotate away mà quay lại ⇒ `TOKEN_REUSE_DETECTED` (401) + xoá **cả** refresh token **lẫn** device session của user. Chỉ áp dụng nhánh `stored == null`. Thứ tự rotate bắt buộc: **lưu-mới → mark-used → xoá-cũ** | `AuthServiceTest.refresh_reusedToken_throwsTokenReuseDetectedAndForceLogoutAll` · `.refresh_validToken_rotatesAndReturnsNewPair` (`InOrder`) · `.refresh_storedTokenMismatch_throwsRefreshTokenExpired` |
 | B81 | **Absolute session timeout (`D8b`)**: phiên sống quá `app.jwt.absolute-session-timeout-ms` (30 ngày, đếm từ **login**) ⇒ `SESSION_ABSOLUTE_TIMEOUT` (401) + force logout **cả** refresh token **lẫn** device session. Ba vế bắt buộc: ① check nằm **sau** validate `stored`, **trước** rotate · ② rotate **carry-forward** `sessionCreatedAt` cũ sang tokenId mới, **không** stamp `now` · ③ phiên không có stamp (trước `D8b`) **fail-open**, coi như bắt đầu từ bây giờ | `AuthServiceTest.refresh_sessionOlderThanAbsoluteTimeout_throwsAndForceLogoutAll` · `.refresh_carriesTheOriginalSessionStartForwardToTheNewTokenId` · `.refresh_sessionWithoutStartStamp_isTreatedAsStartingNow` · `.refresh_sessionJustUnderAbsoluteTimeout_rotatesNormally` · `.login_recordsTheSessionStart` |
 | B95 | **Concurrent refresh race (mở rộng `D8`)**: request đến sau, race trên **cùng** `tokenId` đã bị request khác rotate xong trong vài giây gần nhất ⇒ nhận lại **đúng** cặp token mà request thắng vừa sinh ra, **không** bị chẩn đoán thành `TOKEN_REUSE_DETECTED`, **không** rotate lần hai. Cơ chế: khoá tư vấn `acquireRefreshLock` (`SET NX PX`, TTL 2s) trước validate + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) đọc **trước** `wasRefreshTokenUsed` trong nhánh `stored == null`. **Không grace window** — token cũ vẫn chết ngay, chỉ request trùng lặp được dẫn tới cặp đã tồn tại. Breadcrumb hết hạn hoặc cặp nó trỏ tới đã mất ⇒ rơi xuống `wasRefreshTokenUsed` y hệt trước phase này, RTR thật (`B80`) không đổi | `AuthServiceTest.refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected` · `.refresh_concurrentDuplicate_extendsDeviceSession` · `.refresh_rotationResultTargetGone_fallsThroughToReuseCheck` · `.refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists` · `.refresh_validToken_rotatesAndReturnsNewPair` (`saveRotationResult` verify) |
+| B101 | **Account Recovery (`D8c`)**: `forgotPassword` trả **`void`** và không branch theo kết quả — nhánh "email không tồn tại" **không** gọi `PasswordResetTokenService`/`EmailNotificationService`, **không** audit gì, giữ hai nhánh giống hệt nhau ở mọi collaborator (account enumeration prevention thật, không chỉ cùng response text). `resetPassword` xoá token **cả hai chiều** (`auth:reset:{token}` + `auth:reset:user:{userId}`) rồi force-logout toàn bộ phiên (`deleteAllUserTokens` + `deleteAllDeviceSessions`) trước khi audit `PASSWORD_RESET`. `adminUnlockAccount` là `@PreAuthorize("hasRole('ADMIN')")` — **role-based**, không phải `PERM_*` scope-based như phần lớn service khác trong repo, cùng kiểu `UserService` đã dùng | `PasswordResetTokenServiceTest` (round-trip + invalidate-on-regenerate) · `AuthServiceTest.forgotPassword_existingEmail_generatesTokenAndSendsEmail` · `.forgotPassword_unknownEmail_doesNothingObservable` · `.resetPassword_validToken_updatesPasswordAndForcesLogoutEverywhere` · `.resetPassword_invalidToken_throwsResetTokenInvalidBeforeTouchingAnything` · `.adminUnlockAccount_resetsStatusAndFailCount` · `AuthMethodSecurityTest` (deny/allow `hasRole('ADMIN')`) |
 
 > **[`D1`, 2026-07-28] Nợ #7 đã trả.** `LoginRequest`, `RefreshRequest`, `LogoutRequest` (và
 > `CreateUserRequest`/`UpdateUserRequest` ở module `user`) đều override `toString()` che secret —
@@ -49,10 +50,7 @@
 > §4.12. Giới hạn "race double-submit" của `D8a` **đã đóng** ở phase concurrent-refresh-token-race
 > sau `D8b` — xem `B95` + `common/security/CLAUDE.md §4.12a`.
 
-> **[`D8b`, 2026-08-03] Absolute session timeout đã implement — nợ #6 nay trả 2/3.**
-> 🔴 **`D8c` (forgot-password) vẫn chưa có dòng code nào** — đừng đọc `B80`+`B81` rồi tưởng cả nợ #6
-> đã đóng. Ba method liệt kê ở mục "Trách nhiệm chính" bên trên (`forgotPassword`, `resetPassword`,
-> `adminUnlockAccount`) vẫn là **thiết kế, chưa tồn tại trong code**.
+> **[`D8b`, 2026-08-03] Absolute session timeout đã implement — nợ #6 khi đó mới trả 2/3.**
 >
 > Ba điều `D8b` chốt, **đừng "sửa cho gọn"**:
 > 1. **`sessionCreatedAt` lưu ở companion key** `auth:refresh:{userId}:{tokenId}:meta`, **không** đổi
@@ -64,3 +62,10 @@
 > 3. **Fail-open cho phiên không có stamp** là quyết định, không phải sơ suất: fail-closed sẽ đăng
 >    xuất mọi user đang online ngay lúc deploy mà không tăng bảo mật (refresh TTL 7 ngày ⇒ trong một
 >    tuần mọi phiên sống đều có stamp).
+
+> **[`D8c`, 2026-08-06] Account recovery đã implement — nợ #6 nay trả đủ 3/3.** `forgotPassword`,
+> `resetPassword`, `adminUnlockAccount` (+ `PasswordResetTokenService`, `EmailNotificationService`)
+> không còn là thiết kế — xem bất biến `B101` ở bảng trên và `common/security/CLAUDE.md §4.14`.
+> Quyết định hạ tầng chốt với user: gửi email bằng **mock/log console**, không
+> `spring-boot-starter-mail`, không interface cho một implementation duy nhất
+> (`coding-rules.md §11.5`).

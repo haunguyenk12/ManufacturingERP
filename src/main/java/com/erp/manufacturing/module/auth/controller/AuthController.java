@@ -2,10 +2,12 @@ package com.erp.manufacturing.module.auth.controller;
 
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
+import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
+import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.auth.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,9 +21,10 @@ import org.springframework.web.bind.annotation.*;
 /**
  * Authentication endpoints.
  *
- * <p>Base path: /api/v1/auth/. {@code login}/{@code refresh}/{@code logout}/{@code logout-all} are
- * permit-all in {@code SecurityConfig}; {@code /me} is the one exception — it requires a valid,
- * unexpired token (see {@code SecurityConfig} for the matcher that carves it out).
+ * <p>Base path: /api/v1/auth/. Every endpoint is permit-all in {@code SecurityConfig} except
+ * {@code /me}, which requires a valid, unexpired token (see {@code SecurityConfig} for the matcher
+ * that carves it out) — {@code forgot-password}/{@code reset-password} (D8c) are unauthenticated by
+ * nature, same as {@code login}/{@code refresh}.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -79,5 +82,27 @@ public class AuthController {
     @Operation(summary = "Get current user profile, permissions, and accessible scopes")
     public ResponseEntity<ApiResponse<MeResponse>> me(HttpServletRequest httpRequest) {
         return ResponseEntity.ok(ApiResponse.ok(authService.me(httpRequest)));
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Request a password reset link",
+            description = "Always returns 200 with the same generic message, whether or not the "
+                    + "email belongs to a real account (account enumeration prevention).")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+        return ResponseEntity.ok(ApiResponse.noContent(
+                "If this email exists, a reset link has been sent"));
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "Reset password using a reset token",
+            description = "401 RESET_TOKEN_INVALID if the token is unknown or expired. On success, "
+                    + "every existing session for the account is logged out.")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request,
+            HttpServletRequest httpRequest) {
+        authService.resetPassword(request, httpRequest);
+        return ResponseEntity.ok(ApiResponse.noContent("Password reset successfully"));
     }
 }

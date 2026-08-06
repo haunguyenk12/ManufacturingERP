@@ -1,10 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **`P6` — WO Close/Reconcile** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
-> `CLAUDE.md §0.34`. Đóng nốt track `P*` — chỉ còn `P-Deferred` (chờ tầng OT, ngoài phạm vi).
+> Phase trước: **`D8c` — Forgot-password / Account Recovery** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi
+> đầy đủ: `CLAUDE.md §0.35`. Trả nốt 3/3 nợ #6 (`D8a`+`D8b` đã trả 2/3 trước đó). Không migration.
 >
-> **864 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V53`.
+> **885 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất vẫn `V53` (`D8c` không migration).
 
 ---
 
@@ -26,9 +26,9 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `P6` vừa xong, đóng nốt track `P*`)* |
-| **Ứng viên kế tiếp** | *(không có — mọi ứng viên còn lại đều bị chặn, xem hàng dưới)* |
-| **Bị chặn** | `C2-1`, `C2-2` (chờ FE), `D8c` (chờ quyết định hạ tầng email) |
+| **Đang chạy** | *(không có — `D8c` vừa xong, đóng nốt track `D8` / nợ #6)* |
+| **Ứng viên kế tiếp** | *(không có — hai phase còn lại đều bị chặn, xem hàng dưới)* |
+| **Bị chặn** | `C2-1`, `C2-2` (chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md §5`) |
 
 ---
 
@@ -43,7 +43,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 5 | ~~`P6` — WO Close/Reconcile~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.34` |
 | 6 | `C2-1` — Audit Logs read API | 🔴 Bị chặn — chờ FE câu 1 | Giữ vị trí trong roadmap để không quên |
 | 7 | `C2-2` — Inventory Lot lifecycle API | 🔴 Bị chặn — chờ FE câu 2 | Tương tự |
-| 8 | `D8c` — Forgot-password / Account Recovery | 🔴 Bị chặn — chờ quyết định hạ tầng email | Thiết kế đã có sẵn, chỉ chờ chốt `spring-boot-starter-mail` hay dịch vụ ngoài |
+| 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -161,23 +161,16 @@ thêm cột `warehouseId` lên `InventoryLot`. `manufactureDate` map từ `recei
 
 ---
 
-## 8. `D8c` — Forgot-password / Account Recovery 🔴 BỊ CHẶN
+## 8. `D8c` — Forgot-password / Account Recovery ✅ ĐÃ XONG (2026-08-06)
 
-Thiết kế đã có sẵn đầy đủ ở `common/security/CLAUDE.md §4.14` — chỉ tóm tắt lại, **không thiết kế
-lại từ đầu** khi tới lượt làm:
-
-- `POST /api/v1/auth/forgot-password { email }` — luôn trả 200 generic message (chống account
-  enumeration theo §4.13), sinh token UUID lưu Redis `auth:reset:{token}` → `{userId}` TTL 15 phút,
-  gửi email chứa link reset.
-- `POST /api/v1/auth/reset-password { token, newPassword }` — `RESET_TOKEN_INVALID` (401) nếu không
-  tìm thấy, validate password policy, đặt mật khẩu mới, xoá token ngay (single-use), xoá toàn bộ
-  refresh token của user (force logout), audit `PASSWORD_RESET`.
-- Flow liên quan nhưng tách biệt: Admin Manual Unlock (`PATCH /api/v1/admin/users/{userId}/unlock`)
-  — cùng section, cũng chưa code.
-
-**Câu hỏi chặn:** `pom.xml` **chưa có** `spring-boot-starter-mail`. Dùng SMTP thật, dịch vụ ngoài
-(SES/SendGrid), hay mock/log ra console cho môi trường dev? Quyết định hạ tầng phải chốt trước khi
-viết dòng code đầu tiên. **Không code phase này tới khi có quyết định.**
+Trả nốt 3/3 nợ #6 (`D8a` RTR + `D8b` absolute session timeout đã trả 2/3 trước đó). Thiết kế đã có
+sẵn ở `common/security/CLAUDE.md §4.14` — phase này triển khai đúng thiết kế, không thiết kế lại.
+Bản ghi đầy đủ (bất biến `B101`, breaking changes): `CLAUDE.md §0.35`. Quyết định hạ tầng chốt với
+user trước khi viết kế hoạch chi tiết: gửi email bằng **mock/log console** — không thêm
+`spring-boot-starter-mail`, không SMTP/SES/SendGrid nào được tích hợp, không interface cho một
+implementation duy nhất (`coding-rules.md §11.5`). 3 endpoint mới: `POST /auth/forgot-password`,
+`POST /auth/reset-password`, `PATCH /admin/users/{id}/unlock` (controller `/admin` đầu tiên trong
+repo). Không migration.
 
 ---
 
@@ -238,9 +231,14 @@ viết dòng code đầu tiên. **Không code phase này tới khi có quyết �
         .cancelActiveReservations`), tái dùng `PERM_WORK_ORDER_MANAGE`, không permission mới
   - [x] Endpoint `POST /work-orders/{id}/close` — migration `V53`
   - [x] Test (nhánh vào + nhánh ra + regression mỗi gate ghi) — 864 case unit + 89 case IT / 13 class IT + docs
+- [x] **`D8c`** — Forgot-password / Account Recovery ✅ **2026-08-06**
+  - [x] Quyết định hạ tầng gửi email — chốt với user: mock/log console, không `spring-boot-starter-mail`
+  - [x] `PasswordResetTokenService` (Redis `auth:reset:{token}` + reverse index, TTL 15m, single-use)
+  - [x] `AuthService.forgotPassword`/`resetPassword`/`adminUnlockAccount` — nợ #6 trả đủ 3/3
+  - [x] Endpoint `POST /auth/forgot-password`, `POST /auth/reset-password`, `PATCH /admin/users/{id}/unlock`
+  - [x] Test (885 case unit + 89 case IT / 13 class IT) + docs
 - [ ] **`C2-1`** — Audit Logs read API *(🔴 chờ FE trả lời câu 1 — không code trước khi có câu trả lời)*
 - [ ] **`C2-2`** — Inventory Lot lifecycle API *(🔴 chờ FE trả lời câu 2 — không code trước khi có câu trả lời)*
-- [ ] **`D8c`** — Forgot-password / Account Recovery *(🔴 chờ quyết định hạ tầng email — không code trước khi có quyết định)*
 
 ---
 
