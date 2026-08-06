@@ -49,7 +49,7 @@ class ItemServiceTest {
         when(itemRepository.save(any(Item.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.createItem(companyId, new ItemCreateRequest(
-                "rm-001", "Steel Coil", ItemType.RAW_MATERIAL, "kg", true));
+                "rm-001", "Steel Coil", ItemType.RAW_MATERIAL, "kg", true, false));
 
         ArgumentCaptor<Item> captor = ArgumentCaptor.forClass(Item.class);
         verify(itemRepository).save(captor.capture());
@@ -59,13 +59,44 @@ class ItemServiceTest {
     }
 
     @Test
+    void createItem_serialTrackedAlone_succeeds() {
+        UUID companyId = UUID.randomUUID();
+        when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
+        when(itemRepository.existsByCompanyCompanyIdAndCode(companyId, "SN-001")).thenReturn(false);
+        when(itemRepository.save(any(Item.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.createItem(companyId, new ItemCreateRequest(
+                "SN-001", "Router", ItemType.FINISHED_GOOD, "EA", false, true));
+
+        ArgumentCaptor<Item> captor = ArgumentCaptor.forClass(Item.class);
+        verify(itemRepository).save(captor.capture());
+        assertThat(captor.getValue().isLotTracked()).isFalse();
+        assertThat(captor.getValue().isSerialTracked()).isTrue();
+    }
+
+    @Test
+    void createItem_bothLotAndSerialTracked_throwsOperationNotAllowedBeforeSaving() {
+        UUID companyId = UUID.randomUUID();
+        when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
+        when(itemRepository.existsByCompanyCompanyIdAndCode(companyId, "SN-002")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createItem(companyId, new ItemCreateRequest(
+                "SN-002", "Router", ItemType.FINISHED_GOOD, "EA", true, true)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(itemRepository, never()).save(any());
+    }
+
+    @Test
     void createItem_duplicateCodeWithinCompany_fails() {
         UUID companyId = UUID.randomUUID();
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
         when(itemRepository.existsByCompanyCompanyIdAndCode(companyId, "RM-001")).thenReturn(true);
 
         assertThatThrownBy(() -> service.createItem(companyId, new ItemCreateRequest(
-                "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true)))
+                "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true, false)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_ALREADY_EXISTS));
@@ -84,7 +115,7 @@ class ItemServiceTest {
                 .build()));
 
         assertThatThrownBy(() -> service.createItem(companyId, new ItemCreateRequest(
-                "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true)))
+                "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true, false)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));

@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workorder.domain;
 import com.erp.manufacturing.common.audit.BaseEntity;
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.SerialNumber;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import jakarta.persistence.*;
@@ -53,6 +54,10 @@ public class MaterialIssueLine extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "lot_id")
     private InventoryLot lot;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "serial_id")
+    private SerialNumber serial;
 
     @Column(name = "quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantity;

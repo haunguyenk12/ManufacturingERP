@@ -16,6 +16,7 @@ public class InventoryMapper {
                 item.getType().name(),
                 item.getUnit(),
                 item.isLotTracked(),
+                item.isSerialTracked(),
                 item.getStatus().name(),
                 item.getCreatedAt(),
                 item.getUpdatedAt());

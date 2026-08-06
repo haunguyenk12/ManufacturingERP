@@ -8,6 +8,7 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.repository.SerialNumberRepository;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
@@ -29,6 +30,7 @@ public class InventoryMovementService {
     private final ItemRepository itemRepository;
     private final WarehouseRepository warehouseRepository;
     private final InventoryLotRepository lotRepository;
+    private final SerialNumberRepository serialNumberRepository;
     private final StockBalanceRepository balanceRepository;
     private final StockMovementRepository movementRepository;
     private final IdempotencySupport idempotency;
@@ -63,6 +65,7 @@ public class InventoryMovementService {
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveReceiveLot(item, command.lotId(), command.lotCode(), initialStatusForNewLot);
         BigDecimal quantity = requirePositive(command.quantity());
+        SerialNumber serial = resolveReceiveSerial(item, command.serialId(), command.serialCode(), quantity);
 
         StockBalance balance = findOrCreateBalance(item, warehouse, lot);
         balance.increase(quantity);
@@ -73,6 +76,7 @@ public class InventoryMovementService {
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
+                .serial(serial)
                 .movementType(MovementType.RECEIVE)
                 .direction(MovementDirection.IN)
                 .quantity(quantity)
@@ -230,6 +234,7 @@ public class InventoryMovementService {
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveExistingLotForOutbound(item, command.lotId(), command.lotCode());
         BigDecimal quantity = requirePositive(command.quantity());
+        SerialNumber serial = resolveExistingSerialForOutbound(item, command.serialId(), quantity);
 
         StockBalance balance = findBalance(item, warehouse, lot);
         if (consumeReserved) {
@@ -240,12 +245,17 @@ public class InventoryMovementService {
             balance.decrease(quantity);
         }
         balanceRepository.save(balance);
+        if (serial != null) {
+            serial.setStatus(SerialStatus.ISSUED);
+            serialNumberRepository.save(serial);
+        }
 
         StockMovement movement = StockMovement.builder()
                 .traceId(traceIdProvider.currentTraceId())
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
+                .serial(serial)
                 .movementType(MovementType.ISSUE)
                 .direction(MovementDirection.OUT)
                 .quantity(quantity)
@@ -293,6 +303,7 @@ public class InventoryMovementService {
         InventoryLot lot = resolveExistingLotForAdjustment(item, command.lotId(), command.lotCode());
 
         BigDecimal quantity = delta.abs();
+        SerialNumber serial = resolveExistingSerialForAdjustment(item, command.serialId(), quantity);
         StockBalance balance = inbound
                 ? findOrCreateBalance(item, warehouse, lot)
                 : findBalance(item, warehouse, lot);
@@ -309,6 +320,7 @@ public class InventoryMovementService {
                 .item(item)
                 .warehouse(warehouse)
                 .lot(lot)
+                .serial(serial)
                 .movementType(movementType)
                 .direction(inbound ? MovementDirection.IN : MovementDirection.OUT)
                 .quantity(quantity)
@@ -404,6 +416,88 @@ public class InventoryMovementService {
                     "Lot does not belong to item: " + item.getItemId());
         }
         return lot;
+    }
+
+    /**
+     * A serial is never "received into" an existing row the way a lot bucket can be — it always
+     * represents a fresh physical unit, so an already-known {@code serialCode} for this item is a
+     * duplicate, not a replay target.
+     */
+    private SerialNumber resolveReceiveSerial(Item item, UUID serialId, String serialCode, BigDecimal quantity) {
+        if (!item.isSerialTracked()) {
+            ensureNoSerialProvided(serialId, serialCode);
+            return null;
+        }
+        ensureSerialQuantityIsOne(quantity);
+        String normalizedSerialCode = requireSerialCode(serialCode);
+        if (serialNumberRepository.findByItemItemIdAndSerialCode(item.getItemId(), normalizedSerialCode).isPresent()) {
+            throw ExceptionFactory.alreadyExists(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Serial number", normalizedSerialCode);
+        }
+        return serialNumberRepository.save(SerialNumber.builder()
+                .item(item)
+                .serialCode(normalizedSerialCode)
+                .status(SerialStatus.AVAILABLE)
+                .receivedAt(Instant.now())
+                .build());
+    }
+
+    private SerialNumber resolveExistingSerialForOutbound(Item item, UUID serialId, BigDecimal quantity) {
+        SerialNumber serial = resolveExistingSerial(item, serialId, quantity);
+        if (serial != null && !serial.canIssue()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.SERIAL_NOT_ELIGIBLE,
+                    "Serial cannot be issued in status: " + serial.getStatus());
+        }
+        return serial;
+    }
+
+    /** No status check — withdrawing a rejected unit is expected to touch a non-AVAILABLE serial. */
+    private SerialNumber resolveExistingSerialForAdjustment(Item item, UUID serialId, BigDecimal quantity) {
+        return resolveExistingSerial(item, serialId, quantity);
+    }
+
+    private SerialNumber resolveExistingSerial(Item item, UUID serialId, BigDecimal quantity) {
+        if (!item.isSerialTracked()) {
+            ensureNoSerialProvided(serialId, null);
+            return null;
+        }
+        ensureSerialQuantityIsOne(quantity);
+        if (serialId == null) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial-tracked item requires a serial id");
+        }
+        return findSerialForItem(item, serialId);
+    }
+
+    private SerialNumber findSerialForItem(Item item, UUID serialId) {
+        SerialNumber serial = serialNumberRepository.findById(serialId)
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Serial number", serialId));
+        if (!serial.getItem().getItemId().equals(item.getItemId())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial does not belong to item: " + item.getItemId());
+        }
+        return serial;
+    }
+
+    private void ensureNoSerialProvided(UUID serialId, String serialCode) {
+        if (serialId != null || StringUtils.hasText(serialCode)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial can only be provided for serial-tracked items");
+        }
+    }
+
+    private void ensureSerialQuantityIsOne(BigDecimal quantity) {
+        if (quantity == null || quantity.compareTo(BigDecimal.ONE) != 0) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial-tracked items must be moved one unit at a time");
+        }
+    }
+
+    private String requireSerialCode(String serialCode) {
+        if (!StringUtils.hasText(serialCode)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial-tracked item requires a serial code");
+        }
+        return serialCode.trim();
     }
 
     private StockBalance findOrCreateBalance(Item item, Warehouse warehouse, InventoryLot lot) {

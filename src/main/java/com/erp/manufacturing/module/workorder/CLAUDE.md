@@ -161,6 +161,38 @@ release/reserve/issue 4kg (kế hoạch 6kg) → `GET .../variance` trả `usage
 đọc lại: `actualLaborCost=6` (2×3), `actualOverheadCost=2` (2×1), `totalCostVariance` cập nhật đúng
 — xác nhận cả hai hook chạy đúng qua ledger/DB thật, không chỉ qua mock.
 
+## Bất Biến Serial Tracking (P5, 2026-08-06)
+
+> Thiết kế đầy đủ (mirror `InventoryLot`, quyết định chốt với user): `module/inventory/CLAUDE.md`
+> mục Serial Tracking + `CLAUDE.md §0.33`. Bảng dưới chỉ liệt kê phần thuộc `workorder`: receipt/issue
+> ràng buộc quantity=1, và **quyết định cắt phạm vi QC quan trọng nhất của phase**.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B98 | 🔴 **Serial-tracked output KHÔNG có HOLD chờ QC** — khác hẳn lot (`B18`). Chốt với user
+(AskUserQuestion) để tránh phải thêm `serial_id` vào `stock_balances` + viết lại mọi
+`StockBalanceRepository.aggregate*`. `approve()` mở serial ở `AVAILABLE` ngay (không nhận tham số
+`initialStatusForNewLot` như lot) ⇒ hàng khả dụng ngay khi approve, **giống hệt** cách item không
+lot-tracked đã hoạt động từ `D5` (`B39`). `qcDisposition` (`dispositionSerials`, mirror
+`dispositionWithoutLots`) vẫn chạy: `AVAILABLE` chỉ ghi verdict + fulfill; `REJECTED` **phải** rút
+hàng bằng `ADJUST_OUT` (không có gate trạng thái nào ngăn hàng lỗi được xuất) **cộng thêm** flip
+`serial.status = REJECTED` cho mục đích truy xuất nguồn gốc đơn vị — mutation trực tiếp qua entity
+đã managed trong transaction (dirty-checking), không qua `InventoryMovementService.changeLotStatus`
+vì serial không cần sinh dòng ledger `LOT_STATUS_CHANGE`-tương-đương | `ProductionReceiptServiceTest.qcDisposition_available_onSerialTrackedOutput_fulfilsAndMarksSerialAvailable`, `.qcDisposition_rejected_onSerialTrackedOutput_withdrawsAndMarksSerialRejected` |
+| B99 | Receipt/issue của item serial-tracked luôn `quantity = 1` — enforce ở **hai** nơi: `ProductionReceiptService.postNew` (`SERIAL_REQUIRED` 400 nếu thiếu `serialNumber`, `OPERATION_NOT_ALLOWED` 422 nếu `quantity != 1` — mirror `B41`/`LOT_REQUIRED` **nhưng ở tầng cao hơn**, tương tự cách `LOT_REQUIRED` chỉ tồn tại ở đây chứ không ở `InventoryMovementService`) và `InventoryMovementService` tự nó (`ensureSerialQuantityIsOne`, `OPERATION_NOT_ALLOWED`, defense-in-depth cho mọi caller khác). Nhận/xuất N đơn vị serial-tracked = N receipt/N dòng issue riêng — **không** có shape `List<serialId>` nào trong DTO, giữ `MaterialIssueLineRequest`/`ProductionReceiptPostRequest` **hoàn toàn additive** (không phải breaking change như phác thảo roadmap ban đầu dự đoán) | `ProductionReceiptServiceTest.post_serialTrackedOutputWithoutSerial_shouldThrowSerialRequired`, `.post_serialTrackedOutputWithQuantityOtherThanOne_shouldThrowOperationNotAllowed`, `MaterialIssueServiceTest.post_serialTrackedComponent_threadsSerialIdIntoIssueCommandAndOntoLine` |
+
+**Quyết định cần nhớ:**
+
+1. `MaterialIssueFlatRequest`/`postFlat` **không** đổi — không có chỗ cho `serialId`. Issue một
+   component serial-tracked qua đường flat sẽ tự nhiên rơi vào `resolveExistingSerial`'s `serialId ==
+   null` branch và ném `OPERATION_NOT_ALLOWED` — **không** cần thêm code đặc biệt nào ở
+   `MaterialIssueService` để chặn đường này, đúng như thiết kế đã dự đoán.
+2. Reservation **không** biết serial nào sẽ được issue — chỉ giữ số lượng trên bucket chung. Serial cụ
+   thể luôn đến từ `MaterialIssueLineRequest.serialId` do người dùng chọn tại thời điểm issue, kể cả
+   khi line đó cũng mang `reservationId`.
+3. `SerialNumber` không có FK `warehouse` (giống `InventoryLot`) — vị trí kho suy ra từ
+   `StockMovement.warehouse`/`stock_balances`, không lưu trùng trên serial.
+
 ## Bất Biến Fulfillment Allocation (F6)
 
 | # | Bất biến | Test bảo vệ |

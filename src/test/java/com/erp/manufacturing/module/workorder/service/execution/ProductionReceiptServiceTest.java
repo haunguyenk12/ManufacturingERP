@@ -207,6 +207,175 @@ class ProductionReceiptServiceTest {
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
+    // ── Serial-tracked output (P5) ──────────────────────────────────────────
+
+    @Test
+    void post_serialTrackedOutputWithoutSerial_shouldThrowSerialRequired() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.getProductItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(receiptRepository.findWithLinesByIdempotencyKey("KEY-NOSERIAL")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(BigDecimal.ZERO);
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        ProductionReceiptPostRequest request = receiptRequest(warehouse, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-NOSERIAL"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.SERIAL_REQUIRED));
+
+        verify(receiptRepository, never()).save(any());
+        verifyNoInteractions(movementService, wipTransactionService);
+    }
+
+    @Test
+    void post_serialTrackedOutputWithQuantityOtherThanOne_shouldThrowOperationNotAllowed() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.getProductItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(receiptRepository.findWithLinesByIdempotencyKey("KEY-SN-QTY")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(BigDecimal.ZERO);
+
+        UUID workOrderId = workOrder.getWorkOrderId();
+        ProductionReceiptPostRequest request = serialReceiptRequest(warehouse, new BigDecimal("2"), "SN-1");
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-SN-QTY"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(receiptRepository, never()).save(any());
+        verifyNoInteractions(movementService, wipTransactionService);
+    }
+
+    @Test
+    void post_serialTrackedOutputWithSerial_setsRequestedSerialCodeOnTheLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.getProductItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(receiptRepository.findWithLinesByIdempotencyKey("KEY-SN-OK")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(BigDecimal.ZERO);
+        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), serialReceiptRequest(warehouse, BigDecimal.ONE, "SN-1"), "KEY-SN-OK");
+
+        ArgumentCaptor<ProductionReceipt> captor = ArgumentCaptor.forClass(ProductionReceipt.class);
+        verify(receiptRepository).save(captor.capture());
+        assertThat(captor.getValue().getLines().get(0).getRequestedSerialCode()).isEqualTo("SN-1");
+        verifyNoInteractions(movementService);
+    }
+
+    @Test
+    void approve_serialTrackedOutput_createsSerialAndSetsItOnTheLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, BigDecimal.ONE);
+        workOrder.getProductItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        ProductionReceipt receipt = receiptWithSerial(workOrder, warehouse, BigDecimal.ONE,
+                ProductionReceiptStatus.PENDING_APPROVAL, "SN-2");
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(UUID.randomUUID())
+                .item(workOrder.getProductItem())
+                .serialCode("SN-2")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+        StockMovement movement = StockMovement.builder()
+                .movementId(UUID.randomUUID())
+                .item(workOrder.getProductItem())
+                .warehouse(warehouse)
+                .serial(serial)
+                .movementType(MovementType.RECEIVE)
+                .direction(MovementDirection.IN)
+                .quantity(BigDecimal.ONE)
+                .idempotencyKey("KEY")
+                .createdAt(Instant.now())
+                .build();
+
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(movementService.receive(any(InventoryReceiveCommand.class),
+                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD)))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
+        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        ArgumentCaptor<InventoryReceiveCommand> commandCaptor = ArgumentCaptor.forClass(InventoryReceiveCommand.class);
+        verify(movementService).receive(commandCaptor.capture(), anyString(), eq(LotStatus.HOLD));
+        assertThat(commandCaptor.getValue().serialCode()).isEqualTo("SN-2");
+        assertThat(receipt.getLines().get(0).getSerial()).isSameAs(serial);
+        assertThat(workOrder.getCompletedQuantity()).isEqualByComparingTo("1");
+    }
+
+    // ── QC disposition on serial-tracked output (P5) ────────────────────────
+
+    @Test
+    void qcDisposition_available_onSerialTrackedOutput_fulfilsAndMarksSerialAvailable() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, BigDecimal.ONE);
+        workOrder.getProductItem().setSerialTracked(true);
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(UUID.randomUUID())
+                .item(workOrder.getProductItem())
+                .serialCode("SN-3")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+        ProductionReceipt receipt = receiptWithApprovedSerial(workOrder, workOrder.getOutputWarehouse(),
+                BigDecimal.ONE, serial);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
+        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptQcDispositionRequest(QualityDispositionResult.AVAILABLE, "Passed"));
+
+        assertThat(serial.getStatus()).isEqualTo(SerialStatus.AVAILABLE);
+        verify(allocationService).fulfill(same(workOrder), argThat(quantity ->
+                quantity.compareTo(BigDecimal.ONE) == 0));
+        verify(movementService, never()).adjust(any(), anyString());
+        verify(movementService, never()).changeLotStatus(any(), anyString());
+        verifyNoInteractions(dispositionRepository);
+    }
+
+    @Test
+    void qcDisposition_rejected_onSerialTrackedOutput_withdrawsAndMarksSerialRejected() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, BigDecimal.ONE);
+        workOrder.getProductItem().setSerialTracked(true);
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(UUID.randomUUID())
+                .item(workOrder.getProductItem())
+                .serialCode("SN-4")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        ProductionReceipt receipt = receiptWithApprovedSerial(workOrder, warehouse, BigDecimal.ONE, serial);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
+        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Damaged"));
+
+        assertThat(serial.getStatus()).isEqualTo(SerialStatus.REJECTED);
+        ArgumentCaptor<InventoryAdjustCommand> commandCaptor = ArgumentCaptor.forClass(InventoryAdjustCommand.class);
+        verify(movementService).adjust(commandCaptor.capture(),
+                eq(receipt.getIdempotencyKey() + ":qc-reject:L1"));
+        assertThat(commandCaptor.getValue().serialId()).isEqualTo(serial.getSerialId());
+        assertThat(commandCaptor.getValue().quantityDelta()).isEqualByComparingTo("-1");
+        verifyNoInteractions(allocationService, dispositionRepository);
+    }
+
     @Test
     void submit_draftReceipt_movesToPendingApproval_withoutInventoryImpact() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
@@ -919,11 +1088,64 @@ class ProductionReceiptServiceTest {
 
     private ProductionReceiptPostRequest receiptRequest(Warehouse warehouse, BigDecimal quantity) {
         return new ProductionReceiptPostRequest(
-                warehouse.getWarehouseId(), null, null, quantity, "Complete", "Receipt");
+                warehouse.getWarehouseId(), null, null, null, quantity, "Complete", "Receipt");
+    }
+
+    private ProductionReceiptPostRequest serialReceiptRequest(Warehouse warehouse, BigDecimal quantity, String serialNumber) {
+        return new ProductionReceiptPostRequest(
+                warehouse.getWarehouseId(), null, null, serialNumber, quantity, "Complete", "Receipt");
     }
 
     private ProductionReceipt pendingReceipt(WorkOrder workOrder, Warehouse warehouse, BigDecimal quantity) {
         return receipt(workOrder, warehouse, quantity, ProductionReceiptStatus.PENDING_APPROVAL, null);
+    }
+
+    /** Mirrors {@link #receipt} but for the serial-tracked path: the line carries a requested code
+     *  instead of an already-resolved lot, exactly like {@code postNew} leaves it before approval. */
+    private ProductionReceipt receiptWithSerial(WorkOrder workOrder,
+                                                Warehouse warehouse,
+                                                BigDecimal quantity,
+                                                ProductionReceiptStatus status,
+                                                String requestedSerialCode) {
+        ProductionReceipt receipt = ProductionReceipt.builder()
+                .receiptId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .status(status)
+                .idempotencyKey("KEY-PENDING-RECEIPT")
+                .lines(new ArrayList<>())
+                .build();
+        receipt.getLines().add(ProductionReceiptLine.builder()
+                .receiptLineId(UUID.randomUUID())
+                .receipt(receipt)
+                .item(workOrder.getProductItem())
+                .warehouse(warehouse)
+                .requestedSerialCode(requestedSerialCode)
+                .quantity(quantity)
+                .build());
+        return receipt;
+    }
+
+    /** An {@code APPROVED} receipt whose line already carries the resolved serial — the shape QC acts on. */
+    private ProductionReceipt receiptWithApprovedSerial(WorkOrder workOrder,
+                                                        Warehouse warehouse,
+                                                        BigDecimal quantity,
+                                                        SerialNumber serial) {
+        ProductionReceipt receipt = ProductionReceipt.builder()
+                .receiptId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .status(ProductionReceiptStatus.APPROVED)
+                .idempotencyKey("KEY-PENDING-RECEIPT")
+                .lines(new ArrayList<>())
+                .build();
+        receipt.getLines().add(ProductionReceiptLine.builder()
+                .receiptLineId(UUID.randomUUID())
+                .receipt(receipt)
+                .item(workOrder.getProductItem())
+                .warehouse(warehouse)
+                .serial(serial)
+                .quantity(quantity)
+                .build());
+        return receipt;
     }
 
     private ProductionReceipt receipt(WorkOrder workOrder,

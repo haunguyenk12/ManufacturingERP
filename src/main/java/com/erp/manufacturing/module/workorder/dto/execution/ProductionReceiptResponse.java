@@ -18,7 +18,7 @@ public record ProductionReceiptResponse(
         String workOrderCode,
         String status,
         String idempotencyKey,
-        /** NON_TRACKED / LOT_TRACKED — QC disposition only applies to LOT_TRACKED output. */
+        /** NON_TRACKED / LOT_TRACKED / SERIAL_TRACKED — QC disposition applies to both tracked kinds. */
         String outputTrackingMethod,
         UUID itemId,
         String itemSku,
@@ -30,6 +30,8 @@ public record ProductionReceiptResponse(
         String destinationWarehouseCode,
         UUID lotId,
         String lotNumber,
+        UUID serialId,
+        String serialNumber,
         /**
          * HOLD / AVAILABLE / REJECTED (spec §6.4 "Output lot"). Null when the output is not
          * lot-tracked — for those the QC verdict lives in {@link #qcResult()} instead (D5, B40).

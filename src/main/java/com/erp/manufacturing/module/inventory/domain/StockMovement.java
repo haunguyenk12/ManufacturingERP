@@ -41,6 +41,10 @@ public class StockMovement {
     @JoinColumn(name = "lot_id")
     private InventoryLot lot;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "serial_id")
+    private SerialNumber serial;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "movement_type", nullable = false, length = 30)
     private MovementType movementType;

@@ -11,6 +11,7 @@ public record ItemResponse(
         String type,
         String unit,
         boolean lotTracked,
+        boolean serialTracked,
         String status,
         Instant createdAt,
         Instant updatedAt

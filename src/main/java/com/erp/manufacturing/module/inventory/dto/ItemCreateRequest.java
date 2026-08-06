@@ -23,5 +23,7 @@ public record ItemCreateRequest(
         @Size(max = 30)
         String unit,
 
-        boolean lotTracked
+        boolean lotTracked,
+
+        boolean serialTracked
 ) {}

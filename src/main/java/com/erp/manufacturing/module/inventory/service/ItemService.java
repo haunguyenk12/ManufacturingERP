@@ -46,6 +46,10 @@ public class ItemService {
         if (itemRepository.existsByCompanyCompanyIdAndCode(companyId, code)) {
             throw ExceptionFactory.alreadyExists(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Item code", code);
         }
+        if (request.lotTracked() && request.serialTracked()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Item cannot be both lot-tracked and serial-tracked");
+        }
 
         Item item = Item.builder()
                 .company(company)
@@ -54,6 +58,7 @@ public class ItemService {
                 .type(request.type())
                 .unit(normalizeUnit(request.unit()))
                 .lotTracked(request.lotTracked())
+                .serialTracked(request.serialTracked())
                 .status(ItemStatus.ACTIVE)
                 .build();
         return mapper.toResponse(itemRepository.save(item));

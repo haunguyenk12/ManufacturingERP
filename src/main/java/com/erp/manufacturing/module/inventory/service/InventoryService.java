@@ -42,7 +42,7 @@ public class InventoryService {
                 request.quantity(),
                 request.reason(),
                 request.referenceType(),
-                request.referenceId()), idempotencyKey).movement();
+                request.referenceId(), null, null), idempotencyKey).movement();
         return mapper.toResponse(movement);
     }
 
@@ -58,7 +58,7 @@ public class InventoryService {
                 request.quantity(),
                 request.reason(),
                 request.referenceType(),
-                request.referenceId()), idempotencyKey).movement();
+                request.referenceId(), null, null), idempotencyKey).movement();
         return mapper.toResponse(movement);
     }
 
@@ -74,7 +74,7 @@ public class InventoryService {
                 request.quantityDelta(),
                 request.reason(),
                 request.referenceType(),
-                request.referenceId()), idempotencyKey).movement();
+                request.referenceId(), null, null), idempotencyKey).movement();
         return mapper.toResponse(movement);
     }
 

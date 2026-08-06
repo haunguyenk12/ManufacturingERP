@@ -22,6 +22,7 @@ public enum BusinessErrorCode implements ErrorCode {
     NEGATIVE_QUANTITY         ("NEGATIVE_QUANTITY",         "Quantity cannot be negative",                   HttpStatus.UNPROCESSABLE_ENTITY),
     ITEM_ALREADY_ISSUED       ("ITEM_ALREADY_ISSUED",       "Item has already been issued",                  HttpStatus.CONFLICT),
     LOT_NOT_ELIGIBLE          ("LOT_NOT_ELIGIBLE",          "Lot status does not allow this operation",      HttpStatus.CONFLICT),
+    SERIAL_NOT_ELIGIBLE       ("SERIAL_NOT_ELIGIBLE",       "Serial status does not allow this operation",   HttpStatus.CONFLICT),
 
     // ── BOM / Manufacturing ────────────────────────────────────────────────
     BOM_CIRCULAR_REFERENCE    ("BOM_CIRCULAR_REFERENCE",    "Circular reference detected in Bill of Materials", HttpStatus.UNPROCESSABLE_ENTITY),

@@ -11,5 +11,7 @@ public record InventoryAdjustCommand(
         BigDecimal quantityDelta,
         String reason,
         String referenceType,
-        String referenceId
+        String referenceId,
+        UUID serialId,
+        String serialCode
 ) {}

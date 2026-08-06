@@ -64,15 +64,15 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — concurrent refresh-token race vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
-| **Phase trước** | **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt giới hạn "race double-submit" mà `D8a` từng chấp nhận. Advisory lock `acquireRefreshLock` (`SET NX PX`, TTL 2s) + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) trong `AuthService.refresh` — request trùng lặp race trên cùng `tokenId` nhận lại đúng cặp token đã rotate thay vì bị `TOKEN_REUSE_DETECTED` oan. **Không grace window** (quyết định user). **Không migration**, wire additive. Bất biến **`B95`**. Tiện thể sửa 1 câu sai trong tài liệu (`§4.8`: brute-force counter chưa từng dùng Lua script). Bản ghi: **§0.32** |
-| **Phase trước đó** | **`P3` – Costing Engine** ✅ **HOÀN THÀNH** (2026-08-05). Module mới `module/costing`: `ItemStandardCost` (upsert, company-scoped) + `CostingService` (BOM cost roll-up đệ quy) + `WorkOrderCostAccumulator` (`module/workorder`, tích luỹ material/labor/overhead thực tế). 3 endpoint mới dưới `/api/v1/companies/{companyId}/items/{itemId}/standard-cost` (+ list). `GET /work-orders/{id}/variance` mở rộng `usageVarianceCost` (Material Usage Variance — **không** làm Price Variance) + khối `costVariance`. Migration **`V50`** (schema) + **`V51`** (seed `PERM_COSTING_READ`/`_MANAGE`, ADMIN+MANAGER only). Bất biến `B91`-`B94`. Bản ghi: **§0.31** |
+| **Phase đang chạy** | *(không có — `P5` vừa xong. Xem `NEXT_PHASE_PLAN.md` "Ứng viên kế tiếp")* |
+| **Phase trước** | **`P5` – Serial Number Tracking** ✅ **HOÀN THÀNH** (2026-08-06). `SerialNumber` (module `inventory`, mirror `InventoryLot` nhưng luôn quantity = 1) + `Item.serialTracked` (loại trừ `lotTracked`, chốt với user). Nối vào Material Issue + Production Receipt (`module/workorder`); Goods Receipt (`purchasing`) **chưa** nối — nợ có ghi chú. Quyết định lớn nhất: serial-tracked output **không** có HOLD chờ QC (mirror non-lot-tracked của `D5`), tránh phải thêm `serial_id` vào `stock_balances` + viết lại aggregate query. Migration **`V52`**. **Không breaking change trên wire** — mọi field mới đều additive. Bất biến `B96`-`B99`. Bản ghi: **§0.33** |
+| **Phase trước đó** | **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH** (2026-08-05). Đóng nốt giới hạn "race double-submit" mà `D8a` từng chấp nhận. Advisory lock `acquireRefreshLock` (`SET NX PX`, TTL 2s) + breadcrumb `saveRotationResult`/`getRotationResult` (TTL 5s) trong `AuthService.refresh`. **Không grace window** (quyết định user). Bất biến **`B95`**. Bản ghi: **§0.32** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
-| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): `P5` serial tracking, `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. Concurrent refresh-token race ✅ đã xong — xem §0.32. |
-| **Migration mới nhất** | **`V51__seed_costing_permissions.sql`** (`P3`) — concurrent refresh-token race **không** migration (thuần Redis), cùng `D7`, `D7b`, `D11`, `F9`, `D8a`, `D8b`, `C2-0`, `C2-4` |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → **concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+10` unit: `TokenStoreServiceTest` +6 (`acquireRefreshLock` ×3, `saveRotationResult`/`getRotationResult` ×3), `AuthServiceTest` +4 (`refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected`, `.refresh_concurrentDuplicate_extendsDeviceSession`, `.refresh_rotationResultTargetGone_fallsThroughToReuseCheck`, `.refresh_lockNotAcquired_stillDetectsGenuineReuseWhenNoBreadcrumbExists`) + 1 assertion thêm vào `refresh_validToken_rotatesAndReturnsNewPair` (không phải case mới); `+0` IT — phase này không đụng repository/JPQL nào |
-| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
+| **Phase kế tiếp** | **Chưa chốt.** `C2-1` (audit read API) và `C2-2` (inventory lot) **vẫn bị chặn** — chờ FE trả lời câu 1/2 ở `docs/capstone2-api-gap-response.md` §5. Ứng viên không bị chặn (xem thứ tự đề xuất ở `NEXT_PHASE_PLAN.md` §"Thứ tự đề xuất"): `P6` WO close/reconcile. `D8c` (forgot-password) 🔴 bị chặn: thiếu `spring-boot-starter-mail`. `P5` serial tracking ✅ đã xong — xem §0.33. |
+| **Migration mới nhất** | **`V52__create_serial_numbers.sql`** (`P5`) — bảng `serial_numbers` + `items.serial_tracked` + FK `serial_id` trên `stock_movements`/`material_issue_lines`/`production_receipt_lines` |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → **`P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+19` unit: `ItemServiceTest` +2, `InventoryMovementServiceTest` +9, `MaterialIssueServiceTest` +2, `ProductionReceiptServiceTest` +6; `+1` IT: `FlywayMigrationIT.migrate_v52_rejectsAnItemThatIsBothLotAndSerialTracked`, không thêm class IT mới) |
+| **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đang chạy): cùng file §8** — bảng phase §8.1, trạng thái checklist 7/13 §8.0, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (phase đang chạy) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
@@ -151,7 +151,7 @@ do not delete 47 lines above
 |---|---|---|
 | `auth` + `user` | ✅ Done | JWT HS256, refresh rotation, multi-device session, brute-force Lua. **[2026-08-01]** `GET /api/v1/auth/me` — profile + permissions + `scopes[]` theo company/plant + `defaultPlantId` (endpoint duy nhất của `AuthController` không permit-all). Không phải phase `F*`/`D*`/`P*`, không migration. Xem `module/auth/CLAUDE.md` + `module/organization/CLAUDE.md` (B80) |
 | `organization` + dynamic RBAC | ✅ Done | `roles` / `permissions` / `access_scopes` / `user_role_assignments`, scope Company→Plant→Warehouse |
-| `inventory` | ✅ Done | `stock_movements` append-only ledger, `stock_balances` projection, lot tracking, idempotency. **[D6]** `Idempotency-Key` scope theo `(key, movement_type)` (V37). Xem §0.14 + `module/inventory/CLAUDE.md` B69-B71 |
+| `inventory` | ✅ Done | `stock_movements` append-only ledger, `stock_balances` projection, lot tracking, idempotency. **[D6]** `Idempotency-Key` scope theo `(key, movement_type)` (V37). **[P5]** Serial tracking (`SerialNumber`, mirror lot nhưng quantity luôn = 1, `Item.serialTracked` loại trừ `lotTracked`) — xem §0.33 + `module/inventory/CLAUDE.md` B96-B97. Xem §0.14 + B69-B71 |
 | `bom` | ✅ Done | BOM đa cấp, circular reference check, activate/deactivate revision |
 | `planning` + `mrp` | ✅ Done | MRP run, requirement explosion, supply suggestion, safety stock + lead time |
 | `purchasing` | ✅ Done | Supplier, PR → PO → Goods Receipt (+ cancel/reversal) |
@@ -1637,6 +1637,59 @@ trace ra là bằng chứng thật.
 **Breaking changes — wire: KHÔNG có** (không đổi `AuthResponse`, không endpoint mới, không mã lỗi
 mới — nhánh breadcrumb-hit trả **cùng hình dạng response 200** như rotate bình thường). **Java
 positional: không có** — chỉ thêm method mới trên `TokenStoreService`, không đổi constructor nào.
+
+---
+
+### 0.33 P5 – Serial Number Tracking (ĐÃ HOÀN THÀNH 2026-08-06)
+
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P5). Module mới nằm trong `module/inventory` (entity/
+repository) + nối vào `module/workorder` (Material Issue, Production Receipt). **Không** đụng
+`module/purchasing`, `module/sales`. Migration **`V52`**.
+
+**Hai quyết định chốt với user trước khi viết kế hoạch chi tiết (cả hai qua `AskUserQuestion`):**
+1. **`Item.lotTracked` và `Item.serialTracked` loại trừ nhau** — một item chỉ là lot-tracked,
+   serial-tracked, hoặc không tracking gì, không bao giờ cả hai. Validate ở service **và** DB
+   (`chk_items_tracking_exclusive`).
+2. **Serial-tracked production output KHÔNG có HOLD chờ QC** — khác lot. Chấp nhận đánh đổi này để
+   tránh phải thêm cột `serial_id` vào `stock_balances` và viết lại toàn bộ
+   `StockBalanceRepository.aggregate*` (rủi ro/quy mô lớn nhất được xác định lúc research). Serial-
+   tracked output vào thẳng tồn khả dụng ngay khi `approve`, giống hệt cách item không lot-tracked đã
+   hoạt động từ `D5`.
+
+**Thiết kế cốt lõi:** `SerialNumber` mirror `InventoryLot` gần như nguyên vẹn, nhưng **mọi movement
+chạm một serial luôn có `quantity = 1`** — một serial là đúng một đơn vị vật lý, không phải bucket số
+lượng tuỳ ý như lot. Nhờ vậy:
+- Nhận/xuất N đơn vị serial-tracked = N `StockMovement` riêng (N lần gọi `receive`/`issue`), **không**
+  cần schema/API mới cho "nhiều đơn vị trong một lần gọi".
+- `MaterialIssueLineRequest` (+`serialId`) và `ProductionReceiptPostRequest` (+`serialNumber`) chỉ
+  thêm field **optional** — hoàn toàn additive, **không phải breaking change** như bản phác thảo gốc
+  của roadmap từng dự đoán (`List<serialId>` thay `quantity`). Xuất N đơn vị dùng **N dòng** trong
+  mảng `lines[]` đã có sẵn của `MaterialIssuePostRequest`, không cần list field mới.
+- `stock_balances`/`StockBalanceRepository` và `MaterialReservation` **không đổi** — item serial-
+  tracked dùng chung "bucket không lot" với item không tracking, và reservation vẫn thuần số lượng;
+  serial cụ thể chỉ được chọn ở bước issue.
+
+**Bất biến mới:** `B96` (mutual exclusivity, `module/inventory/CLAUDE.md`), `B97` (quantity=1 +
+lifecycle AVAILABLE→ISSUED, cùng file), `B98` (quyết định #2 ở trên — không HOLD,
+`module/workorder/CLAUDE.md`), `B99` (quantity=1 ở tầng receipt/issue, cùng file).
+
+**Nợ để lại có chủ đích:** Goods Receipt (`module/purchasing`) chưa nối serial — nhận nguyên liệu
+serial-tracked qua PO sẽ nổ `SERIAL_REQUIRED` (lỗi thấy được, không silently sai). Ghi chú đầy đủ:
+`module/purchasing/CLAUDE.md`.
+
+**Nghiệm thu:** `mvn -o clean verify` — **850 case unit + 89 case IT / 13 class IT, failures = 0,
+errors = 0** (baseline trước phase: 831 unit + 88 IT / 13 class — `+19` unit, `+1` IT, không thêm
+class IT mới; chi tiết ở hàng "Baseline test" §0.1). Không nghiệm thu mutation (khác một số phase
+`C2-*`/`P3` gần đây) — bù lại bằng test rộng ở service (Item/InventoryMovementService/
+MaterialIssueService/ProductionReceiptService) + `FlywayMigrationIT` cho CHECK constraint.
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: `ItemCreateRequest`/`ItemResponse` +
+`serialTracked`, `MaterialIssueLineRequest`/`Response` + `serialId`/`serialNumber`,
+`ProductionReceiptPostRequest`/`Response` + `serialNumber`/`serialId`, `TrackingMethod` +
+`SERIAL_TRACKED`, 2 mã lỗi mới `SERIAL_REQUIRED`/`SERIAL_NOT_ELIGIBLE`). **Java positional: có** —
+`InventoryReceiveCommand`/`InventoryIssueCommand`/`InventoryAdjustCommand` +2 component mỗi record
+(`serialId`, `serialCode`); `InventoryMovementService`/`MaterialIssueService.issueCommand` constructor/
+signature đổi. Test cũ dựng các record/constructor này đã **sửa** theo `R10`.
 
 ---
 

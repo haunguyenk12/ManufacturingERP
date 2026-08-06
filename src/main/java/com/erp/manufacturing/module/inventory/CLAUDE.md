@@ -36,6 +36,32 @@
 > **`MovementDirection` giờ có 3 giá trị** (`IN`/`OUT`/`NONE`). Mọi so sánh direction mới viết phải
 > xét nhánh `NONE`; hiện chưa có `switch` nào trên enum này.
 
+## Bất Biến Serial Tracking (P5, 2026-08-06)
+
+> Thiết kế đầy đủ + quyết định đã chốt với user: `CLAUDE.md §0.33`. `SerialNumber` mirror
+> `InventoryLot` nhưng luôn đại diện **đúng 1 đơn vị vật lý** — không phải bucket số lượng tuỳ ý.
+> Mọi command (`receive`/`issue`/`adjust`) nhận thêm `serialId`/`serialCode` cạnh `lotId`/`lotCode`.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B96 | `Item.lotTracked` và `Item.serialTracked` **loại trừ nhau** — chốt với user (AskUserQuestion, không phải suy luận). Validate ở **cả hai tầng**: `ItemService.createItem` (422 `OPERATION_NOT_ALLOWED`, trước khi save) **và** CHECK `chk_items_tracking_exclusive` (`V52`, defense-in-depth cho dòng ghi ngoài service, vd migration/script). Immutable sau khi tạo — giống hệt `lotTracked`, `ItemUpdateRequest` không đụng tới | `ItemServiceTest.createItem_bothLotAndSerialTracked_throwsOperationNotAllowedBeforeSaving`, `FlywayMigrationIT.migrate_v52_rejectsAnItemThatIsBothLotAndSerialTracked` |
+| B97 | Mọi `StockMovement` chạm một serial luôn có `quantity = 1` — `ensureSerialQuantityIsOne` chặn ở cả `receive`/`issue`/`adjust`, **trước** khi mutate balance. `receive` **luôn tạo serial mới** (không có khái niệm "nhận vào serial đã tồn tại" như lot) — `serialCode` trùng với item ném `RESOURCE_ALREADY_EXISTS` (409), không im lặng ghi đè. `issue` đòi `serialId` cụ thể (không FEFO tự động cho serial), verify `canIssue()` (`status == AVAILABLE`) rồi flip `ISSUED` — đây là **trạng thái cuối**, không có đường quay lại `AVAILABLE` ở MVP | `InventoryMovementServiceTest.receive_serialTrackedItem_createsSerialAndIncreasesBalance`, `.receive_serialTrackedItem_quantityOtherThanOne_throwsBeforeAnyWrite`, `.receive_serialTrackedItem_duplicateSerialCode_throwsResourceAlreadyExists`, `.issue_serialTrackedItem_flipsSerialToIssuedAndDecreasesBalance`, `.issue_serialNotAvailable_failsBeforeStockMutation`, `.issue_serialTrackedItemWithoutSerialId_throwsBeforeStockMutation` |
+
+**Quyết định cần nhớ khi mở rộng serial tracking:**
+
+1. 🔴 **`stock_balances` KHÔNG có cột `serial_id`.** Cân nhắc rõ với user: thêm cột đó (mirror `lot_id`)
+   sẽ cho phép serial-tracked output mở ở `HOLD` chờ QC giống lot (xem `module/workorder/CLAUDE.md`
+   mục Serial QC) nhưng phải viết lại **mọi** `StockBalanceRepository.aggregate*` JPQL — bị đánh giá là
+   rủi ro/quy mô lớn nhất của cả phase. Quyết định: **không làm**, item serial-tracked dùng chung bucket
+   "không lot" với item không tracked — `findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull` không đổi.
+2. **`MaterialReservation` KHÔNG có `serial_id`.** Reservation vẫn thuần theo số lượng trên bucket
+   chung; serial cụ thể chỉ được chọn **lúc issue** (`MaterialIssueLineRequest.serialId`) — giống mô
+   hình "reserve số lượng, pick đơn vị cụ thể lúc xuất kho" thực tế.
+3. **Không có FEFO tự động cho serial.** `MaterialReservationService.reserveAutomatically` không đổi —
+   với component serial-tracked, việc chọn serial luôn là tường minh từ người dùng qua `serialId` trên
+   dòng issue, không có "auto-pick oldest serial".
+4. **Goods Receipt (`module/purchasing`) chưa nối** — xem `module/purchasing/CLAUDE.md`.
+
 ## Bất Biến Bổ Sung (D6)
 
 | # | Bất biến | Test bảo vệ |

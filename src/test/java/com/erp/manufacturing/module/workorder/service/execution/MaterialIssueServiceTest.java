@@ -168,6 +168,7 @@ class MaterialIssueServiceTest {
                         warehouse.getWarehouseId(),
                         null,
                         null,
+                        null,
                         new BigDecimal("4"),
                         "Issue reserved",
                         null))), "KEY-ISSUE");
@@ -177,6 +178,93 @@ class MaterialIssueServiceTest {
         assertThat(line.getIssuedQuantity()).isEqualByComparingTo("4");
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.IN_PROGRESS);
         verify(wipTransactionService).recordMaterialIssued(eq(workOrder), eq(new BigDecimal("4")), any());
+    }
+
+    @Test
+    void post_serialTrackedComponent_threadsSerialIdIntoIssueCommandAndOntoLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        line.getComponentItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        UUID serialId = UUID.randomUUID();
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(serialId)
+                .item(line.getComponentItem())
+                .serialCode("SN-1")
+                .status(SerialStatus.ISSUED)
+                .build();
+        StockMovement movement = StockMovement.builder()
+                .movementId(UUID.randomUUID())
+                .item(line.getComponentItem())
+                .warehouse(warehouse)
+                .serial(serial)
+                .movementType(MovementType.ISSUE)
+                .direction(MovementDirection.OUT)
+                .quantity(BigDecimal.ONE)
+                .idempotencyKey("KEY")
+                .createdAt(Instant.now())
+                .build();
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-SERIAL")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-SERIAL:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueLineRequest lineRequest = new MaterialIssueLineRequest(
+                line.getComponentLineId(), null, warehouse.getWarehouseId(), null, null,
+                serialId, BigDecimal.ONE, null, null);
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest)), "KEY-SERIAL");
+
+        ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
+        verify(movementService).issue(commandCaptor.capture(), eq("KEY-SERIAL:L1"));
+        assertThat(commandCaptor.getValue().serialId()).isEqualTo(serialId);
+
+        ArgumentCaptor<MaterialIssue> issueCaptor = ArgumentCaptor.forClass(MaterialIssue.class);
+        verify(issueRepository).save(issueCaptor.capture());
+        assertThat(issueCaptor.getValue().getLines().get(0).getSerial().getSerialId()).isEqualTo(serialId);
+    }
+
+    @Test
+    void post_serialTrackedComponentViaReservation_threadsSerialIdIntoIssueReservedCommand() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        line.getComponentItem().setSerialTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        UUID serialId = UUID.randomUUID();
+        MaterialReservation reservation = MaterialReservation.builder()
+                .reservationId(UUID.randomUUID())
+                .workOrder(workOrder)
+                .componentLine(line)
+                .item(line.getComponentItem())
+                .warehouse(warehouse)
+                .quantity(BigDecimal.ONE)
+                .consumedQuantity(BigDecimal.ZERO)
+                .status(MaterialReservationStatus.ACTIVE)
+                .build();
+        StockMovement movement = movement(line.getComponentItem(), warehouse);
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-SERIAL-RES")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(reservationService.findActiveReservationForIssue(workOrder.getWorkOrderId(), reservation.getReservationId()))
+                .thenReturn(reservation);
+        when(movementService.issueReserved(any(InventoryIssueCommand.class), eq("KEY-SERIAL-RES:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueLineRequest lineRequest = new MaterialIssueLineRequest(
+                line.getComponentLineId(), reservation.getReservationId(), warehouse.getWarehouseId(), null, null,
+                serialId, BigDecimal.ONE, null, null);
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest)), "KEY-SERIAL-RES");
+
+        ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
+        verify(movementService).issueReserved(commandCaptor.capture(), eq("KEY-SERIAL-RES:L1"));
+        assertThat(commandCaptor.getValue().serialId()).isEqualTo(serialId);
+        assertThat(reservation.getConsumedQuantity()).isEqualByComparingTo("1");
     }
 
     @Test
@@ -357,6 +445,7 @@ class MaterialIssueServiceTest {
                 line.getComponentLineId(),
                 null,
                 warehouse.getWarehouseId(),
+                null,
                 null,
                 null,
                 quantity,

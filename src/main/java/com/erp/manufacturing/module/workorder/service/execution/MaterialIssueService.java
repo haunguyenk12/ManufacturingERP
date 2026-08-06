@@ -93,6 +93,7 @@ public class MaterialIssueService {
                         reservation.getWarehouse().getWarehouseId(),
                         null,
                         null,
+                        null,
                         request.quantity(),
                         request.reason(),
                         null))), idempotencyKey);
@@ -189,6 +190,7 @@ public class MaterialIssueService {
                         warehouse,
                         reservation.getLot() != null ? reservation.getLot().getLotId() : null,
                         null,
+                        lineRequest.serialId(),
                         quantity,
                         lineRequest.reason(),
                         workOrder),
@@ -202,6 +204,7 @@ public class MaterialIssueService {
                         warehouse,
                         lineRequest.lotId(),
                         lineRequest.lotNumber(),
+                        lineRequest.serialId(),
                         quantity,
                         lineRequest.reason(),
                         workOrder),
@@ -221,6 +224,7 @@ public class MaterialIssueService {
                     .item(componentLine.getComponentItem())
                     .warehouse(warehouse)
                     .lot(movement.getLot())
+                    .serial(movement.getSerial())
                     .quantity(quantity)
                     .overIssue(overIssue)
                     .overrideReason(support.trimToNull(lineRequest.overrideReason()))
@@ -268,6 +272,7 @@ public class MaterialIssueService {
                                                Warehouse warehouse,
                                                UUID lotId,
                                                String lotCode,
+                                               UUID serialId,
                                                BigDecimal quantity,
                                                String reason,
                                                WorkOrder workOrder) {
@@ -279,7 +284,9 @@ public class MaterialIssueService {
                 quantity,
                 support.trimToNull(reason),
                 WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
-                workOrder.getWorkOrderId().toString());
+                workOrder.getWorkOrderId().toString(),
+                serialId,
+                null);
     }
 
     private void validateReservationForIssue(MaterialReservation reservation,

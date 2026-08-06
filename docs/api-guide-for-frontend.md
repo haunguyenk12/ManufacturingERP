@@ -335,6 +335,9 @@ Sales Order ──confirm──► Planning Demand
 | Item | `GET /api/v1/companies/{companyId}/items` |
 
 `ItemResponse.lotTracked` quyết định màn hình receipt có **bắt buộc** nhập `lotNumber` hay không.
+Tương tự, `ItemResponse.serialTracked` (P5, 2026-08-06) quyết định màn hình có **bắt buộc** nhập
+`serialNumber` hay không — **hai cờ này loại trừ nhau**, một item chỉ có thể là lot-tracked, serial-
+tracked, hoặc không tracking gì, không bao giờ cả hai cùng lúc.
 
 ---
 
@@ -495,6 +498,9 @@ Từ `BLOCKED` vẫn **reserve tiếp được** để thoát ra — đó là đ
 > Cần xuất nhiều dòng cùng lúc, hoặc xuất **vượt định mức**: dùng
 > `POST /api/v1/work-orders/{workOrderId}/material-issues` với `lines[]` và `overrideReason`.
 > Xuất vượt cần quyền `PERM_MATERIAL_ISSUE_OVERRIDE`; thiếu `overrideReason` → `422`.
+> 🔴 Component **serial-tracked**: endpoint phẳng (`quantity` bất kỳ) **không dùng được** — mỗi dòng
+> serial-tracked phải là `quantity: 1` kèm `serialId` cụ thể, nên phải đi qua `lines[]` với **N dòng**
+> cho N đơn vị (mỗi dòng gọi `movementService.issue` một serial riêng).
 
 Xem lịch sử: `GET /api/v1/material-issues?plantId={…}&workOrderId={…}` (workOrderId tuỳ chọn).
 `MaterialIssueResponse.code` là số chứng từ dạng `MI-3F2A9C01`.
@@ -562,6 +568,7 @@ Body bước ① (**phẳng, không phải `lines[]`**):
 {
   "destinationWarehouseId": "…",
   "lotNumber": "LOT-20260803-01",   // 🔴 BẮT BUỘC nếu item lotTracked = true
+  "serialNumber": "SN-00042",       // 🔴 BẮT BUỘC nếu item serialTracked = true; quantity PHẢI = 1
   "quantity": 10,
   "note": "…"
 }
@@ -572,9 +579,16 @@ Từ chối: `POST .../{rid}/reject` body `{"reason": "…"}` (reason bắt bu�
 🔴 **Sau `approve`, hàng đã vào kho nhưng CHƯA dùng được**: lot ở trạng thái `HOLD`, `onHand` tăng
 nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đúng điều này.
 
+🔴 **Item serial-tracked là NGOẠI LỆ của quy tắc trên (P5, 2026-08-06)**: hàng khả dụng **ngay** sau
+`approve`, không có bước `HOLD` chờ QC (quyết định có chủ đích, đánh đổi lấy việc không phải viết lại
+toàn bộ tầng aggregate tồn kho). QC vẫn chạy được ở bước 9 nhưng chỉ ghi nhận verdict; `REJECTED` sẽ
+rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì mỗi đơn vị serial là 1 unit, nhận N đơn vị
+= gửi **N request** riêng (không có `serialNumbers[]`).
+
 | Lỗi | Nghĩa |
 |---|---|
 | `400 LOT_REQUIRED` | Item lot-tracked mà không gửi `lotNumber` |
+| `400 SERIAL_REQUIRED` | Item serial-tracked mà không gửi `serialNumber` |
 | `409 PLANNED_QUANTITY_EXCEEDED` | Nhập vượt `availableToReceipt` (đã trừ receipt đang mở) |
 | `409 STATE_CONFLICT` | Sai trạng thái receipt (vd approve một receipt đang `DRAFT`) |
 
@@ -915,11 +929,12 @@ fulfilledQuantity, uom, dueDate`
 `operations[]`: `workOrderOperationId, sourceRoutingOperationId, sequence, name, workCenterCode,
 setupMinutes, runMinutesPerUnit`
 
-### `ProductionReceiptResponse` (32 field)
+### `ProductionReceiptResponse` (34 field)
 ```
 receiptId, code, workOrderId, workOrderCode, status, idempotencyKey,
 outputTrackingMethod, itemId, itemSku, itemName, uom,
-destinationWarehouseId, destinationWarehouseCode, lotId, lotNumber, outputLotStatus,
+destinationWarehouseId, destinationWarehouseCode, lotId, lotNumber, serialId, serialNumber,
+outputLotStatus,
 quantity, stockMovementId, postedAt, note,
 submittedAt, approvedAt, rejectedAt, rejectReason,
 qcResult, qcReason, qcAt,
@@ -953,7 +968,8 @@ issueId, code, workOrderId, workOrderCode, status, idempotencyKey, traceId,
 postedAt, createdByUsername, note, lines[]
 ```
 `lines[]`: `issueLineId, componentLineId, reservationId, itemId, itemSku, itemName, uom,
-warehouseId, warehouseCode, lotId, lotNumber, quantity, stockMovementId, overIssue, overrideReason`
+warehouseId, warehouseCode, lotId, lotNumber, serialId, serialNumber, quantity, stockMovementId,
+overIssue, overrideReason`
 
 ---
 
@@ -968,7 +984,7 @@ warehouseId, warehouseCode, lotId, lotNumber, quantity, stockMovementId, overIss
 | `MaterialIssueStatus` | `POSTED` `CANCELLED` |
 | `QualityDispositionResult` | `AVAILABLE` `REJECTED` |
 | `LotStatus` | `AVAILABLE` `HOLD` `REJECTED` `EXPIRED` |
-| `TrackingMethod` | `NON_TRACKED` `LOT_TRACKED` |
+| `TrackingMethod` | `NON_TRACKED` `LOT_TRACKED` `SERIAL_TRACKED` |
 | `MrpRequirementStatus` | `COVERED` `SHORTAGE` `BOM_MISSING` `INVALID` |
 | `SupplySuggestionStatus` | `DRAFT` `APPROVED` `REJECTED` `CONVERTED` |
 | `SupplySuggestionExceptionState` | `READY` `WARNING` `BLOCKED` |
@@ -988,6 +1004,7 @@ warehouseId, warehouseCode, lotId, lotNumber, quantity, stockMovementId, overIss
 | `VALIDATION_ERROR` | `@Valid` fail — **có** mảng `errors[{field, message}]` để bind vào form |
 | `MISSING_REQUIRED_FIELD`, `FIELD_TOO_LONG`, `FIELD_FORMAT_INVALID` | |
 | `LOT_REQUIRED` | Item lot-tracked mà thiếu `lotNumber` |
+| `SERIAL_REQUIRED` | Item serial-tracked mà thiếu `serialNumber`/`serialId` |
 | `APPROVAL_REASON_REQUIRED` | Thiếu `reason` khi cancel WO / reject receipt / QC |
 
 ```jsonc
@@ -1022,6 +1039,7 @@ warehouseId, warehouseCode, lotId, lotNumber, quantity, stockMovementId, overIss
 | `PLANNED_QUANTITY_EXCEEDED` | Vượt trần chứng từ (good > planned, nhập > availableToReceipt…) |
 | `RESERVATION_EXCEEDED` | Xuất quá phần còn lại của reservation |
 | `LOT_NOT_ELIGIBLE` | Lot sai trạng thái (vd QC lot không ở `HOLD`) |
+| `SERIAL_NOT_ELIGIBLE` | Issue một serial không ở trạng thái `AVAILABLE` (vd đã `ISSUED`/`REJECTED`) |
 | `MISSING_BOM` / `MISSING_ROUTING` | Thiếu master data `ACTIVE` |
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |

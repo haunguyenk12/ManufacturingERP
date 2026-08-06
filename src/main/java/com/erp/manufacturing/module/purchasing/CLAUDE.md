@@ -21,3 +21,16 @@ hành vi "đầu vào rỗng ⇒ `Map.of()` không chạm repository", **1 aggre
 
 Định nghĩa "open" nằm ở `OPEN_SUPPLY_STATUSES = {SENT, PARTIALLY_RECEIVED}`. Đổi tập này là **đổi số
 MRP** trên toàn hệ thống — không phải tinh chỉnh nội bộ purchasing.
+
+## Nợ đã biết: Goods Receipt chưa hỗ trợ item serial-tracked (`P5`, 2026-08-06)
+
+`P5` (Serial Number Tracking) chỉ nối serial vào **Material Issue** và **Production Receipt**
+(`module/workorder`) — cố ý **không** đụng `GoodsReceiptService`/`GoodsReceiptLineRequest`. Nhận hàng
+PO của một item `serialTracked = true` qua goods receipt hiện nay sẽ nổ `SERIAL_REQUIRED` (400) từ
+`InventoryMovementService.receive`, đúng cách `LOT_REQUIRED` đã hoạt động cho item lot-tracked chưa
+từng được nối — đây là lỗi **thấy được**, không phải silently sai. Muốn nhận nguyên liệu serial-tracked
+qua PO thì `GoodsReceiptLineRequest`/`GoodsReceiptLine` cần thêm `serialNumber` (mirror `lotCode`),
+và vì mỗi goods receipt line có thể có `receivedQuantity` > 1 trong khi serial luôn = 1 đơn vị/lần
+receive, endpoint sẽ cần chấp nhận **danh sách** serial number thay vì một chuỗi đơn — khác hẳn shape
+`lotCode` hiện tại. Xem `module/inventory/CLAUDE.md` (mục Serial Tracking) + `module/workorder/CLAUDE.md`
+cho phần đã làm.

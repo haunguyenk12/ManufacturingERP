@@ -44,6 +44,9 @@ public class Item extends BaseEntity {
     @Column(name = "lot_tracked", nullable = false)
     private boolean lotTracked;
 
+    @Column(name = "serial_tracked", nullable = false)
+    private boolean serialTracked;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default

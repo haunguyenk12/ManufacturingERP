@@ -21,6 +21,7 @@ public record ProductionReceiptPostRequest(
         @NotNull UUID destinationWarehouseId,
         UUID lotId,
         @Size(max = 120) String lotNumber,
+        @Size(max = 120) String serialNumber,
         @NotNull @Positive BigDecimal quantity,
         @Size(max = 1000) String reason,
         @Size(max = 2000) String note

@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V51) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V52) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -32,6 +32,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String BACKFILL_SCHEMA = "v36_backfill_check";
     private static final String IDEMPOTENCY_SCHEMA = "v37_idempotency_check";
     private static final String DOCUMENT_CODE_SCHEMA = "v40_document_code_check";
+    private static final String SERIAL_TRACKING_SCHEMA = "v52_serial_tracking_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -44,7 +45,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("51");
+        assertThat(current.getVersion().getVersion()).isEqualTo("52");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -356,6 +357,48 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
         }
         return granted;
+    }
+
+    /**
+     * P5: {@code chk_items_tracking_exclusive} (V52) is the DB-level half of the mutual-exclusivity
+     * decision — {@code ItemServiceTest} already proves the service rejects both flags before saving,
+     * this proves the constraint backs it up even for a row written outside the service layer.
+     */
+    @Test
+    void migrate_v52_rejectsAnItemThatIsBothLotAndSerialTracked() throws Exception {
+        Flyway flyway = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(SERIAL_TRACKING_SCHEMA)
+                .load();
+        flyway.migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + SERIAL_TRACKING_SCHEMA);
+            statement.execute("""
+                    INSERT INTO companies (company_id, code, name)
+                    VALUES ('66666666-6666-4666-8666-666666666666', 'SN_CO', 'Serial Co')
+                    """);
+
+            assertThatThrownBy(() -> statement.execute("""
+                    INSERT INTO items (item_id, company_id, code, name, type, unit, lot_tracked, serial_tracked)
+                    VALUES ('77777777-7777-4777-8777-777777777777',
+                            '66666666-6666-4666-8666-666666666666', 'SN-ITEM', 'Serial Item',
+                            'FINISHED_GOOD', 'EA', true, true)
+                    """))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("chk_items_tracking_exclusive");
+
+            // A serial-tracked-only item is unaffected by the constraint.
+            statement.execute("""
+                    INSERT INTO items (item_id, company_id, code, name, type, unit, lot_tracked, serial_tracked)
+                    VALUES ('88888888-8888-4888-8888-888888888888',
+                            '66666666-6666-4666-8666-666666666666', 'SN-ITEM-2', 'Serial Item 2',
+                            'FINISHED_GOOD', 'EA', false, true)
+                    """);
+        }
     }
 
     /** Migrating the shared public schema is idempotent, so each test can ask for it independently. */

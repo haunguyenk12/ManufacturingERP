@@ -7,9 +7,13 @@ package com.erp.manufacturing.module.inventory.domain;
 public enum TrackingMethod {
 
     NON_TRACKED,
-    LOT_TRACKED;
+    LOT_TRACKED,
+    SERIAL_TRACKED;
 
-    public static TrackingMethod of(boolean lotTracked) {
-        return lotTracked ? LOT_TRACKED : NON_TRACKED;
+    public static TrackingMethod of(boolean lotTracked, boolean serialTracked) {
+        if (lotTracked) {
+            return LOT_TRACKED;
+        }
+        return serialTracked ? SERIAL_TRACKED : NON_TRACKED;
     }
 }

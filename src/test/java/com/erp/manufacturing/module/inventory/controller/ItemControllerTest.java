@@ -82,7 +82,7 @@ class ItemControllerTest {
 
     private ItemResponse sampleResponse() {
         return new ItemResponse(ITEM_ID, COMPANY_ID, "MAT-001", "Steel Sheet",
-                "RAW_MATERIAL", "KG", false, "ACTIVE", Instant.now(), Instant.now());
+                "RAW_MATERIAL", "KG", false, false, "ACTIVE", Instant.now(), Instant.now());
     }
 
     @Test

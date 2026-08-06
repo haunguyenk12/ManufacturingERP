@@ -31,7 +31,7 @@
 | **[x]** | **P2** | Quality Control (QC) Module | Khớp `business_flow` (QC + HOLD) | P1 ✅ | Trung bình | Không |
 | **[x]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
 | **[x]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
-| **[ ]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
+| **[x]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
 | **[~]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
 > `P6`: Sales Order (`F3`) + Fulfillment allocation (`F6`) ✅ **xong 2026-07-28**. Còn lại **WO Close/reconcile** (status `CLOSED` do manager) — chưa xếp lịch.
 | **[ ]** | **P-Deferred** | MES/ISA-95, OEE, WIP real-time, CRP động | Industry 4.0 | Tầng OT | — | **Có** |
@@ -93,7 +93,15 @@
         + message `MISSING_ROUTING`, không đợi đến lúc convert — **xong 2026-07-28 dưới tên `F5-B`**
   - *Khác thiết kế gốc:* field entity là `routingVersion` (không phải `revision`) vì `BaseEntity` đã
     chiếm `version`; operations nhập inline khi create thay vì endpoint line riêng như BOM.
-- [ ] **P5 – Serial Number Tracking**
+- [x] **P5 – Serial Number Tracking** — hoàn thành 2026-08-06
+  - [x] `SerialNumber` entity (mirror `InventoryLot`, mọi movement chạm serial luôn `quantity = 1`) +
+        `Item.serialTracked` loại trừ `lotTracked` (service + CHECK constraint, chốt với user)
+  - [x] Nối vào `InventoryMovementService` (receive/issue/adjust), `MaterialIssueService`,
+        `ProductionReceiptService` (post/approve/qcDisposition) — migration `V52`
+  - [x] Quyết định chốt với user: serial-tracked output **không** HOLD chờ QC (mirror non-lot-tracked
+        của `D5`, tránh phải viết lại `StockBalanceRepository.aggregate*`)
+  - [ ] Goods Receipt (`module/purchasing`) — **chưa nối**, nợ có chủ đích, xem `module/purchasing/CLAUDE.md`
+  - Chi tiết + bất biến B96-B99: `CLAUDE.md §0.33`
 - [ ] **P6 – Sales Order & Fulfillment + WO Close** — *nửa đầu xong 2026-07-26 (`F3`), nửa sau xong 2026-07-28 (`F6`); chỉ còn WO Close*
   - [x] **[F6]** `WorkOrderDemandAllocation` (`V35`) — nối WO ↔ SO line lúc convert proposal MAKE level-0
   - [x] **[F6]** Fulfillment chỉ chạy khi QC `AVAILABLE` commit (spec §7.1); `REJECTED`/`approve` không chạm
@@ -274,6 +282,15 @@ báo over-capacity; test roll-up giờ tải; build + test PASS.
 ---
 
 ### P5 — Serial Number Tracking
+
+> ✅ **Đã xong (2026-08-06).** Phần dưới đây là **thiết kế phác thảo gốc**, giữ lại làm lịch sử —
+> triển khai thật lệch một chỗ quan trọng, đã chốt với user trước khi viết kế hoạch chi tiết:
+> `MaterialIssueLineRequest` **không** đổi sang nhận danh sách `serialId` như phác thảo dưới đây dự
+> đoán — mỗi movement chạm serial luôn `quantity = 1` nên chỉ cần thêm field optional `serialId`, và
+> N đơn vị dùng N dòng trong `lines[]` đã có sẵn (**không phải breaking change**). Quyết định thứ hai
+> chốt với user: serial-tracked output **không** có HOLD chờ QC (mirror non-lot-tracked của `D5`),
+> tránh phải thêm `serial_id` vào `stock_balances` + viết lại `StockBalanceRepository.aggregate*`.
+> Chi tiết đầy đủ + bất biến B96-B99: `CLAUDE.md §0.33`.
 
 **Mục tiêu:** Truy vết cấp **từng đơn vị** (Rule 4 – Serial), bổ sung bên cạnh Lot đã có.
 

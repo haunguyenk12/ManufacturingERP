@@ -1,10 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Phase trước: **Concurrent refresh-token race (mở rộng `D8`)** ✅ **HOÀN THÀNH 2026-08-05.** Bản ghi
-> đầy đủ: `CLAUDE.md §0.32`.
+> Phase trước: **`P5` — Serial Number Tracking** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
+> `CLAUDE.md §0.33`.
 >
-> **831 case unit + 88 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
-> verify` thật với Docker) · migration mới nhất `V51` (phase này không migration).
+> **850 case unit + 89 case IT / 13 class IT · failures = 0, errors = 0** (đo bằng `mvn -o clean
+> verify` thật với Docker) · migration mới nhất `V52`.
 
 ---
 
@@ -26,8 +26,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — concurrent refresh-token race vừa xong. Cập nhật dòng này thành tên phase khi bắt tay vào code phase kế tiếp)* |
-| **Ứng viên kế tiếp** | `P5` — Serial Number Tracking, hoặc `P6` phần còn lại — xem §4/§5 |
+| **Đang chạy** | *(không có — `P5` vừa xong)* |
+| **Ứng viên kế tiếp** | `P6` phần còn lại — WO Close/Reconcile — xem §5 |
 | **Bị chặn** | `C2-1`, `C2-2` (chờ FE), `D8c` (chờ quyết định hạ tầng email) |
 
 ---
@@ -39,7 +39,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 1 | ~~`C2-8` — CRP tĩnh + Capacity Board + Schedule Adjustment~~ | ✅ **Đã xong (2026-08-05)** | Đóng nốt `P4`. Bản ghi: `CLAUDE.md §0.30` |
 | 2 | ~~`P3` — Costing Engine~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.31` |
 | 3 | ~~Concurrent refresh-token race (mở rộng `D8`)~~ | ✅ **Đã xong (2026-08-05)** | Bản ghi: `CLAUDE.md §0.32` |
-| 4 | `P5` — Serial Number Tracking | Không bị chặn | Đổi `MaterialIssueLineRequest` — nên làm sau khi `P3`/`C2-8` đã ổn định để tránh đổi DTO cùng lúc nhiều phase |
+| 4 | ~~`P5` — Serial Number Tracking~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.33` |
 | 5 | `P6` phần còn lại — WO Close/Reconcile | Không bị chặn | Nhỏ, đóng nốt track `P6` |
 | 6 | `C2-1` — Audit Logs read API | 🔴 Bị chặn — chờ FE câu 1 | Giữ vị trí trong roadmap để không quên |
 | 7 | `C2-2` — Inventory Lot lifecycle API | 🔴 Bị chặn — chờ FE câu 2 | Tương tự |
@@ -84,34 +84,17 @@ dùng Lua như tài liệu cũ ghi (đã sửa cùng phase, xem `CLAUDE.md §0.3
 
 ---
 
-## 4. `P5` — Serial Number Tracking
+## 4. `P5` — Serial Number Tracking ✅ ĐÃ XONG (2026-08-06)
 
-Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P5). Độc lập, nhưng đổi DTO đang chạy nên xếp sau khi
-`P3`/`C2-8` ổn định.
-
-### Quyết định phải chốt với user TRƯỚC khi viết kế hoạch chi tiết
-
-Item vừa `lotTracked` vừa `serialTracked` có được phép cùng lúc không, hay hai cờ loại trừ nhau?
-
-### Thiết kế phác thảo (đối chiếu code thật)
-
-- `SerialNumber` entity song song `InventoryLot` (đã đọc `InventoryLot.java` làm mẫu):
-  `serialId`, `item`, `serialCode` (unique), `status` (AVAILABLE/ISSUED/SOLD...).
-- FK nullable `serialId` trên `stock_movements`/`material_issue_lines`/`production_receipt_lines` —
-  đúng pattern cột `lot_id` đã có.
-- `Item.serialTracked` (boolean) song song `Item.lotTracked` đã có.
-
-### 🔴 Breaking change thật — ghi rõ khi viết kế hoạch chi tiết
-
-`MaterialIssueLineRequest` hiện nhận `quantity` (BigDecimal) đơn lẻ (đã đọc `MaterialIssueLine.java`
-xác nhận shape hiện tại). Với item serial-tracked, request phải đổi sang nhận **danh sách
-`serialId`** — đây là thay đổi DTO đang chạy production, phải có mục Breaking Changes tường minh và
-sửa (không xoá) test cũ theo `R10`.
-
-### Test bắt buộc
-
-Test receipt sinh đúng N `SerialNumber` cho N unit nhận vào, test issue theo danh sách serial, test
-item vừa lot vừa serial theo quyết định đã chốt ở trên.
+Nguồn: `MANUFACTURING_GAP_ROADMAP.md §3` (mục P5). Bản ghi đầy đủ (thiết kế, quyết định đã chốt, bất
+biến B96-B99, breaking changes): `CLAUDE.md §0.33`. Hai quyết định chốt với user trước khi viết kế
+hoạch chi tiết: `lotTracked`/`serialTracked` **loại trừ nhau**; serial-tracked output **không** có
+HOLD chờ QC (mirror non-lot-tracked của `D5`, tránh phải thêm `serial_id` vào `stock_balances` +
+viết lại `StockBalanceRepository.aggregate*`). Thiết kế thật lệch bản phác thảo gốc ở đúng một chỗ,
+theo hướng **tốt hơn dự đoán**: mỗi movement chạm serial luôn `quantity = 1` nên
+`MaterialIssueLineRequest`/`ProductionReceiptPostRequest` chỉ cần thêm field optional
+(`serialId`/`serialNumber`) — **không phải breaking change** như roadmap gốc dự đoán (`List<serialId>`
+thay `quantity`). Migration `V52`.
 
 ---
 
@@ -254,14 +237,15 @@ viết dòng code đầu tiên. **Không code phase này tới khi có quyết �
   - [x] Test đồng thời (mô phỏng race, breadcrumb absent/present, lock not-acquired)
   - [x] Docs cập nhật (`common/security/CLAUDE.md` §4.8+§4.12+§4.12a mới, `module/auth/CLAUDE.md`
         `B95`, `architecture-decisions.md`, `FRONTEND_ALIGNMENT_ROADMAP.md §8.0`)
-- [ ] **`P5`** — Serial Number Tracking
-  - [ ] Quyết định `lotTracked`+`serialTracked` có loại trừ nhau — đã chốt với user
-  - [ ] `SerialNumber` entity + migration + FK trên 3 bảng (`stock_movements`,
+- [x] **`P5`** — Serial Number Tracking ✅ **2026-08-06**
+  - [x] Quyết định `lotTracked`+`serialTracked` loại trừ nhau — chốt với user
+  - [x] Quyết định serial-tracked output không HOLD chờ QC — chốt với user
+  - [x] `SerialNumber` entity + migration (`V52`) + FK trên 3 bảng (`stock_movements`,
         `material_issue_lines`, `production_receipt_lines`)
-  - [ ] `Item.serialTracked` flag
-  - [ ] Đổi `MaterialIssueLineRequest` (quantity → serial list khi serial-tracked) — **breaking
-        change, ghi rõ mục riêng**
-  - [ ] Test (receipt sinh N serial, issue theo serial list) + docs
+  - [x] `Item.serialTracked` flag + validate loại trừ (service + CHECK constraint)
+  - [x] Nối vào `InventoryMovementService` (receive/issue/adjust) + `MaterialIssueService` +
+        `ProductionReceiptService` (post/approve/qcDisposition) — **additive, không breaking**
+  - [x] Test (850 case unit + 89 case IT / 13 class IT) + docs
 - [ ] **`P6`** — WO Close/Reconcile
   - [ ] Quyết định phạm vi khoá của `CLOSED` — đã chốt với user
   - [ ] `WorkOrderStatus.CLOSED` + rà switch/so sánh status hiện có (checklist `coding-rules.md §11.3`)

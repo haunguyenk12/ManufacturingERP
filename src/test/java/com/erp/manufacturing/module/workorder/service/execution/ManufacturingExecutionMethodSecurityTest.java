@@ -111,7 +111,7 @@ class ManufacturingExecutionMethodSecurityTest {
                 .thenReturn(false);
 
         assertThatThrownBy(() -> materialIssueService.post(workOrderId, new MaterialIssuePostRequest(null, List.of(
-                new MaterialIssueLineRequest(UUID.randomUUID(), null, UUID.randomUUID(), null, null, BigDecimal.ONE, null, null))),
+                new MaterialIssueLineRequest(UUID.randomUUID(), null, UUID.randomUUID(), null, null, null, BigDecimal.ONE, null, null))),
                 "KEY-1"))
                 .isInstanceOf(AccessDeniedException.class);
 
@@ -127,7 +127,7 @@ class ManufacturingExecutionMethodSecurityTest {
                 .thenReturn(false);
 
         assertThatThrownBy(() -> receiptService.post(workOrderId, new ProductionReceiptPostRequest(
-                UUID.randomUUID(), null, null, BigDecimal.ONE, null, null),
+                UUID.randomUUID(), null, null, null, BigDecimal.ONE, null, null),
                 "KEY-2"))
                 .isInstanceOf(AccessDeniedException.class);
 

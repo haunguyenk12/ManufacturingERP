@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.workorder.mapper;
 
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.SerialNumber;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.inventory.domain.TrackingMethod;
 import com.erp.manufacturing.module.workorder.domain.*;
@@ -83,6 +84,7 @@ public class ManufacturingExecutionMapper {
 
     public MaterialIssueLineResponse toResponse(MaterialIssueLine line) {
         InventoryLot lot = line.getLot();
+        SerialNumber serial = line.getSerial();
         return new MaterialIssueLineResponse(
                 line.getIssueLineId(),
                 line.getComponentLine().getComponentLineId(),
@@ -95,6 +97,8 @@ public class ManufacturingExecutionMapper {
                 line.getWarehouse().getCode(),
                 lot != null ? lot.getLotId() : null,
                 lot != null ? lot.getLotCode() : null,
+                serial != null ? serial.getSerialId() : null,
+                serial != null ? serial.getSerialCode() : null,
                 line.getQuantity(),
                 line.getStockMovement().getMovementId(),
                 line.isOverIssue(),
@@ -185,7 +189,7 @@ public class ManufacturingExecutionMapper {
                 workOrder.getActualGoodQuantity(),
                 workOrder.getCompletedQuantity(),
                 workOrder.availableToReceipt().subtract(openReceiptQuantity),
-                TrackingMethod.of(product.isLotTracked()).name(),
+                TrackingMethod.of(product.isLotTracked(), product.isSerialTracked()).name(),
                 workOrder.getPlannedEndAt());
     }
 
@@ -213,6 +217,7 @@ public class ManufacturingExecutionMapper {
                                                 Map<UUID, String> usernames) {
         ProductionReceiptLine line = lines.isEmpty() ? null : lines.get(0);
         InventoryLot lot = line == null ? null : line.getLot();
+        SerialNumber serial = line == null ? null : line.getSerial();
         StockMovement movement = line == null ? null : line.getStockMovement();
         return new ProductionReceiptResponse(
                 receipt.getReceiptId(),
@@ -221,7 +226,7 @@ public class ManufacturingExecutionMapper {
                 receipt.getWorkOrder().getWorkOrderNo(),
                 receipt.getStatus().name(),
                 receipt.getIdempotencyKey(),
-                line == null ? null : TrackingMethod.of(line.getItem().isLotTracked()).name(),
+                line == null ? null : TrackingMethod.of(line.getItem().isLotTracked(), line.getItem().isSerialTracked()).name(),
                 line == null ? null : line.getItem().getItemId(),
                 line == null ? null : line.getItem().getCode(),
                 line == null ? null : line.getItem().getName(),
@@ -230,6 +235,8 @@ public class ManufacturingExecutionMapper {
                 line == null ? null : line.getWarehouse().getCode(),
                 lot == null ? null : lot.getLotId(),
                 lot != null ? lot.getLotCode() : (line == null ? null : line.getRequestedLotCode()),
+                serial == null ? null : serial.getSerialId(),
+                serial != null ? serial.getSerialCode() : (line == null ? null : line.getRequestedSerialCode()),
                 // Null for output that is not lot-tracked: there is no lot to carry HOLD, so the QC
                 // verdict lives on qcResult instead (D5, B40). Absent status ≠ "not decided".
                 lot == null ? null : lot.getStatus().name(),

@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workorder.domain;
 import com.erp.manufacturing.common.audit.BaseEntity;
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.SerialNumber;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import jakarta.persistence.*;
@@ -47,6 +48,14 @@ public class ProductionReceiptLine extends BaseEntity {
     /** Lot code requested at post time; used to resolve/create the real lot on approval. */
     @Column(name = "requested_lot_code", length = 120)
     private String requestedLotCode;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "serial_id")
+    private SerialNumber serial;
+
+    /** Serial code requested at post time; used to create the real serial on approval. */
+    @Column(name = "requested_serial_code", length = 120)
+    private String requestedSerialCode;
 
     @Column(name = "quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantity;

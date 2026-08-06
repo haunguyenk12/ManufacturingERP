@@ -337,6 +337,7 @@ public class WorkOrderService {
                         request.warehouseId(),
                         request.lotId(),
                         request.lotCode(),
+                        null,
                         request.quantity(),
                         request.reason(),
                         null))), idempotencyKey);
@@ -358,6 +359,7 @@ public class WorkOrderService {
                 workOrder.getOutputWarehouse().getWarehouseId(),
                 request.lotId(),
                 request.lotCode(),
+                null,
                 request.quantity(),
                 request.reason(),
                 null), idempotencyKey);

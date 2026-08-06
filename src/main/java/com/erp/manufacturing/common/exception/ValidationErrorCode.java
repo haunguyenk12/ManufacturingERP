@@ -22,6 +22,7 @@ public enum ValidationErrorCode implements ErrorCode {
 
     // ── Manufacturing input ────────────────────────────────────────────────
     LOT_REQUIRED             ("LOT_REQUIRED",              "Lot number is required for a lot-tracked item", HttpStatus.BAD_REQUEST),
+    SERIAL_REQUIRED          ("SERIAL_REQUIRED",           "Serial number is required for a serial-tracked item", HttpStatus.BAD_REQUEST),
     APPROVAL_REASON_REQUIRED ("APPROVAL_REASON_REQUIRED",  "A reason is required for this decision",        HttpStatus.BAD_REQUEST),
 
     // ── General resource ───────────────────────────────────────────────────

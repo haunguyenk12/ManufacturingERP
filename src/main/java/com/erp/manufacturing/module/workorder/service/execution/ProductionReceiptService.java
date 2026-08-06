@@ -10,6 +10,7 @@ import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.LotStatus;
+import com.erp.manufacturing.module.inventory.domain.SerialStatus;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.inventory.service.InventoryAdjustCommand;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementResult;
@@ -152,13 +153,16 @@ public class ProductionReceiptService {
                     line.getQuantity(),
                     line.getReason(),
                     WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
-                    workOrder.getWorkOrderId().toString()),
+                    workOrder.getWorkOrderId().toString(),
+                    null,
+                    line.getRequestedSerialCode()),
                     idempotency.childKey(receipt.getIdempotencyKey() + ":approve", index),
                     LotStatus.HOLD);
 
             StockMovement movement = movementResult.movement();
             line.setStockMovement(movement);
             line.setLot(movement.getLot());
+            line.setSerial(movement.getSerial());
             totalReceived = totalReceived.add(line.getQuantity());
         }
 
@@ -246,13 +250,21 @@ public class ProductionReceiptService {
         Instant now = Instant.now();
         UUID actor = auditorAware.getCurrentAuditor().orElse(null);
         // The condition is per line, not a flag on the item: what decides the path is whether
-        // approval actually opened a lot to carry HOLD.
+        // approval actually opened a lot (or a serial) to carry the verdict.
         List<ProductionReceiptLine> lotLines = receipt.getLines().stream()
                 .filter(line -> line.getLot() != null)
                 .toList();
-        BigDecimal dispositionedQuantity = lotLines.isEmpty()
-                ? dispositionWithoutLots(receipt, request.result(), reason)
-                : dispositionLots(receipt, lotLines, request.result(), reason, now, actor);
+        List<ProductionReceiptLine> serialLines = receipt.getLines().stream()
+                .filter(line -> line.getSerial() != null)
+                .toList();
+        BigDecimal dispositionedQuantity;
+        if (!lotLines.isEmpty()) {
+            dispositionedQuantity = dispositionLots(receipt, lotLines, request.result(), reason, now, actor);
+        } else if (!serialLines.isEmpty()) {
+            dispositionedQuantity = dispositionSerials(receipt, serialLines, request.result(), reason);
+        } else {
+            dispositionedQuantity = dispositionWithoutLots(receipt, request.result(), reason);
+        }
 
         // Spec §7.1: fulfilment is driven by QC release and nothing else. REJECTED output stays on
         // hand but unusable, so it must never touch an allocation or a sales order (F6).
@@ -351,9 +363,47 @@ public class ProductionReceiptService {
                         line.getQuantity().negate(),
                         reason,
                         WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
-                        receipt.getWorkOrder().getWorkOrderId().toString()),
+                        receipt.getWorkOrder().getWorkOrderId().toString(),
+                        null,
+                        null),
                         idempotency.childKey(receipt.getIdempotencyKey() + ":qc-reject", index));
             }
+            dispositionedQuantity = dispositionedQuantity.add(line.getQuantity());
+        }
+        return dispositionedQuantity;
+    }
+
+    /**
+     * QC on serial-tracked output. Structurally the same as {@link #dispositionWithoutLots} — the
+     * unit went straight to free stock at approval (no HOLD gate, see the P5 scope decision in
+     * {@code module/workorder/CLAUDE.md}) — plus it additionally records the verdict on the serial's
+     * own status for genealogy, even though that status never gated availability.
+     */
+    private BigDecimal dispositionSerials(ProductionReceipt receipt,
+                                          List<ProductionReceiptLine> serialLines,
+                                          QualityDispositionResult result,
+                                          String reason) {
+        BigDecimal dispositionedQuantity = BigDecimal.ZERO;
+        int index = 0;
+        for (ProductionReceiptLine line : serialLines) {
+            index++;
+            if (result == QualityDispositionResult.REJECTED) {
+                movementService.adjust(new InventoryAdjustCommand(
+                        line.getItem().getItemId(),
+                        line.getWarehouse().getWarehouseId(),
+                        null,
+                        null,
+                        line.getQuantity().negate(),
+                        reason,
+                        WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
+                        receipt.getWorkOrder().getWorkOrderId().toString(),
+                        line.getSerial().getSerialId(),
+                        null),
+                        idempotency.childKey(receipt.getIdempotencyKey() + ":qc-reject", index));
+            }
+            line.getSerial().setStatus(result == QualityDispositionResult.AVAILABLE
+                    ? SerialStatus.AVAILABLE
+                    : SerialStatus.REJECTED);
             dispositionedQuantity = dispositionedQuantity.add(line.getQuantity());
         }
         return dispositionedQuantity;
@@ -480,6 +530,18 @@ public class ProductionReceiptService {
             throw ExceptionFactory.custom(ValidationErrorCode.LOT_REQUIRED,
                     "Lot-tracked output requires a lot number or lot id");
         }
+        // Symmetric to the lot check above (B41 sibling): a serial-tracked receipt always names
+        // exactly one physical unit, so quantity must be 1 and the serial code is mandatory.
+        if (workOrder.getProductItem().isSerialTracked()) {
+            if (support.trimToNull(request.serialNumber()) == null) {
+                throw ExceptionFactory.custom(ValidationErrorCode.SERIAL_REQUIRED,
+                        "Serial-tracked output requires a serial number");
+            }
+            if (quantity.compareTo(BigDecimal.ONE) != 0) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Serial-tracked output must be receipted one unit at a time");
+            }
+        }
 
         receipt.getLines().add(ProductionReceiptLine.builder()
                 .receipt(receipt)
@@ -489,6 +551,7 @@ public class ProductionReceiptService {
                         ? itemLookupService.getLotForItem(workOrder.getProductItem(), request.lotId())
                         : null)
                 .requestedLotCode(support.trimToNull(request.lotNumber()))
+                .requestedSerialCode(support.trimToNull(request.serialNumber()))
                 .quantity(quantity)
                 .reason(support.trimToNull(request.reason()))
                 .build());

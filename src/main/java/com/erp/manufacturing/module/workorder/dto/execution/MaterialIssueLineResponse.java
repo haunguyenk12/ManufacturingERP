@@ -17,6 +17,8 @@ public record MaterialIssueLineResponse(
         String warehouseCode,
         UUID lotId,
         String lotNumber,
+        UUID serialId,
+        String serialNumber,
         BigDecimal quantity,
         UUID stockMovementId,
         boolean overIssue,

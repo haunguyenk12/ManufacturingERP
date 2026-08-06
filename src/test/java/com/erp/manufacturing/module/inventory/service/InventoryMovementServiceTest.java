@@ -2,12 +2,14 @@ package com.erp.manufacturing.module.inventory.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.repository.SerialNumberRepository;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.*;
@@ -38,6 +40,7 @@ class InventoryMovementServiceTest {
     @Mock ItemRepository itemRepository;
     @Mock WarehouseRepository warehouseRepository;
     @Mock InventoryLotRepository lotRepository;
+    @Mock SerialNumberRepository serialNumberRepository;
     @Mock StockBalanceRepository balanceRepository;
     @Mock StockMovementRepository movementRepository;
 
@@ -52,6 +55,7 @@ class InventoryMovementServiceTest {
                 itemRepository,
                 warehouseRepository,
                 lotRepository,
+                serialNumberRepository,
                 balanceRepository,
                 movementRepository,
                 idempotency,
@@ -82,7 +86,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-1", new BigDecimal("10.500"), "PO receipt", "PO", "PO-1"), "KEY-1");
+                itemId, warehouseId, null, "LOT-1", new BigDecimal("10.500"), "PO receipt", "PO", "PO-1", null, null), "KEY-1");
 
         ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
         verify(balanceRepository).save(balanceCaptor.capture());
@@ -118,7 +122,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-WO-1", new BigDecimal("5"), null, "WORK_ORDER", "WO-1"),
+                itemId, warehouseId, null, "LOT-WO-1", new BigDecimal("5"), null, "WORK_ORDER", "WO-1", null, null),
                 "KEY-HOLD", LotStatus.HOLD);
 
         ArgumentCaptor<InventoryLot> lotCaptor = ArgumentCaptor.forClass(InventoryLot.class);
@@ -151,7 +155,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-EXISTING", BigDecimal.ONE, null, "WORK_ORDER", "WO-1"),
+                itemId, warehouseId, null, "LOT-EXISTING", BigDecimal.ONE, null, "WORK_ORDER", "WO-1", null, null),
                 "KEY-EXISTING", LotStatus.HOLD);
 
         assertThat(existingLot.getStatus()).isEqualTo(LotStatus.AVAILABLE);
@@ -182,7 +186,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-DEFAULT", BigDecimal.ONE, null, "PO", "PO-1"), "KEY-DEFAULT");
+                itemId, warehouseId, null, "LOT-DEFAULT", BigDecimal.ONE, null, "PO", "PO-1", null, null), "KEY-DEFAULT");
 
         ArgumentCaptor<InventoryLot> lotCaptor = ArgumentCaptor.forClass(InventoryLot.class);
         verify(lotRepository).save(lotCaptor.capture());
@@ -208,7 +212,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-1", MovementType.RECEIVE)).thenReturn(Optional.of(existing));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null), "KEY-1");
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-1");
 
         verifyNoInteractions(itemRepository, warehouseRepository, lotRepository, balanceRepository);
         verify(movementRepository, never()).save(any());
@@ -223,7 +227,7 @@ class InventoryMovementServiceTest {
         Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
 
         InventoryReceiveCommand original = new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null);
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null);
         StockMovement existing = StockMovement.builder()
                 .item(item)
                 .warehouse(warehouse)
@@ -239,7 +243,7 @@ class InventoryMovementServiceTest {
         // Same key, but quantity 1 -> 99: replaying this silently used to return the original
         // movement and discard the new payload.
         InventoryReceiveCommand tampered = new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null);
+                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null);
 
         assertThatThrownBy(() -> service.receive(tampered, "KEY-1"))
                 .isInstanceOf(AppException.class)
@@ -271,7 +275,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.findByIdempotencyKeyAndMovementType("LEGACY-1", MovementType.RECEIVE)).thenReturn(Optional.of(legacy));
 
         InventoryMovementResult result = service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null), "LEGACY-1");
+                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null), "LEGACY-1");
 
         assertThat(result.created()).isFalse();
         assertThat(result.movement()).isSameAs(legacy);
@@ -319,7 +323,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         InventoryMovementResult result = service.issue(new InventoryIssueCommand(
-                itemId, warehouseId, null, null, new BigDecimal("4"), null, null, null), "SHARED-KEY");
+                itemId, warehouseId, null, null, new BigDecimal("4"), null, null, null, null, null), "SHARED-KEY");
 
         assertThat(result.created()).isTrue();
         assertThat(result.movement()).isNotSameAs(earlierReceive);
@@ -356,7 +360,7 @@ class InventoryMovementServiceTest {
                 .thenReturn(Optional.of(existing));
 
         InventoryMovementResult result = service.issueReserved(new InventoryIssueCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null), "ISSUE-KEY");
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "ISSUE-KEY");
 
         assertThat(result.created()).isFalse();
         assertThat(result.movement()).isSameAs(existing);
@@ -402,7 +406,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         InventoryMovementResult result = service.adjust(new InventoryAdjustCommand(
-                itemId, warehouseId, null, null, new BigDecimal("-3"), "Cycle count", null, null), "ADJ-KEY");
+                itemId, warehouseId, null, null, new BigDecimal("-3"), "Cycle count", null, null, null, null), "ADJ-KEY");
 
         assertThat(result.created()).isTrue();
         assertThat(result.movement().getMovementType()).isEqualTo(MovementType.ADJUST_OUT);
@@ -418,7 +422,7 @@ class InventoryMovementServiceTest {
     @Test
     void adjust_zeroDelta_failsBeforeAnyLookupIncludingTheReplayLookup() {
         assertThatThrownBy(() -> service.adjust(new InventoryAdjustCommand(
-                UUID.randomUUID(), UUID.randomUUID(), null, null, BigDecimal.ZERO, null, null, null), "ADJ-ZERO"))
+                UUID.randomUUID(), UUID.randomUUID(), null, null, BigDecimal.ZERO, null, null, null, null, null), "ADJ-ZERO"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.NEGATIVE_QUANTITY));
@@ -446,7 +450,7 @@ class InventoryMovementServiceTest {
                 .thenReturn(Optional.of(balance));
 
         assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
-                itemId, warehouseId, null, null, new BigDecimal("5"), null, null, null), "KEY-2"))
+                itemId, warehouseId, null, null, new BigDecimal("5"), null, null, null, null, null), "KEY-2"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
@@ -475,7 +479,7 @@ class InventoryMovementServiceTest {
                 .thenReturn(Optional.of(balance));
 
         assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
-                itemId, warehouseId, null, null, new BigDecimal("3"), null, null, null), "KEY-RESERVED"))
+                itemId, warehouseId, null, null, new BigDecimal("3"), null, null, null, null, null), "KEY-RESERVED"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
@@ -506,7 +510,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.issueReserved(new InventoryIssueCommand(
-                itemId, warehouseId, null, null, new BigDecimal("5"), null, null, null), "KEY-RES-ISSUE");
+                itemId, warehouseId, null, null, new BigDecimal("5"), null, null, null, null, null), "KEY-RES-ISSUE");
 
         assertThat(balance.getQuantity()).isEqualByComparingTo("5");
         assertThat(balance.getReservedQuantity()).isEqualByComparingTo("3");
@@ -533,7 +537,7 @@ class InventoryMovementServiceTest {
         when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
-                itemId, warehouseId, lotId, null, BigDecimal.ONE, null, null, null), "KEY-3"))
+                itemId, warehouseId, lotId, null, BigDecimal.ONE, null, null, null, null, null), "KEY-3"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
@@ -556,12 +560,271 @@ class InventoryMovementServiceTest {
         // Master-data validation, not a lot status problem — deliberately left at 422 when F5
         // moved the lot-status refusals to LOT_NOT_ELIGIBLE (409).
         assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null), "KEY-4"))
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-4"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
         verifyNoInteractions(balanceRepository);
+    }
+
+    // ── Serial tracking (P5) ─────────────────────────────────────────────────
+
+    @Test
+    void receive_serialTrackedItem_createsSerialAndIncreasesBalance() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID serialId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-1", MovementType.RECEIVE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(serialNumberRepository.findByItemItemIdAndSerialCode(itemId, "SN-1")).thenReturn(Optional.empty());
+        when(serialNumberRepository.save(any(SerialNumber.class))).thenAnswer(invocation -> {
+            SerialNumber serial = invocation.getArgument(0);
+            serial.setSerialId(serialId);
+            return serial;
+        });
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(itemId, warehouseId))
+                .thenReturn(Optional.empty());
+        when(balanceRepository.save(any(StockBalance.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryMovementResult result = service.receive(new InventoryReceiveCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-1"), "KEY-SN-1");
+
+        ArgumentCaptor<SerialNumber> serialCaptor = ArgumentCaptor.forClass(SerialNumber.class);
+        verify(serialNumberRepository).save(serialCaptor.capture());
+        assertThat(serialCaptor.getValue().getSerialCode()).isEqualTo("SN-1");
+        assertThat(serialCaptor.getValue().getStatus()).isEqualTo(SerialStatus.AVAILABLE);
+        assertThat(result.movement().getSerial().getSerialId()).isEqualTo(serialId);
+
+        ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
+        verify(balanceRepository).save(balanceCaptor.capture());
+        assertThat(balanceCaptor.getValue().getQuantity()).isEqualByComparingTo("1");
+    }
+
+    @Test
+    void receive_serialTrackedItem_quantityOtherThanOne_throwsBeforeAnyWrite() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-2", MovementType.RECEIVE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
+                itemId, warehouseId, null, null, new BigDecimal("2"), null, null, null, null, "SN-2"), "KEY-SN-2"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(serialNumberRepository, balanceRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    void receive_serialTrackedItem_withoutSerialCode_throwsBeforeAnyWrite() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-3", MovementType.RECEIVE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-SN-3"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(balanceRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    void receive_serialTrackedItem_duplicateSerialCode_throwsResourceAlreadyExists() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        SerialNumber existingSerial = SerialNumber.builder()
+                .serialId(UUID.randomUUID())
+                .item(item)
+                .serialCode("SN-4")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-4", MovementType.RECEIVE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(serialNumberRepository.findByItemItemIdAndSerialCode(itemId, "SN-4")).thenReturn(Optional.of(existingSerial));
+
+        assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-4"), "KEY-SN-4"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_ALREADY_EXISTS));
+
+        verify(serialNumberRepository, never()).save(any());
+        verifyNoInteractions(balanceRepository);
+    }
+
+    @Test
+    void issue_serialTrackedItem_flipsSerialToIssuedAndDecreasesBalance() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID serialId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(serialId)
+                .item(item)
+                .serialCode("SN-5")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+        StockBalance balance = StockBalance.builder()
+                .item(item)
+                .warehouse(warehouse)
+                .quantity(BigDecimal.ONE)
+                .build();
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-5", MovementType.ISSUE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(serialNumberRepository.findById(serialId)).thenReturn(Optional.of(serial));
+        when(serialNumberRepository.save(any(SerialNumber.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(itemId, warehouseId))
+                .thenReturn(Optional.of(balance));
+        when(balanceRepository.save(balance)).thenReturn(balance);
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryMovementResult result = service.issue(new InventoryIssueCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, serialId, null), "KEY-SN-5");
+
+        assertThat(serial.getStatus()).isEqualTo(SerialStatus.ISSUED);
+        assertThat(result.movement().getSerial().getSerialId()).isEqualTo(serialId);
+        assertThat(balance.getQuantity()).isEqualByComparingTo("0");
+        verify(serialNumberRepository).save(serial);
+    }
+
+    @Test
+    void issue_serialTrackedItemWithoutSerialId_throwsBeforeStockMutation() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-5B", MovementType.ISSUE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        // This is exactly the path MaterialIssueService.postFlat hits for a serial-tracked
+        // component: it never has a serialId to offer, so it fails here instead of needing a
+        // special case of its own.
+        assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-SN-5B"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(balanceRepository, serialNumberRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    void issue_serialNotAvailable_failsBeforeStockMutation() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID serialId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(serialId)
+                .item(item)
+                .serialCode("SN-6")
+                .status(SerialStatus.ISSUED)
+                .build();
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-6", MovementType.ISSUE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(serialNumberRepository.findById(serialId)).thenReturn(Optional.of(serial));
+
+        assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, serialId, null), "KEY-SN-6"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.SERIAL_NOT_ELIGIBLE));
+
+        verifyNoInteractions(balanceRepository);
+        verify(serialNumberRepository, never()).save(any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    void issue_serialBelongingToDifferentItem_throws() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID otherItemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID serialId = UUID.randomUUID();
+        Item item = serialItem(itemId, companyId, ItemStatus.ACTIVE);
+        Item otherItem = serialItem(otherItemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        SerialNumber serial = SerialNumber.builder()
+                .serialId(serialId)
+                .item(otherItem)
+                .serialCode("SN-7")
+                .status(SerialStatus.AVAILABLE)
+                .build();
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-7", MovementType.ISSUE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(serialNumberRepository.findById(serialId)).thenReturn(Optional.of(serial));
+
+        assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, serialId, null), "KEY-SN-7"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(balanceRepository);
+    }
+
+    @Test
+    void issue_serialProvidedForNonSerialTrackedItem_throws() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-SN-8", MovementType.ISSUE)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.issue(new InventoryIssueCommand(
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, UUID.randomUUID(), null), "KEY-SN-8"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(balanceRepository, serialNumberRepository);
     }
 
     private Item item(UUID itemId, UUID companyId, boolean lotTracked, ItemStatus status) {
@@ -573,6 +836,19 @@ class InventoryMovementServiceTest {
                 .type(ItemType.RAW_MATERIAL)
                 .unit("KG")
                 .lotTracked(lotTracked)
+                .status(status)
+                .build();
+    }
+
+    private Item serialItem(UUID itemId, UUID companyId, ItemStatus status) {
+        return Item.builder()
+                .itemId(itemId)
+                .company(company(companyId))
+                .code("SN-ITEM")
+                .name("Router")
+                .type(ItemType.FINISHED_GOOD)
+                .unit("EA")
+                .serialTracked(true)
                 .status(status)
                 .build();
     }
