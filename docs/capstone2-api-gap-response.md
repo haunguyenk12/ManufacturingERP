@@ -1,8 +1,15 @@
 # Phản hồi `BACKEND_CAPSTONE2_API_GAPS.md` — Backend → FE
 
-> Ngày: 2026-08-04 · Đối tượng: FE team
+> Ngày lập: 2026-08-04 · **Cập nhật: 2026-08-06** · Đối tượng: FE team
 > Nguồn đối chiếu: **code thật trên branch hiện tại**, không phải OpenAPI snapshot.
 > Tài liệu đối ngoại chính vẫn là `docs/api-guide-for-frontend.md` — đã cập nhật cùng ngày.
+
+> 🔴 **Đổi mới từ 2026-08-06 (đọc trước nếu đã đọc bản 2026-08-04 rồi):** ba đợt còn lại của track
+> `C2-*` (`C2-6` Work Center, `C2-7` Shift/Work Calendar, `C2-8` Capacity Board + schedule adjustment)
+> đã **xong hết** — xem **§8** (section mới). §3 cũng vừa được sửa lại tương ứng. Nợ "concurrent
+> refresh" mà bảng nghiệm thu ở §6.1 của `BACKEND_CAPSTONE2_API_GAPS.md` từng nêu là chưa qua cũng đã
+> đóng — xem **§9**. **Danh sách câu hỏi cần FE trả lời (§5) không đổi** — vẫn đúng 2 câu đang chặn
+> (`§5` câu 1, câu 2) + 1 câu hành chính (câu 5); câu 3, câu 4 đã trả lời từ trước.
 
 ---
 
@@ -129,22 +136,23 @@ bộ: roadmap `C2-*`.
 | Đợt | Nội dung | Trạng thái |
 |---|---|---|
 | `C2-0` | Phản hồi này + sửa OpenAPI summary + cập nhật `api-guide-for-frontend.md` | ✅ **xong** (2026-08-04) |
-| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | chờ FE trả lời §2.1 |
-| `C2-2` | §3.2 Inventory Lot list/detail/status | chờ FE trả lời §2.2(c) |
+| `C2-1` | §3.3 Audit read API (đợt 1, chưa có diff) | 🔴 chờ FE trả lời §2.1 |
+| `C2-2` | §3.2 Inventory Lot list/detail/status | 🔴 chờ FE trả lời §2.2(c) |
 | `C2-3` | §3.1 UOM master CRUD + lifecycle | ✅ **xong** (2026-08-04) — xem §7 |
 | `C2-4` | §4.3-§4.6: `PATCH /sales-orders/{id}`, Role/Scope lifecycle, `GET /access/assignments`, chốt contract over-BOM, **+ time variance** | ✅ **xong** (2026-08-05) — xem `CLAUDE.md §0.27` |
 | `C2-5` | §5: **CORS cho origin FE**, seed 2 plant + account theo role, **+ sửa lệch RBAC seed** | ✅ **xong** (2026-08-04) — xem §6 |
-| `C2-6..8` | §3.4-§3.6: Work Center, Shift/Calendar, Capacity Board + schedule adjustment | chưa bắt đầu — **phần lớn nhất** |
-| *(mới)* | Time variance cho §5 (xem §1.3) | chưa xếp phase |
+| `C2-6` | §3.4 Work Center CRUD + lifecycle | ✅ **xong** (2026-08-05) — xem §8 |
+| `C2-7` | §3.5 Shift + Work Calendar CRUD + lifecycle | ✅ **xong** (2026-08-05) — xem §8 |
+| `C2-8` | §3.6 Capacity Board + schedule adjustment | ✅ **xong** (2026-08-05) — xem §8 |
 
-**Về CORS:** các bạn xếp mục này ở P2, nhưng backend hiện **không có một dòng cấu hình CORS nào** ⇒
-không origin nào được whitelist. Nếu FE chạy khác origin và **không** dùng proxy same-origin thì mọi
-request sẽ bị browser chặn, bất kể API đúng hay sai. Đề nghị nâng lên P0 hoặc xác nhận các bạn dùng proxy.
+⇒ **Toàn bộ track `C2-*` đã đóng**, chỉ còn `C2-1`/`C2-2` đang chờ hai câu trả lời ở §2 (lặp lại ở §5
+để dễ tìm). Không còn hạng mục nào trong `C2-*` đang "chưa bắt đầu".
 
-**Về §3.6 Capacity:** `work_order_operations` hiện **không có** `plannedStartAt`/`plannedEndAt`. Capacity
-Board đòi hai giá trị đó cho mỗi operation ⇒ backend phải quyết định **sinh lịch lúc nào** (lúc tạo WO?
-lúc `plan`? lúc `release`?). Đây là quyết định nghiệp vụ, không phải thêm cột — sẽ hỏi lại các bạn khi
-vào `C2-8`.
+✅ **Về CORS (đã xong, không cần theo dõi nữa):** lúc viết bản 2026-08-04, backend chưa có dòng cấu
+hình CORS nào. Đã đóng ở `C2-5` (§6.1) — origin whitelist qua biến môi trường `CORS_ALLOWED_ORIGINS`.
+
+✅ **Về §3.6 Capacity (đã xong, không cần theo dõi nữa):** quyết định "sinh lịch lúc nào" đã chốt ở
+`C2-8` — lúc `POST /work-orders/{id}/release`, không phải lúc tạo hay `plan()`. Chi tiết đầy đủ: §8.
 
 ---
 
@@ -228,6 +236,88 @@ tự kiểm và phải làm lại probe.
 
 **Không làm trong đợt này** (báo trước để FE không chờ): `DELETE` xoá cứng riêng biệt với deactivate,
 đơn vị quy đổi (kg↔g), company-scope.
+
+---
+
+## 8. `C2-6`+`C2-7`+`C2-8` đã xong (2026-08-05) — Work Center, Shift/Work Calendar, Capacity Board
+
+Đây là phần **lớn nhất** của track `C2-*` (§3.4-§3.6 trong tài liệu của các bạn) và giờ đã đóng hết.
+Field list đầy đủ nằm ở `docs/api-guide-for-frontend.md` (mục "Work Center", "Shift & Work Calendar",
+"Capacity Board (CRP tĩnh)") — phần dưới đây chỉ nêu **quyết định nghiệp vụ** FE cần biết trước khi
+dựng UI, không lặp lại toàn bộ field.
+
+### 8.1 Work Center (`C2-6`) — 7 endpoint
+
+`POST`/`GET /plants/{plantId}/work-centers`, `GET`/`PATCH /work-centers/{id}`,
+`POST /work-centers/{id}/activate`, `POST /work-centers/{id}/deactivate`, `DELETE /work-centers/{id}`.
+
+- **Per-plant, không có `companyId`** — khác UOM (global).
+- `DELETE` gọi **cùng hành vi** với `deactivate` — Work Center là ngoại lệ duy nhất có cả ba verb
+  (`activate`/`deactivate`/`DELETE`) cùng tồn tại; đừng suy ra pattern này áp dụng cho resource khác.
+- 🔴 **Breaking change trên Routing:** `RoutingOperationRequest.workCenterCode` (text tự do trước đây)
+  đã đổi thành `workCenterId` (UUID) — phải tạo Work Center trước rồi mới tạo/sửa Routing operation
+  tham chiếu nó. Mọi operation trong cùng routing phải cùng plant, khác plant trả
+  `422 OPERATION_NOT_ALLOWED`. `RoutingOperationResponse` vẫn trả cả `workCenterId` lẫn
+  `workCenterCode` (resolve qua join) để FE không cần gọi thêm API để hiện tên.
+
+### 8.2 Shift + Work Calendar (`C2-7`) — 14 endpoint
+
+`POST`/`GET /plants/{plantId}/shifts`, `GET`/`PATCH`/`DELETE /shifts/{id}`, activate/deactivate; và
+bộ tương tự cho `/plants/{plantId}/work-calendars` + `/work-calendars/{id}`.
+
+- **Shift là MỘT khoảng liên tục** (`startTime`/`endTime` kiểu `TIME`, không phải danh sách nhiều ca
+  con). `endTime < startTime` nghĩa là **ca qua đêm** (vd `22:00:00`-`06:00:00`), không phải lỗi input.
+- `weeklyShifts[]` của Work Calendar: một weekday có thể gán **nhiều** shift (vd ca ngày + ca đêm cùng
+  chạy thứ Hai).
+- `exceptions[]` chỉ có **một chiều** — đánh dấu một ngày cụ thể thành `NON_WORKING`, không có kiểu
+  "làm bù"/ngày đặc biệt khác.
+- `WorkCenter` có field tuỳ chọn `workCalendarId` để gán lịch làm việc — phải cùng plant.
+- 🔴 `breaks[]`/`weeklyShifts[]`/`exceptions[]` trên `PATCH` theo quy ước **full-replace-khi-có-mặt**:
+  không gửi field = giữ nguyên; gửi `[]` = xoá sạch; gửi mảng có phần tử = thay thế toàn bộ, không
+  phải "thêm vào".
+
+### 8.3 Capacity Board + schedule adjustment (`C2-8`) — 2 endpoint
+
+`GET /plants/{plantId}/capacity-board?from=&to=&workCenterId=&status=&page=&size=` và
+`POST /work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments`.
+
+- 🔴 **Lịch của một operation (`plannedStartAt`/`plannedEndAt`) chỉ sinh MỘT LẦN, lúc
+  `POST /work-orders/{id}/release`** — không phải lúc tạo hay `plan()` work order. WO chưa release thì
+  operation của nó **không xuất hiện** trên Capacity Board — đúng thiết kế, không phải thiếu dữ liệu.
+- Mỗi dòng board là **một operation**, kèm `dayCapacityMinutes` (`null` = Work Center chưa gắn Work
+  Calendar, **không phải** `0`), `dayExistingLoadMinutes`, `utilizationPercent`, `overload` (boolean),
+  `calendarExceptionApplies`.
+- 🔴 **Đây là lịch "infinite capacity"** — hệ thống không tự phát hiện/ngăn hai Work Order cùng chiếm
+  một Work Center; nó chỉ **báo cáo** khi việc đó đã xảy ra (`overload = true`). Giải quyết xung đột là
+  việc của con người.
+- 🔴 **`schedule-adjustments` KHÔNG BAO GIỜ tự dời operation khác và KHÔNG chặn cứng** khi lịch mới đụng
+  operation liền kề hoặc vượt capacity — chỉ chặn cứng khi `expectedVersion` lệch (`409
+  CONCURRENT_MODIFICATION`) hoặc `plannedEndAt <= plannedStartAt` (`400`). Mọi xung đột khác trả về
+  dưới dạng **cờ tư vấn** trong response thành công: `sequenceConflict`, `calendarConflict`,
+  `capacityOverload` — FE tự quyết định hiển thị cảnh báo, người dùng tự xử lý bằng tay.
+- Nợ **chưa làm, có chủ đích**: validate thứ tự phụ thuộc operation (`predecessorOperationIds`) —
+  tách phase riêng, chưa xếp lịch.
+
+---
+
+## 9. Concurrent refresh-token race — đã đóng (2026-08-05)
+
+`BACKEND_CAPSTONE2_API_GAPS.md §6` (bảng nghiệm thu của các bạn) từng đánh dấu 🔴 mục "Auth refresh
+rotation và concurrent refresh pass" là **chưa qua** phần concurrent refresh, và ghi rõ cần mở phase
+riêng nếu FE coi đây là điều kiện nghiệm thu. Chúng tôi coi đây là điều kiện nghiệm thu và đã đóng nó.
+
+**Vấn đề đã sửa:** hai request `refresh` cùng lúc trên **cùng** một `refreshToken`/`tokenId` (vd do
+client retry mạng, double-submit) trước đây có thể khiến request thứ hai bị chẩn đoán nhầm thành
+`TOKEN_REUSE_DETECTED` (401) và **đăng xuất oan** toàn bộ phiên của user, dù không có ai đánh cắp
+token thật.
+
+**Cách sửa:** advisory lock trên `tokenId` (`SET NX PX`, TTL 2s) trước khi validate + breadcrumb kết
+quả rotate (TTL 5s) — request thua cuộc trong race nhận lại **đúng** cặp token mà request thắng vừa
+sinh ra, thay vì tự rotate lần hai hoặc bị coi là kẻ trộm. **Không có grace window** cho token thật sự
+bị đánh cắp — cơ chế cũ (`TOKEN_REUSE_DETECTED` sau khi bị rotate away) không đổi.
+
+🔴 **Không có gì để FE đổi ở client** — đây là sửa lỗi phía trong, response shape/mã lỗi không đổi.
+Chỉ nêu ở đây để đóng đúng mục 🔴 mà bảng nghiệm thu của các bạn đã gắn cờ.
 
 ---
 

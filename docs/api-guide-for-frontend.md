@@ -864,8 +864,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > `utilizationPercent` (`null` khi capacity không xác định được), `overload` (boolean),
 > `calendarExceptionApplies` (ngày đó là exception `NON_WORKING` của Work Calendar).
 > `dayExistingLoadMinutes`/`overload` luôn tính trên **mọi** operation `RELEASED`/`IN_PROGRESS`/
-> `COMPLETED` của Work Center đó, **bất kể** filter `status` đang lọc dòng nào — filter chỉ ảnh
-> hưởng dòng hiển thị, không ảnh hưởng số utilization.
+> `COMPLETED`/`CLOSED` (`P6`, 2026-08-06 — đóng WO vẫn giữ nguyên lịch sử load, không bị trừ khỏi số
+> utilization của ngày đã báo cáo) của Work Center đó, **bất kể** filter `status` đang lọc dòng nào —
+> filter chỉ ảnh hưởng dòng hiển thị, không ảnh hưởng số utilization.
 >
 > 🔴 **Đây là lịch "infinite capacity"** — hệ thống không tự phát hiện và ngăn hai Work Order cùng
 > chiếm một Work Center cùng lúc; nó chỉ **báo cáo** khi việc đó đã xảy ra (`overload = true`). Việc

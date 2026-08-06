@@ -261,7 +261,7 @@ OpenAPI phải mô tả rõ permission, trạng thái, reason, stock posting tim
 
 ## 6. Acceptance checklist cho backend
 
-- [~] Auth refresh rotation và concurrent refresh pass. *(rotation/RTR/absolute timeout ✅ `D8a`/`D8b`; 🔴 concurrent refresh KHÔNG pass, cố ý — cần lock/CAS, xem `CLAUDE.md §0.22` #5 — mở phase riêng nếu FE coi đây là điều kiện nghiệm thu)*
+- [x] Auth refresh rotation và concurrent refresh pass. *(rotation/RTR/absolute timeout ✅ `D8a`/`D8b`; concurrent refresh ✅ **đã sửa 2026-08-05** — advisory lock `SET NX PX` + breadcrumb kết quả rotate, không grace window, xem `CLAUDE.md §0.32`, bất biến `B95`)*
 - [~] Không còn lỗi 500 không có trace trong core happy path. *(3 lỗi được báo đã sửa, xem `CLAUDE.md §0.24`; **chưa** rà toàn bộ endpoint nên không tuyên bố "không còn")*
 - [x] UOM CRUD/lifecycle có OpenAPI và permission. *(`C2-3`, 2026-08-04 — 7 endpoint, `V42`+`V43`)*
 - [ ] Inventory Lot list/detail/status có OpenAPI và business rules. *(`C2-2` — bị chặn, chờ FE trả lời `docs/capstone2-api-gap-response.md §5` câu 2)*
