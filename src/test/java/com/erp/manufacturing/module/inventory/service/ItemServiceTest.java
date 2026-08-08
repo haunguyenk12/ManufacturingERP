@@ -121,6 +121,79 @@ class ItemServiceTest {
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
     }
 
+    @Test
+    void activateItem_underActiveCompany_succeeds() {
+        UUID itemId = UUID.randomUUID();
+        Item item = Item.builder()
+                .itemId(itemId)
+                .company(activeCompany(UUID.randomUUID()))
+                .code("RM-001")
+                .name("Steel Coil")
+                .type(ItemType.RAW_MATERIAL)
+                .unit("KG")
+                .lotTracked(true)
+                .status(ItemStatus.INACTIVE)
+                .build();
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(itemRepository.save(item)).thenReturn(item);
+
+        var response = service.activateItem(itemId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(itemRepository).save(item);
+    }
+
+    @Test
+    void activateItem_alreadyActive_isIdempotent() {
+        UUID itemId = UUID.randomUUID();
+        Item item = Item.builder()
+                .itemId(itemId)
+                .company(activeCompany(UUID.randomUUID()))
+                .code("RM-001")
+                .name("Steel Coil")
+                .type(ItemType.RAW_MATERIAL)
+                .unit("KG")
+                .lotTracked(true)
+                .status(ItemStatus.ACTIVE)
+                .build();
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(itemRepository.save(item)).thenReturn(item);
+
+        var response = service.activateItem(itemId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(itemRepository).save(item);
+    }
+
+    @Test
+    void activateItem_underInactiveCompany_failsBeforeSaving() {
+        UUID itemId = UUID.randomUUID();
+        Company inactiveCompany = Company.builder()
+                .companyId(UUID.randomUUID())
+                .code("ACME")
+                .name("ACME")
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        Item item = Item.builder()
+                .itemId(itemId)
+                .company(inactiveCompany)
+                .code("RM-001")
+                .name("Steel Coil")
+                .type(ItemType.RAW_MATERIAL)
+                .unit("KG")
+                .lotTracked(true)
+                .status(ItemStatus.INACTIVE)
+                .build();
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+
+        assertThatThrownBy(() -> service.activateItem(itemId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(itemRepository, never()).save(any());
+    }
+
     private Company activeCompany(UUID companyId) {
         return Company.builder()
                 .companyId(companyId)

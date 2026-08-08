@@ -12,6 +12,7 @@ import com.erp.manufacturing.module.organization.dto.CompanyCreateRequest;
 import com.erp.manufacturing.module.organization.dto.CompanyResponse;
 import com.erp.manufacturing.module.organization.dto.PlantCreateRequest;
 import com.erp.manufacturing.module.organization.dto.PlantResponse;
+import com.erp.manufacturing.module.organization.dto.WarehouseResponse;
 import com.erp.manufacturing.module.organization.service.OrganizationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -82,9 +83,16 @@ class OrganizationControllerTest {
                 Instant.now(), Instant.now());
     }
 
+    private static final UUID WAREHOUSE_ID = UUID.randomUUID();
+
     private PlantResponse samplePlant() {
         return new PlantResponse(PLANT_ID, COMPANY_ID, "PLANT-01", "Hanoi Plant",
                 "Asia/Ho_Chi_Minh", "ACTIVE", Instant.now(), Instant.now());
+    }
+
+    private WarehouseResponse sampleWarehouse() {
+        return new WarehouseResponse(WAREHOUSE_ID, PLANT_ID, "RM", "Raw Materials",
+                "RAW_MATERIAL", "ACTIVE", Instant.now(), Instant.now());
     }
 
     @Test
@@ -211,5 +219,59 @@ class OrganizationControllerTest {
                 .andExpect(jsonPath("$.result").doesNotExist());
 
         verify(organizationService).deactivateCompany(COMPANY_ID);
+    }
+
+    @Test
+    @DisplayName("activatePlant: returns 200 with the ACTIVE plant")
+    void activatePlant_returns200WithTheActivatedPlant() throws Exception {
+        when(organizationService.activatePlant(PLANT_ID)).thenReturn(samplePlant());
+
+        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/activate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.plantId").value(PLANT_ID.toString()))
+                .andExpect(jsonPath("$.result.status").value("ACTIVE"));
+
+        verify(organizationService).activatePlant(PLANT_ID);
+    }
+
+    @Test
+    @DisplayName("activatePlant: inactive parent company returns 422 OPERATION_NOT_ALLOWED")
+    void activatePlant_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+        when(organizationService.activatePlant(PLANT_ID))
+                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Cannot activate a plant while its company is inactive: " + PLANT_ID));
+
+        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/activate"))
+                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("activateWarehouse: returns 200 with the ACTIVE warehouse")
+    void activateWarehouse_returns200WithTheActivatedWarehouse() throws Exception {
+        when(organizationService.activateWarehouse(WAREHOUSE_ID)).thenReturn(sampleWarehouse());
+
+        mockMvc.perform(post("/api/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.warehouseId").value(WAREHOUSE_ID.toString()))
+                .andExpect(jsonPath("$.result.status").value("ACTIVE"));
+
+        verify(organizationService).activateWarehouse(WAREHOUSE_ID);
+    }
+
+    @Test
+    @DisplayName("activateWarehouse: inactive parent plant returns 422 OPERATION_NOT_ALLOWED")
+    void activateWarehouse_inactivePlant_returns422OperationNotAllowed() throws Exception {
+        when(organizationService.activateWarehouse(WAREHOUSE_ID))
+                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Cannot activate a warehouse while its plant is inactive: " + WAREHOUSE_ID));
+
+        mockMvc.perform(post("/api/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
+                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
     }
 }

@@ -18,5 +18,6 @@ public record SalesOrderResponse(
         String note,
         Instant createdAt,
         Instant updatedAt,
+        Long version,
         List<SalesOrderLineResponse> lines
 ) {}

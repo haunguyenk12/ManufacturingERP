@@ -103,6 +103,12 @@ public class OrganizationController {
         return ResponseEntity.ok(ApiResponse.noContent("Plant deactivated successfully"));
     }
 
+    @PostMapping("/api/v1/plants/{plantId}/activate")
+    @Operation(summary = "Activate a plant (idempotent — no-op if already ACTIVE; fails if its company is inactive)")
+    public ResponseEntity<ApiResponse<PlantResponse>> activatePlant(@PathVariable UUID plantId) {
+        return ResponseEntity.ok(ApiResponse.ok(organizationService.activatePlant(plantId)));
+    }
+
     @GetMapping("/api/v1/plants/{plantId}/warehouses")
     @Operation(summary = "List warehouses by plant")
     public ResponseEntity<ApiResponse<PageResult<WarehouseResponse>>> listWarehouses(
@@ -143,6 +149,12 @@ public class OrganizationController {
     public ResponseEntity<ApiResponse<Void>> deactivateWarehouse(@PathVariable UUID warehouseId) {
         organizationService.deactivateWarehouse(warehouseId);
         return ResponseEntity.ok(ApiResponse.noContent("Warehouse deactivated successfully"));
+    }
+
+    @PostMapping("/api/v1/warehouses/{warehouseId}/activate")
+    @Operation(summary = "Activate a warehouse (idempotent — no-op if already ACTIVE; fails if its plant is inactive)")
+    public ResponseEntity<ApiResponse<WarehouseResponse>> activateWarehouse(@PathVariable UUID warehouseId) {
+        return ResponseEntity.ok(ApiResponse.ok(organizationService.activateWarehouse(warehouseId)));
     }
 
 }

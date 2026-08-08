@@ -51,9 +51,12 @@ public enum AuditAction {
     PLANT_CREATED,
     PLANT_UPDATED,
     PLANT_DEACTIVATED,
+    /** FE contract fix (2026-08-06): activate API for Plant/Warehouse/Item. */
+    PLANT_ACTIVATED,
     WAREHOUSE_CREATED,
     WAREHOUSE_UPDATED,
     WAREHOUSE_DEACTIVATED,
+    WAREHOUSE_ACTIVATED,
 
     // ── Manufacturing ──────────────────────────────────────────────────────
     BOM_CREATED,
@@ -136,6 +139,8 @@ public enum AuditAction {
     ITEM_CREATED,
     ITEM_UPDATED,
     ITEM_DEACTIVATED,
+    /** FE contract fix (2026-08-06): activate API for Plant/Warehouse/Item. */
+    ITEM_ACTIVATED,
     INVENTORY_RECEIVED,
     INVENTORY_ISSUED,
     INVENTORY_ADJUSTED,

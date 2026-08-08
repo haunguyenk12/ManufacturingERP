@@ -131,7 +131,13 @@ public class SalesOrderService {
                 order.getLines().add(buildLine(order, lineRequest, lineNo++));
             }
         }
-        return mapper.toResponse(salesOrderRepository.save(order), true);
+        // saveAndFlush (not save): the response now carries `version` (FE contract fix, 2026-08-06)
+        // for the client's *next* expectedVersion. A plain save() only queues the UPDATE — Hibernate
+        // doesn't bump the in-memory @Version field until that UPDATE actually flushes, which
+        // otherwise happens at commit, after mapper.toResponse() already ran. Without the flush here
+        // the response would report the pre-update version while the DB row is already one ahead,
+        // so a client trusting it would retry with a version that's already stale.
+        return mapper.toResponse(salesOrderRepository.saveAndFlush(order), true);
     }
 
     /**
@@ -158,7 +164,8 @@ public class SalesOrderService {
                     line.getDueDate(),
                     line.getSalesOrderLineId());
         }
-        return mapper.toResponse(salesOrderRepository.save(order), true);
+        // saveAndFlush: see update()'s comment — the response's `version` must reflect this write.
+        return mapper.toResponse(salesOrderRepository.saveAndFlush(order), true);
     }
 
     /**
@@ -181,7 +188,8 @@ public class SalesOrderService {
                     order.getLines().stream().map(SalesOrderLine::getSalesOrderLineId).toList());
         }
         order.cancel();
-        return mapper.toResponse(salesOrderRepository.save(order), true);
+        // saveAndFlush: see update()'s comment — the response's `version` must reflect this write.
+        return mapper.toResponse(salesOrderRepository.saveAndFlush(order), true);
     }
 
     @Transactional(readOnly = true)

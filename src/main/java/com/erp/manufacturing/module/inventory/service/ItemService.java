@@ -97,6 +97,19 @@ public class ItemService {
         return mapper.toResponse(itemRepository.save(item));
     }
 
+    @Transactional
+    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_INVENTORY_MANAGE', #itemId)")
+    @Auditable(action = AuditAction.ITEM_ACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()")
+    public ItemResponse activateItem(UUID itemId) {
+        Item item = findItem(itemId);
+        if (!item.getCompany().isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Cannot activate an item while its company is inactive: " + itemId);
+        }
+        item.activate();
+        return mapper.toResponse(itemRepository.save(item));
+    }
+
     private Company findCompany(UUID companyId) {
         return companyRepository.findById(companyId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Company", companyId));

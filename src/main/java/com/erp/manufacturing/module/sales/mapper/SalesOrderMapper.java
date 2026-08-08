@@ -35,6 +35,7 @@ public class SalesOrderMapper {
                 order.getNote(),
                 order.getCreatedAt(),
                 order.getUpdatedAt(),
+                order.getVersion(),
                 lines);
     }
 

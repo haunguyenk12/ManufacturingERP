@@ -66,4 +66,10 @@ public class ItemController {
         return ResponseEntity.ok(ApiResponse.noContent("Item deactivated successfully"));
     }
 
+    @PostMapping("/api/v1/items/{itemId}/activate")
+    @Operation(summary = "Activate an item (idempotent — no-op if already ACTIVE; fails if its company is inactive)")
+    public ResponseEntity<ApiResponse<ItemResponse>> activateItem(@PathVariable UUID itemId) {
+        return ResponseEntity.ok(ApiResponse.ok(itemService.activateItem(itemId)));
+    }
+
 }

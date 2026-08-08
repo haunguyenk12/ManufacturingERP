@@ -153,6 +153,138 @@ class OrganizationServiceTest {
         verify(warehouseRepository, never()).delete(any());
     }
 
+    @Test
+    void activatePlant_underActiveCompany_succeeds() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = Plant.builder()
+                .plantId(plantId)
+                .company(activeCompany(UUID.randomUUID()))
+                .code("P1")
+                .name("Plant 1")
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+        when(plantRepository.save(plant)).thenReturn(plant);
+
+        PlantResponse response = service.activatePlant(plantId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(plantRepository).save(plant);
+    }
+
+    @Test
+    void activatePlant_alreadyActive_isIdempotent() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = Plant.builder()
+                .plantId(plantId)
+                .company(activeCompany(UUID.randomUUID()))
+                .code("P1")
+                .name("Plant 1")
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+        when(plantRepository.save(plant)).thenReturn(plant);
+
+        PlantResponse response = service.activatePlant(plantId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(plantRepository).save(plant);
+    }
+
+    @Test
+    void activatePlant_underInactiveCompany_failsBeforeSaving() {
+        UUID plantId = UUID.randomUUID();
+        Company inactiveCompany = Company.builder()
+                .companyId(UUID.randomUUID())
+                .code("ACME")
+                .name("ACME")
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        Plant plant = Plant.builder()
+                .plantId(plantId)
+                .company(inactiveCompany)
+                .code("P1")
+                .name("Plant 1")
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+
+        assertThatThrownBy(() -> service.activatePlant(plantId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(plantRepository, never()).save(any());
+    }
+
+    @Test
+    void activateWarehouse_underActivePlant_succeeds() {
+        UUID warehouseId = UUID.randomUUID();
+        Warehouse warehouse = Warehouse.builder()
+                .warehouseId(warehouseId)
+                .plant(activePlant(UUID.randomUUID()))
+                .code("RM")
+                .name("Raw")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(warehouseRepository.save(warehouse)).thenReturn(warehouse);
+
+        WarehouseResponse response = service.activateWarehouse(warehouseId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(warehouseRepository).save(warehouse);
+    }
+
+    @Test
+    void activateWarehouse_alreadyActive_isIdempotent() {
+        UUID warehouseId = UUID.randomUUID();
+        Warehouse warehouse = Warehouse.builder()
+                .warehouseId(warehouseId)
+                .plant(activePlant(UUID.randomUUID()))
+                .code("RM")
+                .name("Raw")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(warehouseRepository.save(warehouse)).thenReturn(warehouse);
+
+        WarehouseResponse response = service.activateWarehouse(warehouseId);
+
+        assertThat(response.status()).isEqualTo("ACTIVE");
+        verify(warehouseRepository).save(warehouse);
+    }
+
+    @Test
+    void activateWarehouse_underInactivePlant_failsBeforeSaving() {
+        UUID warehouseId = UUID.randomUUID();
+        Plant inactivePlant = Plant.builder()
+                .plantId(UUID.randomUUID())
+                .company(activeCompany(UUID.randomUUID()))
+                .code("P1")
+                .name("Plant 1")
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        Warehouse warehouse = Warehouse.builder()
+                .warehouseId(warehouseId)
+                .plant(inactivePlant)
+                .code("RM")
+                .name("Raw")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.INACTIVE)
+                .build();
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.activateWarehouse(warehouseId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(warehouseRepository, never()).save(any());
+    }
+
     private Company activeCompany(UUID companyId) {
         return Company.builder()
                 .companyId(companyId)

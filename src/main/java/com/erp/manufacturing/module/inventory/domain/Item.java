@@ -59,4 +59,8 @@ public class Item extends BaseEntity {
     public void deactivate() {
         status = ItemStatus.INACTIVE;
     }
+
+    public void activate() {
+        status = ItemStatus.ACTIVE;
+    }
 }

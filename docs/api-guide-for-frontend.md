@@ -769,6 +769,15 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Danh sách đơn | `GET /sales-orders?companyId=&plantId=&status=` |
 | Tạo / xác nhận / huỷ | `POST /sales-orders` · `/{id}/confirm` · `/{id}/cancel` |
 | Sửa (chỉ khi `DRAFT`) | `PATCH /sales-orders/{id}` — full-replace `lines[]`, `expectedVersion` bắt buộc (`C2-4`) |
+| Plant / Warehouse / Item: activate | `POST /plants/{id}/activate` · `POST /warehouses/{id}/activate` · `POST /items/{id}/activate` *(mới, 2026-08-06)* |
+
+> 🔴 **[2026-08-06] `SalesOrderResponse` giờ mang `version`.** Trước đây `PATCH /sales-orders/{id}`
+> đòi `expectedVersion` bắt buộc nhưng không endpoint nào trả `version` lại cho FE — không có cách
+> hợp lệ để lấy giá trị phải gửi. Nay **mọi** response Sales Order (`create`, `get`, `list`, `update`,
+> `confirm`, `cancel`) đều có field `version` (số nguyên, tăng dần từ `0`). Luồng đúng: lấy `version`
+> từ response gần nhất (`GET` hoặc bất kỳ action nào) → gửi lại nguyên giá trị đó làm `expectedVersion`
+> trên `PATCH` tiếp theo → response của `PATCH` trả `version` **mới** (đã +1) → dùng cho lần sau. Lệch
+> `expectedVersion` (đơn đã bị người khác sửa) trả `409 CONCURRENT_MODIFICATION`.
 | Tồn kho | `GET /inventory/balances?warehouseId=` (bắt buộc) `&itemId=` (tuỳ chọn) |
 | Lịch sử movement | `GET /inventory/movements?warehouseId=` (**bắt buộc**) `&itemId=&lotId=` (tuỳ chọn) |
 | Nhập/xuất/điều chỉnh thủ công | `POST /inventory/receive` · `/issue` · `/adjust` |
@@ -793,6 +802,17 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > `material-reservations`, BOM, Routing. Deactivate BOM/Routing **không** đổi snapshot của work
 > order đã tạo (bất biến `B12`/`B49`); nhưng khi item không còn routing `ACTIVE` thì convert proposal
 > MAKE sẽ bị từ chối bằng `409 MISSING_ROUTING`.
+>
+> 🔴 **[2026-08-06] `plants`, `warehouses`, `items` giờ là NGOẠI LỆ có `POST .../activate` — nhưng
+> vẫn KHÔNG có `POST .../deactivate`, chỉ `DELETE`.** Trước đây ba resource này chỉ đi được một
+> chiều (`ACTIVE` → `DELETE` → `INACTIVE`, không có đường quay lại); FE báo thiếu và backend đã thêm
+> `POST /plants/{id}/activate`, `POST /warehouses/{id}/activate`, `POST /items/{id}/activate` (không
+> phải `companies` — chưa ai yêu cầu, vẫn chỉ có `DELETE`). Cả ba **idempotent** (gọi trên record đã
+> `ACTIVE` là no-op `200`) và **chặn nếu "cha" đang `INACTIVE`**: activate Warehouse khi Plant của nó
+> `INACTIVE` ⇒ `422 OPERATION_NOT_ALLOWED`; activate Plant hoặc Item khi Company `INACTIVE` ⇒ cùng mã
+> lỗi. FE nên vô hiệu hoá nút "Activate" của Warehouse/Plant/Item khi cha đang hiển thị `INACTIVE`,
+> thay vì chỉ phát hiện qua lỗi `422` sau khi bấm. Verb vẫn **lệch cặp** có chủ đích (`activate` =
+> `POST`, `deactivate` = `DELETE`) — đây là asymmetry thật của API, không phải tài liệu thiếu.
 
 ### Work Center *(`C2-6`, 2026-08-05)*
 

@@ -135,6 +135,19 @@ public class OrganizationService {
         return mapper.toResponse(plantRepository.save(plant));
     }
 
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'PLANT', #plantId)")
+    @Auditable(action = AuditAction.PLANT_ACTIVATED, entityType = "Plant", entityIdExpression = "plantId.toString()")
+    public PlantResponse activatePlant(UUID plantId) {
+        Plant plant = findPlant(plantId);
+        if (!plant.getCompany().isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Cannot activate a plant while its company is inactive: " + plantId);
+        }
+        plant.activate();
+        return mapper.toResponse(plantRepository.save(plant));
+    }
+
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_READ', 'PLANT', #plantId)")
     public PageResult<WarehouseResponse> listWarehouses(UUID plantId, Pageable pageable) {
@@ -189,6 +202,19 @@ public class OrganizationService {
     public WarehouseResponse deactivateWarehouse(UUID warehouseId) {
         Warehouse warehouse = findWarehouse(warehouseId);
         warehouse.deactivate();
+        return mapper.toResponse(warehouseRepository.save(warehouse));
+    }
+
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'WAREHOUSE', #warehouseId)")
+    @Auditable(action = AuditAction.WAREHOUSE_ACTIVATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()")
+    public WarehouseResponse activateWarehouse(UUID warehouseId) {
+        Warehouse warehouse = findWarehouse(warehouseId);
+        if (!warehouse.getPlant().isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Cannot activate a warehouse while its plant is inactive: " + warehouseId);
+        }
+        warehouse.activate();
         return mapper.toResponse(warehouseRepository.save(warehouse));
     }
 

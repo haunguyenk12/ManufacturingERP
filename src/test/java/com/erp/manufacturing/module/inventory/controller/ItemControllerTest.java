@@ -199,4 +199,32 @@ class ItemControllerTest {
 
         verify(itemService).deactivateItem(ITEM_ID);
     }
+
+    @Test
+    @DisplayName("activate: returns 200 with the ACTIVE item")
+    void activate_returns200WithTheActivatedItem() throws Exception {
+        when(itemService.activateItem(ITEM_ID)).thenReturn(sampleResponse());
+
+        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/activate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.itemId").value(ITEM_ID.toString()))
+                .andExpect(jsonPath("$.result.status").value("ACTIVE"));
+
+        verify(itemService).activateItem(ITEM_ID);
+    }
+
+    @Test
+    @DisplayName("activate: inactive parent company stays 422 OPERATION_NOT_ALLOWED (§5.3 — master data, "
+            + "not a document state conflict)")
+    void activate_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+        when(itemService.activateItem(ITEM_ID))
+                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Cannot activate an item while its company is inactive: " + ITEM_ID));
+
+        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/activate"))
+                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
 }

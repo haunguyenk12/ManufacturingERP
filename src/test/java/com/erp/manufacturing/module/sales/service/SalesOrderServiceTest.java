@@ -158,7 +158,7 @@ class SalesOrderServiceTest {
         UUID newItemId = UUID.randomUUID();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
         when(itemLookupService.getActiveItem(newItemId)).thenReturn(item(newItemId, company, "FG-3"));
-        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
         SalesOrderResponse response = service.update(salesOrderId, new SalesOrderUpdateRequest(
                 1L, "New Customer", ORDER_DATE.plusDays(1), "updated note",
@@ -173,12 +173,34 @@ class SalesOrderServiceTest {
         assertThat(response.lines().get(0).orderedQuantity()).isEqualByComparingTo("15");
     }
 
+    /**
+     * FE contract fix (2026-08-06): {@code saveAndFlush}, not {@code save}, is what makes
+     * {@code response.version()} trustworthy as the client's next {@code expectedVersion}. A plain
+     * {@code save()} only queues the UPDATE — Hibernate does not bump the in-memory {@code @Version}
+     * field until that UPDATE is actually flushed (normally at commit, after the response is already
+     * built), so the client would be handed a version that is already one behind the persisted row.
+     * The mock's {@code returnFirstArgument()} answer can't reproduce that staleness on its own, so
+     * this test instead pins the collaborator call itself: reverting to {@code save} makes it red.
+     */
+    @Test
+    void update_persistsThroughSaveAndFlush_soTheResponseVersionCanBeTrustedAsTheNextExpectedVersion() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+
+        service.update(salesOrderId, new SalesOrderUpdateRequest(1L, "New Customer", null, null, null));
+
+        verify(salesOrderRepository).saveAndFlush(order);
+        verify(salesOrderRepository, never()).save(any());
+    }
+
     @Test
     void update_nullLines_keepsExistingLines() {
         SalesOrder order = draftOrderWithTwoLines();
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
-        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
         SalesOrderResponse response = service.update(salesOrderId, new SalesOrderUpdateRequest(
                 1L, "New Customer", null, null, null));
@@ -204,7 +226,7 @@ class SalesOrderServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
-        verify(salesOrderRepository, never()).save(any());
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -219,7 +241,7 @@ class SalesOrderServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
 
-        verify(salesOrderRepository, never()).save(any());
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -235,7 +257,7 @@ class SalesOrderServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
-        verify(salesOrderRepository, never()).save(any());
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     // ── confirm ────────────────────────────────────────────────────────────
@@ -245,7 +267,7 @@ class SalesOrderServiceTest {
         SalesOrder order = draftOrderWithTwoLines();
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
-        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
         SalesOrderResponse response = service.confirm(salesOrderId);
 
@@ -276,7 +298,7 @@ class SalesOrderServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(planningDemandService);
-        verify(salesOrderRepository, never()).save(any());
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     // ── cancel ─────────────────────────────────────────────────────────────
@@ -287,7 +309,7 @@ class SalesOrderServiceTest {
         order.confirm();
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
-        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
         when(planningDemandService.cancelOpenDemandsForSalesOrderLines(anyCollection())).thenReturn(2);
 
         SalesOrderResponse response = service.cancel(salesOrderId);
@@ -303,7 +325,7 @@ class SalesOrderServiceTest {
         SalesOrder order = draftOrderWithTwoLines();
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
-        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
         assertThat(service.cancel(salesOrderId).status()).isEqualTo(SalesOrderStatus.CANCELLED.name());
 
@@ -323,7 +345,7 @@ class SalesOrderServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(planningDemandService);
-        verify(salesOrderRepository, never()).save(any());
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     // ── planning demands ───────────────────────────────────────────────────

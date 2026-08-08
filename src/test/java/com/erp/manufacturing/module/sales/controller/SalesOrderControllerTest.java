@@ -83,10 +83,14 @@ class SalesOrderControllerTest {
     private static final UUID SALES_ORDER_ID = UUID.randomUUID();
 
     private SalesOrderResponse sampleResponse(String statusValue) {
+        return sampleResponse(statusValue, 0L);
+    }
+
+    private SalesOrderResponse sampleResponse(String statusValue, long version) {
         return new SalesOrderResponse(
                 SALES_ORDER_ID, COMPANY_ID, "COMP-01", PLANT_ID, "PLANT-01",
                 "SO-001", "ACME Corp", LocalDate.of(2026, 7, 1), statusValue, null,
-                Instant.now(), Instant.now(), List.of());
+                Instant.now(), Instant.now(), version, List.of());
     }
 
     private String createBody(UUID plantId) {
@@ -100,7 +104,7 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("create: valid request returns 201 with the DRAFT order")
     void create_validRequest_returns201Created() throws Exception {
-        when(salesOrderService.create(any(SalesOrderCreateRequest.class))).thenReturn(sampleResponse("DRAFT"));
+        when(salesOrderService.create(any(SalesOrderCreateRequest.class))).thenReturn(sampleResponse("DRAFT", 0L));
 
         mockMvc.perform(post("/api/v1/sales-orders")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -109,7 +113,8 @@ class SalesOrderControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.salesOrderId").value(SALES_ORDER_ID.toString()))
                 .andExpect(jsonPath("$.result.status").value("DRAFT"))
-                .andExpect(jsonPath("$.result.orderNo").value("SO-001"));
+                .andExpect(jsonPath("$.result.orderNo").value("SO-001"))
+                .andExpect(jsonPath("$.result.version").value(0));
     }
 
     @Test
@@ -129,8 +134,10 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("update: valid request returns 200 with the updated order")
     void update_validRequest_returns200Ok() throws Exception {
+        // version bumps from the expectedVersion sent (1) to 2 — response must reflect the NEW
+        // value so the client has what it needs to send as expectedVersion on the next PATCH.
         when(salesOrderService.update(eq(SALES_ORDER_ID), any(SalesOrderUpdateRequest.class)))
-                .thenReturn(sampleResponse("DRAFT"));
+                .thenReturn(sampleResponse("DRAFT", 2L));
 
         mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -139,7 +146,8 @@ class SalesOrderControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.result.salesOrderId").value(SALES_ORDER_ID.toString()));
+                .andExpect(jsonPath("$.result.salesOrderId").value(SALES_ORDER_ID.toString()))
+                .andExpect(jsonPath("$.result.version").value(2));
     }
 
     @Test

@@ -51,4 +51,8 @@ public class Warehouse extends BaseEntity {
     public void deactivate() {
         status = OrganizationStatus.INACTIVE;
     }
+
+    public void activate() {
+        status = OrganizationStatus.ACTIVE;
+    }
 }
