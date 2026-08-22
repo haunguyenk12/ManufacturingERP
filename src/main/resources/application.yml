@@ -2,6 +2,7 @@ spring:
   application:
     name: manufacturing-erp
 
+  # PostgreSQL connection + HikariCP pool
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -14,6 +15,7 @@ spring:
       max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
       pool-name: HikariPool-ERP
 
+  # JPA / Hibernate — schema is validated only, never auto-generated (Flyway owns schema)
   jpa:
     hibernate:
       ddl-auto: validate
@@ -28,11 +30,13 @@ spring:
         order_inserts: true
         order_updates: true
 
+  # Schema migrations
   flyway:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  # Redis — token store, session state, rate-limit counters
   data:
     redis:
       host: ${REDIS_HOST}
@@ -48,31 +52,22 @@ spring:
           max-idle: 4
           min-idle: 1
 
+  # File upload limits (spreadsheet import endpoint)
   servlet:
-    # Spreadsheet import (POST /api/v1/import-runs) is the only multipart endpoint in this API.
-    # 10 MB is well above a master-data sheet of the row limit the importer enforces
-    # (app.data-import.max-rows) and low enough that a stray upload cannot exhaust the heap.
     multipart:
       enabled: true
       max-file-size: ${MULTIPART_MAX_FILE_SIZE:10MB}
       max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:12MB}
 
+  # JSON wire format for all API responses
   jackson:
-    # These settings were dead until 2026-08-12: an @Bean ObjectMapper in RedisConfig overrode Boot's
-    # auto-configured one, so nothing here applied (debt #27). See RedisConfig's javadoc.
-    #
-    # `always` is deliberate and NOT the same as the `non_null` written here before. Letting `non_null`
-    # take effect would have dropped every null field from every nested DTO in one go — a payload change
-    # on all endpoints that no client asked for. The frontend asked only for ISO dates, so null handling
-    # stays exactly as it has always been on the wire. Switching to `non_null` is a separate, coordinated
-    # decision. (The envelope is unaffected either way: ApiResponse carries its own @JsonInclude(NON_NULL),
-    # which is why `result`/`errors` already disappear when null.)
     default-property-inclusion: always
     serialization:
-      write-dates-as-timestamps: false   # LocalDate -> "2026-08-15", Instant -> "2026-08-03T08:00:00Z"
+      write-dates-as-timestamps: false
     deserialization:
-      fail-on-unknown-properties: false  # now effective; unknown request fields are ignored, not rejected
+      fail-on-unknown-properties: false
 
+# HTTP server
 server:
   port: ${SERVER_PORT:8080}
   servlet:
@@ -86,6 +81,7 @@ server:
     include-stacktrace: never
     include-binding-errors: never
 
+# Actuator health/info endpoints, served on a separate port
 management:
   server:
     port: ${MANAGEMENT_SERVER_PORT:8081}
@@ -100,6 +96,7 @@ management:
     env:
       enabled: true
 
+# OpenAPI / Swagger UI (disabled by default, enable per environment)
 springdoc:
   api-docs:
     path: /v3/api-docs
@@ -109,6 +106,7 @@ springdoc:
     operations-sorter: method
     enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
 
+# Logging pattern + per-package log levels
 logging:
   pattern:
     console: "%d{ISO8601} [%X{traceId}] [%X{userId}] [%X{clientIp}] %-5level [%thread] %logger{36} - %msg%n"
@@ -118,8 +116,9 @@ logging:
     org.hibernate.SQL: ${LOG_LEVEL_HIBERNATE_SQL:WARN}
     org.hibernate.orm.jdbc.bind: ${LOG_LEVEL_HIBERNATE_BIND:WARN}
 
-# ── App custom properties ──────────────────────────────────────────────────
+# App-specific custom properties
 app:
+  # First-run admin account creation (disabled by default — see AdminBootstrapService)
   bootstrap:
     admin:
       enabled: ${APP_BOOTSTRAP_ADMIN_ENABLED:false}
@@ -127,6 +126,7 @@ app:
       email: ${APP_BOOTSTRAP_ADMIN_EMAIL:}
       password: ${APP_BOOTSTRAP_ADMIN_PASSWORD:}
 
+  # JWT token issuance + expiry
   jwt:
     secret: ${JWT_SECRET}
     issuer: ${JWT_ISSUER}
@@ -135,30 +135,24 @@ app:
     refresh-token-expiry-ms: ${JWT_REFRESH_TOKEN_EXPIRY_MS:604800000}
     absolute-session-timeout-ms: ${JWT_ABSOLUTE_SESSION_TIMEOUT_MS:2592000000}
 
+  # Trusted reverse-proxy IPs (for resolving real client IP)
   security:
     trusted-proxies: ${SECURITY_TRUSTED_PROXIES}
 
-  # CORS (best practice S5). Exact origins only — "*" is refused at startup because every request
-  # carries the Authorization header, and the CORS spec forbids a wildcard on credentialed requests.
-  # Override per environment with CORS_ALLOWED_ORIGINS (comma-separated).
+  # CORS — exact origins only, wildcard rejected at startup (credentialed requests)
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
     allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PATCH,PUT,DELETE,OPTIONS}
-    # Idempotency-Key and X-Plant-Id are ours; without them the browser blocks the preflight of
-    # every sensitive POST and every plant-scoped call.
     allowed-headers: ${CORS_ALLOWED_HEADERS:Authorization,Content-Type,Idempotency-Key,X-Plant-Id,X-Trace-Id}
-    # Response headers the browser hides from JS unless they are exposed explicitly. X-Trace-Id is
-    # what the frontend quotes in a bug report; the rate-limit trio is what it needs to back off.
     exposed-headers: ${CORS_EXPOSED_HEADERS:X-Trace-Id,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Rule,Retry-After}
     allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
     max-age-seconds: ${CORS_MAX_AGE_SECONDS:3600}
 
-  # Spreadsheet import. max-rows is a guard on the synchronous apply path: every row is its own
-  # transaction, so a file far larger than this would hold an HTTP request open for minutes.
-  # Raising it is a decision about moving the apply step off the request thread, not a config tweak.
+  # Spreadsheet import row limit (synchronous apply path)
   data-import:
     max-rows: ${DATA_IMPORT_MAX_ROWS:5000}
 
+  # Redis sliding-window rate limiting, per IP/user and per route pattern
   rate-limit:
     enabled: true
     rules:

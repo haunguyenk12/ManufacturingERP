@@ -64,10 +64,11 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — bộ dữ liệu demo dựng xong 2026-08-14, xem `§0.45`)* |
-| **Việc mới nhất** | **Bộ dữ liệu demo `VIETBIKE` + sửa lỗi P0 `MultipleBagFetchException`** ✅ **HOÀN THÀNH** (2026-08-14). Dựng `scripts/demo/` (1 orchestrator + 2 lib + 15 stage) seed lại **toàn bộ** dữ liệu demo từ DB trắng **qua REST API thật**, chủ đề nhà máy xe đạp, tên tiếng Việt có dấu, phủ **mọi** trạng thái của mọi vòng đời chứng từ. 🔴 **Lỗi P0 do chính bộ dữ liệu này phát hiện:** `WorkCalendarRepository` join-fetch **hai** bag (`weeklyShifts` + `Shift.breaks` — bag thứ hai nằm xa hơn một association) ⇒ **mọi** `POST /work-orders/{id}/release` qua lịch làm việc có ca **kèm giờ nghỉ** trả **500**; đây là **lần thứ ba** repo dính bẫy này (sau `§0.27`, `§0.29`). Sửa + `WorkCalendarLookupServiceIT` (class IT thứ **18**), nghiệm thu mutation 4/4 đỏ. Không migration, không permission mới, **không breaking change wire**. Bản ghi: **§0.45**, hướng dẫn demo: `docs/demo-dataset-guide.md` |
-| **Việc trước** | **Trả lời `live-data-audit.md`: available theo lot status + idempotency cho planning run** ✅ **HOÀN THÀNH** (2026-08-14). FE báo 3 mục; kết cục **khác nhau**: (1) 🔴 **bug thật** — `/inventory/balances` + `/inventory/lots*` báo `available > 0` cho lot `HOLD`/`REJECTED` vì `StockBalance.availableQuantity()` không đọc `lot.status`, trong khi aggregate của MRP/dashboard **có** lọc ⇒ một hệ thống hai con số; sửa ở `InventoryMapper.issuableQuantity` (**không** đụng domain method — 3 gate ghi tồn kho dựa vào nó). (2) 🟡 **gap thật** — `POST /planning-runs` bỏ qua `Idempotency-Key` (FE gửi 1 key 3 lần ⇒ 3 run); implement đầy đủ theo khuôn `stock_movements`, migration **`V58`**, header **tuỳ chọn**. (3) ✅ **báo nhầm** — "convert suggestion không atomic" **không có defect**, WO của họ sinh từ suggestion của **run khác** (đã `CONVERTED` đúng), suggestion họ nhắc chết vì trùng `workOrderNo` rồi rollback sạch; gốc rễ chính là (2). Bất biến **`B116`** (`module/inventory`), **`B117`** (`module/planning`). **Breaking change wire: có, hẹp** — `availableQuantity` của lot bị giữ nay là `0`. Bản ghi: **§0.44**, hướng dẫn FE: `FE_SingleTask_Response.md` |
-| **Việc trước đó** | **FE handoff: Inventory Dashboard API** ✅ **HOÀN THÀNH** (2026-08-14). Nguồn: `BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md`. FE chuyển `/dashboard` từ mock sang API thật, cần `GET /reports/inventory-dashboard` trả đủ nhãn để **một** request là đủ (không N+1 sang Item/Warehouse/User). Thêm: `generatedAt`; `uomCode`/`onHandQuantity`/`reservedQuantity`/`qualityHoldQuantity`/`shortageQuantity` trên alert line; DTO mới `DashboardRecentMovementResponse` (item/warehouse label + `actorUsername` batch-resolve); `lowStockLimit`/`movementLimit` (mặc định 10, kẹp `[1,20]`); thứ tự `REORDER_NEEDED` → shortage desc → `itemCode` → `warehouseCode`, ledger tie-break `movementId desc`. 🔴 `shortageQuantity` dùng **`max(safetyStock, reorderPoint)`**, không phải reorder point một mình như FE đề xuất — repo cấu hình `safetyStock ≥ reorderPoint` nên công thức FE đề xuất báo `0` cho **mọi** dòng `LOW_STOCK` (đã giải thích cho FE). Không migration, không permission mới. **Breaking change wire: nhẹ** — `recentMovements[]` đổi sang DTO riêng, mất `idempotencyKey` (FE chưa dùng, còn ở mock). Bất biến **`B114`**, **`B115`** (`module/inventory`). Bản ghi: **§0.43**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Phase đang chạy** | *(không có — bộ dữ liệu demo Capstone 2 dựng xong 2026-08-22, xem `§0.46`)* |
+| **Việc mới nhất** | **Bộ dữ liệu demo SẠCH cho Capstone 2 (namespace `D26-`)** ✅ **HOÀN THÀNH** (2026-08-22). Nguồn: `BE_CLEAN_DEMO_DATA_GUIDE_2026-08-22.docx`. Xoá sạch DB rồi seed lại **qua REST API thật** một bộ dữ liệu trình diễn cho **khách hàng/hội đồng**: 1 công ty, 1 nhà máy, 5 kho, 10 vật tư, 3 BOM 2 cấp, 3 quy trình, 4 tổ sản xuất, tồn kho đầu kỳ. **Không** tạo Sales Order (đổi lại theo yêu cầu của user sau lượt bàn giao đầu tiên — người vận hành tự tạo đơn hàng của mình, seed lại phần còn lại được nhiều lần). 🔴 Khác hẳn seeder `VIETBIKE` (`§0.45`): bộ này **không** có bản ghi lỗi/`INACTIVE`/`BLOCKED` nào, và **cố ý dừng trước MRP** để người trình bày chạy Planning trực tiếp. Nghiệm thu bằng `verify.sh` trên DB dùng-một-lần: **PF-01→PF-15 và smoke test 9 bước §12 đều PASS** (blockedProposals=0, reservedPercent=100, lô HOLD→AVAILABLE, đơn hàng FULFILLED). **Không sửa một dòng `src/main` nào**, không migration. Bản ghi: **§0.46**, hướng dẫn: `docs/demo-capstone2-guide.md` |
+| **Việc trước** | **Bộ dữ liệu demo `VIETBIKE` + sửa lỗi P0 `MultipleBagFetchException`** ✅ **HOÀN THÀNH** (2026-08-14). Dựng `scripts/demo/` (1 orchestrator + 2 lib + 15 stage) seed lại **toàn bộ** dữ liệu demo từ DB trắng **qua REST API thật**, chủ đề nhà máy xe đạp, tên tiếng Việt có dấu, phủ **mọi** trạng thái của mọi vòng đời chứng từ. 🔴 **Lỗi P0 do chính bộ dữ liệu này phát hiện:** `WorkCalendarRepository` join-fetch **hai** bag (`weeklyShifts` + `Shift.breaks` — bag thứ hai nằm xa hơn một association) ⇒ **mọi** `POST /work-orders/{id}/release` qua lịch làm việc có ca **kèm giờ nghỉ** trả **500**; đây là **lần thứ ba** repo dính bẫy này (sau `§0.27`, `§0.29`). Sửa + `WorkCalendarLookupServiceIT` (class IT thứ **18**), nghiệm thu mutation 4/4 đỏ. Không migration, không permission mới, **không breaking change wire**. Bản ghi: **§0.45**, hướng dẫn demo: `docs/demo-dataset-guide.md` |
+| **Việc trước đó** | **Trả lời `live-data-audit.md`: available theo lot status + idempotency cho planning run** ✅ **HOÀN THÀNH** (2026-08-14). FE báo 3 mục; kết cục **khác nhau**: (1) 🔴 **bug thật** — `/inventory/balances` + `/inventory/lots*` báo `available > 0` cho lot `HOLD`/`REJECTED` vì `StockBalance.availableQuantity()` không đọc `lot.status`, trong khi aggregate của MRP/dashboard **có** lọc ⇒ một hệ thống hai con số; sửa ở `InventoryMapper.issuableQuantity` (**không** đụng domain method — 3 gate ghi tồn kho dựa vào nó). (2) 🟡 **gap thật** — `POST /planning-runs` bỏ qua `Idempotency-Key` (FE gửi 1 key 3 lần ⇒ 3 run); implement đầy đủ theo khuôn `stock_movements`, migration **`V58`**, header **tuỳ chọn**. (3) ✅ **báo nhầm** — "convert suggestion không atomic" **không có defect**, WO của họ sinh từ suggestion của **run khác** (đã `CONVERTED` đúng), suggestion họ nhắc chết vì trùng `workOrderNo` rồi rollback sạch; gốc rễ chính là (2). Bất biến **`B116`** (`module/inventory`), **`B117`** (`module/planning`). **Breaking change wire: có, hẹp** — `availableQuantity` của lot bị giữ nay là `0`. Bản ghi: **§0.44**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Việc trước nữa** | **FE handoff: Inventory Dashboard API** ✅ **HOÀN THÀNH** (2026-08-14). Nguồn: `BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md`. FE chuyển `/dashboard` từ mock sang API thật, cần `GET /reports/inventory-dashboard` trả đủ nhãn để **một** request là đủ (không N+1 sang Item/Warehouse/User). Thêm: `generatedAt`; `uomCode`/`onHandQuantity`/`reservedQuantity`/`qualityHoldQuantity`/`shortageQuantity` trên alert line; DTO mới `DashboardRecentMovementResponse` (item/warehouse label + `actorUsername` batch-resolve); `lowStockLimit`/`movementLimit` (mặc định 10, kẹp `[1,20]`); thứ tự `REORDER_NEEDED` → shortage desc → `itemCode` → `warehouseCode`, ledger tie-break `movementId desc`. 🔴 `shortageQuantity` dùng **`max(safetyStock, reorderPoint)`**, không phải reorder point một mình như FE đề xuất — repo cấu hình `safetyStock ≥ reorderPoint` nên công thức FE đề xuất báo `0` cho **mọi** dòng `LOW_STOCK` (đã giải thích cho FE). Không migration, không permission mới. **Breaking change wire: nhẹ** — `recentMovements[]` đổi sang DTO riêng, mất `idempotencyKey` (FE chưa dùng, còn ở mock). Bất biến **`B114`**, **`B115`** (`module/inventory`). Bản ghi: **§0.43**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Bugfix mới nhất** | **Nợ #27: wire format ngày/giờ về ISO** ✅ **HOÀN THÀNH** (2026-08-12). FE yêu cầu tường minh (`ADMIN_RBAC_BACKEND_RESPONSE_REVIEW_2026-08-12.md §4`) **và** xác nhận adapter của họ nhận cả hai định dạng ⇒ điều kiện còn thiếu từ `§0.40` nay đã có. Xoá `@Bean ObjectMapper` trong `RedisConfig` — bean đó chỉ định dùng cho Redis nhưng làm `JacksonAutoConfiguration` của Boot nhường chỗ ⇒ **mọi** dòng `spring.jackson.*` chết lặng ⇒ `LocalDate` ra `[2026,8,8]`, `Instant` ra số epoch, ở **mọi** endpoint. 🔴 **Ghi đè `default-property-inclusion` `non_null` → `always`** (quyết định của user): để `non_null` có hiệu lực cùng lúc là xoá mọi field null khỏi mọi response — thay đổi payload toàn hệ thống không ai yêu cầu. Hệ quả phụ đã báo FE: field lạ trong request body nay bị bỏ qua thay vì 400. **Breaking change wire: CÓ** (nhưng là sửa sai — tài liệu hứa ISO từ đầu). Không migration, không permission mới. Bản ghi: **§0.42**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Bugfix trước** | **Admin RBAC: đọc membership Role↔Permission / Scope↔Resource + unmapped path trả 500** ✅ **HOÀN THÀNH** (2026-08-12). FE báo qua `ADMIN_RBAC_BACKEND_API_CONTRACT_REQUEST.md`. **Ba khoản sửa:** (1) **blocker** — `GET /access/roles/{roleId}/permissions` **không tồn tại** ⇒ FE không có cách hợp lệ nào biết role đang giữ quyền nào, không dựng được checkbox (chỉ có catalog toàn cục); (2) `GET /access/scopes/{scopeId}/resources` cũng thiếu — `addScopeResource` từ trước tới nay **chỉ ghi được, không đọc được**; (3) 🔴 **lỗi toàn cục, không riêng RBAC:** request tới path **không** có handler trả **500 `INTERNAL_SERVER_ERROR`** (trace `bbad9f8c37824349`) — Spring 6.1 ném `NoResourceFoundException`, không handler nào bắt nên rơi xuống catch-all ⇒ URL gõ sai trông như backend sập và alert 5xx nổ oan. Đây là **đúng cùng một lỗ hổng** `§0.24` đã vá cho `MissingServletRequestParameterException`, sót lại một loại. Không migration, không permission mới, **không breaking change wire**. Bất biến **`B113`** (`module/organization`). Bản ghi: **§0.41**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Bugfix trước đó** | **Sales Order full-replacement `PATCH` + version bump khi thay dòng** ✅ **HOÀN THÀNH** (2026-08-10). FE báo `PATCH /sales-orders/{id}` chỉ chạy được khi **không** kèm `lines[]`; kèm vào thì trả `Data constraint violation`. 🔴 **Hai bug thật, cả hai chỉ lộ trên Postgres thật — 977 case unit đều xanh:** (1) `clear()` + add lại `lineNo` 1..N trong **cùng một flush** ⇒ Hibernate xếp `INSERT` con **trước** `DELETE` orphan-removal ⇒ đụng `uk_sales_order_lines_order_line_no`; (2) phát hiện thêm lúc smoke test: `lines` là collection **inverse** (`mappedBy`) nên thay dòng **không** làm dirty header ⇒ PATCH chỉ có `lines` trả 200 mà `version` **đứng yên** ⇒ hai request thay dòng đồng thời đều qua check `expectedVersion` (**lost update**). Không migration, không breaking change wire. Bất biến **`B112`** (`module/sales`). Bản ghi: **§0.40**, hướng dẫn FE: `FE_SingleTask_Response.md` |
@@ -2690,6 +2691,100 @@ tên tiếng Việt hiện đúng dấu trong DB. Script còn tự kiểm round-
 
 ---
 
+### 0.46 Bộ Dữ Liệu Demo SẠCH Cho Capstone 2 — Namespace `D26-` (2026-08-22)
+
+**Không** phase, **không** migration, **không** permission mới, **không sửa một dòng `src/main`
+nào**. Yêu cầu của user: xoá hết dữ liệu hiện tại và seed lại theo
+`BE_CLEAN_DEMO_DATA_GUIDE_2026-08-22.docx` để demo trước hội đồng, **đối tượng xem dữ liệu là
+khách hàng**. Hướng dẫn bàn giao: `docs/demo-capstone2-guide.md`.
+
+**Vì sao KHÔNG tái dùng seeder `VIETBIKE` (`§0.45`).** Hai bộ dữ liệu phục vụ hai mục đích ngược
+nhau. `VIETBIKE` cố ý phủ **mọi** trạng thái, kể cả trạng thái xấu — lô `HOLD`/`REJECTED`, vật tư
+và kho `INACTIVE`, đề xuất `BLOCKED` vì thiếu BOM/quy trình, lệnh sản xuất kẹt ở `BLOCKED`, phiếu
+nhập bị từ chối. Đó là thứ cần cho kiểm thử và **đúng thứ không được** cho một buổi trình diễn
+trước khách hàng. Bộ `D26-` là mặt còn lại: một luồng duy nhất, sạch, không bản ghi lỗi nào.
+
+| Thành phần | Nội dung |
+|---|---|
+| `scripts/demo-capstone2/catalogue.sh` | **Toàn bộ** mã, tên, số lượng. Không có lời gọi HTTP nào |
+| `scripts/demo-capstone2/seed.sh` | Seed + preflight chỉ đọc (PF-01…PF-08, PF-15), dừng ở tồn kho đầu kỳ — KHÔNG tạo Sales Order |
+| `scripts/demo-capstone2/verify.sh` | Nghiệm thu **ghi dữ liệu** (PF-10, PF-12…PF-14 + smoke test §12) trên một Sales Order do người dùng tự tạo và CONFIRM trước — đòi `ALLOW_DESTRUCTIVE=1` **và** `SALES_ORDER_NO` |
+| `scripts/demo-capstone2/reset-db.sh` | `docker compose down -v` + `up -d` + đợi Postgres |
+| `docs/demo-capstone2-guide.md` | Tài khoản, kịch bản 9 bước, cách dựng lại, các chỗ lệch tài liệu |
+
+Bộ dữ liệu (đếm thật trong DB sau lượt bàn giao): 1 công ty · 1 nhà máy · 5 kho · 10 vật tư ·
+10 cấu hình item-warehouse · 3 BOM `ACTIVE` / 9 dòng · 3 quy trình `ACTIVE` / 5 công đoạn ·
+4 tổ sản xuất · 1 ca · 1 lịch · 9 phiếu nhập tồn đầu kỳ · 1 đơn hàng CONFIRMED · 1 dòng nhu cầu
+OPEN · **0** lượt chạy MRP · **0** lệnh sản xuất · 3 tài khoản. Không dòng nào dính mojibake.
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Bố cục URL của API là HỖN HỢP, và đoán sai trả 401 chứ không phải 404.** Phần lớn
+   controller nằm ở `/api/v1/...`, nhưng `auth`/`users`/`access`/`sales-orders` đặt `/v1` **sau**
+   tiền tố tài nguyên (`/api/auth/v1/login`, `/api/sales-orders/v1`, `/api/access/v1/roles`) —
+   `server.servlet.context-path` là `/api`, `@RequestMapping` cấp class là `/auth`, `@PostMapping`
+   là `/v1/login`. Một đường dẫn sai không khớp handler nào ⇒ Spring Security trả **401
+   `AUTHENTICATION_REQUIRED`**, tức **trông hệt như sai mật khẩu**, không phải 404. `seed.sh` vì
+   thế đối chiếu 25 đường dẫn bắt buộc với **OpenAPI runtime** và dừng ngay nếu lệch (đúng câu cuối
+   §15 của tài liệu). 🔴 **Seeder `VIETBIKE` (`scripts/demo/`) vẫn dùng `BASE_URL=.../api/v1` và
+   nay đã lệch hợp đồng — nó chưa được chạy lại sau khi bố cục URL đổi.**
+2. 🔴 **Phạm vi `PLANT` KHÔNG nhận tài nguyên `WAREHOUSE` nữa.**
+   `AccessControlService.isResourceTypeAllowed` (siết ở `V63`) ép `COMPANY→COMPANY`,
+   `PLANT→PLANT`, `WAREHOUSE_GROUP→WAREHOUSE`. Bản nháp đầu của phase này liệt kê cả 5 kho vào
+   phạm vi `PLANT` — đúng hình dạng seeder `VIETBIKE` đang dùng — và chết với
+   `OPERATION_NOT_ALLOWED`. Và **không cần** liệt kê: `PermissionGuard.hasWarehouseAccess` kiểm
+   quyền trực tiếp trên kho **trước**, rồi lùi về nhà máy và công ty của kho đó, nên một tài nguyên
+   `PLANT` phủ trọn cả 5 kho. Đã kiểm thật: `congnhan.demo` đọc được tồn kho `D26-FG`.
+3. 🔴 **Tài khoản `admin` mặc định đã bị `V61` vô hiệu hoá — phải cấp qua bootstrap, và bước đó
+   KHÔNG gộp được với lần khởi động thường.** `AdminBootstrapService` ném `IllegalStateException`
+   nếu cờ bật trong khi tài khoản quản trị **đã** `ACTIVE`, nên để `APP_BOOTSTRAP_ADMIN_ENABLED=true`
+   trong `.env` sẽ làm backend **không khởi động lại được** ở lần sau. Quy trình đúng: khởi động
+   một lần với `--app.bootstrap.admin.enabled=true` trên dòng lệnh, dừng, rồi khởi động lại bình
+   thường. `.env` giữ `false`. Mật khẩu bootstrap bắt buộc ≥ 15 ký tự và khác `Admin@123`.
+4. **`ItemWarehouseSetting` phải có ĐÚNG MỘT dòng cho mỗi vật tư trong một nhà máy.**
+   `MrpWarehouseResolutionService.resolve` trả `AMBIGUOUS_WAREHOUSE_POLICY` khi `defaults.size() > 1`
+   **hoặc** `settings.size() > 1` — tức dòng thứ hai làm hỏng hoạch định kể cả khi chỉ một dòng là
+   default. `PF-03` canh đúng bất biến này bằng cách lấy `max` số cấu hình trên mỗi vật tư.
+5. **Không dòng nhu cầu nào rơi vào `SYSTEM_FALLBACK_USED`** vì cấp 0 lấy kho từ
+   `demandWarehouseId` của lượt chạy, còn các cấp dưới do DEC-03 phân giải theo `defaultSupply` của
+   **từng** vật tư. Đó là lý do bảng §5 phải đủ 10 dòng — thiếu một dòng là một đề xuất `WARNING`.
+6. **Bán thành phẩm nạp sẵn 12 cái là thứ giữ cho `blockedProposals = 0`.** Nhu cầu cấp 1 đều
+   `COVERED` (net = 0) nên `expandChildren` không nổ xuống cấp 2, không sinh đề xuất mua nào, và
+   `plannedPurchaseRecommendations` bằng 0 đúng như §9.1.
+7. **`verify.sh` tách khỏi `seed.sh` là quyết định, không phải tiện tay.** §9 của tài liệu cấm seed
+   sẵn Planning Run ("để người trình bày chạy Planning trực tiếp"), trong khi §11/§14 lại đòi bằng
+   chứng `blockedProposals = 0`. Hai yêu cầu chỉ dung hoà được bằng **hai lượt**: nghiệm thu trên
+   một cơ sở dữ liệu dùng-một-lần, rồi xoá sạch và seed lại để bàn giao.
+8. **Tài khoản gán phạm vi `PLANT` vẫn bị 403 ở `GET /v1/companies`** — giới hạn có sẵn của repo
+   (`hasPermission` chỉ đọc assignment `GLOBAL`, xem `module/uom/CLAUDE.md`), **không** phải lỗi bộ
+   dữ liệu. Đã ghi vào hướng dẫn để người trình bày không gặp nó trên sân khấu.
+
+**Nghiệm thu:** chạy `seed.sh` rồi `verify.sh` trên một cơ sở dữ liệu dựng lại từ trắng —
+**PF-01 → PF-15 và toàn bộ 9 bước smoke test §12 đều PASS**: nhu cầu cấp 0 `gross 10 / net 10`,
+4 dòng cấp 1 `COVERED`, đúng 1 đề xuất `MAKE`/`READY` với thông điệp duy nhất `MATERIAL_SHORTAGE`,
+`reservedPercent = 100`, tổng lượng xuất 50, lô `D26-BIKE16-B001` ở `HOLD` báo tồn thực tế 10 mà
+khả dụng 0, sau QC thành `AVAILABLE` và tồn khả dụng `D26-FG` tăng đúng 10, đơn hàng
+`SO-DEMO26-001` → `FULFILLED` 10/10. Sau đó xoá sạch và seed lại lượt bàn giao.
+
+**Breaking changes: KHÔNG có** — phase này không đụng `src/main`, không migration, không đổi wire.
+
+**[Cùng ngày, sau lượt bàn giao đầu tiên] Bỏ Sales Order khỏi seed.sh, theo yêu cầu của user.**
+Người dùng muốn tự tạo Sales Order của riêng mình và seed lại phần còn lại của bộ dữ liệu (tổ
+chức, vật tư, BOM/routing, tồn kho) **nhiều lần** mà không dính một đơn hàng cố định lặp đi lặp
+lại. `seed.sh` nay dừng lại đúng ở cuối tồn kho đầu kỳ; PF-09/PF-11 (vốn kiểm Sales Order) bị bỏ
+khỏi preflight của nó. `verify.sh` — vẫn cần một Sales Order CONFIRMED để chạy Planning — đổi từ
+đọc `salesOrder.id`/`salesOrder.lineId` trong manifest sang **tra cứu qua API** theo biến môi
+trường bắt buộc `SALES_ORDER_NO` (dùng `GET /sales-orders/v1?search=...`, xác nhận `CONFIRMED`
+trước khi dùng). `workOrderNo` sinh ra trong `verify.sh` cũng đổi từ hằng số sang
+`WO-VERIFY-<giờ:phút:giây>` để không đụng độ giữa các lượt chạy trên các đơn hàng khác nhau.
+Đã nghiệm thu lại toàn bộ: `seed.sh` cho PF-01→PF-08/PF-15 PASS mà không tạo SO nào; tạo tay
+`SO-TEST-001`, CONFIRM, rồi `SALES_ORDER_NO=SO-TEST-001 verify.sh` cho PF-10→PF-14 + smoke test
+9 bước đều PASS; sau đó xoá sạch và seed lại lượt bàn giao thật (0 sales order, 0 MRP run,
+0 work order, 3 tài khoản). `docs/demo-capstone2-guide.md` đã cập nhật theo (bảng dữ liệu, kịch
+bản 9 bước bắt đầu bằng bước "bạn tự tạo Sales Order", §4/§5 hướng dẫn dùng `SALES_ORDER_NO`).
+
+---
+
 ### 0.5 ✅ Đảo Ngược Ngữ Nghĩa — ĐÃ XỬ LÝ Ở `F5-A` (2026-07-27)
 
 Đây từng là rủi ro lớn nhất của track `F*`. **Đã xong**, giữ lại bảng để agent sau hiểu vì sao code
@@ -2860,6 +2955,7 @@ com.erp.manufacturing
 | Bất biến Costing B91-B92 + entry points `ItemStandardCostLookupService` (`P3`) | `src/main/java/com/erp/manufacturing/module/costing/CLAUDE.md` | Chỉ khi chạm `module/costing/**` |
 | **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
 | **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
+| **Bộ dữ liệu demo Capstone 2** (namespace `D26-`: 3 tài khoản, kịch bản trình diễn 9 bước, cách dựng lại, các chỗ script cố ý lệch tài liệu nguồn) | `docs/demo-capstone2-guide.md` | Đọc thủ công — cặp với `scripts/demo-capstone2/`. 🔴 Đây là bộ dữ liệu **cho khách hàng xem** (sạch, không bản ghi lỗi); bộ `VIETBIKE` ở hàng dưới là bộ **kiểm thử** (cố ý phủ cả trạng thái xấu) — **đừng trộn hai bộ trên cùng một môi trường**. Sửa dữ liệu thì sửa `scripts/demo-capstone2/catalogue.sh` |
 | **Bộ dữ liệu demo** (chủ đề nhà máy xe đạp `VIETBIKE`: tài khoản, cây BOM, ma trận trạng thái, kịch bản thuyết trình, các trạng thái **không** seed được) | `docs/demo-dataset-guide.md` | Đọc thủ công — cặp với `scripts/demo/seed-demo.sh`. 🔴 Sửa dữ liệu demo thì sửa **`scripts/demo/lib/catalogue.sh`**, không sửa các file trong `stages/` |
 | **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và **5 câu hỏi đang chờ FE trả lời** — `C2-1`/`C2-2` bị chặn cho tới khi có câu 1 và 2 |
 

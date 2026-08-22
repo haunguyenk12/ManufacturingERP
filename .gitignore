@@ -31,3 +31,8 @@ fixture-ids.json
 
 # Local credential notes — plaintext passwords, never commit
 UserAccount.md
+
+# Bộ dữ liệu demo Capstone 2 (scripts/demo-capstone2)
+demo-capstone2-ids.json
+demo-capstone2-ids.partial.json
+demo-capstone2-preflight.json
