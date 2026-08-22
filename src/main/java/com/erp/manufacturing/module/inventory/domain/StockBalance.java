@@ -46,8 +46,18 @@ public class StockBalance extends BaseEntity {
     @Builder.Default
     private BigDecimal reservedQuantity = BigDecimal.ZERO;
 
+    /**
+     * On-hand output that has not passed quality yet. Lot-tracked stock carries the same gate on
+     * {@link InventoryLot#getStatus()}; this column is the equivalent carrier for stock that has no
+     * lot row. It is deliberately separate from {@code reservedQuantity}: quality hold is not a
+     * demand allocation and must be visible as such to inventory clients.
+     */
+    @Column(name = "quality_hold_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal qualityHoldQuantity = BigDecimal.ZERO;
+
     public BigDecimal availableQuantity() {
-        return quantity.subtract(reservedQuantity);
+        return quantity.subtract(reservedQuantity).subtract(qualityHoldQuantity);
     }
 
     public void increase(BigDecimal amount) {
@@ -64,6 +74,14 @@ public class StockBalance extends BaseEntity {
 
     public void releaseReserved(BigDecimal amount) {
         reservedQuantity = reservedQuantity.subtract(amount);
+    }
+
+    public void holdForQuality(BigDecimal amount) {
+        qualityHoldQuantity = qualityHoldQuantity.add(amount);
+    }
+
+    public void releaseQualityHold(BigDecimal amount) {
+        qualityHoldQuantity = qualityHoldQuantity.subtract(amount);
     }
 
     public void consumeReserved(BigDecimal amount) {

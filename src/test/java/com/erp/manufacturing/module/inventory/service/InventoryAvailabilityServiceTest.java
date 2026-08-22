@@ -5,7 +5,7 @@ import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehousePlanningSettingProjection;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.module.inventory.repository.StockAvailabilityProjection;
-import com.erp.manufacturing.module.inventory.repository.StockAvailabilityByWarehouseProjection;
+import com.erp.manufacturing.module.inventory.repository.StockQuantityByWarehouseProjection;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockExcludedLotCountProjection;
 import com.erp.manufacturing.module.inventory.repository.StockPlanningQuantityProjection;
@@ -62,21 +62,34 @@ class InventoryAvailabilityServiceTest {
     }
 
     @Test
-    void getAvailableQuantitiesByWarehouse_usesAvailableLotStatus() {
+    void getStockQuantitiesByWarehouse_usesAvailableLotStatusAndKeepsTheTermsBehindAvailability() {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
-        when(stockBalanceRepository.aggregateAvailableQuantitiesByWarehouse(
+        when(stockBalanceRepository.aggregateStockQuantitiesByWarehouse(
                 List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
-                .thenReturn(List.of(new TestWarehouseProjection(itemId, warehouseId, new BigDecimal("8"))));
+                .thenReturn(List.of(new TestWarehouseProjection(itemId, warehouseId,
+                        new BigDecimal("12"), new BigDecimal("3"), new BigDecimal("1"), new BigDecimal("8"))));
 
-        Map<InventoryAvailabilityService.ItemWarehouseAvailabilityKey, BigDecimal> result =
-                service.getAvailableQuantitiesByWarehouse(List.of(itemId), List.of(warehouseId));
+        Map<InventoryAvailabilityService.ItemWarehouseAvailabilityKey,
+                InventoryAvailabilityService.WarehouseStockQuantity> result =
+                service.getStockQuantitiesByWarehouse(List.of(itemId), List.of(warehouseId));
 
-        assertThat(result).containsEntry(
-                new InventoryAvailabilityService.ItemWarehouseAvailabilityKey(itemId, warehouseId),
-                new BigDecimal("8"));
-        verify(stockBalanceRepository).aggregateAvailableQuantitiesByWarehouse(
+        InventoryAvailabilityService.WarehouseStockQuantity quantity = result.get(
+                new InventoryAvailabilityService.ItemWarehouseAvailabilityKey(itemId, warehouseId));
+        assertThat(quantity.onHandQuantity()).isEqualByComparingTo("12");
+        assertThat(quantity.reservedQuantity()).isEqualByComparingTo("3");
+        assertThat(quantity.qualityHoldQuantity()).isEqualByComparingTo("1");
+        assertThat(quantity.availableQuantity()).isEqualByComparingTo("8");
+        verify(stockBalanceRepository).aggregateStockQuantitiesByWarehouse(
                 List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+    }
+
+    @Test
+    void getStockQuantitiesByWarehouse_emptyInputs_returnEmptyWithoutRepositoryCall() {
+        assertThat(service.getStockQuantitiesByWarehouse(List.of(), List.of(UUID.randomUUID()))).isEmpty();
+        assertThat(service.getStockQuantitiesByWarehouse(List.of(UUID.randomUUID()), List.of())).isEmpty();
+
+        verifyNoInteractions(stockBalanceRepository);
     }
 
     @Test
@@ -143,11 +156,20 @@ class InventoryAvailabilityServiceTest {
         @Override public BigDecimal getQuantity() { return quantity; }
     }
 
-    private record TestWarehouseProjection(UUID itemId, UUID warehouseId, BigDecimal quantity)
-            implements StockAvailabilityByWarehouseProjection {
+    private record TestWarehouseProjection(
+            UUID itemId,
+            UUID warehouseId,
+            BigDecimal onHandQuantity,
+            BigDecimal reservedQuantity,
+            BigDecimal qualityHoldQuantity,
+            BigDecimal availableQuantity
+    ) implements StockQuantityByWarehouseProjection {
         @Override public UUID getItemId() { return itemId; }
         @Override public UUID getWarehouseId() { return warehouseId; }
-        @Override public BigDecimal getQuantity() { return quantity; }
+        @Override public BigDecimal getOnHandQuantity() { return onHandQuantity; }
+        @Override public BigDecimal getReservedQuantity() { return reservedQuantity; }
+        @Override public BigDecimal getQualityHoldQuantity() { return qualityHoldQuantity; }
+        @Override public BigDecimal getAvailableQuantity() { return availableQuantity; }
     }
 
     private record TestPlanningQuantityProjection(

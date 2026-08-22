@@ -85,7 +85,7 @@ class CapacityControllerTest {
                 eq(LocalDate.of(2026, 1, 5)), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleLine()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/capacity-board")
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/capacity-board")
                         .param("from", "2026-01-05").param("to", "2026-01-05"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -107,7 +107,7 @@ class CapacityControllerTest {
                 eq(LocalDate.of(2026, 1, 1)), any(), any(), any()))
                 .thenThrow(new AppException(ValidationErrorCode.INVALID_INPUT, "'from' must not be after 'to'"));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/capacity-board")
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/capacity-board")
                         .param("from", "2026-01-05").param("to", "2026-01-01"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
@@ -117,7 +117,7 @@ class CapacityControllerTest {
     @Test
     @DisplayName("getBoard: missing required 'from'/'to' returns 400 naming the parameter")
     void getBoard_missingRequiredParam_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/capacity-board").param("to", "2026-01-05"))
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/capacity-board").param("to", "2026-01-05"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("from"));
@@ -133,7 +133,7 @@ class CapacityControllerTest {
         when(scheduleAdjustmentService.adjust(eq(WORK_ORDER_ID), eq(OPERATION_ID), any()))
                 .thenReturn(response);
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
                         + "/schedule-adjustments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -155,7 +155,7 @@ class CapacityControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.CONCURRENT_MODIFICATION,
                         "Work order operation was modified by another request"));
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
                         + "/schedule-adjustments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -170,7 +170,7 @@ class CapacityControllerTest {
     @Test
     @DisplayName("adjustSchedule: blank reason returns 400 VALIDATION_ERROR naming the field")
     void adjustSchedule_blankReason_returns400() throws Exception {
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID
                         + "/schedule-adjustments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

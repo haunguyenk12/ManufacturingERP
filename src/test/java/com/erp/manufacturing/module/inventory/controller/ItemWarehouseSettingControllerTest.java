@@ -94,7 +94,7 @@ class ItemWarehouseSettingControllerTest {
     void upsert_validRequest_returns200() throws Exception {
         when(settingService.upsert(any(ItemWarehouseSettingRequest.class))).thenReturn(sampleResponse());
 
-        mockMvc.perform(put("/api/v1/inventory/item-warehouse-settings")
+        mockMvc.perform(put("/v1/inventory/item-warehouse-settings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(upsertBody()))
                 .andExpect(status().isOk())
@@ -108,7 +108,7 @@ class ItemWarehouseSettingControllerTest {
     @Test
     @DisplayName("upsert: missing required threshold returns 400 VALIDATION_ERROR with the field name")
     void upsert_missingLeadTime_returns400WithFieldError() throws Exception {
-        mockMvc.perform(put("/api/v1/inventory/item-warehouse-settings")
+        mockMvc.perform(put("/v1/inventory/item-warehouse-settings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"itemId":"%s","warehouseId":"%s","safetyStock":25,"reorderPoint":40}
@@ -129,7 +129,7 @@ class ItemWarehouseSettingControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Item and warehouse must belong to the same company"));
 
-        mockMvc.perform(put("/api/v1/inventory/item-warehouse-settings")
+        mockMvc.perform(put("/v1/inventory/item-warehouse-settings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(upsertBody()))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
@@ -143,7 +143,7 @@ class ItemWarehouseSettingControllerTest {
         when(settingService.list(eq(WAREHOUSE_ID), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/inventory/item-warehouse-settings")
+        mockMvc.perform(get("/v1/inventory/item-warehouse-settings")
                         .param("warehouseId", WAREHOUSE_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -159,7 +159,7 @@ class ItemWarehouseSettingControllerTest {
     @Test
     @DisplayName("deactivate: returns 200 with a null result payload (§5.8 DELETE pattern)")
     void deactivate_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/inventory/item-warehouse-settings/" + SETTING_ID))
+        mockMvc.perform(delete("/v1/inventory/item-warehouse-settings/" + SETTING_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());

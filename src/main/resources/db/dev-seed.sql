@@ -11,13 +11,15 @@
 --         applies while tests run. Wiring this into application-dev.yml would inject demo rows into
 --         the Testcontainers database of all 11 *IT classes and quietly change what they assert.
 --
---    Usage (dev stack from docker-compose):
---      docker exec -i erp-postgres psql -U postgres -d manufacturing_erp < src/main/resources/db/dev-seed.sql
+--    Usage (dev stack from docker-compose): pass a UNIQUE BCrypt hash explicitly.
+--      docker exec -i erp-postgres psql -U manufacturing_erp -d manufacturing_erp \
+--        -v dev_seed_ack=true -v demo_password_hash='$2a$12$REPLACE_WITH_REAL_BCRYPT_HASH' \
+--        < src/main/resources/db/dev-seed.sql
 --
 -- Idempotent: safe to run repeatedly. Every statement either ON CONFLICT DO NOTHING or guards with
 -- NOT EXISTS (user_role_assignments has no unique constraint, so it needs the explicit guard).
 --
--- Accounts created — all share the password `Admin@123` (same BCrypt hash as V2's admin):
+-- Accounts created — their password is supplied explicitly as demo_password_hash:
 --   manager.a   MANAGER  scoped to PLANT-A only
 --   operator.a  OPERATOR scoped to PLANT-A only
 --   manager.b   MANAGER  scoped to PLANT-B only   ← use this pair to prove plant isolation
@@ -26,6 +28,17 @@
 -- Isolation check this data is meant to support: manager.a calling a PLANT-B endpoint must get
 -- 403 PERMISSION_DENIED, not an empty list. An empty list would mean the scope filter silently
 -- widened, which is the failure mode a single-plant fixture can never detect.
+
+\if :{?dev_seed_ack}
+\else
+\echo 'Refusing dev seed: pass -v dev_seed_ack=true'
+\quit
+\endif
+\if :{?demo_password_hash}
+\else
+\echo 'Refusing dev seed: pass -v demo_password_hash=<unique bcrypt hash>'
+\quit
+\endif
 
 BEGIN;
 
@@ -87,15 +100,15 @@ WHERE s.code IN ('DEMO_PLANT_A', 'DEMO_PLANT_B')
 ON CONFLICT (scope_id, resource_type, resource_id) DO NOTHING;
 
 -- ── Accounts ──────────────────────────────────────────────────────────────────
--- BCrypt(cost 12) hash of 'Admin@123', reused from V2__seed_admin_user.sql on purpose: one password
--- for every dev account is one less thing to look up, and this file never leaves dev.
+-- No password is committed. Re-running this seed rotates the demo accounts to the supplied hash.
 
 INSERT INTO users (username, email, password, status)
 VALUES
-    ('manager.a',  'manager.a@erp.local',  '$2a$12$zUhsQTqnZs0KqpFHioEgpOXyJtVwLyWdwZsgaAl49LA5ocVTYwgqe', 'ACTIVE'),
-    ('operator.a', 'operator.a@erp.local', '$2a$12$zUhsQTqnZs0KqpFHioEgpOXyJtVwLyWdwZsgaAl49LA5ocVTYwgqe', 'ACTIVE'),
-    ('manager.b',  'manager.b@erp.local',  '$2a$12$zUhsQTqnZs0KqpFHioEgpOXyJtVwLyWdwZsgaAl49LA5ocVTYwgqe', 'ACTIVE')
-ON CONFLICT (username) DO NOTHING;
+    ('manager.a',  'manager.a@erp.local',  :'demo_password_hash', 'ACTIVE'),
+    ('operator.a', 'operator.a@erp.local', :'demo_password_hash', 'ACTIVE'),
+    ('manager.b',  'manager.b@erp.local',  :'demo_password_hash', 'ACTIVE')
+ON CONFLICT (username) DO UPDATE
+SET password = EXCLUDED.password, status = 'ACTIVE', updated_at = NOW();
 
 -- ── Role assignments (dynamic RBAC) ───────────────────────────────────────────
 -- Authorities come from user_role_assignments, not from the legacy user_roles table

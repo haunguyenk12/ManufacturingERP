@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.workorder.repository;
 
 import com.erp.manufacturing.module.workorder.domain.MaterialIssue;
+import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -19,7 +20,27 @@ public interface MaterialIssueRepository extends JpaRepository<MaterialIssue, UU
             "lines.item", "lines.warehouse", "lines.lot", "lines.stockMovement"})
     Optional<MaterialIssue> findWithLinesByIdempotencyKey(String idempotencyKey);
 
-    Page<MaterialIssue> findByWorkOrderWorkOrderId(UUID workOrderId, Pageable pageable);
+    @EntityGraph(attributePaths = {"workOrder", "lines", "lines.componentLine", "lines.reservation",
+            "lines.item", "lines.warehouse", "lines.lot", "lines.stockMovement", "lines.sourceExecution"})
+    Optional<MaterialIssue> findWithLinesByIssueId(UUID issueId);
+
+    /**
+     * One work order's issue history, optionally narrowed to a status.
+     *
+     * <p>{@code status} exists so the Over-BOM approval queue is a server-side filter, not a client
+     * that pages through POSTED history hoping a PENDING_APPROVAL row appears. Filtering in the
+     * browser breaks the moment a work order has more issues than one page: the queue would look
+     * empty while requests wait.
+     */
+    @Query("""
+            select i
+            from MaterialIssue i
+            where i.workOrder.workOrderId = :workOrderId
+              and (:status is null or i.status = :status)
+            """)
+    Page<MaterialIssue> findByWorkOrder(@Param("workOrderId") UUID workOrderId,
+                                        @Param("status") MaterialIssueStatus status,
+                                        Pageable pageable);
 
     /**
      * Flat plant-scoped history (spec §4.1). {@code workOrderId} is an optional narrowing filter.
@@ -35,14 +56,17 @@ public interface MaterialIssueRepository extends JpaRepository<MaterialIssue, UU
             join fetch i.workOrder w
             where w.plant.plantId = :plantId
               and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (:status is null or i.status = :status)
             """,
             countQuery = """
             select count(i)
             from MaterialIssue i
             where i.workOrder.plant.plantId = :plantId
               and (:workOrderId is null or i.workOrder.workOrderId = :workOrderId)
+              and (:status is null or i.status = :status)
             """)
     Page<MaterialIssue> findByPlant(@Param("plantId") UUID plantId,
                                     @Param("workOrderId") UUID workOrderId,
+                                    @Param("status") MaterialIssueStatus status,
                                     Pageable pageable);
 }

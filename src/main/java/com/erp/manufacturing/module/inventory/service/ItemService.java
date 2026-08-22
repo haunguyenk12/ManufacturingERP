@@ -33,10 +33,14 @@ public class ItemService {
     private final InventoryMapper mapper;
 
     @Transactional
-    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MANAGE', 'COMPANY', #companyId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_MANAGE', #companyId)")
     @Auditable(action = AuditAction.ITEM_CREATED, entityType = "Item", entityIdExpression = "itemId.toString()")
     public ItemResponse createItem(UUID companyId, ItemCreateRequest request) {
         Company company = findCompany(companyId);
+        if (request.serialTracked()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial Tracking is deferred; use NON_TRACKED or LOT_TRACKED");
+        }
         if (!company.isActive()) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                     "Cannot create item under inactive company: " + companyId);
@@ -65,20 +69,32 @@ public class ItemService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', 'COMPANY', #companyId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_READ', #companyId)")
     public PageResult<ItemResponse> listItems(UUID companyId, Pageable pageable) {
         ensureCompanyExists(companyId);
         return PageResult.from(itemRepository.findByCompanyCompanyId(companyId, pageable).map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_INVENTORY_READ', #itemId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_READ', #companyId)")
+    public PageResult<ItemResponse> listItems(UUID companyId, String search, Pageable pageable) {
+        ensureCompanyExists(companyId);
+        String normalizedSearch = search == null || search.isBlank() ? null : search.trim();
+        if (normalizedSearch == null) {
+            return PageResult.from(itemRepository.findByCompanyCompanyId(companyId, pageable).map(mapper::toResponse));
+        }
+        return PageResult.from(itemRepository.searchByCodeOrName(companyId, normalizedSearch, pageable)
+                .map(mapper::toResponse));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_READ', #itemId)")
     public ItemResponse getItem(UUID itemId) {
         return mapper.toResponse(findItem(itemId));
     }
 
     @Transactional
-    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_INVENTORY_MANAGE', #itemId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
     @Auditable(action = AuditAction.ITEM_UPDATED, entityType = "Item", entityIdExpression = "itemId.toString()")
     public ItemResponse updateItem(UUID itemId, ItemUpdateRequest request) {
         Item item = findItem(itemId);
@@ -89,7 +105,7 @@ public class ItemService {
     }
 
     @Transactional
-    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_INVENTORY_MANAGE', #itemId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
     @Auditable(action = AuditAction.ITEM_DEACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()")
     public ItemResponse deactivateItem(UUID itemId) {
         Item item = findItem(itemId);
@@ -98,7 +114,7 @@ public class ItemService {
     }
 
     @Transactional
-    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_INVENTORY_MANAGE', #itemId)")
+    @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
     @Auditable(action = AuditAction.ITEM_ACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()")
     public ItemResponse activateItem(UUID itemId) {
         Item item = findItem(itemId);

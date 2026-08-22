@@ -23,7 +23,7 @@ public class PurchaseOrderController {
 
     private final PurchaseOrderService purchaseOrderService;
 
-    @PostMapping("/api/v1/purchase-orders")
+    @PostMapping("/v1/purchase-orders")
     @Operation(summary = "Create purchase order")
     public ResponseEntity<ApiResponse<PurchaseOrderResponse>> create(
             @Valid @RequestBody PurchaseOrderCreateRequest request) {
@@ -31,7 +31,7 @@ public class PurchaseOrderController {
                 .body(ApiResponse.created(purchaseOrderService.create(request)));
     }
 
-    @GetMapping("/api/v1/purchase-orders")
+    @GetMapping("/v1/purchase-orders")
     @Operation(summary = "List purchase orders")
     public ResponseEntity<ApiResponse<PageResult<PurchaseOrderResponse>>> list(
             @RequestParam UUID companyId,
@@ -47,19 +47,19 @@ public class PurchaseOrderController {
                 companyId, plantId, warehouseId, supplierId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/purchase-orders/{purchaseOrderId}")
+    @GetMapping("/v1/purchase-orders/{purchaseOrderId}")
     @Operation(summary = "Get purchase order")
     public ResponseEntity<ApiResponse<PurchaseOrderResponse>> get(@PathVariable UUID purchaseOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(purchaseOrderService.get(purchaseOrderId)));
     }
 
-    @PostMapping("/api/v1/purchase-orders/{purchaseOrderId}/send")
+    @PostMapping("/v1/purchase-orders/{purchaseOrderId}/send")
     @Operation(summary = "Send draft purchase order")
     public ResponseEntity<ApiResponse<PurchaseOrderResponse>> send(@PathVariable UUID purchaseOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(purchaseOrderService.send(purchaseOrderId)));
     }
 
-    @PostMapping("/api/v1/purchase-orders/{purchaseOrderId}/cancel")
+    @PostMapping("/v1/purchase-orders/{purchaseOrderId}/cancel")
     @Operation(summary = "Cancel draft purchase order")
     public ResponseEntity<ApiResponse<PurchaseOrderResponse>> cancel(@PathVariable UUID purchaseOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(purchaseOrderService.cancel(purchaseOrderId)));

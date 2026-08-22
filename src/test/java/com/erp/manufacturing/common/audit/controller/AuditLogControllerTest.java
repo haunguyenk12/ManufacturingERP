@@ -1,6 +1,8 @@
 package com.erp.manufacturing.common.audit.controller;
 
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.erp.manufacturing.common.audit.AuditLogQueryService;
+import com.erp.manufacturing.common.audit.dto.AuditLogChangeResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogDetailResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogResponse;
 import com.erp.manufacturing.common.exception.AppException;
@@ -67,17 +69,19 @@ class AuditLogControllerTest {
     void list_defaultRequest_returns200() throws Exception {
         UUID auditId = UUID.randomUUID();
         AuditLogResponse response = new AuditLogResponse(
-                auditId, UUID.randomUUID(), "admin", "LOGIN", null, null, null, "SUCCESS",
+                auditId, UUID.randomUUID(), "admin", "LOGIN", "Uom", "Piece", null, "SUCCESS",
                 "127.0.0.1", "curl/8.0", "trace-1", null, Instant.parse("2026-08-06T10:00:00Z"));
         when(auditLogQueryService.list(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(PageResult.from(
                         new PageImpl<>(List.of(response), PageRequest.of(0, 20), 1)));
 
-        mockMvc.perform(get("/api/v1/audit-logs"))
+        mockMvc.perform(get("/v1/audit-logs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].auditId").value(auditId.toString()))
                 .andExpect(jsonPath("$.result.content[0].action").value("LOGIN"))
+                .andExpect(jsonPath("$.result.content[0].entityName").value("Piece"))
+                .andExpect(jsonPath("$.result.content[0].entityId").doesNotExist())
                 .andExpect(jsonPath("$.result.page").value(0))
                 .andExpect(jsonPath("$.result.size").value(20))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
@@ -89,7 +93,7 @@ class AuditLogControllerTest {
     @Test
     @DisplayName("list: invalid action query param returns 400 VALIDATION_ERROR")
     void list_invalidActionParam_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/audit-logs").param("action", "NOT_A_REAL_ACTION"))
+        mockMvc.perform(get("/v1/audit-logs").param("action", "NOT_A_REAL_ACTION"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
     }
@@ -98,17 +102,25 @@ class AuditLogControllerTest {
     @DisplayName("get: known id returns 200 with the detail envelope including changes[]")
     void get_knownId_returns200WithChanges() throws Exception {
         UUID auditId = UUID.randomUUID();
+        AuditLogChangeResponse change = new AuditLogChangeResponse(
+                UUID.randomUUID(), "status", TextNode.valueOf("DRAFT"),
+                TextNode.valueOf("RELEASED"), "UPDATE", Instant.parse("2026-08-06T10:00:00Z"));
         AuditLogDetailResponse response = new AuditLogDetailResponse(
-                auditId, UUID.randomUUID(), "admin", "WORK_ORDER_UPDATED", "WorkOrder", "wo-1",
+                auditId, UUID.randomUUID(), "admin", "WORK_ORDER_UPDATED", "WorkOrder", "WO-2026-001",
                 null, "SUCCESS", "127.0.0.1", "curl/8.0", "trace-1", null,
-                Instant.parse("2026-08-06T10:00:00Z"), List.of());
+                Instant.parse("2026-08-06T10:00:00Z"), List.of(change));
         when(auditLogQueryService.get(auditId)).thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/audit-logs/" + auditId))
+        mockMvc.perform(get("/v1/audit-logs/" + auditId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.auditId").value(auditId.toString()))
-                .andExpect(jsonPath("$.result.changes").isArray());
+                .andExpect(jsonPath("$.result.entityName").value("WO-2026-001"))
+                .andExpect(jsonPath("$.result.entityId").doesNotExist())
+                .andExpect(jsonPath("$.result.changes").isArray())
+                .andExpect(jsonPath("$.result.changes[0].fieldName").value("status"))
+                .andExpect(jsonPath("$.result.changes[0].oldValue").value("DRAFT"))
+                .andExpect(jsonPath("$.result.changes[0].newValue").value("RELEASED"));
     }
 
     @Test
@@ -118,7 +130,7 @@ class AuditLogControllerTest {
         when(auditLogQueryService.get(auditId)).thenThrow(new AppException(
                 ValidationErrorCode.RESOURCE_NOT_FOUND, "Audit log not found: " + auditId));
 
-        mockMvc.perform(get("/api/v1/audit-logs/" + auditId))
+        mockMvc.perform(get("/v1/audit-logs/" + auditId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }

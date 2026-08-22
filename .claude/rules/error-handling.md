@@ -241,6 +241,7 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 | `MissingServletRequestParameterException` (thiếu `@RequestParam` bắt buộc) | 400 | `VALIDATION_ERROR` | ✅ |
 | `HttpMessageNotReadableException` (JSON hỏng/thiếu body) | 400 | `VALIDATION_ERROR` | — |
 | `HttpRequestMethodNotSupportedException` | 405 | `VALIDATION_ERROR` | — |
+| `NoResourceFoundException` / `NoHandlerFoundException` (không có endpoint ở path đó) | 404 | `ENTITY_NOT_FOUND` | — |
 | `AccessDeniedException` (Spring) | 403 | `PERMISSION_DENIED` | — |
 | `ObjectOptimisticLockingFailureException` (`@Version`) | 409 | `CONCURRENT_MODIFICATION` | — |
 | `DataIntegrityViolationException` | 409 | `RESOURCE_ALREADY_EXISTS` | — |
@@ -255,6 +256,17 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 > phân biệt được "tôi gọi sai" với "backend chết" và làm alert 5xx nổ oan. Nay trả 400
 > `VALIDATION_ERROR` + `errors[{field: "<tên param>"}]`, có test
 > (`GlobalExceptionHandlerTest.missingRequiredQueryParam_returns400NamingTheParameter`).
+> 🔴 **[2026-08-12] `NoResourceFoundException` bị sót theo đúng cùng một cách** — phát hiện khi FE probe
+> `GET /access/roles/{roleId}/permissions` (endpoint lúc đó chưa tồn tại) và nhận **500
+> `INTERNAL_SERVER_ERROR`**, trace `bbad9f8c37824349`. Spring 6.1 đẩy request không khớp handler nào
+> sang `ResourceHttpRequestHandler`, chỗ này ném `NoResourceFoundException`; không handler nào bắt nên
+> nó rơi xuống catch-all. Hệ quả giống hệt bài học 2026-08-04: URL gõ sai hoặc endpoint chưa làm trông
+> như **backend sập**, và alert 5xx nổ oan. Nay trả 404 `ENTITY_NOT_FOUND`, có test
+> (`GlobalExceptionHandlerTest.unmappedPath_returns404NotAnInternalServerError`) **cùng** một test canh
+> ranh giới ngược lại (`wrongVerbOnExistingPath_stays405`) — path **có** tồn tại mà sai verb vẫn phải là
+> **405** của handler 8, không bị nhánh 404 mới nuốt mất. `NoHandlerFoundException` gộp chung
+> `@ExceptionHandler` để câu trả lời không phụ thuộc `spring.mvc.throw-exception-if-no-handler-found`.
+>
 > **`MissingRequestHeaderException` cố ý KHÔNG thêm handler:** mọi `@RequestHeader` trong repo đều
 > `required = false` (`Idempotency-Key`, `X-Plant-Id`) nên exception đó **không có đường ném** —
 > thêm handler cho nó là code speculative (`coding-rules.md §11.5`). Khi nào có header bắt buộc đầu

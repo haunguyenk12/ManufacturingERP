@@ -110,26 +110,78 @@ class InventoryLotMethodSecurityTest {
     }
 
     @Test
-    void get_deniedWhenLotAccessMissing() {
-        when(inventoryPermissionGuard.hasLotAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID)))
+    void get_withoutWarehouse_deniedWhenCompanyAccessMissing() {
+        when(inventoryPermissionGuard.hasLotCompanyAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> lotService.get(LOT_ID))
+        assertThatThrownBy(() -> lotService.get(LOT_ID, null))
                 .isInstanceOf(AccessDeniedException.class);
 
-        verify(inventoryPermissionGuard).hasLotAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID));
+        verify(inventoryPermissionGuard).hasLotCompanyAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID));
+        verifyNoInteractions(balanceRepository, lotRepository);
     }
 
     @Test
-    void get_allowedWhenLotAccessPresent() {
-        when(inventoryPermissionGuard.hasLotAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID)))
+    void get_withoutWarehouse_allowedWhenCompanyAccessPresent() {
+        when(inventoryPermissionGuard.hasLotCompanyAccess(any(), eq("PERM_INVENTORY_READ"), eq(LOT_ID)))
                 .thenReturn(true);
         when(lotRepository.findById(LOT_ID)).thenReturn(Optional.of(lot()));
         when(balanceRepository.findByLotLotId(LOT_ID)).thenReturn(List.of());
         when(movementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(any(), any()))
                 .thenReturn(Optional.empty());
 
-        assertThatCode(() -> lotService.get(LOT_ID)).doesNotThrowAnyException();
+        assertThatCode(() -> lotService.get(LOT_ID, null)).doesNotThrowAnyException();
+        verifyNoInteractions(permissionGuard);
+    }
+
+    @Test
+    void get_withWarehouse_deniedWhenWarehouseScopeMissing() {
+        when(permissionGuard.hasResourceAccess(
+                any(), eq("PERM_INVENTORY_READ"), eq("WAREHOUSE"), eq(WAREHOUSE_ID)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> lotService.get(LOT_ID, WAREHOUSE_ID))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(permissionGuard).hasResourceAccess(
+                any(), eq("PERM_INVENTORY_READ"), eq("WAREHOUSE"), eq(WAREHOUSE_ID));
+        verifyNoInteractions(inventoryPermissionGuard, balanceRepository, lotRepository);
+    }
+
+    @Test
+    void get_withWarehouse_allowedWhenWarehouseScopePresent() {
+        when(permissionGuard.hasResourceAccess(
+                any(), eq("PERM_INVENTORY_READ"), eq("WAREHOUSE"), eq(WAREHOUSE_ID)))
+                .thenReturn(true);
+        InventoryLot lot = lot();
+        StockBalance balance = StockBalance.builder()
+                .item(lot.getItem())
+                .warehouse(Warehouse.builder()
+                        .warehouseId(WAREHOUSE_ID)
+                        .plant(Plant.builder()
+                                .plantId(UUID.randomUUID())
+                                .company(lot.getItem().getCompany())
+                                .code("P1").name("Plant 1")
+                                .status(OrganizationStatus.ACTIVE)
+                                .build())
+                        .code("WH1").name("Warehouse 1")
+                        .type(WarehouseType.RAW_MATERIAL)
+                        .status(OrganizationStatus.ACTIVE)
+                        .build())
+                .lot(lot)
+                .quantity(BigDecimal.TEN)
+                .reservedQuantity(BigDecimal.ZERO)
+                .build();
+        when(lotRepository.findById(LOT_ID)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                lot.getItem().getItemId(), WAREHOUSE_ID, LOT_ID)).thenReturn(Optional.of(balance));
+        when(movementRepository
+                .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                        WAREHOUSE_ID, LOT_ID, MovementType.RECEIVE))
+                .thenReturn(Optional.empty());
+
+        assertThatCode(() -> lotService.get(LOT_ID, WAREHOUSE_ID)).doesNotThrowAnyException();
+        verifyNoInteractions(inventoryPermissionGuard);
     }
 
     @Test

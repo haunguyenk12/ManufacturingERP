@@ -21,7 +21,7 @@ import java.util.UUID;
  * without borrowing a real business controller. Mirrors the {@code SecurityTestController} pattern.
  */
 @RestController
-@RequestMapping("/api/v1/test/exceptions")
+@RequestMapping("/v1/test/exceptions")
 class ExceptionTestController {
 
     @GetMapping("/app")

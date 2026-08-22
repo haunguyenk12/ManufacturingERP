@@ -38,7 +38,7 @@ public class CapacityController {
     private final CapacityBoardService capacityBoardService;
     private final ScheduleAdjustmentService scheduleAdjustmentService;
 
-    @GetMapping("/api/v1/plants/{plantId}/capacity-board")
+    @GetMapping("/v1/plants/{plantId}/capacity-board")
     @Operation(summary = "Load/capacity per scheduled operation over a date range")
     public ResponseEntity<ApiResponse<PageResult<CapacityBoardLineResponse>>> getBoard(
             @PathVariable UUID plantId,
@@ -54,7 +54,7 @@ public class CapacityController {
                 plantId, from, to, workCenterId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments")
+    @PostMapping("/v1/work-orders/{workOrderId}/operations/{operationId}/schedule-adjustments")
     @Operation(summary = "Manually adjust a work order operation's planned start/end",
             description = "Never auto-shifts sibling operations; sequence/calendar/capacity conflicts "
                     + "are returned as advisory flags, not rejections.")

@@ -1,5 +1,7 @@
 package com.erp.manufacturing.common.audit;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.audit.dto.AuditLogChangeResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogDetailResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogResponse;
@@ -27,6 +29,7 @@ public class AuditLogQueryService {
 
     private final AuditLogRepository auditLogRepository;
     private final AuditLogChangeRepository auditLogChangeRepository;
+    private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_AUDIT_READ')")
@@ -51,7 +54,7 @@ public class AuditLogQueryService {
 
         return new AuditLogDetailResponse(
                 auditLog.getAuditId(), auditLog.getUserId(), auditLog.getUsername(),
-                auditLog.getAction(), auditLog.getEntityType(), auditLog.getEntityId(),
+                auditLog.getAction(), auditLog.getEntityType(), auditLog.getEntityName(),
                 auditLog.getDescription(), auditLog.getStatus(), auditLog.getClientIp(),
                 auditLog.getUserAgent(), auditLog.getTraceId(), auditLog.getPlantId(),
                 auditLog.getCreatedAt(), changes);
@@ -60,7 +63,7 @@ public class AuditLogQueryService {
     private AuditLogResponse toResponse(AuditLog auditLog) {
         return new AuditLogResponse(
                 auditLog.getAuditId(), auditLog.getUserId(), auditLog.getUsername(),
-                auditLog.getAction(), auditLog.getEntityType(), auditLog.getEntityId(),
+                auditLog.getAction(), auditLog.getEntityType(), auditLog.getEntityName(),
                 auditLog.getDescription(), auditLog.getStatus(), auditLog.getClientIp(),
                 auditLog.getUserAgent(), auditLog.getTraceId(), auditLog.getPlantId(),
                 auditLog.getCreatedAt());
@@ -68,7 +71,18 @@ public class AuditLogQueryService {
 
     private AuditLogChangeResponse toChangeResponse(AuditLogChange change) {
         return new AuditLogChangeResponse(
-                change.getChangeId(), change.getFieldName(), change.getOldValue(),
-                change.getNewValue(), change.getChangeType().name(), change.getCreatedAt());
+                change.getChangeId(), change.getFieldName(), jsonValue(change.getOldValue()),
+                jsonValue(change.getNewValue()), change.getChangeType().name(), change.getCreatedAt());
+    }
+
+    private JsonNode jsonValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(value);
+        } catch (Exception ignored) {
+            return objectMapper.getNodeFactory().textNode(value);
+        }
     }
 }

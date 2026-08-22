@@ -31,6 +31,8 @@ import static org.mockito.Mockito.when;
 class PasswordResetTokenServiceTest {
 
     private static final long TOKEN_TTL_MINUTES = 15L;
+    private static final String TOK_1_HASH =
+            "65dcf16ea3dfa49069628089eb4a75483070f5584b2a21ee64912b5f621f12da";
 
     @Mock private RedisTemplate<String, String>   redis;
     @Mock private ValueOperations<String, String> valueOps;
@@ -51,10 +53,13 @@ class PasswordResetTokenServiceTest {
 
         String token = service.generateToken(userId);
 
-        verify(valueOps).set(eq("auth:reset:" + token), eq(userId.toString()),
+        ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> values = ArgumentCaptor.forClass(String.class);
+        verify(valueOps, org.mockito.Mockito.times(2)).set(keys.capture(), values.capture(),
                 eq(TOKEN_TTL_MINUTES), eq(TimeUnit.MINUTES));
-        verify(valueOps).set(eq("auth:reset:user:" + userId), eq(token),
-                eq(TOKEN_TTL_MINUTES), eq(TimeUnit.MINUTES));
+        assertThat(keys.getAllValues().get(0)).startsWith("auth:reset:").doesNotEndWith(token);
+        assertThat(values.getAllValues().get(0)).isEqualTo(userId.toString());
+        assertThat(values.getAllValues().get(1)).isNotEqualTo(token).hasSize(64);
     }
 
     @Test
@@ -80,7 +85,7 @@ class PasswordResetTokenServiceTest {
     @Test
     @DisplayName("resolveUserId – returns the userId for a known token")
     void resolveUserId_knownToken_returnsUserId() {
-        when(valueOps.get("auth:reset:tok-1")).thenReturn(userId.toString());
+        when(valueOps.get("auth:reset:" + TOK_1_HASH)).thenReturn(userId.toString());
 
         assertThat(service.resolveUserId("tok-1")).contains(userId);
     }
@@ -88,7 +93,7 @@ class PasswordResetTokenServiceTest {
     @Test
     @DisplayName("resolveUserId – returns empty for an unknown or expired token")
     void resolveUserId_unknownToken_returnsEmpty() {
-        when(valueOps.get("auth:reset:tok-1")).thenReturn(null);
+        when(valueOps.get("auth:reset:" + TOK_1_HASH)).thenReturn(null);
 
         assertThat(service.resolveUserId("tok-1")).isEqualTo(Optional.empty());
     }
@@ -101,6 +106,6 @@ class PasswordResetTokenServiceTest {
         ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
         verify(redis, org.mockito.Mockito.times(2)).delete(keys.capture());
         assertThat(keys.getAllValues()).containsExactly(
-                "auth:reset:tok-1", "auth:reset:user:" + userId);
+                "auth:reset:" + TOK_1_HASH, "auth:reset:user:" + userId);
     }
 }

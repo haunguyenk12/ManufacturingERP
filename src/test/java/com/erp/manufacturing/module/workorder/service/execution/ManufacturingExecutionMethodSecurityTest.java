@@ -8,6 +8,7 @@ import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.costing.service.ItemStandardCostLookupService;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
+import com.erp.manufacturing.module.inventory.service.InventoryLotLookupService;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.workorder.domain.QualityDispositionResult;
@@ -297,7 +298,7 @@ class ManufacturingExecutionMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq("PLANT"), eq(plantId))).thenReturn(false);
 
-        assertThatThrownBy(() -> materialIssueService.listByPlant(plantId, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> materialIssueService.listByPlant(plantId, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verify(permissionGuard).hasResourceAccess(
@@ -328,12 +329,13 @@ class ManufacturingExecutionMethodSecurityTest {
                                                   WorkOrderExecutionSupport support,
                                                   ManufacturingExecutionMapper mapper,
                                                   UserLookupService userLookupService,
-                                                  WorkOrderCostAccumulatorService costAccumulatorService) {
+                                                  WorkOrderCostAccumulatorService costAccumulatorService,
+                                                  InventoryLotLookupService inventoryLotLookupService) {
             return new MaterialIssueService(
                     issueRepository, issueLineRepository, reservationService, movementService,
                     wipTransactionService, workOrderPermissionGuard, support,
                     new IdempotencySupport(new ObjectMapper()), mapper, new TraceIdProvider(),
-                    userLookupService, costAccumulatorService);
+                    userLookupService, costAccumulatorService, inventoryLotLookupService);
         }
 
         @Bean
@@ -418,6 +420,7 @@ class ManufacturingExecutionMethodSecurityTest {
         }
 
         @Bean WorkOrderCostAccumulatorService workOrderCostAccumulatorService() { return mock(WorkOrderCostAccumulatorService.class); }
+        @Bean InventoryLotLookupService inventoryLotLookupService() { return mock(InventoryLotLookupService.class); }
         @Bean WorkOrderCostAccumulatorRepository workOrderCostAccumulatorRepository() { return mock(WorkOrderCostAccumulatorRepository.class); }
         @Bean ItemStandardCostLookupService itemStandardCostLookupService() { return mock(ItemStandardCostLookupService.class); }
         @Bean MaterialReservationRepository materialReservationRepository() { return mock(MaterialReservationRepository.class); }

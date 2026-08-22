@@ -32,7 +32,7 @@ public class ShiftController {
 
     private final ShiftService shiftService;
 
-    @PostMapping("/api/v1/plants/{plantId}/shifts")
+    @PostMapping("/v1/plants/{plantId}/shifts")
     @Operation(summary = "Create a shift under a plant")
     public ResponseEntity<ApiResponse<ShiftResponse>> create(
             @PathVariable UUID plantId, @Valid @RequestBody ShiftCreateRequest request) {
@@ -40,7 +40,7 @@ public class ShiftController {
                 .body(ApiResponse.created(shiftService.create(plantId, request)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}/shifts")
+    @GetMapping("/v1/plants/{plantId}/shifts")
     @Operation(summary = "List shifts of a plant")
     public ResponseEntity<ApiResponse<PageResult<ShiftResponse>>> list(
             @PathVariable UUID plantId,
@@ -53,13 +53,13 @@ public class ShiftController {
                 plantId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/shifts/{shiftId}")
+    @GetMapping("/v1/shifts/{shiftId}")
     @Operation(summary = "Get a shift")
     public ResponseEntity<ApiResponse<ShiftResponse>> get(@PathVariable UUID shiftId) {
         return ResponseEntity.ok(ApiResponse.ok(shiftService.get(shiftId)));
     }
 
-    @PatchMapping("/api/v1/shifts/{shiftId}")
+    @PatchMapping("/v1/shifts/{shiftId}")
     @Operation(summary = "Update name/time/breaks of a shift",
             description = "code and plantId are immutable after creation and are not part of this request body.")
     public ResponseEntity<ApiResponse<ShiftResponse>> update(
@@ -67,19 +67,19 @@ public class ShiftController {
         return ResponseEntity.ok(ApiResponse.ok(shiftService.update(shiftId, request)));
     }
 
-    @PostMapping("/api/v1/shifts/{shiftId}/activate")
+    @PostMapping("/v1/shifts/{shiftId}/activate")
     @Operation(summary = "Activate a shift")
     public ResponseEntity<ApiResponse<ShiftResponse>> activate(@PathVariable UUID shiftId) {
         return ResponseEntity.ok(ApiResponse.ok(shiftService.activate(shiftId)));
     }
 
-    @PostMapping("/api/v1/shifts/{shiftId}/deactivate")
+    @PostMapping("/v1/shifts/{shiftId}/deactivate")
     @Operation(summary = "Deactivate a shift")
     public ResponseEntity<ApiResponse<ShiftResponse>> deactivate(@PathVariable UUID shiftId) {
         return ResponseEntity.ok(ApiResponse.ok(shiftService.deactivate(shiftId)));
     }
 
-    @DeleteMapping("/api/v1/shifts/{shiftId}")
+    @DeleteMapping("/v1/shifts/{shiftId}")
     @Operation(summary = "Deactivate a shift (soft) — this IS the deactivate command",
             description = "Rule C6 forbids hard-deleting master data, so DELETE calls the same "
                     + "service method as POST .../deactivate; nothing is removed.")

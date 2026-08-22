@@ -40,6 +40,10 @@ public interface ItemWarehouseSettingRepository extends JpaRepository<ItemWareho
     List<ItemWarehouseSetting> findByWarehouseWarehouseIdInAndStatus(
             Collection<UUID> warehouseIds, ItemWarehouseSettingStatus status);
 
+    @EntityGraph(attributePaths = {"item", "warehouse", "warehouse.plant"})
+    List<ItemWarehouseSetting> findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+            UUID itemId, UUID plantId, ItemWarehouseSettingStatus status);
+
     @Query("""
             select s.item.itemId as itemId,
                    coalesce(sum(s.safetyStock), 0) as safetyStockQuantity,

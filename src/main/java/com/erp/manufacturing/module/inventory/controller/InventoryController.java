@@ -21,7 +21,7 @@ public class InventoryController {
 
     private final InventoryService inventoryService;
 
-    @PostMapping("/api/v1/inventory/receive")
+    @PostMapping("/v1/inventory/receive")
     @Operation(summary = "Receive stock")
     public ResponseEntity<ApiResponse<StockMovementResponse>> receive(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -29,7 +29,7 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.receive(request, idempotencyKey)));
     }
 
-    @PostMapping("/api/v1/inventory/issue")
+    @PostMapping("/v1/inventory/issue")
     @Operation(summary = "Issue stock")
     public ResponseEntity<ApiResponse<StockMovementResponse>> issue(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -37,7 +37,7 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.issue(request, idempotencyKey)));
     }
 
-    @PostMapping("/api/v1/inventory/adjust")
+    @PostMapping("/v1/inventory/adjust")
     @Operation(summary = "Adjust stock")
     public ResponseEntity<ApiResponse<StockMovementResponse>> adjust(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -45,7 +45,7 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.adjust(request, idempotencyKey)));
     }
 
-    @GetMapping("/api/v1/inventory/balances")
+    @GetMapping("/v1/inventory/balances")
     @Operation(summary = "List stock balances")
     public ResponseEntity<ApiResponse<PageResult<StockBalanceResponse>>> listBalances(
             @RequestParam UUID warehouseId,
@@ -58,7 +58,20 @@ public class InventoryController {
                 warehouseId, itemId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/inventory/movements")
+    @GetMapping("/v1/inventory/balances/aggregate")
+    @Operation(summary = "List aggregate stock balances (one row per item and warehouse)")
+    public ResponseEntity<ApiResponse<PageResult<StockBalanceAggregateResponse>>> listAggregateBalances(
+            @RequestParam UUID warehouseId,
+            @RequestParam(required = false) UUID itemId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "updatedAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+        return ResponseEntity.ok(ApiResponse.ok(inventoryService.listAggregateBalances(
+                warehouseId, itemId, PageableFactory.of(page, size, sortBy, sortDir))));
+    }
+
+    @GetMapping("/v1/inventory/movements")
     @Operation(summary = "List stock movements")
     public ResponseEntity<ApiResponse<PageResult<StockMovementResponse>>> listMovements(
             @RequestParam UUID warehouseId,

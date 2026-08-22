@@ -102,7 +102,7 @@ class WorkOrderControllerTest {
     void createWorkOrder_validRequest_returns201Created() throws Exception {
         when(workOrderService.create(eq(PLANT_ID), any())).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-orders")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"workOrderNo":"WO-001","productItemId":"%s","outputWarehouseId":"%s","plannedQuantity":10}
@@ -115,7 +115,7 @@ class WorkOrderControllerTest {
     @Test
     @DisplayName("create: missing required field fails @Valid before reaching the service")
     void createWorkOrder_missingRequiredField_returns400ValidationFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-orders")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"workOrderNo":"WO-001"}
@@ -131,7 +131,7 @@ class WorkOrderControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Reservation does not fully cover component requirements"));
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/release"))
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/release"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -141,7 +141,7 @@ class WorkOrderControllerTest {
     void closeWorkOrder_completed_returns200() throws Exception {
         when(workOrderService.close(WORK_ORDER_ID)).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/close"))
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/close"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.workOrderId").value(WORK_ORDER_ID.toString()));
@@ -154,7 +154,7 @@ class WorkOrderControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only completed work orders can be closed"));
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/close"))
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/close"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -169,7 +169,7 @@ class WorkOrderControllerTest {
     void getWorkOrder_componentLineCarriesUomAndReservedQuantity() throws Exception {
         when(workOrderService.get(WORK_ORDER_ID)).thenReturn(responseWithComponentLine());
 
-        mockMvc.perform(get("/api/v1/work-orders/" + WORK_ORDER_ID))
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.componentLines[0].uom").value("KG"))
@@ -209,7 +209,7 @@ class WorkOrderControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "WorkOrder not found with id: " + WORK_ORDER_ID));
 
-        mockMvc.perform(get("/api/v1/work-orders/" + WORK_ORDER_ID))
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -222,7 +222,7 @@ class WorkOrderControllerTest {
         when(workOrderService.issueComponent(eq(WORK_ORDER_ID), any(WorkOrderComponentIssueRequest.class), eq("KEY-1")))
                 .thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/component-issues")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/component-issues")
                         .header("Idempotency-Key", "KEY-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -242,7 +242,7 @@ class WorkOrderControllerTest {
         when(workOrderService.issueComponent(eq(WORK_ORDER_ID), any(WorkOrderComponentIssueRequest.class), isNull()))
                 .thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/component-issues")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/component-issues")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"componentLineId":"%s","warehouseId":"%s","quantity":5}

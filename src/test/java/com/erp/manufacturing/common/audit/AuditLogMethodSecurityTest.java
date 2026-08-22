@@ -1,5 +1,6 @@
 package com.erp.manufacturing.common.audit;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -112,9 +113,12 @@ class AuditLogMethodSecurityTest {
 
         @Bean
         AuditLogQueryService auditLogQueryService(AuditLogRepository auditLogRepository,
-                                                   AuditLogChangeRepository auditLogChangeRepository) {
-            return new AuditLogQueryService(auditLogRepository, auditLogChangeRepository);
+                                                   AuditLogChangeRepository auditLogChangeRepository,
+                                                   ObjectMapper objectMapper) {
+            return new AuditLogQueryService(auditLogRepository, auditLogChangeRepository, objectMapper);
         }
+
+        @Bean ObjectMapper objectMapper() { return new ObjectMapper(); }
 
         @Bean(name = "permissionGuard")
         PermissionGuard permissionGuard() { return mock(PermissionGuard.class); }

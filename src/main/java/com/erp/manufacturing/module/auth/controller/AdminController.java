@@ -19,14 +19,14 @@ import java.util.UUID;
  * {@code UserService} uses for its own ADMIN-only endpoints.
  */
 @RestController
-@RequestMapping("/api/v1/admin/users")
+@RequestMapping("/admin/users")
 @RequiredArgsConstructor
 @Tag(name = "Admin", description = "Administrative account recovery actions")
 public class AdminController {
 
     private final AuthService authService;
 
-    @PatchMapping("/{userId}/unlock")
+    @PatchMapping("/v1/{userId}/unlock")
     @Operation(summary = "Manually unlock a user account (ADMIN only)",
             description = "Clears the Redis brute-force fail-counter and reactivates the account.")
     public ResponseEntity<ApiResponse<Void>> unlock(@PathVariable UUID userId) {

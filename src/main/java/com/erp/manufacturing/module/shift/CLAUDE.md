@@ -48,14 +48,34 @@ C2-7 §1.4 vẫn đúng: không có endpoint public, chỉ module khác gọi v�
 trước"). Cả ba đều **đọc-only** (rule C7, không có `@PreAuthorize` — caller đã tự authorize trên
 plant của mình). Chi tiết: `CLAUDE.md §0.30`.
 
-### 4. `WorkCalendarRepository.findWithWeeklyShiftsByWorkCalendarId` cố ý KHÔNG fetch `exceptions`
+### 4. `WorkCalendarRepository.findWithWeeklyShiftsByWorkCalendarId` chỉ được join-fetch ĐÚNG MỘT bag
 
-`weeklyShifts` và `exceptions` đều là `List` (bag) trên `WorkCalendar`. Join-fetch cả hai trong cùng
-một `@EntityGraph`/JPQL ném `MultipleBagFetchException` — đúng cái bẫy `C2-4` đã gặp giữa
-`operations`/`componentLines` (`CLAUDE.md §0.27` hệ quả #1). `exceptions` được để lazy-load trong
-cùng transaction thay vì fetch cùng lúc — đây là **một** aggregate detail, không phải report lặp
-theo dòng, nên rule C14 không áp dụng. Đừng "gộp lại cho gọn" bằng cách thêm `exceptions` vào cùng
-`@EntityGraph`.
+Aggregate này chạm tới **ba** collection `List` (bag): `WorkCalendar.weeklyShifts`,
+`WorkCalendar.exceptions`, và **`Shift.breaks` — nằm xa hơn một association**. Hibernate chỉ cho
+join-fetch một bag trong một câu query; hai cái còn lại phải lazy-load trong cùng transaction
+(`WorkCalendarLookupService.loadWithExceptions`). Đây là **một** aggregate detail, không phải report
+lặp theo dòng, nên rule C14 không áp dụng.
+
+🔴 **Đã vi phạm một lần và gây lỗi P0 (sửa 2026-08-14, `CLAUDE.md §0.45`).** `@EntityGraph` từng liệt
+kê `"weeklyShifts.shift.breaks"` cạnh `"weeklyShifts"` ⇒ **mọi** `POST /work-orders/{id}/release` mà
+tổ sản xuất có gắn lịch, và lịch đó dùng ca **có giờ nghỉ**, đều trả **500
+`INTERNAL_SERVER_ERROR`** (`MultipleBagFetchException`). Tức là mọi lịch nhà máy thực tế. Không test
+nào bắt được: unit test mock repository nên không bao giờ dựng câu query, còn các `*IT` có sẵn tuy
+có ca nhưng **không ca nào có break** nên bag thứ hai chưa từng bị chạm tới. Guard hiện nay:
+**`WorkCalendarLookupServiceIT`** (4 case, class IT thứ 18) — nghiệm thu mutation: trả `.breaks` vào
+graph ⇒ **4/4 case đỏ** đúng thông báo lỗi production.
+
+Đây là lần **thứ ba** repo dính đúng bẫy này: `C2-4` (`operations` + `componentLines`, `§0.27`),
+`C2-7` (`weeklyShifts` + `exceptions`, `§0.29`), rồi lần này. **Bài học riêng của lần thứ ba:** hai
+lần trước cả hai bag đều nằm trên **cùng** entity nên nhìn là thấy; lần này bag thứ hai nằm cách một
+association (`weeklyShifts.shift.breaks`), nên "đọc lướt entity graph" không đủ. Trước khi thêm bất
+kỳ path nào vào graph này, **đi hết association và hỏi path đó có giải ra `List` không**.
+
+⚠️ **Không thêm lệnh `.size()` cho `shift.breaks` trong `loadWithExceptions`.** Bản nháp của lần sửa
+đó có thêm, và mutation đã bác bỏ: bỏ vòng lặp đi thì **cả 4 case vẫn xanh**, vì
+`WorkingWindowCalculator` chạy trong đúng transaction đó và tự trigger load, với đúng số query như
+nhau. Nó chỉ là code trông giống biện pháp an toàn. (`exceptions` giữ lệnh `.size()` có sẵn từ
+`C2-7` — nằm ngoài phạm vi bản sửa.)
 
 ### 5. `WorkCalendarUpdateRequest.effectiveTo` / `WorkCenterUpdateRequest.workCalendarId`: `null` = "không đổi", không có đường "xoá về trống"
 

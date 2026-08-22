@@ -44,6 +44,10 @@ public class User extends BaseEntity {
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
 
+    @Column(name = "auth_version", nullable = false)
+    @Builder.Default
+    private long authVersion = 0L;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_roles",
@@ -69,5 +73,9 @@ public class User extends BaseEntity {
 
     public void activate() {
         this.status = UserStatus.ACTIVE;
+    }
+
+    public void revokeAllSessions() {
+        this.authVersion++;
     }
 }

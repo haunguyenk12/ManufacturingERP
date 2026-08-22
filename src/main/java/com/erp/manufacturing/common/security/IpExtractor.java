@@ -35,7 +35,7 @@ public class IpExtractor {
             try {
                 trustedRanges.add(CidrRange.parse(cidr));
             } catch (Exception e) {
-                // Log and skip invalid CIDR – don't fail startup
+                throw new IllegalStateException("Invalid trusted proxy CIDR: " + cidr, e);
             }
         }
     }
@@ -58,9 +58,15 @@ public class IpExtractor {
         if (xff == null || xff.isBlank()) {
             return remoteAddr;
         }
+        if (xff.length() > 2048) {
+            return remoteAddr;
+        }
 
         // XFF: "client, proxy1, proxy2" – traverse right-to-left
         String[] hops = xff.split(",");
+        if (hops.length > 20) {
+            return remoteAddr;
+        }
         for (int i = hops.length - 1; i >= 0; i--) {
             String ip = hops[i].trim();
             if (isValidIp(ip) && !isTrusted(ip)) {
@@ -77,7 +83,18 @@ public class IpExtractor {
     }
 
     private boolean isValidIp(String ip) {
-        return ip.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || ip.contains(":");
+        return isValidAddressLiteral(ip);
+    }
+
+    private static boolean isValidAddressLiteral(String ip) {
+        if (ip == null || ip.isBlank()) return false;
+        if (ip.contains(":")) return ip.matches("^[0-9a-fA-F:.]+$");
+        String[] octets = ip.split("\\.", -1);
+        if (octets.length != 4) return false;
+        for (String octet : octets) {
+            if (!octet.matches("\\d{1,3}") || Integer.parseInt(octet) > 255) return false;
+        }
+        return true;
     }
 
     // ── Simple CIDR range implementation ───────────────────────────────────
@@ -88,15 +105,23 @@ public class IpExtractor {
             if (!cidr.contains("/")) {
                 // Exact IP
                 try {
-                    return new CidrRange(InetAddress.getByName(cidr).getAddress(), 32);
+                    if (!isValidAddressLiteral(cidr)) throw new IllegalArgumentException("Invalid IP: " + cidr);
+                    byte[] address = InetAddress.getByName(cidr).getAddress();
+                    return new CidrRange(address, address.length * 8);
                 } catch (UnknownHostException e) {
                     throw new IllegalArgumentException("Invalid IP: " + cidr);
                 }
             }
             String[] parts = cidr.split("/");
             try {
+                if (parts.length != 2 || !isValidAddressLiteral(parts[0])) {
+                    throw new IllegalArgumentException("Invalid CIDR: " + cidr);
+                }
                 byte[] addr   = InetAddress.getByName(parts[0]).getAddress();
                 int    prefix = Integer.parseInt(parts[1]);
+                if (prefix < 0 || prefix > addr.length * 8) {
+                    throw new IllegalArgumentException("Invalid CIDR prefix: " + cidr);
+                }
                 return new CidrRange(addr, prefix);
             } catch (UnknownHostException e) {
                 throw new IllegalArgumentException("Invalid CIDR: " + cidr);
@@ -105,6 +130,7 @@ public class IpExtractor {
 
         boolean contains(String ip) {
             try {
+                if (!isValidAddressLiteral(ip)) return false;
                 byte[] target = InetAddress.getByName(ip).getAddress();
                 if (target.length != networkAddress.length) return false;
                 int bits = prefixLength;

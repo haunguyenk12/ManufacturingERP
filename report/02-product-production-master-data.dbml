@@ -1,0 +1,329 @@
+Project manufacturing_erp_02_product_production_master_data {
+  database_type: 'PostgreSQL'
+  Note: 'Manufacturing ERP 02-product-production-master-data module. Source: live PostgreSQL schema after Flyway V65 (add entity name to audit logs). External tables are relationship-only stubs.'
+}
+
+Table uoms {
+  uom_id uuid [pk, not null, default: `gen_random_uuid()`]
+  code varchar(20) [not null, unique]
+  name varchar(100) [not null]
+  description text
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_uoms_status']
+  }
+}
+
+Table items {
+  item_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(100) [not null]
+  name varchar(255) [not null]
+  type varchar(50) [not null]
+  unit varchar(30) [not null]
+  lot_tracked boolean [not null, default: false]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  serial_tracked boolean [not null, default: false]
+
+  indexes {
+    (company_id, code) [unique, name: 'uk_items_company_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_items_status']
+    `NOT (lot_tracked AND serial_tracked)` [name: 'chk_items_tracking_exclusive']
+    `type::text = ANY (ARRAY['RAW_MATERIAL'::character varying, 'WIP'::character varying, 'FINISHED_GOOD'::character varying, 'CONSUMABLE'::character varying, 'SERVICE'::character varying]::text[])` [name: 'chk_items_type']
+  }
+}
+
+Table bom_headers {
+  bom_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  parent_item_id uuid [not null]
+  revision varchar(40) [not null]
+  status varchar(20) [not null, default: 'DRAFT']
+  description text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (company_id, parent_item_id, revision) [unique, name: 'uk_bom_headers_company_parent_revision']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_bom_headers_status']
+  }
+}
+
+Table bom_lines {
+  line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  bom_id uuid [not null]
+  component_item_id uuid [not null]
+  line_no integer [not null]
+  quantity_per numeric(19,6) [not null]
+  scrap_rate numeric(9,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (bom_id, component_item_id) [unique, name: 'uk_bom_lines_bom_component']
+    (bom_id, line_no) [unique, name: 'uk_bom_lines_bom_line_no']
+  }
+
+  checks {
+    `quantity_per > 0::numeric` [name: 'chk_bom_lines_quantity']
+    `scrap_rate >= 0::numeric AND scrap_rate < 1::numeric` [name: 'chk_bom_lines_scrap_rate']
+  }
+}
+
+Table routings {
+  routing_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  item_id uuid [not null]
+  code varchar(100) [not null]
+  routing_version varchar(40) [not null]
+  status varchar(20) [not null, default: 'DRAFT']
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (company_id, code, routing_version) [unique, name: 'uk_routings_company_code_version']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_routings_status']
+  }
+}
+
+Table routing_operations {
+  routing_operation_id uuid [pk, not null, default: `gen_random_uuid()`]
+  routing_id uuid [not null]
+  sequence integer [not null]
+  name varchar(255) [not null]
+  work_center_code varchar(100)
+  setup_minutes numeric(19,6) [not null, default: 0]
+  run_minutes_per_unit numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  work_center_id uuid
+
+  indexes {
+    (routing_id, sequence) [unique, name: 'uk_routing_operations_sequence']
+  }
+
+  checks {
+    `run_minutes_per_unit >= 0::numeric` [name: 'chk_routing_operations_run']
+    `sequence > 0` [name: 'chk_routing_operations_sequence']
+    `setup_minutes >= 0::numeric` [name: 'chk_routing_operations_setup']
+  }
+}
+
+Table work_centers {
+  work_center_id uuid [pk, not null, default: `gen_random_uuid()`]
+  plant_id uuid [not null]
+  code varchar(100) [not null]
+  name varchar(255) [not null]
+  description text
+  capacity_unit_type varchar(20) [not null]
+  capacity_units integer [not null]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  work_calendar_id uuid
+
+  indexes {
+    (plant_id, code) [unique, name: 'uk_work_centers_plant_code']
+  }
+
+  checks {
+    `capacity_unit_type::text = ANY (ARRAY['MACHINE'::character varying, 'LINE'::character varying, 'LABOR_TEAM'::character varying]::text[])` [name: 'chk_work_centers_capacity_unit_type']
+    `capacity_units > 0` [name: 'chk_work_centers_capacity_units']
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_work_centers_status']
+  }
+}
+
+Table shifts {
+  shift_id uuid [pk, not null, default: `gen_random_uuid()`]
+  plant_id uuid [not null]
+  code varchar(100) [not null]
+  name varchar(255) [not null]
+  start_time time [not null]
+  end_time time [not null]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (plant_id, code) [unique, name: 'uk_shifts_plant_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_shifts_status']
+  }
+}
+
+Table shift_breaks {
+  shift_break_id uuid [pk, not null, default: `gen_random_uuid()`]
+  shift_id uuid [not null]
+  start_time time [not null]
+  end_time time [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+}
+
+Table work_calendars {
+  work_calendar_id uuid [pk, not null, default: `gen_random_uuid()`]
+  plant_id uuid [not null]
+  code varchar(100) [not null]
+  name varchar(255) [not null]
+  effective_from date [not null]
+  effective_to date
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (plant_id, code) [unique, name: 'uk_work_calendars_plant_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_work_calendars_status']
+  }
+}
+
+Table work_calendar_weekly_shifts {
+  work_calendar_weekly_shift_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_calendar_id uuid [not null]
+  weekday varchar(10) [not null]
+  shift_id uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (work_calendar_id, weekday, shift_id) [unique, name: 'uk_work_calendar_weekly_shifts']
+  }
+
+  checks {
+    `weekday::text = ANY (ARRAY['MONDAY'::character varying, 'TUESDAY'::character varying, 'WEDNESDAY'::character varying, 'THURSDAY'::character varying, 'FRIDAY'::character varying, 'SATURDAY'::character varying, 'SUNDAY'::character varying]::text[])` [name: 'chk_work_calendar_weekly_shifts_weekday']
+  }
+}
+
+Table work_calendar_exceptions {
+  work_calendar_exception_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_calendar_id uuid [not null]
+  exception_date date [not null]
+  reason varchar(255)
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (work_calendar_id, exception_date) [unique, name: 'uk_work_calendar_exceptions']
+  }
+}
+
+Table item_standard_costs {
+  item_standard_cost_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  item_id uuid [not null, unique]
+  material_cost numeric(19,6) [not null, default: 0]
+  labor_cost numeric(19,6) [not null, default: 0]
+  overhead_cost numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `labor_cost >= 0::numeric` [name: 'chk_item_standard_costs_labor_cost']
+    `material_cost >= 0::numeric` [name: 'chk_item_standard_costs_material_cost']
+    `overhead_cost >= 0::numeric` [name: 'chk_item_standard_costs_overhead_cost']
+  }
+}
+
+Table companies [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  company_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table plants [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  plant_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Ref bom_headers_company_id_fkey: bom_headers.company_id > companies.company_id
+Ref bom_headers_parent_item_id_fkey: bom_headers.parent_item_id > items.item_id
+Ref bom_lines_bom_id_fkey: bom_lines.bom_id > bom_headers.bom_id [delete: cascade]
+Ref bom_lines_component_item_id_fkey: bom_lines.component_item_id > items.item_id
+Ref item_standard_costs_company_id_fkey: item_standard_costs.company_id > companies.company_id
+Ref item_standard_costs_item_id_fkey: item_standard_costs.item_id - items.item_id
+Ref items_company_id_fkey: items.company_id > companies.company_id
+Ref routing_operations_routing_id_fkey: routing_operations.routing_id > routings.routing_id
+Ref routing_operations_work_center_id_fkey: routing_operations.work_center_id > work_centers.work_center_id
+Ref routings_company_id_fkey: routings.company_id > companies.company_id
+Ref routings_item_id_fkey: routings.item_id > items.item_id
+Ref shift_breaks_shift_id_fkey: shift_breaks.shift_id > shifts.shift_id
+Ref shifts_plant_id_fkey: shifts.plant_id > plants.plant_id
+Ref work_calendar_exceptions_work_calendar_id_fkey: work_calendar_exceptions.work_calendar_id > work_calendars.work_calendar_id
+Ref work_calendar_weekly_shifts_shift_id_fkey: work_calendar_weekly_shifts.shift_id > shifts.shift_id
+Ref work_calendar_weekly_shifts_work_calendar_id_fkey: work_calendar_weekly_shifts.work_calendar_id > work_calendars.work_calendar_id
+Ref work_calendars_plant_id_fkey: work_calendars.plant_id > plants.plant_id
+Ref work_centers_plant_id_fkey: work_centers.plant_id > plants.plant_id
+Ref work_centers_work_calendar_id_fkey: work_centers.work_calendar_id > work_calendars.work_calendar_id
+
+TableGroup module_02_product_production_master_data {
+  uoms
+  items
+  bom_headers
+  bom_lines
+  routings
+  routing_operations
+  work_centers
+  shifts
+  shift_breaks
+  work_calendars
+  work_calendar_weekly_shifts
+  work_calendar_exceptions
+  item_standard_costs
+}
+

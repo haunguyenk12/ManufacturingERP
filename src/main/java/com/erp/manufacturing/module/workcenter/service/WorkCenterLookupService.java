@@ -9,7 +9,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Entry point for other modules that need Work Center master data (rule C7) — {@code routing} uses
@@ -34,5 +38,14 @@ public class WorkCenterLookupService {
                     "Inactive work center cannot be used: " + workCenterId);
         }
         return workCenter;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, WorkCenter> findWorkCentersByCode(UUID plantId, Collection<String> codes) {
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+        return workCenterRepository.findByPlantPlantIdAndCodeIn(plantId, codes).stream()
+                .collect(Collectors.toMap(WorkCenter::getCode, Function.identity()));
     }
 }

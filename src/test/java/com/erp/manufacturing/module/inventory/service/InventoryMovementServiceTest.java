@@ -131,6 +131,65 @@ class InventoryMovementServiceTest {
     }
 
     @Test
+    void receive_nonTrackedItemWithHoldStatus_increasesOnHandAndQualityHoldButNotAvailable() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-NONTRACKED-HOLD", MovementType.RECEIVE))
+                .thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(itemId, warehouseId))
+                .thenReturn(Optional.empty());
+        when(balanceRepository.save(any(StockBalance.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.receive(new InventoryReceiveCommand(
+                        itemId, warehouseId, null, null, new BigDecimal("5"), null,
+                        "WORK_ORDER", "WO-1", null, null),
+                "KEY-NONTRACKED-HOLD", LotStatus.HOLD);
+
+        ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
+        verify(balanceRepository).save(balanceCaptor.capture());
+        StockBalance balance = balanceCaptor.getValue();
+        assertThat(balance.getQuantity()).isEqualByComparingTo("5");
+        assertThat(balance.getReservedQuantity()).isEqualByComparingTo("0");
+        assertThat(balance.getQualityHoldQuantity()).isEqualByComparingTo("5");
+        assertThat(balance.availableQuantity()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void releaseQualityHold_nonTrackedStock_makesItAvailableWithoutChangingOnHand() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        StockBalance balance = StockBalance.builder()
+                .item(item)
+                .warehouse(warehouse)
+                .quantity(new BigDecimal("8"))
+                .qualityHoldQuantity(new BigDecimal("5"))
+                .build();
+
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(itemId, warehouseId))
+                .thenReturn(Optional.of(balance));
+
+        service.releaseQualityHold(itemId, warehouseId, new BigDecimal("5"));
+
+        assertThat(balance.getQuantity()).isEqualByComparingTo("8");
+        assertThat(balance.getQualityHoldQuantity()).isEqualByComparingTo("0");
+        assertThat(balance.availableQuantity()).isEqualByComparingTo("8");
+        verify(balanceRepository).save(balance);
+        verifyNoInteractions(movementRepository);
+    }
+
+    @Test
     void receive_existingLot_shouldKeepCurrentLotStatus() {
         UUID companyId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();

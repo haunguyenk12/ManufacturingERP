@@ -451,12 +451,10 @@ Output lots created by approval open in `LotStatus.HOLD`, which is what unlocks 
 (Quality Control): QC only has to add the `HOLD → AVAILABLE / REJECTED` workflow.
 
 **Known limitations (P1, accepted):**
-1. An item that is not lot-tracked has nowhere to carry `HOLD`, so its output is immediately
-   usable. ~~P2 quality control therefore applies to lot-tracked output only.~~ **Superseded by `D5`
-   (2026-07-30):** QC now runs on that output too, ruling on the *receipt* instead of on a lot —
-   `AVAILABLE` changes no stock (it was already usable) and only unlocks fulfilment, while `REJECTED`
-   withdraws the goods with an `ADJUST_OUT` movement. Restricting QC to lot-tracked output left every
-   non-lot-tracked finished good unable to fulfil a sales order (debt #17). See `CLAUDE.md §0.13`.
+1. An item that is not lot-tracked has no lot status to carry `HOLD`. `D5` enabled QC on its receipt;
+   `FE4-5B3` added `stock_balances.quality_hold_quantity` as the inventory-side carrier. Approval
+   increases on-hand while available remains zero. `AVAILABLE` releases the hold and unlocks
+   fulfilment; `REJECTED` leaves the goods on hand and held for traceability.
 2. An already-existing lot (same `lotCode`) keeps its current status — only newly created lots
    receive `HOLD`. Business recommendation: use a fresh `lotCode` per production receipt.
 

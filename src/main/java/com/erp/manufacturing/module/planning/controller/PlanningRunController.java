@@ -38,17 +38,25 @@ public class PlanningRunController {
     private final SupplySuggestionService supplySuggestionService;
     private final PlantContextResolver plantContextResolver;
 
-    @PostMapping("/api/v1/planning-runs")
-    @Operation(summary = "Run MRP synchronously")
+    @PostMapping("/v1/planning-runs")
+    @Operation(summary = "Run MRP synchronously",
+            description = """
+                    Optional Idempotency-Key: replaying the same key with the same body returns the
+                    run created the first time instead of computing a second one over the same
+                    demand. Replaying it with a different body is 409 IDEMPOTENCY_CONFLICT. Sending
+                    no key keeps the previous behaviour — every call starts a new run.
+
+                    A run that ended FAILED still owns its key; retry it with a new key.""")
     public ResponseEntity<ApiResponse<MrpRunResponse>> run(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody MrpRunCreateRequest request) {
         plantContextResolver.ensureMatches(plantHeader, request.plantId());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(mrpRunService.run(request)));
+                .body(ApiResponse.created(mrpRunService.run(request, idempotencyKey)));
     }
 
-    @GetMapping("/api/v1/planning-runs")
+    @GetMapping("/v1/planning-runs")
     @Operation(summary = "List planning runs")
     public ResponseEntity<ApiResponse<PageResult<MrpRunResponse>>> listRuns(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
@@ -65,13 +73,13 @@ public class PlanningRunController {
                 companyId, plantId, warehouseId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/planning-runs/{runId}")
+    @GetMapping("/v1/planning-runs/{runId}")
     @Operation(summary = "Get planning run")
     public ResponseEntity<ApiResponse<MrpRunResponse>> getRun(@PathVariable UUID runId) {
         return ResponseEntity.ok(ApiResponse.ok(mrpRunService.get(runId)));
     }
 
-    @GetMapping("/api/v1/planning-runs/{runId}/requirements")
+    @GetMapping("/v1/planning-runs/{runId}/requirements")
     @Operation(summary = "List planning run requirement lines")
     public ResponseEntity<ApiResponse<PageResult<MrpRequirementLineResponse>>> listRequirements(
             @PathVariable UUID runId,
@@ -83,7 +91,7 @@ public class PlanningRunController {
                 runId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/planning-runs/{runId}/suggestions")
+    @GetMapping("/v1/planning-runs/{runId}/suggestions")
     @Operation(summary = "List planning run supply suggestions")
     public ResponseEntity<ApiResponse<PageResult<SupplySuggestionResponse>>> listSuggestions(
             @PathVariable UUID runId,
@@ -95,7 +103,7 @@ public class PlanningRunController {
                 runId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/supply-suggestions/{suggestionId}/approve")
+    @PostMapping("/v1/supply-suggestions/{suggestionId}/approve")
     @Operation(summary = "Approve supply suggestion")
     public ResponseEntity<ApiResponse<SupplySuggestionResponse>> approveSuggestion(
             @PathVariable UUID suggestionId,
@@ -103,7 +111,7 @@ public class PlanningRunController {
         return ResponseEntity.ok(ApiResponse.ok(supplySuggestionService.approve(suggestionId, request)));
     }
 
-    @PostMapping("/api/v1/supply-suggestions/{suggestionId}/reject")
+    @PostMapping("/v1/supply-suggestions/{suggestionId}/reject")
     @Operation(summary = "Reject supply suggestion")
     public ResponseEntity<ApiResponse<SupplySuggestionResponse>> rejectSuggestion(
             @PathVariable UUID suggestionId,
@@ -111,7 +119,7 @@ public class PlanningRunController {
         return ResponseEntity.ok(ApiResponse.ok(supplySuggestionService.reject(suggestionId, request)));
     }
 
-    @PostMapping("/api/v1/supply-suggestions/{suggestionId}/convert-to-work-order")
+    @PostMapping("/v1/supply-suggestions/{suggestionId}/convert-to-work-order")
     @Operation(summary = "Convert approved MAKE suggestion to work order")
     public ResponseEntity<ApiResponse<SupplySuggestionResponse>> convertSuggestionToWorkOrder(
             @PathVariable UUID suggestionId,

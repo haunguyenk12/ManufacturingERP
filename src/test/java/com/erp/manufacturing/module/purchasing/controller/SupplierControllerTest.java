@@ -102,7 +102,7 @@ class SupplierControllerTest {
     void create_validRequest_returns201Created() throws Exception {
         when(supplierService.create(any(SupplierCreateRequest.class))).thenReturn(sampleSupplier("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/suppliers")
+        mockMvc.perform(post("/v1/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody()))
                 .andExpect(status().isCreated())
@@ -115,7 +115,7 @@ class SupplierControllerTest {
     @Test
     @DisplayName("create: invalid email returns 400 VALIDATION_ERROR with the field name")
     void create_invalidEmail_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/suppliers")
+        mockMvc.perform(post("/v1/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"companyId":"%s","code":"SUP-001","name":"Acme Steel","email":"not-an-email"}
@@ -133,7 +133,7 @@ class SupplierControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "Supplier code already exists: SUP-001"));
 
-        mockMvc.perform(post("/api/v1/suppliers")
+        mockMvc.perform(post("/v1/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody()))
                 .andExpect(status().is(ValidationErrorCode.RESOURCE_ALREADY_EXISTS.status().value()))
@@ -149,7 +149,7 @@ class SupplierControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Only one active preferred supplier is allowed for an item"));
 
-        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/suppliers")
+        mockMvc.perform(post("/v1/items/" + ITEM_ID + "/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"supplierId":"%s","preferred":true,"currencyCode":"USD"}
@@ -166,7 +166,7 @@ class SupplierControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Inactive supplier cannot be used: " + SUPPLIER_ID));
 
-        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/suppliers")
+        mockMvc.perform(post("/v1/items/" + ITEM_ID + "/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"supplierId":"%s","currencyCode":"USD"}
@@ -181,7 +181,7 @@ class SupplierControllerTest {
         when(supplierService.addItemSupplier(eq(ITEM_ID), any(ItemSupplierRequest.class)))
                 .thenReturn(sampleItemSupplier());
 
-        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/suppliers")
+        mockMvc.perform(post("/v1/items/" + ITEM_ID + "/suppliers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"supplierId":"%s","preferred":true,"currencyCode":"USD","leadTimeDays":7}
@@ -199,7 +199,7 @@ class SupplierControllerTest {
         when(supplierService.list(eq(COMPANY_ID), eq(null), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleSupplier("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/suppliers").param("companyId", COMPANY_ID.toString()))
+        mockMvc.perform(get("/v1/suppliers").param("companyId", COMPANY_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("SUP-001"))

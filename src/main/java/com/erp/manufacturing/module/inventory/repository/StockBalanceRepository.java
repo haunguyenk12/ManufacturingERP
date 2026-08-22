@@ -24,6 +24,40 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
 
     Page<StockBalance> findByWarehouseWarehouseIdAndItemItemId(UUID warehouseId, UUID itemId, Pageable pageable);
 
+    @Query(value = """
+            select b.item.itemId as itemId,
+                   b.item.code as itemCode,
+                   b.item.name as itemName,
+                   b.item.unit as uom,
+                   b.warehouse.warehouseId as warehouseId,
+                   coalesce(sum(b.quantity), 0) as onHandQuantity,
+                   coalesce(sum(b.reservedQuantity), 0) as reservedQuantity,
+                   coalesce(sum(case when l is null or l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.AVAILABLE
+                                     then b.quantity - b.reservedQuantity - b.qualityHoldQuantity else 0 end), 0)
+                       as availableQuantity,
+                   coalesce(sum(b.qualityHoldQuantity), 0) as qualityHoldQuantity,
+                   coalesce(sum(case when l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.REJECTED
+                                     then b.quantity else 0 end), 0) as rejectedQuantity,
+                   coalesce(sum(case when l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.EXPIRED
+                                     then b.quantity else 0 end), 0) as expiredQuantity,
+                   count(distinct l.lotId) as lotCount,
+                   max(b.updatedAt) as updatedAt
+            from StockBalance b
+            left join b.lot l
+            where b.warehouse.warehouseId = :warehouseId
+              and (:itemId is null or b.item.itemId = :itemId)
+            group by b.item.itemId, b.item.code, b.item.name, b.item.unit, b.warehouse.warehouseId
+            """, countQuery = """
+            select count(distinct b.item.itemId)
+            from StockBalance b
+            where b.warehouse.warehouseId = :warehouseId
+              and (:itemId is null or b.item.itemId = :itemId)
+            """)
+    Page<StockBalanceAggregateProjection> aggregateBalances(
+            @Param("warehouseId") UUID warehouseId,
+            @Param("itemId") UUID itemId,
+            Pageable pageable);
+
     /**
      * All warehouse rows for one lot (C2-2). {@code uk_stock_balances_item_warehouse_lot} is unique
      * per {@code (item, warehouse, lot)}, not per {@code (item, lot)} — a lot can legitimately have
@@ -84,7 +118,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             where b.item.itemId = :itemId
               and b.warehouse.warehouseId in :warehouseIds
               and (l is null or l.status = :availableStatus)
-              and b.quantity - b.reservedQuantity > 0
+              and b.quantity - b.reservedQuantity - b.qualityHoldQuantity > 0
             order by l.expiresAt asc nulls last, l.receivedAt asc nulls last, b.createdAt asc
             """)
     List<StockBalance> findIssuableBalancesFefo(@Param("itemId") UUID itemId,
@@ -97,7 +131,8 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
      * ({@code lot_id IS NULL}) before the {@code l is null} branch can match it — violating B3.
      */
     @Query("""
-            select b.item.itemId as itemId, coalesce(sum(b.quantity - b.reservedQuantity), 0) as quantity
+            select b.item.itemId as itemId,
+                   coalesce(sum(b.quantity - b.reservedQuantity - b.qualityHoldQuantity), 0) as quantity
             from StockBalance b
             left join b.lot l
             where b.item.itemId in :itemIds
@@ -110,10 +145,24 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             @Param("warehouseIds") Collection<UUID> warehouseIds,
             @Param("availableStatus") LotStatus availableStatus);
 
+    /**
+     * Same eligibility rule as {@link #aggregateAvailableQuantities} (including the load-bearing
+     * {@code left join b.lot l}), but grouped per warehouse and returning the three terms the
+     * subtraction is made of, not only its result. The inventory dashboard renders an alert line per
+     * {@code (item, warehouse)} and has to be able to explain {@code availableQuantity}.
+     * <p>
+     * {@code availableQuantity} can never come out negative: {@code chk_stock_balances_reserved_quantity}
+     * (V16) and {@code chk_stock_balances_quality_hold_quantity} (V56) together enforce
+     * {@code reserved + qualityHold <= quantity} on every row, so no {@code max(0, …)} clamp is needed
+     * here — and none is applied, so a violation would surface instead of being hidden.
+     */
     @Query("""
             select b.item.itemId as itemId,
                    b.warehouse.warehouseId as warehouseId,
-                   coalesce(sum(b.quantity - b.reservedQuantity), 0) as quantity
+                   coalesce(sum(b.quantity), 0) as onHandQuantity,
+                   coalesce(sum(b.reservedQuantity), 0) as reservedQuantity,
+                   coalesce(sum(b.qualityHoldQuantity), 0) as qualityHoldQuantity,
+                   coalesce(sum(b.quantity - b.reservedQuantity - b.qualityHoldQuantity), 0) as availableQuantity
             from StockBalance b
             left join b.lot l
             where b.item.itemId in :itemIds
@@ -121,7 +170,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
               and (l is null or l.status = :availableStatus)
             group by b.item.itemId, b.warehouse.warehouseId
             """)
-    List<StockAvailabilityByWarehouseProjection> aggregateAvailableQuantitiesByWarehouse(
+    List<StockQuantityByWarehouseProjection> aggregateStockQuantitiesByWarehouse(
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
             @Param("availableStatus") LotStatus availableStatus);
@@ -130,7 +179,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             select b.item.itemId as itemId,
                    coalesce(sum(b.quantity), 0) as onHandQuantity,
                    coalesce(sum(b.reservedQuantity), 0) as reservedQuantity,
-                   coalesce(sum(b.quantity - b.reservedQuantity), 0) as availableQuantity
+                   coalesce(sum(b.quantity - b.reservedQuantity - b.qualityHoldQuantity), 0) as availableQuantity
             from StockBalance b
             left join b.lot l
             where b.item.itemId in :itemIds

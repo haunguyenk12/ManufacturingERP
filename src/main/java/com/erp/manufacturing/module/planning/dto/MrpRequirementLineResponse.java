@@ -33,7 +33,25 @@ public record MrpRequirementLineResponse(
         LocalDate dueDate,
         String requirementStatus,
         String settingSource,
+        String warehouseResolutionSource,
         Integer excludedLotCount,
         String note,
         Instant createdAt
-) {}
+) {
+    public MrpRequirementLineResponse(UUID mrpRequirementLineId, UUID mrpRunId,
+                                      UUID parentRequirementLineId, UUID sourceDemandId,
+                                      UUID itemId, String itemSku, String itemName, String uom,
+                                      UUID warehouseId, String warehouseCode, Integer requirementLevel,
+                                      BigDecimal grossRequiredQuantity, BigDecimal availableQuantity,
+                                      BigDecimal reservedQuantity, BigDecimal openSupplyQuantity,
+                                      BigDecimal safetyStockQuantity, BigDecimal projectedAvailableQuantity,
+                                      BigDecimal netRequiredQuantity, LocalDate dueDate,
+                                      String requirementStatus, String settingSource, Integer excludedLotCount,
+                                      String note, Instant createdAt) {
+        this(mrpRequirementLineId, mrpRunId, parentRequirementLineId, sourceDemandId, itemId,
+                itemSku, itemName, uom, warehouseId, warehouseCode, requirementLevel,
+                grossRequiredQuantity, availableQuantity, reservedQuantity, openSupplyQuantity,
+                safetyStockQuantity, projectedAvailableQuantity, netRequiredQuantity, dueDate,
+                requirementStatus, settingSource, "UNRESOLVED", excludedLotCount, note, createdAt);
+    }
+}

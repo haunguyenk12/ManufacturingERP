@@ -2,6 +2,9 @@ package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.response.ApiResponse;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
+import com.erp.manufacturing.module.user.domain.UserPrincipal;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -33,13 +36,13 @@ import java.util.Set;
  * were present at all — it does not even attempt to parse one, regardless of what the header contains.
  * This matters because a client that always attaches whatever token it has in storage (even an empty,
  * stale, or corrupted one) must not be able to turn a {@code permitAll} endpoint into a 401 wall; that
- * previously happened to {@code /api/v1/auth/refresh} specifically, which is the one bypass-list entry
+ * previously happened to {@code /api/auth/v1/refresh} specifically, which is the one bypass-list entry
  * that most needs it — refresh is the documented recovery path for exactly the case where the access
  * token is unusable, so it cannot itself depend on that same token being parseable. It no longer does:
  * {@link com.erp.manufacturing.module.auth.service.AuthService#refresh} resolves the caller's identity
  * from {@code tokenId} alone via {@link TokenStoreService#getTokenOwner}, not from this filter.
  *
- * <p>🔴 {@code /api/v1/auth/logout} and {@code /api/v1/auth/logout-all} are deliberately <b>not</b> in
+ * <p>🔴 {@code /api/auth/v1/logout} and {@code /api/auth/v1/logout-all} are deliberately <b>not</b> in
  * the bypass list, even though they are also {@code permitAll}: unlike the endpoints above, {@code
  * AuthService.logout}/{@code logoutAllDevices} still identify what to revoke via the {@code
  * authenticatedUserId} attribute this filter sets from a successfully-parsed token. Bypassing them
@@ -61,10 +64,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     /** Genuinely permitAll endpoints that never need this filter to touch the Authorization header. */
     private static final Set<String> BYPASS_PATHS = Set.of(
-            "/api/v1/auth/login",
-            "/api/v1/auth/refresh",
-            "/api/v1/auth/forgot-password",
-            "/api/v1/auth/reset-password");
+            "/auth/v1/login",
+            "/auth/v1/refresh",
+            "/auth/v1/forgot-password",
+            "/auth/v1/reset-password");
 
     private final JwtTokenProvider    jwtTokenProvider;
     private final UserDetailsService  userDetailsService;
@@ -77,7 +80,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     @NonNull FilterChain filterChain)
             throws ServletException, IOException {
 
-        if (BYPASS_PATHS.contains(request.getRequestURI())) {
+        String applicationPath = request.getRequestURI().substring(request.getContextPath().length());
+        if (isBypassPath(applicationPath)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -113,6 +117,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // Load user and set SecurityContext
         UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+        if (!(userDetails instanceof UserPrincipal principal) || !principal.isEnabled()) {
+            throw ExceptionFactory.unauthorized(AuthErrorCode.ACCOUNT_INACTIVE);
+        }
+        Number tokenVersion = claims.get("ver", Number.class);
+        if (tokenVersion == null || tokenVersion.longValue() != principal.getAuthVersion()) {
+            throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_REVOKED);
+        }
         var authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, userDetails.getAuthorities());
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -122,6 +133,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────
+
+    private boolean isBypassPath(String applicationPath) {
+        return BYPASS_PATHS.contains(applicationPath)
+                || applicationPath.equals("/v3/api-docs")
+                || applicationPath.startsWith("/v3/api-docs/")
+                || applicationPath.equals("/swagger-ui.html")
+                || applicationPath.startsWith("/swagger-ui/");
+    }
 
     private void enrichRequest(HttpServletRequest request, String username, String jti) {
         request.setAttribute("authenticatedUserId", username);

@@ -46,7 +46,11 @@ class UserDetailsServiceImplTest {
         UUID userId = UUID.randomUUID();
         Role legacyAdmin = Role.builder()
                 .roleId(UUID.randomUUID())
+                .code("ADMIN")
                 .name("ADMIN")
+                .companyId(null)
+                .system(true)
+                .status(RoleStatus.ACTIVE)
                 .build();
         User user = User.builder()
                 .userId(userId)

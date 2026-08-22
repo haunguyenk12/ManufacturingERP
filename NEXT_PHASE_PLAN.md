@@ -1,5 +1,23 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
+> Cập nhật ad-hoc mới nhất: **Trả lời `live-data-audit.md` của FE** hoàn thành 2026-08-14 — bản ghi
+> đầy đủ `CLAUDE.md §0.44`, hướng dẫn FE `FE_SingleTask_Response.md`. Migration **`V58`**
+> (`mrp_runs` + idempotency). Hai thay đổi: available của lot `HOLD`/`REJECTED` nay là `0` trên
+> `/inventory/balances` + `/inventory/lots*` (`B116`), và `POST /planning-runs` nhận
+> `Idempotency-Key` tuỳ chọn (`B117`). Mục thứ ba FE báo (convert suggestion "không atomic")
+> **không phải defect** — đã bác bỏ bằng dữ liệu thật, không sửa dòng nào.
+> **1025 case unit + 120 case IT / 17 class IT · failures = 0, errors = 0**.
+>
+> Trước đó: **FE handoff Inventory Dashboard API** hoàn thành 2026-08-14 — bản ghi
+> đầy đủ `CLAUDE.md §0.43`, hướng dẫn FE `FE_SingleTask_Response.md`. Không migration, không permission
+> mới, không endpoint mới; `GET /reports/inventory-dashboard` bổ sung nhãn hiển thị + `generatedAt` +
+> `lowStockLimit`/`movementLimit`. **1009 case unit + 119 case IT / 17 class IT · failures = 0,
+> errors = 0** (`mvn -o clean verify` thật với Docker). Bất biến `B114`, `B115`.
+>
+> Trước đó: **FE-4 5C Item Master permission contract** hoàn thành 2026-08-09.
+> Migration `V57__separate_item_master_permissions.sql`; unit suite `977/977` xanh. Flyway IT đã được
+> bổ sung nhưng chưa chạy lại trong phiên này vì Docker engine không hoạt động.
+>
 > Phase trước: **`C2-2` — Inventory Lot lifecycle API** ✅ **HOÀN THÀNH 2026-08-06.** Bản ghi đầy đủ:
 > `CLAUDE.md §0.37`. `GET /inventory/lots` + `GET /inventory/lots/{lotId}` +
 > `POST /inventory/lots/{lotId}/status`. HOLD-escape gate qua `LotQcOriginLookupService` (cross-module

@@ -42,13 +42,13 @@ public class UomController {
 
     private final UomService uomService;
 
-    @PostMapping("/api/v1/uoms")
+    @PostMapping("/v1/uoms")
     @Operation(summary = "Create a unit of measure")
     public ResponseEntity<ApiResponse<UomResponse>> create(@Valid @RequestBody UomCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(uomService.create(request)));
     }
 
-    @GetMapping("/api/v1/uoms")
+    @GetMapping("/v1/uoms")
     @Operation(summary = "List units of measure")
     public ResponseEntity<ApiResponse<PageResult<UomResponse>>> list(
             @RequestParam(required = false) UomStatus status,
@@ -61,13 +61,13 @@ public class UomController {
                 status, search, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/uoms/{uomId}")
+    @GetMapping("/v1/uoms/{uomId}")
     @Operation(summary = "Get a unit of measure")
     public ResponseEntity<ApiResponse<UomResponse>> get(@PathVariable UUID uomId) {
         return ResponseEntity.ok(ApiResponse.ok(uomService.get(uomId)));
     }
 
-    @PatchMapping("/api/v1/uoms/{uomId}")
+    @PatchMapping("/v1/uoms/{uomId}")
     @Operation(summary = "Update name/description of a unit of measure",
             description = "code is immutable after creation and is not part of this request body.")
     public ResponseEntity<ApiResponse<UomResponse>> update(
@@ -75,13 +75,13 @@ public class UomController {
         return ResponseEntity.ok(ApiResponse.ok(uomService.update(uomId, request)));
     }
 
-    @PostMapping("/api/v1/uoms/{uomId}/activate")
+    @PostMapping("/v1/uoms/{uomId}/activate")
     @Operation(summary = "Activate a unit of measure (idempotent — no-op if already ACTIVE)")
     public ResponseEntity<ApiResponse<UomResponse>> activate(@PathVariable UUID uomId) {
         return ResponseEntity.ok(ApiResponse.ok(uomService.activate(uomId)));
     }
 
-    @PostMapping("/api/v1/uoms/{uomId}/deactivate")
+    @PostMapping("/v1/uoms/{uomId}/deactivate")
     @Operation(summary = "Deactivate a unit of measure (idempotent — no-op if already INACTIVE)")
     public ResponseEntity<ApiResponse<UomResponse>> deactivate(@PathVariable UUID uomId) {
         return ResponseEntity.ok(ApiResponse.ok(uomService.deactivate(uomId)));

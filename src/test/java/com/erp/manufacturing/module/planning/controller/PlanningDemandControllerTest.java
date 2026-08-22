@@ -106,7 +106,7 @@ class PlanningDemandControllerTest {
     void create_validRequest_returns201Created() throws Exception {
         when(planningDemandService.create(any(PlanningDemandCreateRequest.class))).thenReturn(sampleResponse("OPEN"));
 
-        mockMvc.perform(post("/api/v1/planning/demands")
+        mockMvc.perform(post("/v1/planning/demands")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody(PLANT_ID)))
                 .andExpect(status().isCreated())
@@ -120,7 +120,7 @@ class PlanningDemandControllerTest {
     @Test
     @DisplayName("create: X-Plant-Id disagreeing with the body plantId returns 409 STATE_CONFLICT (§5.6.1)")
     void create_plantHeaderMismatch_returns409BeforeReachingService() throws Exception {
-        mockMvc.perform(post("/api/v1/planning/demands")
+        mockMvc.perform(post("/v1/planning/demands")
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody(PLANT_ID)))
@@ -134,7 +134,7 @@ class PlanningDemandControllerTest {
     @Test
     @DisplayName("create: missing requiredQuantity returns 400 VALIDATION_ERROR with the field name")
     void create_missingRequiredQuantity_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/planning/demands")
+        mockMvc.perform(post("/v1/planning/demands")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"companyId":"%s","plantId":"%s","itemId":"%s","demandType":"FORECAST",
@@ -154,7 +154,7 @@ class PlanningDemandControllerTest {
         when(planningDemandService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), eq(null), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("OPEN")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/planning/demands")
+        mockMvc.perform(get("/v1/planning/demands")
                         .param("companyId", COMPANY_ID.toString())
                         .param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())
@@ -177,7 +177,7 @@ class PlanningDemandControllerTest {
     @DisplayName("list: X-Plant-Id disagreeing with the plantId query param returns 409 STATE_CONFLICT "
             + "(§5.6.1 applies to the query string too, not just the body)")
     void list_plantHeaderMismatch_returns409BeforeReachingService() throws Exception {
-        mockMvc.perform(get("/api/v1/planning/demands")
+        mockMvc.perform(get("/v1/planning/demands")
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
                         .param("companyId", COMPANY_ID.toString())
                         .param("plantId", PLANT_ID.toString()))
@@ -191,7 +191,7 @@ class PlanningDemandControllerTest {
     @DisplayName("list: malformed UUID in a query param returns 400 VALIDATION_ERROR, not 500 "
             + "(§5.4 handler, exercised against a real controller for the first time)")
     void list_malformedUuidQueryParam_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/planning/demands")
+        mockMvc.perform(get("/v1/planning/demands")
                         .param("companyId", "not-a-uuid")
                         .param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isBadRequest())
@@ -207,7 +207,7 @@ class PlanningDemandControllerTest {
     @DisplayName("create: malformed X-Plant-Id header returns 400 FIELD_FORMAT_INVALID (not 409 — a "
             + "header that cannot be parsed is bad input, not a disagreement)")
     void create_malformedPlantHeader_returns400FieldFormatInvalid() throws Exception {
-        mockMvc.perform(post("/api/v1/planning/demands")
+        mockMvc.perform(post("/v1/planning/demands")
                         .header(PlantContextResolver.HEADER, "not-a-uuid")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody(PLANT_ID)))
@@ -224,7 +224,7 @@ class PlanningDemandControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Planning demand not found: " + DEMAND_ID));
 
-        mockMvc.perform(get("/api/v1/planning/demands/" + DEMAND_ID))
+        mockMvc.perform(get("/v1/planning/demands/" + DEMAND_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -234,7 +234,7 @@ class PlanningDemandControllerTest {
     void cancel_openDemand_returns200Cancelled() throws Exception {
         when(planningDemandService.cancel(DEMAND_ID)).thenReturn(sampleResponse("CANCELLED"));
 
-        mockMvc.perform(patch("/api/v1/planning/demands/" + DEMAND_ID + "/cancel"))
+        mockMvc.perform(patch("/v1/planning/demands/" + DEMAND_ID + "/cancel"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.status").value("CANCELLED"));
@@ -257,7 +257,7 @@ class PlanningDemandControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only OPEN planning demands can be cancelled"));
 
-        mockMvc.perform(patch("/api/v1/planning/demands/" + DEMAND_ID + "/cancel"))
+        mockMvc.perform(patch("/v1/planning/demands/" + DEMAND_ID + "/cancel"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());

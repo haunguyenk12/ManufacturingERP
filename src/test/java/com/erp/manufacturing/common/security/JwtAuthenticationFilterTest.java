@@ -56,10 +56,14 @@ class JwtAuthenticationFilterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "/api/v1/auth/login",
-            "/api/v1/auth/refresh",
-            "/api/v1/auth/forgot-password",
-            "/api/v1/auth/reset-password"
+            "/auth/v1/login",
+            "/auth/v1/refresh",
+            "/auth/v1/forgot-password",
+            "/auth/v1/reset-password",
+            "/v3/api-docs",
+            "/v3/api-docs/swagger-config",
+            "/swagger-ui.html",
+            "/swagger-ui/index.html"
     })
     @DisplayName("bypass paths: a garbage Bearer header never blocks the request")
     void bypassPath_garbageBearerToken_neverBlocksTheRequest(String path) throws Exception {
@@ -77,10 +81,14 @@ class JwtAuthenticationFilterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "/api/v1/auth/login",
-            "/api/v1/auth/refresh",
-            "/api/v1/auth/forgot-password",
-            "/api/v1/auth/reset-password"
+            "/auth/v1/login",
+            "/auth/v1/refresh",
+            "/auth/v1/forgot-password",
+            "/auth/v1/reset-password",
+            "/v3/api-docs",
+            "/v3/api-docs/swagger-config",
+            "/swagger-ui.html",
+            "/swagger-ui/index.html"
     })
     @DisplayName("bypass paths: an empty Bearer value (\"Bearer \") never blocks the request")
     void bypassPath_emptyBearerValue_neverBlocksTheRequest(String path) throws Exception {
@@ -95,7 +103,7 @@ class JwtAuthenticationFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/api/v1/auth/logout", "/api/v1/auth/logout-all"})
+    @ValueSource(strings = {"/auth/v1/logout", "/auth/v1/logout-all"})
     @DisplayName("logout endpoints are NOT bypassed — a malformed token still fails validation")
     void logoutPaths_areNotBypassed_malformedTokenStillFails(String path) throws Exception {
         MockHttpServletRequest request = requestWithBearer(path, "garbage-not-a-jwt");
@@ -114,7 +122,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("non-bypass path: no token at all passes through untouched (unchanged behavior)")
     void nonBypassPath_noToken_passesThroughUntouched() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/uoms");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/uoms");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
 
@@ -127,11 +135,14 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("non-bypass path: valid token sets SecurityContext and continues the chain")
     void nonBypassPath_validToken_setsSecurityContextAndContinues() throws Exception {
-        MockHttpServletRequest request = requestWithBearer("/api/v1/uoms", "valid-token");
+        MockHttpServletRequest request = requestWithBearer("/v1/uoms", "valid-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
-        Claims claims = claims("alice", "jti-1");
-        UserDetails userDetails = User.withUsername("alice").password("x").authorities("ROLE_ADMIN").build();
+        Claims claims = claims("alice", "jti-1", 7L);
+        var domainUser = com.erp.manufacturing.module.user.domain.User.builder()
+                .userId(java.util.UUID.randomUUID()).username("alice").email("alice@example.test")
+                .password("x").authVersion(7L).build();
+        UserDetails userDetails = new com.erp.manufacturing.module.user.domain.UserPrincipal(domainUser);
         when(jwtTokenProvider.validateAndExtractClaims("valid-token")).thenReturn(claims);
         when(userDetailsService.loadUserByUsername("alice")).thenReturn(userDetails);
 
@@ -144,9 +155,51 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    @DisplayName("access token is rejected immediately after authVersion changes")
+    void staleAuthVersion_isRejected() throws Exception {
+        MockHttpServletRequest request = requestWithBearer("/v1/uoms", "stale-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+        Claims claims = claims("alice", "jti-old", 6L);
+        var domainUser = com.erp.manufacturing.module.user.domain.User.builder()
+                .userId(java.util.UUID.randomUUID()).username("alice").email("alice@example.test")
+                .password("x").authVersion(7L).build();
+        when(jwtTokenProvider.validateAndExtractClaims("stale-token")).thenReturn(claims);
+        when(userDetailsService.loadUserByUsername("alice"))
+                .thenReturn(new com.erp.manufacturing.module.user.domain.UserPrincipal(domainUser));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains(AuthErrorCode.TOKEN_REVOKED.code());
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    @DisplayName("a validly signed token cannot authenticate an inactive user")
+    void inactiveUser_isRejected() throws Exception {
+        MockHttpServletRequest request = requestWithBearer("/v1/uoms", "inactive-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+        Claims claims = claims("alice", "jti-1", 0L);
+        var domainUser = com.erp.manufacturing.module.user.domain.User.builder()
+                .userId(java.util.UUID.randomUUID()).username("alice").email("alice@example.test")
+                .password("x").status(com.erp.manufacturing.module.user.domain.UserStatus.INACTIVE).build();
+        when(jwtTokenProvider.validateAndExtractClaims("inactive-token")).thenReturn(claims);
+        when(userDetailsService.loadUserByUsername("alice"))
+                .thenReturn(new com.erp.manufacturing.module.user.domain.UserPrincipal(domainUser));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(response.getContentAsString()).contains(AuthErrorCode.ACCOUNT_INACTIVE.code());
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    @Test
     @DisplayName("non-bypass path: malformed token is rejected before the chain continues")
     void nonBypassPath_malformedToken_rejectedBeforeChainContinues() throws Exception {
-        MockHttpServletRequest request = requestWithBearer("/api/v1/uoms", "garbage-not-a-jwt");
+        MockHttpServletRequest request = requestWithBearer("/v1/uoms", "garbage-not-a-jwt");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
         when(jwtTokenProvider.validateAndExtractClaims("garbage-not-a-jwt"))
@@ -162,11 +215,12 @@ class JwtAuthenticationFilterTest {
 
     private MockHttpServletRequest requestWithBearer(String path, String token) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setServletPath(path);
         request.addHeader("Authorization", "Bearer " + token);
         return request;
     }
 
-    private Claims claims(String subject, String jti) {
-        return Jwts.claims().subject(subject).id(jti).build();
+    private Claims claims(String subject, String jti, long authVersion) {
+        return Jwts.claims().subject(subject).id(jti).add("ver", authVersion).build();
     }
 }

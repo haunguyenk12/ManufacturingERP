@@ -5,11 +5,15 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 public interface PlantRepository extends JpaRepository<Plant, UUID> {
 
     boolean existsByCompanyCompanyIdAndCode(UUID companyId, String code);
+
+    List<Plant> findByCompanyCompanyIdAndCodeIn(UUID companyId, Collection<String> codes);
 
     Page<Plant> findByCompanyCompanyId(UUID companyId, Pageable pageable);
 }

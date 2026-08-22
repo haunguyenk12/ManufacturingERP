@@ -17,6 +17,9 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -33,7 +36,9 @@ import java.util.stream.Collectors;
  *   <li>{@link HttpMessageNotReadableException}        – malformed / unparseable JSON body</li>
  *   <li>{@link MethodArgumentTypeMismatchException}    – wrong type in path/query (e.g. bad UUID)</li>
  *   <li>{@link MissingServletRequestParameterException}– required query param absent</li>
+ *   <li>{@link MissingServletRequestPartException}     – required multipart part absent</li>
  *   <li>{@link HttpRequestMethodNotSupportedException} – wrong HTTP verb</li>
+ *   <li>{@link NoResourceFoundException}               – no endpoint at this path</li>
  *   <li>{@link AccessDeniedException}                  – Spring Security 403</li>
  *   <li>{@link ObjectOptimisticLockingFailureException}– @Version conflict</li>
  *   <li>{@link DataIntegrityViolationException}        – DB unique/FK constraint</li>
@@ -152,6 +157,15 @@ public class GlobalExceptionHandler {
         return badRequestWithFields(fieldErrors);
     }
 
+    /** Multipart sibling of the missing-query-parameter case above. */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestPart(
+            MissingServletRequestPartException ex) {
+
+        return badRequestWithFields(List.of(
+                new FieldErrorResponse(ex.getRequestPartName(), "is a required multipart part")));
+    }
+
     // ── 8. Wrong HTTP verb ─────────────────────────────────────────────────
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
@@ -163,7 +177,34 @@ public class GlobalExceptionHandler {
                         "HTTP method " + ex.getMethod() + " is not supported for this endpoint"));
     }
 
-    // ── 9. Spring Security – access denied (403) ───────────────────────────
+    // ── 9. No endpoint at this path ────────────────────────────────────────
+
+    /**
+     * A request to a path no controller maps is a <b>404</b>, not a 500.
+     *
+     * <p>Spring 6.1 routes unmatched requests to the static-resource handler, which throws
+     * {@link NoResourceFoundException}. Nothing here handled it, so it fell through to the catch-all
+     * below and every call to a misspelled or not-yet-implemented endpoint answered
+     * {@code INTERNAL_SERVER_ERROR} — telling clients the server was broken when the URL was simply
+     * wrong, and firing 5xx alerts for it. {@link NoHandlerFoundException} is the equivalent thrown
+     * when {@code spring.mvc.throw-exception-if-no-handler-found} is enabled; both are covered so the
+     * answer does not depend on that setting.
+     *
+     * <p>Note the sibling distinction: a path that exists but was called with the wrong verb is a
+     * {@code 405} from handler 8, not a 404 from here.
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ApiResponse<Void>> handleNoHandler(
+            Exception ex, HttpServletRequest request) {
+
+        log.debug("[{}] No endpoint for {} {}", ValidationErrorCode.RESOURCE_NOT_FOUND.code(),
+                request.getMethod(), request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ValidationErrorCode.RESOURCE_NOT_FOUND,
+                        "No endpoint " + request.getMethod() + " " + request.getRequestURI()));
+    }
+
+    // ── 10. Spring Security – access denied (403) ──────────────────────────
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
@@ -189,9 +230,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(
             DataIntegrityViolationException ex, HttpServletRequest request) {
 
+        String detail = ex.getMostSpecificCause().getMessage();
+        if (detail != null && (detail.contains("uk_inventory_lots_item_code")
+                || detail.contains("chk_inventory_lots_code_trimmed"))) {
+            log.warn("[{}] Lot identity conflict at {}", BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.code(),
+                    request.getRequestURI());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.error(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS));
+        }
         log.error("[{}] Data integrity violation at {}: {}",
                 ValidationErrorCode.RESOURCE_ALREADY_EXISTS.code(),
-                request.getRequestURI(), ex.getMostSpecificCause().getMessage());
+                request.getRequestURI(), detail);
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Data constraint violation"));
     }

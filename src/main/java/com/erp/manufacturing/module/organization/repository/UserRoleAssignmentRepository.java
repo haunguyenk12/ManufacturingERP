@@ -59,6 +59,33 @@ public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssi
                                            @Param("scopeStatus") OrganizationStatus scopeStatus);
 
     @Query("""
+            select count(a) > 0
+            from UserRoleAssignment a
+            join Role r on a.roleId = r.roleId
+            join AccessScope s on a.scopeId = s.scopeId
+            where a.userId = :userId
+              and a.status = :assignmentStatus
+              and r.status = :roleStatus
+              and r.system = true
+              and r.companyId is null
+              and upper(r.code) = 'ADMIN'
+              and s.status = :scopeStatus
+              and s.scopeType = com.erp.manufacturing.module.organization.domain.ScopeType.GLOBAL
+              and not exists (
+                    select sr.scopeResourceId
+                    from AccessScopeResource sr
+                    where sr.scopeId = s.scopeId
+              )
+              and (a.expiresAt is null or a.expiresAt > :now)
+            """)
+    boolean existsActiveGlobalSystemAdminAssignment(
+            @Param("userId") UUID userId,
+            @Param("now") Instant now,
+            @Param("assignmentStatus") AssignmentStatus assignmentStatus,
+            @Param("roleStatus") RoleStatus roleStatus,
+            @Param("scopeStatus") OrganizationStatus scopeStatus);
+
+    @Query("""
             select distinct p.code
             from UserRoleAssignment a
             join Role r on a.roleId = r.roleId
@@ -134,7 +161,7 @@ public interface UserRoleAssignmentRepository extends JpaRepository<UserRoleAssi
 
     /**
      * Every (scopeType, resourceType, resourceId, permissionCode) tuple the user's active
-     * assignments grant — the data {@code GET /api/v1/auth/me} groups into {@code scopes[]}.
+     * assignments grant — the data {@code GET /api/auth/v1/me} groups into {@code scopes[]}.
      *
      * <p>{@code left join AccessScopeResource} is deliberate, not {@code inner join}: a
      * {@code GLOBAL} scope has no resource row at all, and an inner join would silently drop it

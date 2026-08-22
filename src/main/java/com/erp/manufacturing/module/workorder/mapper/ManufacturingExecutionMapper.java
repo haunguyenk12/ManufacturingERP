@@ -48,13 +48,14 @@ public class ManufacturingExecutionMapper {
     }
 
     /**
-     * {@code usernames} is resolved by the caller in one batch query per page (rule C14), the same
-     * contract {@link #toResponse(ProductionReceipt, List, Map)} uses; ids missing from the map
-     * render as null.
+     * {@code usernames} and {@code lotCodes} are resolved by the caller in one batch query each per
+     * page (rule C14), the same contract {@link #toResponse(ProductionReceipt, List, Map)} uses; ids
+     * missing from either map render as null.
      */
     public MaterialIssueResponse toResponse(MaterialIssue issue,
                                             List<MaterialIssueLine> lines,
-                                            Map<UUID, String> usernames) {
+                                            Map<UUID, String> usernames,
+                                            Map<UUID, String> lotCodes) {
         return new MaterialIssueResponse(
                 issue.getIssueId(),
                 issue.getCode(),
@@ -64,25 +65,79 @@ public class ManufacturingExecutionMapper {
                 issue.getIdempotencyKey(),
                 issue.getTraceId(),
                 issue.getPostedAt(),
-                usernames.get(issue.getCreatedBy()),
+                usernameOf(usernames, issue.getCreatedBy()),
                 issue.getNote(),
                 lines.stream()
                         .sorted(Comparator.comparing(line -> line.getComponentLine().getLineNo()))
-                        .map(this::toResponse)
-                        .toList());
+                        .map(line -> toResponse(line, lotCodes))
+                        .toList(),
+                issue.getRequestedAt(),
+                issue.getDecidedAt(),
+                issue.getDecidedBy(),
+                issue.getRejectionReason());
     }
 
-    public MaterialIssueResponse toResponse(MaterialIssue issue, Map<UUID, String> usernames) {
-        return toResponse(issue, issue.getLines(), usernames);
+    public MaterialIssueResponse toResponse(MaterialIssue issue,
+                                            Map<UUID, String> usernames,
+                                            Map<UUID, String> lotCodes) {
+        return toResponse(issue, issue.getLines(), usernames, lotCodes);
     }
 
     public MaterialIssueResponse toResponse(MaterialIssue issue,
                                             Map<UUID, List<MaterialIssueLine>> linesByIssue,
-                                            Map<UUID, String> usernames) {
-        return toResponse(issue, linesByIssue.getOrDefault(issue.getIssueId(), List.of()), usernames);
+                                            Map<UUID, String> usernames,
+                                            Map<UUID, String> lotCodes) {
+        return toResponse(issue, linesByIssue.getOrDefault(issue.getIssueId(), List.of()),
+                usernames, lotCodes);
     }
 
-    public MaterialIssueLineResponse toResponse(MaterialIssueLine line) {
+    /**
+     * @param lotCodes lot id → lot code, batch-resolved by the caller for lines that named a lot but
+     *        are not linked to one yet. A PENDING_APPROVAL line has no {@code lot} — that link is
+     *        only made when approval posts the movement — so without this map the approval queue
+     *        shows the manager a raw UUID and the client has to fetch each lot separately.
+     */
+    /**
+     * The code the requester identified their lot by. A typed code is echoed back exactly as given;
+     * when they picked a lot by id instead, the code is filled in from the batch map. Echo wins so a
+     * request that named something the resolver disagrees with still shows what was actually asked
+     * for, rather than a code the operator never typed.
+     */
+    /**
+     * Null-safe read of the batch username map.
+     *
+     * <p>The guard is not defensive padding: a document may legitimately carry no actor — a DRAFT
+     * receipt has no {@code approvedBy}, and rows written outside a user request have no
+     * {@code createdBy}. When <em>every</em> id on a page is null the batch lookup is handed an empty
+     * set and returns {@code Map.of()}, whose {@code get(null)} throws NullPointerException rather
+     * than returning null. That turns a perfectly ordinary page into a 500. Same trap, same fix as
+     * the recent movements feed in CLAUDE.md §0.43.
+     */
+    private String usernameOf(Map<UUID, String> usernames, UUID userId) {
+        return userId == null ? null : usernames.get(userId);
+    }
+
+    /**
+     * The code of the lot this line will actually consume, for a line not yet linked to one.
+     *
+     * <p>Precedence follows {@code InventoryMovementService.resolveExistingLot}, which takes the id
+     * whenever one is present and only falls back to the typed code. A request carrying both a
+     * {@code requestedLotId} and a disagreeing {@code requestedLotCode} would otherwise show the
+     * approver one code while approval consumes a different lot — the one thing an approval screen
+     * must never do. The typed code remains the fallback, including when the id resolves to nothing,
+     * so a line never renders blank while it still has something to say.
+     */
+    private String requestedLotCode(MaterialIssueLine line, Map<UUID, String> lotCodes) {
+        if (line.getRequestedLotId() != null) {
+            String resolved = lotCodes.get(line.getRequestedLotId());
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        return line.getRequestedLotCode();
+    }
+
+    public MaterialIssueLineResponse toResponse(MaterialIssueLine line, Map<UUID, String> lotCodes) {
         InventoryLot lot = line.getLot();
         SerialNumber serial = line.getSerial();
         return new MaterialIssueLineResponse(
@@ -95,14 +150,16 @@ public class ManufacturingExecutionMapper {
                 line.getItem().getUnit(),
                 line.getWarehouse().getWarehouseId(),
                 line.getWarehouse().getCode(),
-                lot != null ? lot.getLotId() : null,
-                lot != null ? lot.getLotCode() : null,
-                serial != null ? serial.getSerialId() : null,
+                lot != null ? lot.getLotId() : line.getRequestedLotId(),
+                lot != null ? lot.getLotCode() : requestedLotCode(line, lotCodes),
+                serial != null ? serial.getSerialId() : line.getRequestedSerialId(),
                 serial != null ? serial.getSerialCode() : null,
                 line.getQuantity(),
-                line.getStockMovement().getMovementId(),
+                line.getStockMovement() == null ? null : line.getStockMovement().getMovementId(),
                 line.isOverIssue(),
-                line.getOverrideReason());
+                line.getOverrideReason(),
+                line.getReasonCode() == null ? null : line.getReasonCode().name(),
+                line.getSourceExecution() == null ? null : line.getSourceExecution().getProductionExecutionId());
     }
 
     /**
@@ -133,7 +190,7 @@ public class ManufacturingExecutionMapper {
                 execution.getActualStartedAt(),
                 execution.getActualEndedAt(),
                 execution.getOperatorUserId(),
-                usernames.get(execution.getOperatorUserId()),
+                usernameOf(usernames, execution.getOperatorUserId()),
                 execution.getTraceId(),
                 execution.getNotes(),
                 workOrder.getProductItem().getUnit(),
@@ -251,9 +308,9 @@ public class ManufacturingExecutionMapper {
                 receipt.getQcResult() != null ? receipt.getQcResult().name() : null,
                 receipt.getQcReason(),
                 receipt.getQcAt(),
-                usernames.get(receipt.getCreatedBy()),
-                usernames.get(receipt.getApprovedBy()),
-                usernames.get(receipt.getQcBy()),
+                usernameOf(usernames, receipt.getCreatedBy()),
+                usernameOf(usernames, receipt.getApprovedBy()),
+                usernameOf(usernames, receipt.getQcBy()),
                 receipt.getTraceId(),
                 splitTraceIds(receipt.getSourceWipTraceIds()));
     }

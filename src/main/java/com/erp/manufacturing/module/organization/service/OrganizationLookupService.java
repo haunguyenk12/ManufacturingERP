@@ -11,8 +11,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -80,6 +84,24 @@ public class OrganizationLookupService {
                     "Warehouse " + warehouseId + " does not belong to plant " + plantId);
         }
         return warehouse;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Plant> findPlantsByCode(UUID companyId, Collection<String> codes) {
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+        return plantRepository.findByCompanyCompanyIdAndCodeIn(companyId, codes).stream()
+                .collect(Collectors.toMap(Plant::getCode, Function.identity()));
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Warehouse> findWarehousesByCode(UUID plantId, Collection<String> codes) {
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+        return warehouseRepository.findByPlantPlantIdAndCodeIn(plantId, codes).stream()
+                .collect(Collectors.toMap(Warehouse::getCode, Function.identity()));
     }
 
     private OrganizationScopeResolution resolveCompany(UUID companyId) {

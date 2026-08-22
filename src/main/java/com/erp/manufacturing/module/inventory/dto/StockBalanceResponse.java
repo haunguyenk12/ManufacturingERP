@@ -12,6 +12,7 @@ public record StockBalanceResponse(
         String lotCode,
         BigDecimal quantity,
         BigDecimal reservedQuantity,
+        BigDecimal qualityHoldQuantity,
         BigDecimal availableQuantity,
         Instant updatedAt
 ) {}

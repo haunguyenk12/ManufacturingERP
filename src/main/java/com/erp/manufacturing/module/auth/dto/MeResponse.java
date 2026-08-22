@@ -7,7 +7,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@code GET /api/v1/auth/me} — self-service profile for the caller.
+ * {@code GET /api/auth/v1/me} — self-service profile for the caller.
  *
  * <p>{@code roles}/{@code permissions} are the same flat union already carried in the access token's
  * {@code roles} claim (split by prefix), so a client that already decodes the JWT sees no surprises

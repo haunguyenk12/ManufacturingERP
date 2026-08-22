@@ -22,5 +22,7 @@ public record MaterialIssueLineResponse(
         BigDecimal quantity,
         UUID stockMovementId,
         boolean overIssue,
-        String overrideReason
+        String overrideReason,
+        String reasonCode,
+        UUID sourceExecutionId
 ) {}

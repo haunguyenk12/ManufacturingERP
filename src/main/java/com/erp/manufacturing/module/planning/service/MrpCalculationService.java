@@ -16,6 +16,7 @@ import com.erp.manufacturing.module.routing.service.RoutingLookupService;
 import com.erp.manufacturing.module.workorder.service.query.WorkOrderSupplyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -32,6 +33,10 @@ public class MrpCalculationService {
     private final PurchaseOrderSupplyService purchaseOrderSupplyService;
     private final RoutingLookupService routingLookupService;
 
+    /** Optional only so older isolated unit tests can keep constructing this service directly. */
+    @Autowired(required = false)
+    private MrpWarehouseResolutionService warehouseResolutionService;
+
     public MrpCalculationResult calculate(MrpRun run,
                                           List<PlanningDemand> demands,
                                           Collection<UUID> scopeWarehouseIds) {
@@ -42,15 +47,7 @@ public class MrpCalculationService {
         List<RequirementDraft> allRequirements = new ArrayList<>();
         List<SuggestionDraft> allSuggestions = new ArrayList<>();
         List<RequirementSeed> currentLevel = demands.stream()
-                .map(demand -> new RequirementSeed(
-                        null,
-                        demand,
-                        demand.getItem(),
-                        demand.getWarehouse(),
-                        demand.getRequiredQuantity(),
-                        demand.getDueDate(),
-                        0,
-                        new LinkedHashSet<>(Set.of(demand.getItem().getItemId()))))
+                .map(demand -> topLevelSeed(run, demand))
                 .toList();
 
         Map<ItemScopeKey, BigDecimal> consumedCoverageByItem = new HashMap<>();
@@ -116,7 +113,9 @@ public class MrpCalculationService {
                         noteFor(status, seed.item()),
                         suggestedOrderDate,
                         settingSource,
-                        inventory.excludedLotCount());
+                        inventory.excludedLotCount(),
+                        seed.warehouseResolutionSource(),
+                        seed.warehouseBlockingMessage());
                 allRequirements.add(requirement);
 
                 if (netRequiredQuantity.compareTo(BigDecimal.ZERO) > 0
@@ -141,6 +140,7 @@ public class MrpCalculationService {
         Map<RequirementSeed, PlanningInventoryQuantity> inventoryBySeed = new IdentityHashMap<>();
         Map<RequirementSeed, BigDecimal> openSupplyBySeed = new IdentityHashMap<>();
         Map<WarehouseScopeKey, List<RequirementSeed>> seedsByWarehouseScope = seeds.stream()
+                .filter(seed -> seed.warehouseBlockingMessage() == null)
                 .collect(Collectors.groupingBy(seed -> new WarehouseScopeKey(
                         seed.warehouse() == null ? null : seed.warehouse().getWarehouseId())));
 
@@ -177,6 +177,26 @@ public class MrpCalculationService {
         return new LevelSupplySnapshot(inventoryBySeed, openSupplyBySeed);
     }
 
+    private RequirementSeed topLevelSeed(MrpRun run, PlanningDemand demand) {
+        Warehouse warehouse = demand.getWarehouse() != null ? demand.getWarehouse() : run.getWarehouse();
+        WarehouseResolutionSource source = demand.getWarehouse() != null
+                ? WarehouseResolutionSource.DEMAND_WAREHOUSE
+                : run.getWarehouse() != null
+                    ? WarehouseResolutionSource.RUN_DEMAND_WAREHOUSE
+                    : WarehouseResolutionSource.UNRESOLVED;
+        PlanningMessageCode blockingMessage = null;
+        if (warehouse == null && warehouseResolutionService != null) {
+            MrpWarehouseResolutionService.Resolution resolution = warehouseResolutionService.resolve(
+                    run.getPlant(), demand.getItem(), MrpWarehouseResolutionService.Role.OUTPUT);
+            warehouse = resolution.warehouse();
+            source = resolution.source();
+            blockingMessage = resolution.blockingMessage();
+        }
+        return new RequirementSeed(
+                null, demand, demand.getItem(), warehouse, demand.getRequiredQuantity(), demand.getDueDate(), 0,
+                new LinkedHashSet<>(Set.of(demand.getItem().getItemId())), source, blockingMessage);
+    }
+
     private List<RequirementSeed> expandChildren(RequirementDraft parent,
                                                  RequirementSeed seed,
                                                  BomHeader activeBom,
@@ -193,15 +213,27 @@ public class MrpCalculationService {
             BigDecimal grossRequiredQuantity = parentNetRequiredQuantity
                     .multiply(line.getQuantityPer())
                     .multiply(BigDecimal.ONE.add(line.getScrapRate()));
+            Warehouse childWarehouse = seed.warehouse();
+            WarehouseResolutionSource resolutionSource = seed.warehouseResolutionSource();
+            PlanningMessageCode blockingMessage = seed.warehouseBlockingMessage();
+            if (warehouseResolutionService != null) {
+                MrpWarehouseResolutionService.Resolution resolution = warehouseResolutionService.resolve(
+                        seed.sourceDemand().getPlant(), component, MrpWarehouseResolutionService.Role.SUPPLY);
+                childWarehouse = resolution.warehouse();
+                resolutionSource = resolution.source();
+                blockingMessage = resolution.blockingMessage();
+            }
             children.add(new RequirementSeed(
                     parent,
                     seed.sourceDemand(),
                     component,
-                    seed.warehouse(),
+                    childWarehouse,
                     grossRequiredQuantity,
                     childDueDate,
                     seed.level() + 1,
-                    childPath));
+                    childPath,
+                    resolutionSource,
+                    blockingMessage));
         }
         return children;
     }
@@ -246,6 +278,16 @@ public class MrpCalculationService {
         if (settingSource == PlanningSettingSource.SYSTEM_DEFAULT) {
             messages.add(PlanningMessageCode.SYSTEM_FALLBACK_USED);
         }
+        if (requirement.warehouseBlockingMessage() != null) {
+            messages.add(requirement.warehouseBlockingMessage());
+        } else if ((requirement.warehouseResolutionSource() == WarehouseResolutionSource.SINGLE_ACTIVE_WAREHOUSE
+                || requirement.warehouseResolutionSource() == WarehouseResolutionSource.WAREHOUSE_TYPE_FALLBACK)
+                && !messages.contains(PlanningMessageCode.SYSTEM_FALLBACK_USED)) {
+            messages.add(PlanningMessageCode.SYSTEM_FALLBACK_USED);
+        }
+        if (suggestionType == SupplySuggestionType.PURCHASE_REQUISITION) {
+            messages.add(PlanningMessageCode.PURCHASING_DEFERRED);
+        }
 
         // BUY proposals carry no routing at all, and a MAKE proposal without one is exactly the
         // BLOCKED/MISSING_ROUTING case above — null here is information, not a gap (spec §2.4).
@@ -261,7 +303,9 @@ public class MrpCalculationService {
 
     private SupplySuggestionExceptionState exceptionStateOf(List<PlanningMessageCode> messages) {
         if (messages.contains(PlanningMessageCode.MISSING_BOM)
-                || messages.contains(PlanningMessageCode.MISSING_ROUTING)) {
+                || messages.contains(PlanningMessageCode.MISSING_ROUTING)
+                || messages.contains(PlanningMessageCode.MISSING_WAREHOUSE_POLICY)
+                || messages.contains(PlanningMessageCode.AMBIGUOUS_WAREHOUSE_POLICY)) {
             return SupplySuggestionExceptionState.BLOCKED;
         }
         if (messages.contains(PlanningMessageCode.SYSTEM_FALLBACK_USED)) {
@@ -324,8 +368,27 @@ public class MrpCalculationService {
             String note,
             LocalDate suggestedOrderDate,
             PlanningSettingSource settingSource,
-            int excludedLotCount
-    ) {}
+            int excludedLotCount,
+            WarehouseResolutionSource warehouseResolutionSource,
+            PlanningMessageCode warehouseBlockingMessage
+    ) {
+        public RequirementDraft(RequirementDraft parent, PlanningDemand sourceDemand, Item item,
+                                Warehouse warehouse, int level, BigDecimal grossRequiredQuantity,
+                                BigDecimal availableQuantity, BigDecimal reservedQuantity,
+                                BigDecimal openSupplyQuantity, BigDecimal safetyStockQuantity,
+                                BigDecimal projectedAvailableQuantity, BigDecimal netRequiredQuantity,
+                                LocalDate dueDate, MrpRequirementStatus status, String note,
+                                LocalDate suggestedOrderDate, PlanningSettingSource settingSource,
+                                int excludedLotCount) {
+            this(parent, sourceDemand, item, warehouse, level, grossRequiredQuantity,
+                    availableQuantity, reservedQuantity, openSupplyQuantity, safetyStockQuantity,
+                    projectedAvailableQuantity, netRequiredQuantity, dueDate, status, note,
+                    suggestedOrderDate, settingSource, excludedLotCount,
+                    warehouse == null ? WarehouseResolutionSource.UNRESOLVED
+                            : WarehouseResolutionSource.DEMAND_WAREHOUSE,
+                    null);
+        }
+    }
 
     public record SuggestionDraft(
             RequirementDraft requirement,
@@ -345,7 +408,9 @@ public class MrpCalculationService {
             BigDecimal grossRequiredQuantity,
             LocalDate dueDate,
             int level,
-            LinkedHashSet<UUID> path
+            LinkedHashSet<UUID> path,
+            WarehouseResolutionSource warehouseResolutionSource,
+            PlanningMessageCode warehouseBlockingMessage
     ) {}
 
     private record WarehouseScopeKey(UUID warehouseId) {}

@@ -85,6 +85,7 @@ public class MrpPlanningMapper {
                 line.getDueDate(),
                 line.getRequirementStatus().name(),
                 line.getSettingSource().name(),
+                line.getWarehouseResolutionSource().name(),
                 line.getExcludedLotCount(),
                 line.getNote(),
                 line.getCreatedAt());
@@ -92,6 +93,8 @@ public class MrpPlanningMapper {
 
     public SupplySuggestionResponse toResponse(SupplySuggestion suggestion) {
         Warehouse warehouse = suggestion.getWarehouse();
+        Warehouse outputWarehouse = suggestion.getOutputWarehouse();
+        Warehouse receivingWarehouse = suggestion.getReceivingWarehouse();
         return new SupplySuggestionResponse(
                 suggestion.getSupplySuggestionId(),
                 suggestion.getMrpRun().getMrpRunId(),
@@ -102,6 +105,10 @@ public class MrpPlanningMapper {
                 suggestion.getPlant().getCode(),
                 warehouse == null ? null : warehouse.getWarehouseId(),
                 warehouse == null ? null : warehouse.getCode(),
+                outputWarehouse == null ? null : outputWarehouse.getWarehouseId(),
+                outputWarehouse == null ? null : outputWarehouse.getCode(),
+                receivingWarehouse == null ? null : receivingWarehouse.getWarehouseId(),
+                receivingWarehouse == null ? null : receivingWarehouse.getCode(),
                 suggestion.getItem().getItemId(),
                 suggestion.getItem().getCode(),
                 suggestion.getItem().getName(),

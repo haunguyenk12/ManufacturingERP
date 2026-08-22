@@ -64,10 +64,17 @@ public class SecurityConfig {
                         // More specific matcher must come first — authorizeHttpRequests evaluates
                         // in declaration order and the first match wins. /me is the one auth
                         // endpoint that is NOT permit-all: it needs a valid, unexpired token.
-                        .requestMatchers("/api/v1/auth/me").authenticated()
-                        .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers("/auth/v1/login", "/auth/v1/refresh",
+                                "/auth/v1/forgot-password", "/auth/v1/reset-password").permitAll()
+                        .requestMatchers("/auth/v1/me", "/auth/v1/logout",
+                                "/auth/v1/logout-all").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        // Springdoc is disabled by default and forced off in prod. When explicitly
+                        // enabled in dev/acceptance, its bootstrap HTML and JSON must be reachable
+                        // before Swagger UI has any opportunity to attach a Bearer token.
+                        .requestMatchers("/v3/api-docs/**",
+                                "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 // Filter order: TraceId (1) → IP RateLimit (2) → JWT (3) → User RateLimit (4)

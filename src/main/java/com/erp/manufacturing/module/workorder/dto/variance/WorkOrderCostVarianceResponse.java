@@ -17,5 +17,7 @@ public record WorkOrderCostVarianceResponse(
         BigDecimal actualLaborCost,
         BigDecimal actualOverheadCost,
         BigDecimal actualTotalCost,
-        BigDecimal totalCostVariance
+        BigDecimal totalCostVariance,
+        boolean authoritative,
+        String authorityStatus
 ) {}

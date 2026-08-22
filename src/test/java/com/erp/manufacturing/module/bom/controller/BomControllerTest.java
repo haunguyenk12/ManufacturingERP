@@ -94,7 +94,7 @@ class BomControllerTest {
         when(bomService.createBom(eq(COMPANY_ID), any(BomCreateRequest.class)))
                 .thenReturn(sampleResponse("DRAFT"));
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/boms")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/boms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"parentItemId":"%s","revision":"REV-1"}
@@ -113,7 +113,7 @@ class BomControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.BOM_CIRCULAR_REFERENCE,
                         "Circular reference detected in Bill of Materials"));
 
-        mockMvc.perform(post("/api/v1/boms/" + BOM_ID + "/activate"))
+        mockMvc.perform(post("/v1/boms/" + BOM_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.BOM_CIRCULAR_REFERENCE.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.BOM_CIRCULAR_REFERENCE.code()));
     }
@@ -125,7 +125,7 @@ class BomControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only draft BOM can be changed"));
 
-        mockMvc.perform(patch("/api/v1/bom-lines/" + LINE_ID)
+        mockMvc.perform(patch("/v1/bom-lines/" + LINE_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(lineBody()))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -140,7 +140,7 @@ class BomControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Service item cannot be used as a BOM component"));
 
-        mockMvc.perform(post("/api/v1/boms/" + BOM_ID + "/lines")
+        mockMvc.perform(post("/v1/boms/" + BOM_ID + "/lines")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(lineBody()))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))

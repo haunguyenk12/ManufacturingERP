@@ -24,7 +24,7 @@ public class RoutingController {
 
     private final RoutingService routingService;
 
-    @PostMapping("/api/v1/companies/{companyId}/routings")
+    @PostMapping("/v1/companies/{companyId}/routings")
     @Operation(summary = "Create routing (DRAFT) with its operations")
     public ResponseEntity<ApiResponse<RoutingResponse>> create(
             @PathVariable UUID companyId,
@@ -33,7 +33,7 @@ public class RoutingController {
                 .body(ApiResponse.created(routingService.create(companyId, request)));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}/routings")
+    @GetMapping("/v1/companies/{companyId}/routings")
     @Operation(summary = "List routings by company")
     public ResponseEntity<ApiResponse<PageResult<RoutingResponse>>> list(
             @PathVariable UUID companyId,
@@ -47,19 +47,19 @@ public class RoutingController {
                 companyId, itemId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/routings/{routingId}")
+    @GetMapping("/v1/routings/{routingId}")
     @Operation(summary = "Get routing")
     public ResponseEntity<ApiResponse<RoutingResponse>> get(@PathVariable UUID routingId) {
         return ResponseEntity.ok(ApiResponse.ok(routingService.get(routingId)));
     }
 
-    @PostMapping("/api/v1/routings/{routingId}/activate")
+    @PostMapping("/v1/routings/{routingId}/activate")
     @Operation(summary = "Activate routing; deactivates the previous ACTIVE routing of the same item")
     public ResponseEntity<ApiResponse<RoutingResponse>> activate(@PathVariable UUID routingId) {
         return ResponseEntity.ok(ApiResponse.ok(routingService.activate(routingId)));
     }
 
-    @DeleteMapping("/api/v1/routings/{routingId}")
+    @DeleteMapping("/v1/routings/{routingId}")
     @Operation(summary = "Deactivate routing (soft) — this IS the deactivate command",
             description = "There is no POST /routings/{routingId}/deactivate. Rule C6 forbids "
                     + "hard-deleting business documents, so DELETE moves the routing to INACTIVE and "

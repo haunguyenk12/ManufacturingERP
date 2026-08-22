@@ -99,7 +99,7 @@ class CorsConfigurationTest {
     @Test
     @DisplayName("Preflight from an allowed origin passes without a token")
     void preflight_fromAllowedOrigin_isAnsweredWithoutAuthentication() throws Exception {
-        mockMvc.perform(options("/api/v1/test/ping")
+        mockMvc.perform(options("/v1/test/ping")
                         .header("Origin", ALLOWED)
                         .header("Access-Control-Request-Method", "GET"))
                 .andExpect(status().isOk())
@@ -112,7 +112,7 @@ class CorsConfigurationTest {
     @Test
     @DisplayName("Preflight allows the custom headers the API actually requires")
     void preflight_allowsIdempotencyKeyAndPlantIdHeaders() throws Exception {
-        mockMvc.perform(options("/api/v1/inventory/receive")
+        mockMvc.perform(options("/v1/inventory/receive")
                         .header("Origin", ALLOWED)
                         .header("Access-Control-Request-Method", "POST")
                         .header("Access-Control-Request-Headers", "Idempotency-Key, X-Plant-Id"))
@@ -123,7 +123,7 @@ class CorsConfigurationTest {
     @Test
     @DisplayName("Preflight from an origin outside the allow-list is refused")
     void preflight_fromForeignOrigin_isRefused() throws Exception {
-        mockMvc.perform(options("/api/v1/test/ping")
+        mockMvc.perform(options("/v1/test/ping")
                         .header("Origin", FOREIGN)
                         .header("Access-Control-Request-Method", "GET"))
                 .andExpect(status().isForbidden())
@@ -138,7 +138,7 @@ class CorsConfigurationTest {
     @Test
     @DisplayName("Actual request from a foreign origin gets no Allow-Origin header")
     void actualRequest_fromForeignOrigin_isNotGrantedAllowOrigin() throws Exception {
-        mockMvc.perform(get("/api/v1/test/ping").header("Origin", FOREIGN))
+        mockMvc.perform(get("/v1/test/ping").header("Origin", FOREIGN))
                 .andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
     }
 
@@ -146,7 +146,7 @@ class CorsConfigurationTest {
     @Test
     @DisplayName("Trace id is exposed to the browser on an allowed cross-origin request")
     void allowedOrigin_exposesTraceIdHeaderToTheBrowser() throws Exception {
-        mockMvc.perform(get("/api/v1/test/ping").header("Origin", ALLOWED))
+        mockMvc.perform(get("/v1/test/ping").header("Origin", ALLOWED))
                 .andExpect(header().string("Access-Control-Expose-Headers",
                         org.hamcrest.Matchers.containsString("X-Trace-Id")));
     }

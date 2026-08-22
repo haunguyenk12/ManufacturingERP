@@ -47,7 +47,13 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 RoleStatus.ACTIVE,
                 OrganizationStatus.ACTIVE,
                 OrganizationStatus.ACTIVE);
+        boolean verifiedDynamicGlobalAdmin = assignmentRepository.existsActiveGlobalSystemAdminAssignment(
+                user.getUserId(),
+                now,
+                AssignmentStatus.ACTIVE,
+                RoleStatus.ACTIVE,
+                OrganizationStatus.ACTIVE);
 
-        return new UserPrincipal(user, dynamicRoles, permissions);
+        return new UserPrincipal(user, dynamicRoles, permissions, verifiedDynamicGlobalAdmin);
     }
 }

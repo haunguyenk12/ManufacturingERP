@@ -50,7 +50,7 @@ class SupplySuggestionServiceTest {
 
     @Test
     void approve_draftSuggestion_success() {
-        SupplySuggestion suggestion = suggestion(SupplySuggestionType.PURCHASE_REQUISITION, SupplySuggestionStatus.DRAFT);
+        SupplySuggestion suggestion = suggestion(SupplySuggestionType.WORK_ORDER, SupplySuggestionStatus.DRAFT);
         when(supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestion.getSupplySuggestionId()))
                 .thenReturn(Optional.of(suggestion));
         when(supplySuggestionRepository.save(suggestion)).thenReturn(suggestion);

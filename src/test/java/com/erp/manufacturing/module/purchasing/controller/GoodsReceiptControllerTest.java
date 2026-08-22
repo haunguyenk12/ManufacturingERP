@@ -91,7 +91,7 @@ class GoodsReceiptControllerTest {
         when(goodsReceiptService.post(eq(ORDER_ID), any(GoodsReceiptPostRequest.class), eq("GR-KEY")))
                 .thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
+        mockMvc.perform(post("/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
                         .header("Idempotency-Key", "GR-KEY")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(postBody("5")))
@@ -110,7 +110,7 @@ class GoodsReceiptControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.IDEMPOTENCY_CONFLICT,
                         "Idempotency-Key was already used with a different payload"));
 
-        mockMvc.perform(post("/api/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
+        mockMvc.perform(post("/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
                         .header("Idempotency-Key", "GR-KEY")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(postBody("7")))
@@ -125,7 +125,7 @@ class GoodsReceiptControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         "Received quantity cannot exceed remaining ordered quantity"));
 
-        mockMvc.perform(post("/api/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
+        mockMvc.perform(post("/v1/purchase-orders/" + ORDER_ID + "/goods-receipts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(postBody("999")))
                 .andExpect(status().is(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED.status().value()))
@@ -139,7 +139,7 @@ class GoodsReceiptControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only POSTED goods receipts can be cancelled"));
 
-        mockMvc.perform(post("/api/v1/goods-receipts/" + RECEIPT_ID + "/cancel")
+        mockMvc.perform(post("/v1/goods-receipts/" + RECEIPT_ID + "/cancel")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cancelNote":"wrong supplier"}

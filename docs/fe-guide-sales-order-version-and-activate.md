@@ -83,6 +83,9 @@ API. Ba endpoint mới:
 | Warehouse | `POST /api/v1/warehouses/{warehouseId}/activate` |
 | Item | `POST /api/v1/items/{itemId}/activate` |
 
+Từ `V57`, endpoint Item dùng `PERM_ITEM_MANAGE`; list/detail dùng `PERM_ITEM_READ`. Không còn dùng
+`PERM_INVENTORY_MANAGE/READ` cho Item Master.
+
 🔴 **`Company` KHÔNG có endpoint này** — FE chỉ hỏi về Plant/Warehouse/Item, phạm vi chỉ đúng ba
 resource đó. `Company` vẫn chỉ có `DELETE /companies/{companyId}` (deactivate), không có đường
 quay lại `ACTIVE` qua API.

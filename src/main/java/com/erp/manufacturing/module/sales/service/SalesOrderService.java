@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -125,11 +126,7 @@ public class SalesOrderService {
             order.setNote(trimToNull(request.note()));
         }
         if (request.lines() != null) {
-            order.getLines().clear();
-            int lineNo = 1;
-            for (SalesOrderLineRequest lineRequest : request.lines()) {
-                order.getLines().add(buildLine(order, lineRequest, lineNo++));
-            }
+            replaceLines(order, request.lines());
         }
         // saveAndFlush (not save): the response now carries `version` (FE contract fix, 2026-08-06)
         // for the client's *next* expectedVersion. A plain save() only queues the UPDATE — Hibernate
@@ -198,10 +195,24 @@ public class SalesOrderService {
                                                UUID plantId,
                                                SalesOrderStatus status,
                                                Pageable pageable) {
+        return list(companyId, plantId, status, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_READ', 'PLANT', #plantId)")
+    public PageResult<SalesOrderResponse> list(UUID companyId,
+                                               UUID plantId,
+                                               SalesOrderStatus status,
+                                               String search,
+                                               Pageable pageable) {
         Company company = organizationLookupService.getActiveCompany(companyId);
         Plant plant = organizationLookupService.getActivePlant(plantId);
         ensurePlantBelongsToCompany(plant, company);
-        return PageResult.from(salesOrderRepository.search(companyId, plantId, status, pageable)
+        String normalizedSearch = trimToNull(search);
+        var page = normalizedSearch == null
+                ? salesOrderRepository.search(companyId, plantId, status, pageable)
+                : salesOrderRepository.searchWithText(companyId, plantId, status, normalizedSearch, pageable);
+        return PageResult.from(page
                 .map(order -> mapper.toResponse(order, false)));
     }
 
@@ -230,6 +241,38 @@ public class SalesOrderService {
                 .map(projection -> mapper.toResponse(
                         projection, demandIdByLineId.get(projection.getSalesOrderLineId())))
                 .toList();
+    }
+
+    /**
+     * Drops every existing line and rebuilds {@code lineNo} 1..N ({@code B87}).
+     *
+     * <p>🔴 The {@code flush()} in the middle is load-bearing, not a tidy-up. In a single flush
+     * Hibernate executes the child {@code INSERT}s <em>before</em> the orphan-removal
+     * {@code DELETE}s, so a replacement that reuses {@code lineNo} 1..N — which every replacement
+     * does — collides with {@code uk_sales_order_lines_order_line_no} and the whole {@code PATCH}
+     * fails with {@code RESOURCE_ALREADY_EXISTS} (FE defect report 2026-08-10). Flushing the
+     * deletes first makes the order deterministic instead of relying on Hibernate's action
+     * ordering. Both statements stay inside the caller's transaction, so an invalid replacement
+     * line still rolls the deletes back with everything else.
+     *
+     * <p>🔴 The {@code setUpdatedAt} is load-bearing too, for a second reason found in the same
+     * smoke test: {@code lines} is an <em>inverse</em> ({@code mappedBy}) collection, so replacing it
+     * does not dirty the header row and Hibernate issues no {@code UPDATE sales_orders} — leaving
+     * {@code version} unchanged on a lines-only {@code PATCH}. That breaks the very guarantee
+     * {@code expectedVersion} exists for: two concurrent replacements both read version <i>n</i>,
+     * both pass the check, and the second silently wins. Touching an audited header field makes the
+     * aggregate dirty so exactly one {@code UPDATE} (hence exactly one version bump) is issued for
+     * every accepted replacement. The value is overwritten by {@code @LastModifiedDate} at flush,
+     * which is the same instant it would otherwise get — the point is the dirtiness, not the value.
+     */
+    private void replaceLines(SalesOrder order, List<SalesOrderLineRequest> lineRequests) {
+        order.getLines().clear();
+        order.setUpdatedAt(Instant.now());
+        salesOrderRepository.flush();
+        int lineNo = 1;
+        for (SalesOrderLineRequest lineRequest : lineRequests) {
+            order.getLines().add(buildLine(order, lineRequest, lineNo++));
+        }
     }
 
     private SalesOrderLine buildLine(SalesOrder order, SalesOrderLineRequest request, int lineNo) {

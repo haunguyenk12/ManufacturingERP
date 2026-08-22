@@ -31,6 +31,23 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, UUID> {
                             @Param("status") SalesOrderStatus status,
                             Pageable pageable);
 
+    /** Combined, case-insensitive contains search required by DEC-01. */
+    @EntityGraph(attributePaths = {"company", "plant"})
+    @Query("""
+            select o
+            from SalesOrder o
+            where o.company.companyId = :companyId
+              and o.plant.plantId = :plantId
+              and (:status is null or o.status = :status)
+              and (lower(o.orderNo) like lower(concat('%', :search, '%'))
+                   or lower(o.customerName) like lower(concat('%', :search, '%')))
+            """)
+    Page<SalesOrder> searchWithText(@Param("companyId") UUID companyId,
+                                    @Param("plantId") UUID plantId,
+                                    @Param("status") SalesOrderStatus status,
+                                    @Param("search") String search,
+                                    Pageable pageable);
+
     @EntityGraph(attributePaths = {"company", "plant", "lines", "lines.item"})
     Optional<SalesOrder> findWithDetailsBySalesOrderId(UUID salesOrderId);
 

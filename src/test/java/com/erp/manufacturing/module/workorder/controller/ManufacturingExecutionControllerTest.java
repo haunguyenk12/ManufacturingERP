@@ -10,6 +10,7 @@ import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.common.web.PlantContextResolver;
 import org.springframework.context.annotation.Import;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionCandidateResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionPostRequest;
@@ -143,7 +144,7 @@ class ManufacturingExecutionControllerTest {
                 eq(WORK_ORDER_ID), any(ProductionExecutionPostRequest.class), eq("EXEC-KEY")))
                 .thenReturn(sampleExecution());
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
                         .header("Idempotency-Key", "EXEC-KEY")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REPORT_BODY))
@@ -167,7 +168,7 @@ class ManufacturingExecutionControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Work order status does not allow execution"));
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REPORT_BODY))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -182,7 +183,7 @@ class ManufacturingExecutionControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         "Cumulative good quantity would exceed the planned quantity"));
 
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REPORT_BODY))
                 .andExpect(status().is(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED.status().value()))
@@ -197,7 +198,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("production-executions: a report without the shift window returns 400 VALIDATION_ERROR")
     void reportProduction_withoutActualTimestamps_returns400() throws Exception {
-        mockMvc.perform(post("/api/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"goodQuantity":6,"scrapQuantity":0,"reworkQuantity":0}
@@ -216,7 +217,7 @@ class ManufacturingExecutionControllerTest {
         when(productionExecutionService.listCandidates(eq(PLANT_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleCandidate()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/production-executions/candidates").param("plantId", PLANT_ID.toString()))
+        mockMvc.perform(get("/v1/production-executions/candidates").param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].workOrderId").value(WORK_ORDER_ID.toString()))
@@ -241,7 +242,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("candidates: X-Plant-Id disagreeing with plantId returns 409 STATE_CONFLICT")
     void listExecutionCandidates_plantHeaderMismatch_returns409() throws Exception {
-        mockMvc.perform(get("/api/v1/production-executions/candidates")
+        mockMvc.perform(get("/v1/production-executions/candidates")
                         .param("plantId", PLANT_ID.toString())
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString()))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -260,7 +261,7 @@ class ManufacturingExecutionControllerTest {
         when(productionReceiptService.listCandidates(eq(PLANT_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleReceiptCandidate()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/production-receipts/candidates").param("plantId", PLANT_ID.toString()))
+        mockMvc.perform(get("/v1/production-receipts/candidates").param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].workOrderId").value(WORK_ORDER_ID.toString()))
@@ -280,7 +281,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("receipt candidates: X-Plant-Id disagreeing with plantId returns 409 STATE_CONFLICT")
     void listReceiptCandidates_plantHeaderMismatch_returns409() throws Exception {
-        mockMvc.perform(get("/api/v1/production-receipts/candidates")
+        mockMvc.perform(get("/v1/production-receipts/candidates")
                         .param("plantId", PLANT_ID.toString())
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString()))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -295,7 +296,7 @@ class ManufacturingExecutionControllerTest {
         when(productionReceiptService.listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/production-receipts")
+        mockMvc.perform(get("/v1/production-receipts")
                         .param("plantId", PLANT_ID.toString())
                         .param("status", "DRAFT"))
                 .andExpect(status().isOk())
@@ -312,7 +313,7 @@ class ManufacturingExecutionControllerTest {
         when(productionReceiptService.listByPlant(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/production-receipts").param("plantId", PLANT_ID.toString()))
+        mockMvc.perform(get("/v1/production-receipts").param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk());
 
         verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), any());
@@ -321,7 +322,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("flat receipts: X-Plant-Id disagreeing with plantId returns 409 STATE_CONFLICT")
     void listProductionReceiptsByPlant_plantHeaderMismatch_returns409() throws Exception {
-        mockMvc.perform(get("/api/v1/production-receipts")
+        mockMvc.perform(get("/v1/production-receipts")
                         .param("plantId", PLANT_ID.toString())
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString()))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -333,22 +334,66 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("flat material issues: plant-scoped list forwards the optional workOrderId (spec §4.1)")
     void listMaterialIssuesByPlant_forwardsTheWorkOrderFilter() throws Exception {
-        when(materialIssueService.listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), any()))
+        when(materialIssueService.listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/material-issues")
+        mockMvc.perform(get("/v1/material-issues")
                         .param("plantId", PLANT_ID.toString())
                         .param("workOrderId", WORK_ORDER_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
-        verify(materialIssueService).listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), any());
+        verify(materialIssueService).listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), any());
+    }
+
+    @Test
+    @DisplayName("flat material issues: status=PENDING_APPROVAL reaches the service as the approval queue")
+    void listMaterialIssuesByPlant_forwardsTheStatusFilter() throws Exception {
+        when(materialIssueService.listByPlant(
+                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/material-issues")
+                        .param("plantId", PLANT_ID.toString())
+                        .param("status", "PENDING_APPROVAL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        verify(materialIssueService).listByPlant(
+                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), any());
+    }
+
+    @Test
+    @DisplayName("flat material issues: an unknown status is a 400, not an ignored filter")
+    void listMaterialIssuesByPlant_unknownStatus_returns400() throws Exception {
+        mockMvc.perform(get("/v1/material-issues")
+                        .param("plantId", PLANT_ID.toString())
+                        .param("status", "WAITING"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(materialIssueService);
+    }
+
+    @Test
+    @DisplayName("material issues of one work order: status filter reaches the service")
+    void listMaterialIssues_forwardsTheStatusFilter() throws Exception {
+        when(materialIssueService.list(
+                eq(WORK_ORDER_ID), eq(MaterialIssueStatus.PENDING_APPROVAL), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/material-issues")
+                        .param("status", "PENDING_APPROVAL"))
+                .andExpect(status().isOk());
+
+        verify(materialIssueService).list(
+                eq(WORK_ORDER_ID), eq(MaterialIssueStatus.PENDING_APPROVAL), any());
     }
 
     @Test
     @DisplayName("flat material issues: X-Plant-Id disagreeing with plantId returns 409 STATE_CONFLICT")
     void listMaterialIssuesByPlant_plantHeaderMismatch_returns409() throws Exception {
-        mockMvc.perform(get("/api/v1/material-issues")
+        mockMvc.perform(get("/v1/material-issues")
                         .param("plantId", PLANT_ID.toString())
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString()))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
@@ -363,7 +408,7 @@ class ManufacturingExecutionControllerTest {
         when(productionExecutionService.list(eq(WORK_ORDER_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleExecution()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/production-executions")
+        mockMvc.perform(get("/v1/production-executions")
                         .param("workOrderId", WORK_ORDER_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
@@ -386,7 +431,7 @@ class ManufacturingExecutionControllerTest {
         when(productionExecutionService.list(eq(WORK_ORDER_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleExecution()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/production-executions")
+        mockMvc.perform(get("/v1/production-executions")
                         .param("workOrderId", WORK_ORDER_ID.toString())
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString()))
                 .andExpect(status().isOk())
@@ -410,7 +455,7 @@ class ManufacturingExecutionControllerTest {
         when(productionExecutionService.list(eq(WORK_ORDER_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleExecution()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/work-orders/" + WORK_ORDER_ID + "/production-executions"))
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].productionExecutionId").value(EXECUTION_ID.toString()))

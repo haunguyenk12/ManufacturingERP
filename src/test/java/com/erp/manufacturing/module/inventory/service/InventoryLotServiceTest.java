@@ -94,12 +94,35 @@ class InventoryLotServiceTest {
         assertThat(response.sourceReferenceId()).isEqualTo("wo-1");
     }
 
+    /**
+     * The frontend hit this on 2026-08-14: a lot on QC {@code HOLD} was listed with a positive
+     * {@code availableQuantity}, so the UI offered stock that B3 forbids issuing — and the inventory
+     * dashboard, which aggregates with a lot-status filter, reported {@code 0} for the same rows.
+     * On-hand stays truthful: the stock exists, it is just not usable yet.
+     */
+    @Test
+    @DisplayName("list: a lot on HOLD reports zero available but keeps its real on-hand quantity")
+    void list_lotOnHold_reportsZeroAvailableWithoutHidingOnHand() {
+        StockBalance balance = balance(lot(LotStatus.HOLD), new BigDecimal("2"), BigDecimal.ZERO);
+        when(balanceRepository.searchLots(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(balance)));
+        when(movementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(lotId, MovementType.RECEIVE))
+                .thenReturn(Optional.empty());
+
+        InventoryLotResponse response = service.list(
+                warehouseId, null, null, null, null, null, PageRequest.of(0, 20)).content().get(0);
+
+        assertThat(response.status()).isEqualTo(LotStatus.HOLD.name());
+        assertThat(response.availableQuantity()).isEqualByComparingTo("0");
+        assertThat(response.onHandQuantity()).isEqualByComparingTo("2");
+    }
+
     @Test
     @DisplayName("get: unknown lotId throws RESOURCE_NOT_FOUND")
     void get_unknownLot_throwsResourceNotFound() {
         when(lotRepository.findById(lotId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.get(lotId))
+        assertThatThrownBy(() -> service.get(lotId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
@@ -116,10 +139,51 @@ class InventoryLotServiceTest {
         when(movementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(lotId, MovementType.RECEIVE))
                 .thenReturn(Optional.empty());
 
-        InventoryLotDetailResponse response = service.get(lotId);
+        InventoryLotDetailResponse response = service.get(lotId, null);
 
         assertThat(response.balances()).hasSize(2);
         assertThat(response.sourceReferenceType()).isNull();
+    }
+
+    @Test
+    @DisplayName("get: warehouse-scoped detail returns only that balance and its source movement")
+    void get_withWarehouse_returnsOnlyThatWarehouseData() {
+        InventoryLot lot = lot(LotStatus.AVAILABLE);
+        StockBalance scopedBalance = balance(lot, new BigDecimal("5"), BigDecimal.ZERO);
+        StockMovement scopedOrigin = receiveMovement("PURCHASE_ORDER", "po-1");
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                itemId, warehouseId, lotId)).thenReturn(Optional.of(scopedBalance));
+        when(movementRepository
+                .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                        warehouseId, lotId, MovementType.RECEIVE))
+                .thenReturn(Optional.of(scopedOrigin));
+
+        InventoryLotDetailResponse response = service.get(lotId, warehouseId);
+
+        assertThat(response.balances()).singleElement()
+                .satisfies(balance -> assertThat(balance.warehouseId()).isEqualTo(warehouseId));
+        assertThat(response.sourceReferenceType()).isEqualTo("PURCHASE_ORDER");
+        assertThat(response.sourceReferenceId()).isEqualTo("po-1");
+        verify(balanceRepository, never()).findByLotLotId(any());
+        verify(movementRepository, never())
+                .findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(any(), any());
+    }
+
+    @Test
+    @DisplayName("get: lot without a balance in the requested warehouse returns RESOURCE_NOT_FOUND")
+    void get_withWarehouseMissingBalance_throwsResourceNotFound() {
+        InventoryLot lot = lot(LotStatus.AVAILABLE);
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                itemId, warehouseId, lotId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.get(lotId, warehouseId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+
+        verifyNoInteractions(movementRepository);
     }
 
     @Test

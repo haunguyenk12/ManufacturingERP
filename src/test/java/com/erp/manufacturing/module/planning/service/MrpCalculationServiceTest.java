@@ -152,6 +152,51 @@ class MrpCalculationServiceTest {
     }
 
     @Test
+    void calculate_componentCovered_materialShortageOnlyDescribesTheFinishedGoodAndDoesNotBlockMake() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item product = item(UUID.randomUUID(), company, "FG", ItemType.FINISHED_GOOD);
+        Item component = item(UUID.randomUUID(), company, "RM", ItemType.RAW_MATERIAL);
+        PlanningDemand demand = demand(company, plant, warehouse, product, "2", LocalDate.now().plusDays(10));
+        MrpRun run = run(company, plant, warehouse);
+        BomHeader bom = bom(product, line(component, "2", "0"));
+
+        when(bomLookupService.findActiveBoms(eq(company.getCompanyId()), anyCollection()))
+                .thenReturn(Map.of(product.getItemId(), bom))
+                .thenReturn(Map.of());
+        when(inventoryAvailabilityService.getPlanningQuantities(itemIdsContaining(product.getItemId()), anyCollection()))
+                .thenReturn(Map.of(product.getItemId(), qty("0", "0", "0", "0", "0", 0)));
+        when(inventoryAvailabilityService.getPlanningQuantities(itemIdsContaining(component.getItemId()), anyCollection()))
+                .thenReturn(Map.of(component.getItemId(), qty("200", "0", "200", "0", "0", 0)));
+        when(workOrderSupplyService.getOpenSupplyQuantities(
+                eq(company.getCompanyId()), eq(plant.getPlantId()), anyCollection(), anyCollection()))
+                .thenReturn(Map.of());
+        when(routingLookupService.findActiveRoutingSummaries(
+                eq(company.getCompanyId()), itemIdsContaining(product.getItemId())))
+                .thenReturn(Map.of(product.getItemId(), routing("WOTEST-RT", "A")));
+
+        MrpCalculationService.MrpCalculationResult result =
+                service.calculate(run, List.of(demand), List.of(warehouse.getWarehouseId()));
+
+        assertThat(result.requirements()).hasSize(2);
+        assertThat(result.requirements().get(0).status()).isEqualTo(MrpRequirementStatus.SHORTAGE);
+        assertThat(result.requirements().get(0).netRequiredQuantity()).isEqualByComparingTo("2");
+        assertThat(result.requirements().get(1).status()).isEqualTo(MrpRequirementStatus.COVERED);
+        assertThat(result.requirements().get(1).grossRequiredQuantity()).isEqualByComparingTo("4");
+        assertThat(result.requirements().get(1).netRequiredQuantity()).isEqualByComparingTo("0");
+
+        assertThat(result.suggestions()).hasSize(1);
+        MrpCalculationService.SuggestionDraft make = result.suggestions().get(0);
+        assertThat(make.suggestionType()).isEqualTo(SupplySuggestionType.WORK_ORDER);
+        assertThat(make.exceptionState()).isEqualTo(SupplySuggestionExceptionState.READY);
+        assertThat(make.messages()).containsExactly(PlanningMessageCode.MATERIAL_SHORTAGE);
+        assertThat(make.messages()).doesNotContain(PlanningMessageCode.MISSING_ROUTING);
+        assertThat(make.sourceRoutingCode()).isEqualTo("WOTEST-RT");
+        assertThat(make.sourceRoutingVersion()).isEqualTo("A");
+    }
+
+    @Test
     void calculate_manufacturableItemWithoutActiveBom_stillEmitsABlockedMakeProposal() {
         Company company = company(UUID.randomUUID());
         Plant plant = plant(UUID.randomUUID(), company);
@@ -322,7 +367,9 @@ class MrpCalculationServiceTest {
         assertThat(result.requirements().get(0).excludedLotCount()).isEqualTo(3);
         assertThat(result.suggestions().get(0).exceptionState()).isEqualTo(SupplySuggestionExceptionState.WARNING);
         assertThat(result.suggestions().get(0).messages()).containsExactly(
-                PlanningMessageCode.MATERIAL_SHORTAGE, PlanningMessageCode.SYSTEM_FALLBACK_USED);
+                PlanningMessageCode.MATERIAL_SHORTAGE,
+                PlanningMessageCode.SYSTEM_FALLBACK_USED,
+                PlanningMessageCode.PURCHASING_DEFERRED);
     }
 
     @Test

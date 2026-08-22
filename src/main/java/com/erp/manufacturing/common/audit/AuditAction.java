@@ -77,6 +77,8 @@ public enum AuditAction {
     MATERIAL_RESERVED,
     MATERIAL_RESERVATION_RELEASED,
     MATERIAL_ISSUE_POSTED,
+    MATERIAL_ISSUE_APPROVED,
+    MATERIAL_ISSUE_REJECTED,
     PRODUCTION_RECEIPT_CREATED,
     PRODUCTION_RECEIPT_SUBMITTED,
     /** Kept under the original name so historical audit_logs rows stay searchable after the
@@ -141,6 +143,12 @@ public enum AuditAction {
     ITEM_DEACTIVATED,
     /** FE contract fix (2026-08-06): activate API for Plant/Warehouse/Item. */
     ITEM_ACTIVATED,
+    IMPORT_PROFILE_CREATED,
+    IMPORT_PROFILE_UPDATED,
+    IMPORT_RUN_CREATED,
+    IMPORT_RUN_VALIDATED,
+    IMPORT_RUN_APPLIED,
+    IMPORT_RUN_FAILED,
     INVENTORY_RECEIVED,
     INVENTORY_ISSUED,
     INVENTORY_ADJUSTED,

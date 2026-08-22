@@ -107,13 +107,106 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
 
     private StockBalance persistBalance(Item item, Warehouse warehouse, InventoryLot lot,
             BigDecimal quantity, BigDecimal reservedQuantity) {
+        return persistBalance(item, warehouse, lot, quantity, reservedQuantity, BigDecimal.ZERO);
+    }
+
+    private StockBalance persistBalance(Item item, Warehouse warehouse, InventoryLot lot,
+            BigDecimal quantity, BigDecimal reservedQuantity, BigDecimal qualityHoldQuantity) {
         Instant now = Instant.now();
 
         StockBalance balance = StockBalance.builder().item(item).warehouse(warehouse).lot(lot)
-                .quantity(quantity).reservedQuantity(reservedQuantity).build();
+                .quantity(quantity).reservedQuantity(reservedQuantity)
+                .qualityHoldQuantity(qualityHoldQuantity).build();
         balance.setCreatedAt(now);
         balance.setUpdatedAt(now);
         return entityManager.persistFlushFind(balance);
+    }
+
+    /**
+     * ISS-09 / DEC-02: one row per {@code Item + Warehouse}, with every bucket the dashboard shows.
+     * The whole point of the endpoint is that the caller stops deriving lot status from
+     * {@code availableQuantity > 0}, so the buckets have to disagree with each other here — a
+     * fixture where held stock happened to be zero would pass against a query that ignored status.
+     */
+    @Test
+    void aggregateBalances_splitsOnHandIntoAvailableHeldRejectedAndExpiredBuckets() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+
+        persistBalance(item, warehouse, null, new BigDecimal("10.000000"),
+                new BigDecimal("2.000000"), new BigDecimal("3.000000"));
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE),
+                new BigDecimal("5.000000"), new BigDecimal("1.000000"));
+        persistBalance(item, warehouse, persistLot(item, LotStatus.HOLD),
+                new BigDecimal("100.000000"), BigDecimal.ZERO);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.REJECTED),
+                new BigDecimal("50.000000"), BigDecimal.ZERO);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.EXPIRED),
+                new BigDecimal("7.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        var page = repository.aggregateBalances(warehouse.getWarehouseId(), null, PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        StockBalanceAggregateProjection row = page.getContent().get(0);
+        assertThat(row.getItemId()).isEqualTo(item.getItemId());
+        assertThat(row.getItemCode()).isEqualTo(item.getCode());
+        assertThat(row.getUom()).isEqualTo("EA");
+        // On hand keeps the physical truth: 10 + 5 + 100 + 50 + 7.
+        assertThat(row.getOnHandQuantity()).isEqualByComparingTo("172.000000");
+        assertThat(row.getReservedQuantity()).isEqualByComparingTo("3.000000");
+        // Available counts only the untracked row and the AVAILABLE lot: (10-2-3) + (5-1).
+        assertThat(row.getAvailableQuantity()).isEqualByComparingTo("9.000000");
+        assertThat(row.getQualityHoldQuantity()).isEqualByComparingTo("3.000000");
+        assertThat(row.getRejectedQuantity()).isEqualByComparingTo("50.000000");
+        assertThat(row.getExpiredQuantity()).isEqualByComparingTo("7.000000");
+        assertThat(row.getLotCount()).isEqualTo(4);
+        assertThat(row.getUpdatedAt()).isNotNull();
+    }
+
+    /**
+     * The {@code left join b.lot l} is load-bearing, not tidiness: an inner join would drop every
+     * balance of a non-lot-tracked item, which is most of the ledger (same trap as CLAUDE.md §0.43).
+     */
+    @Test
+    void aggregateBalances_reportsItemsThatHaveNoLotsAtAll() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+
+        persistBalance(item, warehouse, null, new BigDecimal("12.000000"), new BigDecimal("2.000000"));
+        entityManager.clear();
+
+        var page = repository.aggregateBalances(warehouse.getWarehouseId(), item.getItemId(),
+                PageRequest.of(0, 20));
+
+        assertThat(page.getContent()).hasSize(1);
+        assertThat(page.getContent().get(0).getOnHandQuantity()).isEqualByComparingTo("12.000000");
+        assertThat(page.getContent().get(0).getAvailableQuantity()).isEqualByComparingTo("10.000000");
+        assertThat(page.getContent().get(0).getLotCount()).isZero();
+    }
+
+    /** One row per item — several lots of the same item must collapse, not paginate separately. */
+    @Test
+    void aggregateBalances_returnsOneRowPerItemAndHonoursTheItemFilter() {
+        Warehouse warehouse = persistWarehouse();
+        Item first = persistItem(warehouse.getPlant().getCompany());
+        Item second = persistItem(warehouse.getPlant().getCompany());
+
+        persistBalance(first, warehouse, persistLot(first, LotStatus.AVAILABLE),
+                new BigDecimal("4.000000"), BigDecimal.ZERO);
+        persistBalance(first, warehouse, persistLot(first, LotStatus.AVAILABLE),
+                new BigDecimal("6.000000"), BigDecimal.ZERO);
+        persistBalance(second, warehouse, null, new BigDecimal("8.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        var all = repository.aggregateBalances(warehouse.getWarehouseId(), null, PageRequest.of(0, 20));
+        var filtered = repository.aggregateBalances(warehouse.getWarehouseId(), first.getItemId(),
+                PageRequest.of(0, 20));
+
+        assertThat(all.getTotalElements()).isEqualTo(2);
+        assertThat(filtered.getTotalElements()).isEqualTo(1);
+        assertThat(filtered.getContent().get(0).getOnHandQuantity()).isEqualByComparingTo("10.000000");
+        assertThat(filtered.getContent().get(0).getLotCount()).isEqualTo(2);
     }
 
     @Test
@@ -121,7 +214,8 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         Warehouse warehouse = persistWarehouse();
         Item item = persistItem(warehouse.getPlant().getCompany());
 
-        persistBalance(item, warehouse, null, new BigDecimal("10.000000"), new BigDecimal("2.000000"));
+        persistBalance(item, warehouse, null, new BigDecimal("10.000000"),
+                new BigDecimal("2.000000"), new BigDecimal("3.000000"));
         persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE),
                 new BigDecimal("5.000000"), new BigDecimal("1.000000"));
         persistBalance(item, warehouse, persistLot(item, LotStatus.HOLD),
@@ -135,9 +229,9 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getItemId()).isEqualTo(item.getItemId());
-        // 12.000000 = (10-2) non-lot-tracked + (5-1) AVAILABLE lot.
+        // 9.000000 = (10-2 reserved-3 quality hold) non-lot-tracked + (5-1) AVAILABLE lot.
         // The HOLD (100) and REJECTED (50) rows are excluded by the status filter.
-        assertThat(result.get(0).getQuantity()).isEqualByComparingTo("12.000000");
+        assertThat(result.get(0).getQuantity()).isEqualByComparingTo("9.000000");
     }
 
     @Test
@@ -145,7 +239,8 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         Warehouse warehouse = persistWarehouse();
         Item item = persistItem(warehouse.getPlant().getCompany());
 
-        persistBalance(item, warehouse, null, new BigDecimal("20.000000"), new BigDecimal("5.000000"));
+        persistBalance(item, warehouse, null, new BigDecimal("20.000000"),
+                new BigDecimal("5.000000"), new BigDecimal("6.000000"));
         persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE),
                 new BigDecimal("10.000000"), new BigDecimal("2.000000"));
         persistBalance(item, warehouse, persistLot(item, LotStatus.HOLD),
@@ -158,11 +253,55 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(result).hasSize(1);
         StockPlanningQuantityProjection projection = result.get(0);
         assertThat(projection.getItemId()).isEqualTo(item.getItemId());
-        // Folds the non-lot-tracked row (20/5) into the AVAILABLE-lot row (10/2):
-        // onHand=30, reserved=7, available=23. The HOLD row (100/50) is excluded by the status filter.
+        // Folds the non-lot-tracked row (20/5 reserved/6 quality hold) into the AVAILABLE-lot row
+        // (10/2): onHand=30, reserved=7, available=17. The HOLD lot is excluded by status.
         assertThat(projection.getOnHandQuantity()).isEqualByComparingTo("30.000000");
         assertThat(projection.getReservedQuantity()).isEqualByComparingTo("7.000000");
-        assertThat(projection.getAvailableQuantity()).isEqualByComparingTo("23.000000");
+        assertThat(projection.getAvailableQuantity()).isEqualByComparingTo("17.000000");
+    }
+
+    /**
+     * The dashboard reads this one: same eligibility rule as the other aggregates, but split per
+     * warehouse and carrying the three terms behind {@code availableQuantity}. Splitting is the part
+     * a mock cannot check — the alert lines of two warehouses must not be folded into one figure.
+     */
+    @Test
+    void aggregateStockQuantitiesByWarehouse_splitsPerWarehouse_andKeepsTheTermsBehindAvailability() {
+        Warehouse warehouseA = persistWarehouse();
+        Warehouse warehouseB = persistWarehouse();
+        Item item = persistItem(warehouseA.getPlant().getCompany());
+
+        persistBalance(item, warehouseA, null, new BigDecimal("20.000000"),
+                new BigDecimal("5.000000"), new BigDecimal("6.000000"));
+        persistBalance(item, warehouseA, persistLot(item, LotStatus.AVAILABLE),
+                new BigDecimal("10.000000"), new BigDecimal("2.000000"));
+        persistBalance(item, warehouseA, persistLot(item, LotStatus.HOLD),
+                new BigDecimal("100.000000"), BigDecimal.ZERO);
+        persistBalance(item, warehouseA, persistLot(item, LotStatus.REJECTED),
+                new BigDecimal("50.000000"), BigDecimal.ZERO);
+        persistBalance(item, warehouseB, null, new BigDecimal("7.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        List<StockQuantityByWarehouseProjection> result = repository.aggregateStockQuantitiesByWarehouse(
+                List.of(item.getItemId()),
+                List.of(warehouseA.getWarehouseId(), warehouseB.getWarehouseId()),
+                LotStatus.AVAILABLE);
+
+        assertThat(result).hasSize(2);
+        StockQuantityByWarehouseProjection a = result.stream()
+                .filter(row -> row.getWarehouseId().equals(warehouseA.getWarehouseId()))
+                .findFirst().orElseThrow();
+        // 20/5/6 non-lot-tracked + 10/2 AVAILABLE lot; the HOLD (100) and REJECTED (50) lots
+        // contribute nothing at all, not even to on-hand — neither is stock the dashboard may offer.
+        assertThat(a.getOnHandQuantity()).isEqualByComparingTo("30.000000");
+        assertThat(a.getReservedQuantity()).isEqualByComparingTo("7.000000");
+        assertThat(a.getQualityHoldQuantity()).isEqualByComparingTo("6.000000");
+        assertThat(a.getAvailableQuantity()).isEqualByComparingTo("17.000000");
+
+        StockQuantityByWarehouseProjection b = result.stream()
+                .filter(row -> row.getWarehouseId().equals(warehouseB.getWarehouseId()))
+                .findFirst().orElseThrow();
+        assertThat(b.getAvailableQuantity()).isEqualByComparingTo("7.000000");
     }
 
     @Test

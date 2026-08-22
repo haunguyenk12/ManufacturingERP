@@ -81,7 +81,7 @@ class AuthControllerTest {
         AuthResponse response = new AuthResponse("access.jwt", "refresh-uuid", "tid-1", 900L, "device-1", false);
         when(authService.login(any(LoginRequest.class), any())).thenReturn(response);
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post("/auth/v1/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"username":"alice","password":"secret123","deviceId":"device-1"}
@@ -95,7 +95,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("login: blank username fails @Valid before reaching the service")
     void login_blankUsername_returns400ValidationFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post("/auth/v1/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"username":"","password":"secret123"}
@@ -112,7 +112,7 @@ class AuthControllerTest {
         when(authService.login(any(LoginRequest.class), any()))
                 .thenThrow(new AppException(AuthErrorCode.INVALID_CREDENTIALS));
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post("/auth/v1/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"username":"alice","password":"wrong"}
@@ -127,7 +127,7 @@ class AuthControllerTest {
         when(authService.login(any(LoginRequest.class), any()))
                 .thenThrow(new AppException(AuthErrorCode.ACCOUNT_LOCKED));
 
-        mockMvc.perform(post("/api/v1/auth/login")
+        mockMvc.perform(post("/auth/v1/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"username":"alice","password":"secret123"}
@@ -140,7 +140,7 @@ class AuthControllerTest {
     @WithMockUser
     @DisplayName("logout: valid request returns 200 with null result (noContent envelope)")
     void logout_validRequest_returns200NoContent() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/logout")
+        mockMvc.perform(post("/auth/v1/logout")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"refreshToken":"refresh-uuid","tokenId":"tid-1"}
@@ -156,7 +156,7 @@ class AuthControllerTest {
         when(authService.refresh(any(RefreshRequest.class), any()))
                 .thenThrow(new AppException(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
 
-        mockMvc.perform(post("/api/v1/auth/refresh")
+        mockMvc.perform(post("/auth/v1/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"refreshToken":"old-refresh","tokenId":"old-tid"}
@@ -171,7 +171,7 @@ class AuthControllerTest {
         when(authService.refresh(any(RefreshRequest.class), any()))
                 .thenThrow(new AppException(AuthErrorCode.TOKEN_REUSE_DETECTED));
 
-        mockMvc.perform(post("/api/v1/auth/refresh")
+        mockMvc.perform(post("/auth/v1/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"refreshToken":"old-refresh","tokenId":"old-tid"}
@@ -185,7 +185,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("logout-all: returns 200 with SUCCESS envelope")
     void logoutAll_returns200() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/logout-all"))
+        mockMvc.perform(post("/auth/v1/logout-all"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -203,7 +203,7 @@ class AuthControllerTest {
                 Set.of("ADMIN"), Set.of("PERM_WORK_ORDER_MANAGE"), List.of(scope), plantId);
         when(authService.me(any())).thenReturn(response);
 
-        mockMvc.perform(get("/api/v1/auth/me"))
+        mockMvc.perform(get("/auth/v1/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.userId").value(userId.toString()))
@@ -215,7 +215,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("forgot-password: valid email returns 200 with the fixed enumeration-safe message")
     void forgotPassword_validEmail_returns200() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/forgot-password")
+        mockMvc.perform(post("/auth/v1/forgot-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"alice@erp.local"}
@@ -230,7 +230,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("forgot-password: malformed email fails @Valid before reaching the service")
     void forgotPassword_malformedEmail_returns400ValidationFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/forgot-password")
+        mockMvc.perform(post("/auth/v1/forgot-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"not-an-email"}
@@ -244,7 +244,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("reset-password: valid token returns 200 with null result")
     void resetPassword_validToken_returns200() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/reset-password")
+        mockMvc.perform(post("/auth/v1/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"token":"reset-tok-1","newPassword":"NewPassw0rd!"}
@@ -260,7 +260,7 @@ class AuthControllerTest {
         doThrow(new AppException(AuthErrorCode.RESET_TOKEN_INVALID))
                 .when(authService).resetPassword(any(ResetPasswordRequest.class), any());
 
-        mockMvc.perform(post("/api/v1/auth/reset-password")
+        mockMvc.perform(post("/auth/v1/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"token":"bad-tok","newPassword":"NewPassw0rd!"}
@@ -272,7 +272,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("reset-password: password shorter than 8 chars fails @Valid before reaching the service")
     void resetPassword_shortPassword_returns400ValidationFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/reset-password")
+        mockMvc.perform(post("/auth/v1/reset-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"token":"reset-tok-1","newPassword":"short"}

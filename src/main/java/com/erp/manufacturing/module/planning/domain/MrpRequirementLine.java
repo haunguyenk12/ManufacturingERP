@@ -110,4 +110,9 @@ public class MrpRequirementLine extends BaseEntity {
     @Column(name = "excluded_lot_count", nullable = false)
     @Builder.Default
     private Integer excludedLotCount = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "warehouse_resolution_source", nullable = false, length = 40)
+    @Builder.Default
+    private WarehouseResolutionSource warehouseResolutionSource = WarehouseResolutionSource.UNRESOLVED;
 }

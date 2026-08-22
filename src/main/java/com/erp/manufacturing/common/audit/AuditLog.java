@@ -58,6 +58,10 @@ public class AuditLog {
     @Column(name = "entity_id", length = 255)
     private String entityId;
 
+    /** Human-readable name/code/number snapshot of the affected entity. */
+    @Column(name = "entity_name", length = 255)
+    private String entityName;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 

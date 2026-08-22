@@ -1,5 +1,12 @@
 # common/audit — Audit Log Architecture
 
+> **Implementation update (2026-08-17):** Field-level diff capture is now implemented. The audit
+> aspect snapshots the committed entity before a command, compares it with the returned DTO, and the
+> listener persists changed fields to `audit_log_changes`. Audit responses expose the captured
+> `entityName` instead of `entityId` (the ID remains an internal/filter key; historical names stay
+> null). Older "TODO Phase 2" / "changes[] always empty" notes below describe the pre-implementation
+> state and are superseded by this update.
+
 > Tách từ `CLAUDE.md` §9 (2026-07-25). Chỉ nạp khi agent làm việc trong `common/audit/**`
 > (`AuditLog`, `AuditLogEvent`, `AuditLogListener`, `AuditableAspect`, `AuditAction`, ...).
 

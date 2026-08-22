@@ -74,7 +74,7 @@ class ShiftControllerTest {
         when(shiftService.create(eq(PLANT_ID), any(ShiftCreateRequest.class)))
                 .thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/shifts")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/shifts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"sh-01","name":"Day Shift","startTime":"08:00:00","endTime":"17:00:00"}
@@ -90,7 +90,7 @@ class ShiftControllerTest {
     @Test
     @DisplayName("create: blank name returns 400 VALIDATION_ERROR with the field name")
     void create_blankName_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/shifts")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/shifts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"SH-01","name":"","startTime":"08:00:00","endTime":"17:00:00"}
@@ -108,7 +108,7 @@ class ShiftControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "Shift code already exists: SH-01"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/shifts")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/shifts")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"SH-01","name":"Day Shift","startTime":"08:00:00","endTime":"17:00:00"}
@@ -125,7 +125,7 @@ class ShiftControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Shift not found with id: " + SHIFT_ID));
 
-        mockMvc.perform(get("/api/v1/shifts/" + SHIFT_ID))
+        mockMvc.perform(get("/v1/shifts/" + SHIFT_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -135,7 +135,7 @@ class ShiftControllerTest {
     void update_validRequest_returns200() throws Exception {
         when(shiftService.update(eq(SHIFT_ID), any())).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(patch("/api/v1/shifts/" + SHIFT_ID)
+        mockMvc.perform(patch("/v1/shifts/" + SHIFT_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Day Shift (updated)"}
@@ -149,7 +149,7 @@ class ShiftControllerTest {
     void activate_returns200Active() throws Exception {
         when(shiftService.activate(SHIFT_ID)).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/shifts/" + SHIFT_ID + "/activate"))
+        mockMvc.perform(post("/v1/shifts/" + SHIFT_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"));
     }
@@ -159,7 +159,7 @@ class ShiftControllerTest {
     void deactivate_returns200Inactive() throws Exception {
         when(shiftService.deactivate(SHIFT_ID)).thenReturn(sampleResponse("INACTIVE"));
 
-        mockMvc.perform(post("/api/v1/shifts/" + SHIFT_ID + "/deactivate"))
+        mockMvc.perform(post("/v1/shifts/" + SHIFT_ID + "/deactivate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("INACTIVE"));
     }
@@ -167,7 +167,7 @@ class ShiftControllerTest {
     @Test
     @DisplayName("delete: is the same command as POST .../deactivate — 200 with null result")
     void delete_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/shifts/" + SHIFT_ID))
+        mockMvc.perform(delete("/v1/shifts/" + SHIFT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -181,7 +181,7 @@ class ShiftControllerTest {
         when(shiftService.list(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/shifts"))
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/shifts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("SH-01"))

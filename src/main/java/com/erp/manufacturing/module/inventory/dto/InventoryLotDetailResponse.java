@@ -5,9 +5,13 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * {@code GET /inventory/lots/{lotId}} (C2-2). No single {@code warehouseId} — a lot can hold stock
- * in more than one warehouse (see {@code InventoryLotResponse} javadoc) — so quantities are broken
- * out per warehouse in {@link #balances()} instead of being flattened onto this record.
+ * {@code GET /inventory/lots/{lotId}} (C2-2). A lot can hold stock in more than one warehouse.
+ * When the optional {@code warehouseId} query parameter is present, {@link #balances()} contains
+ * only that authorized warehouse; company/global/admin callers may omit it to receive every row.
+ *
+ * <p>{@code receivedAt} is the authoritative "date received"; {@code manufactureDate} is a legacy
+ * alias of the same value and {@code createdAt} is a row audit timestamp. See
+ * {@link InventoryLotResponse} for why the three must not be used interchangeably.
  */
 public record InventoryLotDetailResponse(
         UUID lotId,
@@ -16,6 +20,7 @@ public record InventoryLotDetailResponse(
         String itemName,
         String lotCode,
         String status,
+        Instant receivedAt,
         Instant manufactureDate,
         Instant expiresAt,
         String sourceMovementType,

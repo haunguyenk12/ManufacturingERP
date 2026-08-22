@@ -32,7 +32,7 @@ public class WorkCenterController {
 
     private final WorkCenterService workCenterService;
 
-    @PostMapping("/api/v1/plants/{plantId}/work-centers")
+    @PostMapping("/v1/plants/{plantId}/work-centers")
     @Operation(summary = "Create a work center under a plant")
     public ResponseEntity<ApiResponse<WorkCenterResponse>> create(
             @PathVariable UUID plantId, @Valid @RequestBody WorkCenterCreateRequest request) {
@@ -40,7 +40,7 @@ public class WorkCenterController {
                 .body(ApiResponse.created(workCenterService.create(plantId, request)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}/work-centers")
+    @GetMapping("/v1/plants/{plantId}/work-centers")
     @Operation(summary = "List work centers of a plant")
     public ResponseEntity<ApiResponse<PageResult<WorkCenterResponse>>> list(
             @PathVariable UUID plantId,
@@ -53,13 +53,13 @@ public class WorkCenterController {
                 plantId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/work-centers/{workCenterId}")
+    @GetMapping("/v1/work-centers/{workCenterId}")
     @Operation(summary = "Get a work center")
     public ResponseEntity<ApiResponse<WorkCenterResponse>> get(@PathVariable UUID workCenterId) {
         return ResponseEntity.ok(ApiResponse.ok(workCenterService.get(workCenterId)));
     }
 
-    @PatchMapping("/api/v1/work-centers/{workCenterId}")
+    @PatchMapping("/v1/work-centers/{workCenterId}")
     @Operation(summary = "Update name/description/capacity of a work center",
             description = "code and plantId are immutable after creation and are not part of this request body.")
     public ResponseEntity<ApiResponse<WorkCenterResponse>> update(
@@ -67,19 +67,19 @@ public class WorkCenterController {
         return ResponseEntity.ok(ApiResponse.ok(workCenterService.update(workCenterId, request)));
     }
 
-    @PostMapping("/api/v1/work-centers/{workCenterId}/activate")
+    @PostMapping("/v1/work-centers/{workCenterId}/activate")
     @Operation(summary = "Activate a work center")
     public ResponseEntity<ApiResponse<WorkCenterResponse>> activate(@PathVariable UUID workCenterId) {
         return ResponseEntity.ok(ApiResponse.ok(workCenterService.activate(workCenterId)));
     }
 
-    @PostMapping("/api/v1/work-centers/{workCenterId}/deactivate")
+    @PostMapping("/v1/work-centers/{workCenterId}/deactivate")
     @Operation(summary = "Deactivate a work center")
     public ResponseEntity<ApiResponse<WorkCenterResponse>> deactivate(@PathVariable UUID workCenterId) {
         return ResponseEntity.ok(ApiResponse.ok(workCenterService.deactivate(workCenterId)));
     }
 
-    @DeleteMapping("/api/v1/work-centers/{workCenterId}")
+    @DeleteMapping("/v1/work-centers/{workCenterId}")
     @Operation(summary = "Deactivate a work center (soft) — this IS the deactivate command",
             description = "Rule C6 forbids hard-deleting master data, so DELETE calls the same "
                     + "service method as POST .../deactivate; nothing is removed.")

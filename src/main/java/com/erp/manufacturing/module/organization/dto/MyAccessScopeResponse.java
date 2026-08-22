@@ -4,7 +4,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * One entry of {@code GET /api/v1/auth/me}'s {@code scopes[]} — a company or plant the caller has
+ * One entry of {@code GET /api/auth/v1/me}'s {@code scopes[]} — a company or plant the caller has
  * an active assignment on, with the permissions that apply to it.
  *
  * <p>{@code scopeType = "GLOBAL"} carries {@code companyId}/{@code plantId} both {@code null}: the

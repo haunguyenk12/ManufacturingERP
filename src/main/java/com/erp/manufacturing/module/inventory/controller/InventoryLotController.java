@@ -9,6 +9,8 @@ import com.erp.manufacturing.module.inventory.dto.InventoryLotResponse;
 import com.erp.manufacturing.module.inventory.dto.InventoryLotStatusChangeRequest;
 import com.erp.manufacturing.module.inventory.service.InventoryLotService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +28,7 @@ public class InventoryLotController {
 
     private final InventoryLotService lotService;
 
-    @GetMapping("/api/v1/inventory/lots")
+    @GetMapping("/v1/inventory/lots")
     @Operation(summary = "List inventory lots")
     public ResponseEntity<ApiResponse<PageResult<InventoryLotResponse>>> list(
             @RequestParam UUID warehouseId,
@@ -43,13 +45,17 @@ public class InventoryLotController {
                 expiryFrom, expiryTo, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/inventory/lots/{lotId}")
+    @GetMapping("/v1/inventory/lots/{lotId}")
     @Operation(summary = "Get inventory lot detail")
-    public ResponseEntity<ApiResponse<InventoryLotDetailResponse>> get(@PathVariable UUID lotId) {
-        return ResponseEntity.ok(ApiResponse.ok(lotService.get(lotId)));
+    public ResponseEntity<ApiResponse<InventoryLotDetailResponse>> get(
+            @PathVariable UUID lotId,
+            @Parameter(name = "warehouseId", in = ParameterIn.QUERY, required = false,
+                    description = "Warehouse scope for the detail view; required for plant/warehouse-scoped users")
+            @RequestParam(required = false) UUID warehouseId) {
+        return ResponseEntity.ok(ApiResponse.ok(lotService.get(lotId, warehouseId)));
     }
 
-    @PostMapping("/api/v1/inventory/lots/{lotId}/status")
+    @PostMapping("/v1/inventory/lots/{lotId}/status")
     @Operation(summary = "Change inventory lot status")
     public ResponseEntity<ApiResponse<InventoryLotResponse>> changeStatus(
             @PathVariable UUID lotId,

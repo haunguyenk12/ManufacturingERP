@@ -59,7 +59,7 @@ class AdminControllerTest {
     void unlock_returns200() throws Exception {
         UUID userId = UUID.randomUUID();
 
-        mockMvc.perform(patch("/api/v1/admin/users/" + userId + "/unlock"))
+        mockMvc.perform(patch("/admin/users/v1/" + userId + "/unlock"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());

@@ -2,6 +2,8 @@ package com.erp.manufacturing.module.planning.service;
 
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.common.audit.AuditLogService;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
@@ -67,7 +69,7 @@ class MrpPlanningMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_MRP_RUN"), eq("PLANT"), eq(plantId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> mrpRunService.run(request))
+        assertThatThrownBy(() -> mrpRunService.run(request, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(mrpRunRepository);
@@ -114,7 +116,8 @@ class MrpPlanningMethodSecurityTest {
                                     OrganizationLookupService organizationLookupService,
                                     MrpCalculationService calculationService,
                                     MrpPlanningMapper mapper,
-                                    AuditLogService auditLogService) {
+                                    AuditLogService auditLogService,
+                                    IdempotencySupport idempotency) {
             return new MrpRunService(
                     mrpRunRepository,
                     planningDemandRepository,
@@ -124,7 +127,13 @@ class MrpPlanningMethodSecurityTest {
                     organizationLookupService,
                     calculationService,
                     mapper,
-                    auditLogService);
+                    auditLogService,
+                    idempotency);
+        }
+
+        @Bean
+        IdempotencySupport idempotencySupport() {
+            return new IdempotencySupport(new ObjectMapper().findAndRegisterModules());
         }
 
         @Bean(name = "permissionGuard")

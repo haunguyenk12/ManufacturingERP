@@ -66,6 +66,10 @@ public class AccessControlService {
         }
 
         String code = normalizeCode(request.code());
+        if (isReservedAdminCode(code)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Reserved administrator role code cannot be used for a custom role");
+        }
         boolean exists = companyId == null
                 ? roleRepository.existsByCodeAndCompanyIdIsNull(code)
                 : roleRepository.existsByCodeAndCompanyId(code, companyId);
@@ -235,6 +239,40 @@ public class AccessControlService {
         rolePermissionRepository.deleteByRoleIdAndPermissionId(roleId, permissionId);
     }
 
+    /**
+     * The permissions granted to one role — the single authoritative source for the admin UI's
+     * permission checkboxes. Without it a client can only read the global permission catalogue and
+     * would have to guess which entries a role actually holds.
+     *
+     * <p>Role existence is checked first so an unknown {@code roleId} answers {@code ENTITY_NOT_FOUND}
+     * (404) instead of an empty page, which is indistinguishable from "a real role with no grants".
+     *
+     * <p>Reads roles of any status on purpose: an {@code INACTIVE} role still has to be inspectable
+     * before an admin decides whether to reactivate it.
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    public PageResult<PermissionResponse> listRolePermissions(UUID roleId, Pageable pageable) {
+        findRoleById(roleId);
+        return PageResult.from(rolePermissionRepository.findPermissionsByRoleId(roleId, pageable)
+                .map(mapper::toResponse));
+    }
+
+    /**
+     * The resources a non-{@code GLOBAL} scope covers — the read side of
+     * {@link #addScopeResource(UUID, AccessScopeResourceRequest)}, which until now could only be
+     * written. {@code GLOBAL} scopes legitimately return an empty page: they carry no resource rows,
+     * which is exactly what {@link com.erp.manufacturing.module.organization.security.PermissionGuard}
+     * relies on when it treats them as unscoped.
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    public PageResult<AccessScopeResourceResponse> listScopeResources(UUID scopeId, Pageable pageable) {
+        findScopeById(scopeId);
+        return PageResult.from(accessScopeResourceRepository.findByScopeId(scopeId, pageable)
+                .map(mapper::toResponse));
+    }
+
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     public PageResult<AccessScopeResponse> listScopes(Pageable pageable) {
@@ -266,6 +304,7 @@ public class AccessControlService {
     public AccessScopeResourceResponse addScopeResource(UUID scopeId, AccessScopeResourceRequest request) {
         AccessScope scope = findActiveScope(scopeId);
         validateScopeResource(request.resourceType(), request.resourceId());
+        validateScopeResourceType(scope.getScopeType(), request.resourceType());
 
         if (accessScopeResourceRepository.existsByScopeIdAndResourceTypeAndResourceId(
                 scope.getScopeId(), request.resourceType(), request.resourceId())) {
@@ -291,6 +330,7 @@ public class AccessControlService {
         Role role = findActiveRole(request.roleId());
         AccessScope scope = findActiveScope(request.scopeId());
         validateExpiresAt(request.expiresAt());
+        validateAssignmentScope(role, scope);
 
         assignmentRepository.findByUserIdAndRoleIdAndScopeIdAndStatus(
                 request.userId(), role.getRoleId(), scope.getScopeId(), AssignmentStatus.ACTIVE)
@@ -321,11 +361,11 @@ public class AccessControlService {
     }
 
     /** Result of {@link #resolveMyScopes(UUID)} — the {@code scopes[]}/{@code defaultPlantId} pair
-     *  {@code GET /api/v1/auth/me} needs. */
+     *  {@code GET /api/auth/v1/me} needs. */
     public record UserAccessScopesResult(List<MyAccessScopeResponse> scopes, UUID defaultPlantId) {}
 
     /**
-     * Builds the caller's {@code scopes[]} for {@code GET /api/v1/auth/me} — every company/plant
+     * Builds the caller's {@code scopes[]} for {@code GET /api/auth/v1/me} — every company/plant
      * the user has an active assignment on, with the permissions that apply to each.
      *
      * <p>No {@code @PreAuthorize}: this is self-service info about the caller's own access, not an
@@ -347,8 +387,15 @@ public class AccessControlService {
         Map<UUID, Set<String>> permissionsByCompany = new LinkedHashMap<>();
 
         for (ScopeResourcePermissionRow row : rows) {
-            if (row.resourceType() == null) {
+            if (row.scopeType() == null || row.permissionCode() == null) {
+                continue;
+            }
+            if (row.scopeType() == ScopeType.GLOBAL) {
                 globalPermissions.add(row.permissionCode());
+                continue;
+            }
+            if (row.resourceType() == null || row.resourceId() == null
+                    || !isResourceTypeAllowed(row.scopeType(), row.resourceType())) {
                 continue;
             }
             switch (row.resourceType()) {
@@ -375,14 +422,20 @@ public class AccessControlService {
         }
         permissionsByCompany.forEach((companyId, permissions) -> {
             Company company = companiesById.get(companyId);
-            scopes.add(new MyAccessScopeResponse(
-                    "COMPANY", companyId, company.getCode(), null, null, permissions));
+            if (company != null && company.isActive()) {
+                scopes.add(new MyAccessScopeResponse(
+                        "COMPANY", companyId, company.getCode(), null, null, permissions));
+            }
         });
         permissionsByPlant.forEach((plantId, permissions) -> {
             Plant plant = plantsById.get(plantId);
-            Company company = companiesById.get(plant.getCompany().getCompanyId());
-            scopes.add(new MyAccessScopeResponse(
-                    "PLANT", company.getCompanyId(), company.getCode(), plantId, plant.getCode(), permissions));
+            if (plant != null && plant.isActive() && plant.getCompany() != null) {
+                Company company = companiesById.get(plant.getCompany().getCompanyId());
+                if (company != null && company.isActive()) {
+                    scopes.add(new MyAccessScopeResponse(
+                            "PLANT", company.getCompanyId(), company.getCode(), plantId, plant.getCode(), permissions));
+                }
+            }
         });
 
         // B80: sort deterministically before picking defaultPlantId — HashMap/Set iteration order
@@ -459,6 +512,96 @@ public class AccessControlService {
         }
     }
 
+    private void validateScopeResourceType(ScopeType scopeType, ScopeResourceType resourceType) {
+        if (!isResourceTypeAllowed(scopeType, resourceType)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Resource type " + resourceType + " is not allowed for scope type " + scopeType);
+        }
+    }
+
+    private boolean isResourceTypeAllowed(ScopeType scopeType, ScopeResourceType resourceType) {
+        if (scopeType == null || resourceType == null) {
+            return false;
+        }
+        return switch (scopeType) {
+            case GLOBAL -> false;
+            case COMPANY -> resourceType == ScopeResourceType.COMPANY;
+            case PLANT -> resourceType == ScopeResourceType.PLANT;
+            case WAREHOUSE_GROUP -> resourceType == ScopeResourceType.WAREHOUSE;
+            case CUSTOM -> true;
+        };
+    }
+
+    private void validateAssignmentScope(Role role, AccessScope scope) {
+        if (role.getCompanyId() != null && scope.getScopeType() == ScopeType.GLOBAL) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "A company-owned role cannot be assigned to a global scope");
+        }
+
+        List<AccessScopeResource> resources = accessScopeResourceRepository
+                .findByScopeId(scope.getScopeId(), Pageable.unpaged())
+                .getContent();
+
+        if (scope.getScopeType() == ScopeType.GLOBAL) {
+            if (!resources.isEmpty()) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "A global scope cannot contain resources");
+            }
+            return;
+        }
+        if (resources.isEmpty()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "A non-global scope must contain at least one resource before assignment");
+        }
+
+        resources.forEach(resource -> validateScopeResourceType(
+                scope.getScopeType(), resource.getResourceType()));
+        Set<UUID> owningCompanyIds = resolveOwningCompanyIds(resources);
+
+        if (role.isSystem() && isReservedAdminCode(role.getCode())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "The system administrator role can only be assigned to a global scope");
+        }
+        if (role.getCompanyId() != null
+                && (owningCompanyIds.isEmpty()
+                || owningCompanyIds.stream().anyMatch(id -> !role.getCompanyId().equals(id)))) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "The role and access scope must belong to the same company");
+        }
+    }
+
+    private Set<UUID> resolveOwningCompanyIds(List<AccessScopeResource> resources) {
+        Set<UUID> companyIds = resources.stream()
+                .filter(resource -> resource.getResourceType() == ScopeResourceType.COMPANY)
+                .map(AccessScopeResource::getResourceId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        Set<UUID> plantIds = resources.stream()
+                .filter(resource -> resource.getResourceType() == ScopeResourceType.PLANT)
+                .map(AccessScopeResource::getResourceId)
+                .collect(Collectors.toSet());
+        List<Plant> plants = plantRepository.findAllById(plantIds);
+        if (plants.size() != plantIds.size() || plants.stream().anyMatch(plant -> !plant.isActive())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Scope contains an unavailable plant");
+        }
+        plants.forEach(plant -> companyIds.add(plant.getCompany().getCompanyId()));
+
+        Set<UUID> warehouseIds = resources.stream()
+                .filter(resource -> resource.getResourceType() == ScopeResourceType.WAREHOUSE)
+                .map(AccessScopeResource::getResourceId)
+                .collect(Collectors.toSet());
+        List<Warehouse> warehouses = warehouseRepository.findAllById(warehouseIds);
+        if (warehouses.size() != warehouseIds.size()
+                || warehouses.stream().anyMatch(warehouse -> !warehouse.isActive())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Scope contains an unavailable warehouse");
+        }
+        warehouses.forEach(warehouse -> companyIds.add(
+                warehouse.getPlant().getCompany().getCompanyId()));
+        return companyIds;
+    }
+
     private void ensureActiveCompany(UUID companyId) {
         boolean active = companyRepository.findById(companyId).map(Company::isActive).orElse(false);
         if (!active) {
@@ -475,6 +618,11 @@ public class AccessControlService {
 
     private String normalizeCode(String code) {
         return code.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean isReservedAdminCode(String code) {
+        String normalized = normalizeCode(code);
+        return normalized.equals("ADMIN") || normalized.equals("ROLE_ADMIN");
     }
 
     private String normalizeToken(String value) {

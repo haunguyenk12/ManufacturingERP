@@ -22,7 +22,7 @@ public class OrganizationController {
 
     private final OrganizationService organizationService;
 
-    @GetMapping("/api/v1/companies")
+    @GetMapping("/v1/companies")
     @Operation(summary = "List companies")
     public ResponseEntity<ApiResponse<PageResult<CompanyResponse>>> listCompanies(
             @RequestParam(defaultValue = "0") int page,
@@ -32,7 +32,7 @@ public class OrganizationController {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.listCompanies(PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/companies")
+    @PostMapping("/v1/companies")
     @Operation(summary = "Create company")
     public ResponseEntity<ApiResponse<CompanyResponse>> createCompany(
             @Valid @RequestBody CompanyCreateRequest request) {
@@ -40,13 +40,13 @@ public class OrganizationController {
                 .body(ApiResponse.created(organizationService.createCompany(request)));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}")
+    @GetMapping("/v1/companies/{companyId}")
     @Operation(summary = "Get company")
     public ResponseEntity<ApiResponse<CompanyResponse>> getCompany(@PathVariable UUID companyId) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.getCompany(companyId)));
     }
 
-    @PatchMapping("/api/v1/companies/{companyId}")
+    @PatchMapping("/v1/companies/{companyId}")
     @Operation(summary = "Update company")
     public ResponseEntity<ApiResponse<CompanyResponse>> updateCompany(
             @PathVariable UUID companyId,
@@ -54,14 +54,14 @@ public class OrganizationController {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.updateCompany(companyId, request)));
     }
 
-    @DeleteMapping("/api/v1/companies/{companyId}")
+    @DeleteMapping("/v1/companies/{companyId}")
     @Operation(summary = "Deactivate company")
     public ResponseEntity<ApiResponse<Void>> deactivateCompany(@PathVariable UUID companyId) {
         organizationService.deactivateCompany(companyId);
         return ResponseEntity.ok(ApiResponse.noContent("Company deactivated successfully"));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}/plants")
+    @GetMapping("/v1/companies/{companyId}/plants")
     @Operation(summary = "List plants by company")
     public ResponseEntity<ApiResponse<PageResult<PlantResponse>>> listPlants(
             @PathVariable UUID companyId,
@@ -73,7 +73,7 @@ public class OrganizationController {
                 companyId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/companies/{companyId}/plants")
+    @PostMapping("/v1/companies/{companyId}/plants")
     @Operation(summary = "Create plant under company")
     public ResponseEntity<ApiResponse<PlantResponse>> createPlant(
             @PathVariable UUID companyId,
@@ -82,13 +82,13 @@ public class OrganizationController {
                 .body(ApiResponse.created(organizationService.createPlant(companyId, request)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}")
+    @GetMapping("/v1/plants/{plantId}")
     @Operation(summary = "Get plant")
     public ResponseEntity<ApiResponse<PlantResponse>> getPlant(@PathVariable UUID plantId) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.getPlant(plantId)));
     }
 
-    @PatchMapping("/api/v1/plants/{plantId}")
+    @PatchMapping("/v1/plants/{plantId}")
     @Operation(summary = "Update plant")
     public ResponseEntity<ApiResponse<PlantResponse>> updatePlant(
             @PathVariable UUID plantId,
@@ -96,20 +96,20 @@ public class OrganizationController {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.updatePlant(plantId, request)));
     }
 
-    @DeleteMapping("/api/v1/plants/{plantId}")
+    @DeleteMapping("/v1/plants/{plantId}")
     @Operation(summary = "Deactivate plant")
     public ResponseEntity<ApiResponse<Void>> deactivatePlant(@PathVariable UUID plantId) {
         organizationService.deactivatePlant(plantId);
         return ResponseEntity.ok(ApiResponse.noContent("Plant deactivated successfully"));
     }
 
-    @PostMapping("/api/v1/plants/{plantId}/activate")
+    @PostMapping("/v1/plants/{plantId}/activate")
     @Operation(summary = "Activate a plant (idempotent — no-op if already ACTIVE; fails if its company is inactive)")
     public ResponseEntity<ApiResponse<PlantResponse>> activatePlant(@PathVariable UUID plantId) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.activatePlant(plantId)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}/warehouses")
+    @GetMapping("/v1/plants/{plantId}/warehouses")
     @Operation(summary = "List warehouses by plant")
     public ResponseEntity<ApiResponse<PageResult<WarehouseResponse>>> listWarehouses(
             @PathVariable UUID plantId,
@@ -121,7 +121,7 @@ public class OrganizationController {
                 plantId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/plants/{plantId}/warehouses")
+    @PostMapping("/v1/plants/{plantId}/warehouses")
     @Operation(summary = "Create warehouse under plant")
     public ResponseEntity<ApiResponse<WarehouseResponse>> createWarehouse(
             @PathVariable UUID plantId,
@@ -130,13 +130,13 @@ public class OrganizationController {
                 .body(ApiResponse.created(organizationService.createWarehouse(plantId, request)));
     }
 
-    @GetMapping("/api/v1/warehouses/{warehouseId}")
+    @GetMapping("/v1/warehouses/{warehouseId}")
     @Operation(summary = "Get warehouse")
     public ResponseEntity<ApiResponse<WarehouseResponse>> getWarehouse(@PathVariable UUID warehouseId) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.getWarehouse(warehouseId)));
     }
 
-    @PatchMapping("/api/v1/warehouses/{warehouseId}")
+    @PatchMapping("/v1/warehouses/{warehouseId}")
     @Operation(summary = "Update warehouse")
     public ResponseEntity<ApiResponse<WarehouseResponse>> updateWarehouse(
             @PathVariable UUID warehouseId,
@@ -144,14 +144,14 @@ public class OrganizationController {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.updateWarehouse(warehouseId, request)));
     }
 
-    @DeleteMapping("/api/v1/warehouses/{warehouseId}")
+    @DeleteMapping("/v1/warehouses/{warehouseId}")
     @Operation(summary = "Deactivate warehouse")
     public ResponseEntity<ApiResponse<Void>> deactivateWarehouse(@PathVariable UUID warehouseId) {
         organizationService.deactivateWarehouse(warehouseId);
         return ResponseEntity.ok(ApiResponse.noContent("Warehouse deactivated successfully"));
     }
 
-    @PostMapping("/api/v1/warehouses/{warehouseId}/activate")
+    @PostMapping("/v1/warehouses/{warehouseId}/activate")
     @Operation(summary = "Activate a warehouse (idempotent — no-op if already ACTIVE; fails if its plant is inactive)")
     public ResponseEntity<ApiResponse<WarehouseResponse>> activateWarehouse(@PathVariable UUID warehouseId) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.activateWarehouse(warehouseId)));

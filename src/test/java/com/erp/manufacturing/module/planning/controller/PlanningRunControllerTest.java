@@ -35,6 +35,8 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -103,9 +105,9 @@ class PlanningRunControllerTest {
     @Test
     @DisplayName("run: returns 201 with the spec §2.4 run header (code + 4 summary counters)")
     void run_validRequest_returns201WithRunHeader() throws Exception {
-        when(mrpRunService.run(any(MrpRunCreateRequest.class))).thenReturn(sampleRun());
+        when(mrpRunService.run(any(MrpRunCreateRequest.class), any())).thenReturn(sampleRun());
 
-        mockMvc.perform(post("/api/v1/planning-runs")
+        mockMvc.perform(post("/v1/planning-runs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(runBody(PLANT_ID)))
                 .andExpect(status().isCreated())
@@ -118,10 +120,50 @@ class PlanningRunControllerTest {
                 .andExpect(jsonPath("$.result.blockedProposals").value(0));
     }
 
+    /**
+     * The header is optional and must reach the service verbatim: the frontend sent one key three
+     * times and got three runs because nothing here read it. Absent ⇒ the service still receives
+     * {@code null} and keeps its previous behaviour.
+     */
+    @Test
+    @DisplayName("run: Idempotency-Key is forwarded to the service; absent means null")
+    void run_forwardsTheIdempotencyKeyHeader() throws Exception {
+        when(mrpRunService.run(any(MrpRunCreateRequest.class), any())).thenReturn(sampleRun());
+
+        mockMvc.perform(post("/v1/planning-runs")
+                        .header("Idempotency-Key", "slide-seed-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(runBody(PLANT_ID)))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/v1/planning-runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(runBody(PLANT_ID)))
+                .andExpect(status().isCreated());
+
+        verify(mrpRunService).run(any(MrpRunCreateRequest.class), eq("slide-seed-1"));
+        verify(mrpRunService).run(any(MrpRunCreateRequest.class), isNull());
+    }
+
+    @Test
+    @DisplayName("run: replaying a key with a different body surfaces 409 IDEMPOTENCY_CONFLICT")
+    void run_idempotencyConflict_returns409() throws Exception {
+        when(mrpRunService.run(any(MrpRunCreateRequest.class), eq("slide-seed-1")))
+                .thenThrow(new AppException(BusinessErrorCode.IDEMPOTENCY_CONFLICT,
+                        "Idempotency-Key was already used with a different payload"));
+
+        mockMvc.perform(post("/v1/planning-runs")
+                        .header("Idempotency-Key", "slide-seed-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(runBody(PLANT_ID)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.IDEMPOTENCY_CONFLICT.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
     @Test
     @DisplayName("run: missing horizonEndDate fails @Valid before reaching the service")
     void run_missingHorizonEnd_returns400ValidationError() throws Exception {
-        mockMvc.perform(post("/api/v1/planning-runs")
+        mockMvc.perform(post("/v1/planning-runs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"companyId":"%s","plantId":"%s","horizonStartDate":"2026-07-01"}
@@ -136,7 +178,7 @@ class PlanningRunControllerTest {
     @Test
     @DisplayName("run: X-Plant-Id disagreeing with the body plantId returns 409 STATE_CONFLICT (§5.6.1)")
     void run_plantHeaderMismatch_returns409BeforeReachingService() throws Exception {
-        mockMvc.perform(post("/api/v1/planning-runs")
+        mockMvc.perform(post("/v1/planning-runs")
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(runBody(PLANT_ID)))
@@ -158,7 +200,7 @@ class PlanningRunControllerTest {
         when(mrpRunService.listRequirements(eq(RUN_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleRequirementLine()), 0, 20, 1, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/planning-runs/" + RUN_ID + "/requirements"))
+        mockMvc.perform(get("/v1/planning-runs/" + RUN_ID + "/requirements"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].availableQuantity").value(12.0))
@@ -174,7 +216,7 @@ class PlanningRunControllerTest {
         when(mrpRunService.listSuggestions(eq(RUN_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleSuggestion()), 0, 20, 1, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/planning-runs/" + RUN_ID + "/suggestions"))
+        mockMvc.perform(get("/v1/planning-runs/" + RUN_ID + "/suggestions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.content[0].supplyType").value("MAKE"))
                 .andExpect(jsonPath("$.result.content[0].sourceRoutingCode").value("RT-ASSY"))
@@ -211,7 +253,7 @@ class PlanningRunControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.MISSING_BOM,
                         "No active BOM for this item"));
 
-        mockMvc.perform(post("/api/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-work-order")
+        mockMvc.perform(post("/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-work-order")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"workOrderNo":"WO-001"}

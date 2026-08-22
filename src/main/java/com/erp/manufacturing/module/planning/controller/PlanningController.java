@@ -18,7 +18,7 @@ public class PlanningController {
 
     private final PlanningService planningService;
 
-    @PostMapping("/api/v1/planning/production-estimates")
+    @PostMapping("/v1/planning/production-estimates")
     @Operation(summary = "Estimate production capability and shortages")
     public ResponseEntity<ApiResponse<ProductionEstimateResponse>> estimateProduction(
             @Valid @RequestBody ProductionEstimateRequest request) {

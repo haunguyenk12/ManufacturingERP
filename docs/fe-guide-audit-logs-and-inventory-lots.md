@@ -1,5 +1,9 @@
 # Hướng dẫn tích hợp: Audit Logs (C2-1) & Inventory Lots (C2-2)
 
+> **Cập nhật 2026-08-17:** Audit field-level diff đã được triển khai. Với audit sinh ra sau bản cập
+> nhật này, `changes[]` chứa `fieldName`, `oldValue`, `newValue`, `changeType`; các ghi chú cũ bên
+> dưới nói mảng này "luôn rỗng" chỉ mô tả trạng thái trước ngày 2026-08-17.
+
 > Ngày viết: 2026-08-06 · Đối tượng: FE team
 > Phạm vi: đúng 2 tính năng vừa hoàn thành, backend đang chờ FE tích hợp — **không** phải bản tổng
 > hợp toàn bộ API. Envelope/pagination/auth chung: `docs/api-guide-for-frontend.md §2`.
@@ -56,7 +60,7 @@ Response — mỗi phần tử trong `content[]`:
   "username": "admin",
   "action": "WORK_ORDER_CREATED",
   "entityType": "WorkOrder",
-  "entityId": "e5f6a7b8-...",
+  "entityName": "WO-2026-001",
   "description": null,
   "status": "SUCCESS",
   "clientIp": "10.0.0.5",
@@ -80,7 +84,7 @@ Trả về đúng các field ở trên **cộng thêm** `changes[]`:
   "username": "admin",
   "action": "WORK_ORDER_UPDATED",
   "entityType": "WorkOrder",
-  "entityId": "e5f6a7b8-...",
+  "entityName": "WO-2026-001",
   "description": null,
   "status": "SUCCESS",
   "clientIp": "10.0.0.5",
@@ -93,6 +97,10 @@ Trả về đúng các field ở trên **cộng thêm** `changes[]`:
 ```
 
 `auditLogId` không tồn tại → `404 ENTITY_NOT_FOUND`.
+
+`entityId` vẫn là query parameter để lọc chính xác nhưng không còn xuất hiện trong response.
+`entityName` là snapshot tên/mã/số chứng từ tại thời điểm thao tác; audit lịch sử trước migration
+`V65` trả `null` vì backend không suy diễn tên hiện tại thành dữ liệu lịch sử.
 
 ### 1.4 Hai điều bắt buộc biết trước khi code UI
 
@@ -170,7 +178,17 @@ Ghi chú field:
     goods receipt của một PO.
   - Cả 4 field này có thể là `null` nếu không tìm thấy dòng `RECEIVE` gốc (hiếm, lot cũ/chỉnh tay).
 
-### 2.3 Chi tiết một lot — `GET /inventory/lots/{lotId}`
+### 2.3 Chi tiết một lot — `GET /inventory/lots/{lotId}?warehouseId=`
+
+FE phải truyền lại `warehouseId` đang dùng ở màn danh sách:
+
+```http
+GET /api/v1/inventory/lots/{lotId}?warehouseId={selectedWarehouseId}
+```
+
+Với request có `warehouseId`, backend kiểm tra `PERM_INVENTORY_READ` theo warehouse/plant/company
+và chỉ trả balance cùng source movement thuộc kho đó. Chế độ không truyền param chỉ dành cho
+company/global/admin và trả toàn bộ balances để giữ tương thích với client quản trị cũ.
 
 ```jsonc
 {
@@ -202,9 +220,9 @@ Ghi chú field:
 }
 ```
 
-🔴 **Không có field `warehouseId` ở cấp ngoài** — chi tiết lot trả về `balances[]`, mỗi phần tử là
-một kho lot đang có hàng. Với đại đa số lot, mảng này chỉ có **1 phần tử**, nhưng UI phải code cho
-trường hợp nhiều phần tử (xem §2.5). `lotId` không tồn tại → `404 ENTITY_NOT_FOUND`.
+🔴 **Không có field `warehouseId` ở cấp ngoài.** Khi FE truyền `warehouseId`, `balances[]` có đúng
+một phần tử của kho đó. Lot không tồn tại, hoặc lot không có balance tại warehouse đã chọn, trả
+`404 ENTITY_NOT_FOUND`; warehouse ngoài scope trả `403 PERMISSION_DENIED`.
 
 ### 2.4 Đổi trạng thái lot — `POST /inventory/lots/{lotId}/status`
 
@@ -265,8 +283,8 @@ như đã thống nhất**, không có gì đổi khác đi:
 **(b) Một lot có thể có hàng ở nhiều kho cùng lúc.** Vì vậy:
 - Danh sách (`GET /inventory/lots`) **bắt buộc** phải chọn 1 kho qua `warehouseId` — không có chế độ
   "xem tất cả kho" cho danh sách lot (giống cách `/inventory/balances` đã hoạt động).
-- Chi tiết (`GET /inventory/lots/{lotId}`) trả `balances[]` — UI nên hiển thị dạng bảng con "lot này
-  có ở những kho nào, số lượng bao nhiêu mỗi kho" thay vì giả định luôn có đúng 1 kho.
+- Chi tiết từ màn list phải gọi `GET /inventory/lots/{lotId}?warehouseId={selectedWarehouseId}`.
+  Response `balances[]` chỉ có kho đang xem; không gọi lại endpoint thiếu param cho Manager/Operator.
 - Khi đổi trạng thái (`POST .../status`), UI phải cho user chọn **đúng kho** muốn thao tác (thường là
   kho đang xem trong màn hình chi tiết) rồi gửi `warehouseId` đó lên.
 
@@ -278,6 +296,7 @@ như đã thống nhất**, không có gì đổi khác đi:
 - [ ] Audit: **không** hiển thị bộ lọc theo plant cho tới khi có thông báo tiếp theo (luôn trả rỗng)
 - [ ] Audit: chỉ hiện menu/route này cho user có role ADMIN (tránh gọi API rồi nhận 403)
 - [ ] Inventory Lots: màn hình danh sách yêu cầu chọn kho trước khi gọi API
+- [ ] Inventory Lots: khi mở detail, truyền lại chính `warehouseId` của màn danh sách
 - [ ] Inventory Lots: màn hình chi tiết hiển thị đúng theo `balances[]`, không giả định 1 kho
 - [ ] Inventory Lots: form đổi trạng thái bắt validate `reason` bắt buộc, không cho chọn `EXPIRED`
 - [ ] Inventory Lots: xử lý riêng `409 LOT_NOT_ELIGIBLE` → điều hướng sang QC disposition

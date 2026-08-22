@@ -1,0 +1,463 @@
+Project manufacturing_erp_06_manufacturing_execution_quality {
+  database_type: 'PostgreSQL'
+  Note: 'Manufacturing ERP 06-manufacturing-execution-quality module. Source: live PostgreSQL schema after Flyway V65 (add entity name to audit logs). External tables are relationship-only stubs.'
+}
+
+Table work_orders {
+  work_order_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plant_id uuid [not null]
+  work_order_no varchar(100) [not null]
+  product_item_id uuid [not null]
+  bom_id uuid [not null]
+  bom_revision varchar(40) [not null]
+  output_warehouse_id uuid [not null]
+  planned_quantity numeric(19,6) [not null]
+  completed_quantity numeric(19,6) [not null, default: 0]
+  status varchar(20) [not null, default: 'DRAFT']
+  planned_start_at timestamptz
+  planned_end_at timestamptz
+  released_at timestamptz
+  completed_at timestamptz
+  cancelled_at timestamptz
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  blocked_at timestamptz
+  block_reason text
+  source_routing_id uuid
+  source_routing_code varchar(100)
+  source_routing_version varchar(40)
+  routing_captured_at timestamptz
+  actual_good_quantity numeric(19,6) [not null, default: 0]
+  actual_scrap_quantity numeric(19,6) [not null, default: 0]
+  actual_rework_quantity numeric(19,6) [not null, default: 0]
+  cancel_reason text
+  execution_started_at timestamptz
+  planning_run_id uuid
+  planning_run_code varchar(40)
+  planning_proposal_id uuid
+  closed_at timestamptz
+
+  indexes {
+    (plant_id, work_order_no) [unique, name: 'uk_work_orders_plant_no']
+  }
+
+  checks {
+    `actual_good_quantity >= 0::numeric AND actual_good_quantity <= planned_quantity` [name: 'chk_work_orders_actual_good']
+    `actual_rework_quantity >= 0::numeric` [name: 'chk_work_orders_actual_rework']
+    `actual_scrap_quantity >= 0::numeric` [name: 'chk_work_orders_actual_scrap']
+    `completed_quantity >= 0::numeric AND completed_quantity <= planned_quantity` [name: 'chk_work_orders_completed_quantity']
+    `completed_quantity <= actual_good_quantity` [name: 'chk_work_orders_completed_within_good']
+    `planned_quantity > 0::numeric` [name: 'chk_work_orders_planned_quantity']
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'PLANNED'::character varying, 'BLOCKED'::character varying, 'RELEASED'::character varying, 'IN_PROGRESS'::character varying, 'COMPLETED'::character varying, 'CANCELLED'::character varying, 'CLOSED'::character varying]::text[])` [name: 'chk_work_orders_status']
+  }
+}
+
+Table work_order_component_lines {
+  component_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  bom_line_id uuid [not null]
+  component_item_id uuid [not null]
+  line_no integer [not null]
+  quantity_per numeric(19,6) [not null]
+  scrap_rate numeric(9,6) [not null, default: 0]
+  required_quantity numeric(19,6) [not null]
+  issued_quantity numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (work_order_id, component_item_id) [unique, name: 'uk_work_order_component_item']
+    (work_order_id, line_no) [unique, name: 'uk_work_order_component_line_no']
+  }
+
+  checks {
+    `issued_quantity >= 0::numeric` [name: 'chk_work_order_component_issued']
+    `quantity_per > 0::numeric` [name: 'chk_work_order_component_quantity_per']
+    `required_quantity > 0::numeric` [name: 'chk_work_order_component_required']
+    `scrap_rate >= 0::numeric AND scrap_rate < 1::numeric` [name: 'chk_work_order_component_scrap_rate']
+  }
+}
+
+Table work_order_operations {
+  work_order_operation_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  source_routing_operation_id uuid
+  sequence integer [not null]
+  name varchar(255) [not null]
+  work_center_code varchar(100) [not null]
+  setup_minutes numeric(19,6) [not null, default: 0]
+  run_minutes_per_unit numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  work_center_id uuid
+  planned_start_at timestamptz
+  planned_end_at timestamptz
+  schedule_adjustment_reason text
+
+  indexes {
+    (work_order_id, sequence) [unique, name: 'uk_work_order_operations_sequence']
+  }
+
+  checks {
+    `run_minutes_per_unit >= 0::numeric` [name: 'chk_work_order_operations_run']
+    `sequence > 0` [name: 'chk_work_order_operations_sequence']
+    `setup_minutes >= 0::numeric` [name: 'chk_work_order_operations_setup']
+  }
+}
+
+Table material_reservations {
+  reservation_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  component_line_id uuid [not null]
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  lot_id uuid
+  quantity numeric(19,6) [not null]
+  consumed_quantity numeric(19,6) [not null, default: 0]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `consumed_quantity >= 0::numeric AND consumed_quantity <= quantity` [name: 'chk_material_reservations_consumed']
+    `quantity > 0::numeric` [name: 'chk_material_reservations_quantity']
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'RELEASED'::character varying, 'CONSUMED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_material_reservations_status']
+  }
+}
+
+Table material_issues {
+  issue_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  status varchar(20) [not null, default: 'POSTED']
+  idempotency_key varchar(120) [not null, unique]
+  posted_at timestamptz [not null, default: `now()`]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  payload_hash varchar(64)
+  trace_id varchar(64)
+  code varchar(40) [not null]
+
+  checks {
+    `status::text = ANY (ARRAY['POSTED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_material_issues_status']
+  }
+}
+
+Table material_issue_lines {
+  issue_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  issue_id uuid [not null]
+  component_line_id uuid [not null]
+  reservation_id uuid
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  lot_id uuid
+  quantity numeric(19,6) [not null]
+  stock_movement_id uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  over_issue boolean [not null, default: false]
+  override_reason text
+  serial_id uuid
+
+  checks {
+    `quantity > 0::numeric` [name: 'chk_material_issue_lines_quantity']
+  }
+}
+
+Table wip_transactions {
+  wip_transaction_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  transaction_type varchar(40) [not null]
+  stage_code varchar(80)
+  quantity numeric(19,6)
+  reference_type varchar(80)
+  reference_id varchar(120) [note: 'Polymorphic business-document identifier selected by reference_type.']
+  occurred_at timestamptz [not null, default: `now()`]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  work_order_operation_id uuid
+
+  checks {
+    `quantity IS NULL OR quantity > 0::numeric` [name: 'chk_wip_transactions_quantity']
+    `transaction_type::text = ANY (ARRAY['START'::character varying, 'MATERIAL_ISSUED'::character varying, 'OUTPUT_COMPLETED'::character varying, 'OUTPUT_RECEIPTED'::character varying, 'SCRAP_REPORTED'::character varying, 'REWORK_REPORTED'::character varying]::text[])` [name: 'chk_wip_transactions_type']
+  }
+}
+
+Table production_executions {
+  production_execution_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  work_order_operation_id uuid
+  good_quantity numeric(19,6) [not null, default: 0]
+  scrap_quantity numeric(19,6) [not null, default: 0]
+  rework_quantity numeric(19,6) [not null, default: 0]
+  actual_started_at timestamptz
+  actual_ended_at timestamptz
+  operator_user_id uuid [note: 'Logical users.user_id; no physical FK in the current schema.']
+  trace_id varchar(64)
+  idempotency_key varchar(120) [not null, unique]
+  payload_hash varchar(64)
+  notes text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  code varchar(40) [not null]
+
+  checks {
+    `good_quantity >= 0::numeric` [name: 'chk_production_executions_good']
+    `rework_quantity >= 0::numeric` [name: 'chk_production_executions_rework']
+    `scrap_quantity >= 0::numeric` [name: 'chk_production_executions_scrap']
+    `(good_quantity + scrap_quantity + rework_quantity) > 0::numeric` [name: 'chk_production_executions_total']
+  }
+}
+
+Table production_receipts {
+  receipt_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  status varchar(20) [not null, default: 'DRAFT']
+  idempotency_key varchar(120) [not null, unique]
+  posted_at timestamptz [not null, default: `now()`]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  approved_at timestamptz
+  approved_by uuid [note: 'Logical users.user_id; no physical FK in the current schema.']
+  rejected_at timestamptz
+  reject_reason text
+  payload_hash varchar(64)
+  submitted_at timestamptz
+  qc_result varchar(20)
+  qc_reason text
+  qc_at timestamptz
+  qc_by uuid
+  trace_id varchar(64)
+  source_wip_trace_ids text
+  code varchar(40)
+
+  checks {
+    `qc_result IS NULL OR (qc_result::text = ANY (ARRAY['AVAILABLE'::character varying, 'REJECTED'::character varying]::text[]))` [name: 'chk_production_receipts_qc_result']
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'PENDING_APPROVAL'::character varying, 'APPROVED'::character varying, 'REJECTED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_production_receipts_status']
+  }
+}
+
+Table production_receipt_lines {
+  receipt_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  receipt_id uuid [not null]
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  lot_id uuid
+  quantity numeric(19,6) [not null]
+  stock_movement_id uuid
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  requested_lot_code varchar(120)
+  reason text
+  serial_id uuid
+  requested_serial_code varchar(120)
+
+  checks {
+    `quantity > 0::numeric` [name: 'chk_production_receipt_lines_quantity']
+  }
+}
+
+Table quality_dispositions {
+  disposition_id uuid [pk, not null, default: `gen_random_uuid()`]
+  receipt_id uuid [not null]
+  lot_id uuid [not null]
+  result varchar(20) [not null]
+  reason text [not null]
+  decided_by uuid [note: 'Logical users.user_id; no physical FK in the current schema.']
+  decided_at timestamptz [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (receipt_id, lot_id) [unique, name: 'uk_quality_dispositions_receipt_lot']
+  }
+
+  checks {
+    `result::text = ANY (ARRAY['AVAILABLE'::character varying, 'REJECTED'::character varying]::text[])` [name: 'chk_quality_dispositions_result']
+  }
+}
+
+Table work_order_demand_allocations {
+  allocation_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null]
+  sales_order_line_id uuid [not null]
+  allocated_quantity numeric(19,6) [not null]
+  fulfilled_quantity numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (work_order_id, sales_order_line_id) [unique, name: 'uk_wo_demand_allocations']
+  }
+
+  checks {
+    `allocated_quantity > 0::numeric` [name: 'chk_wo_demand_allocations_allocated']
+    `fulfilled_quantity >= 0::numeric AND fulfilled_quantity <= allocated_quantity` [name: 'chk_wo_demand_allocations_fulfilled']
+  }
+}
+
+Table work_order_cost_accumulators {
+  work_order_cost_accumulator_id uuid [pk, not null, default: `gen_random_uuid()`]
+  work_order_id uuid [not null, unique]
+  material_cost_accumulated numeric(19,6) [not null, default: 0]
+  labor_cost_accumulated numeric(19,6) [not null, default: 0]
+  overhead_cost_accumulated numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `labor_cost_accumulated >= 0::numeric` [name: 'chk_work_order_cost_accumulators_labor']
+    `material_cost_accumulated >= 0::numeric` [name: 'chk_work_order_cost_accumulators_material']
+    `overhead_cost_accumulated >= 0::numeric` [name: 'chk_work_order_cost_accumulators_overhead']
+  }
+}
+
+Table bom_headers [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  bom_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table bom_lines [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  line_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table companies [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  company_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table inventory_lots [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  lot_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table items [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  item_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table plants [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  plant_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table routings [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  routing_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table sales_order_lines [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  sales_order_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table serial_numbers [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  serial_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table stock_movements [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  movement_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table warehouses [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  warehouse_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table work_centers [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  work_center_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Ref material_issue_lines_component_line_id_fkey: material_issue_lines.component_line_id > work_order_component_lines.component_line_id
+Ref material_issue_lines_issue_id_fkey: material_issue_lines.issue_id > material_issues.issue_id [delete: cascade]
+Ref material_issue_lines_item_id_fkey: material_issue_lines.item_id > items.item_id
+Ref material_issue_lines_lot_id_fkey: material_issue_lines.lot_id > inventory_lots.lot_id
+Ref material_issue_lines_reservation_id_fkey: material_issue_lines.reservation_id > material_reservations.reservation_id
+Ref material_issue_lines_serial_id_fkey: material_issue_lines.serial_id > serial_numbers.serial_id
+Ref material_issue_lines_stock_movement_id_fkey: material_issue_lines.stock_movement_id > stock_movements.movement_id
+Ref material_issue_lines_warehouse_id_fkey: material_issue_lines.warehouse_id > warehouses.warehouse_id
+Ref material_issues_work_order_id_fkey: material_issues.work_order_id > work_orders.work_order_id
+Ref material_reservations_component_line_id_fkey: material_reservations.component_line_id > work_order_component_lines.component_line_id
+Ref material_reservations_item_id_fkey: material_reservations.item_id > items.item_id
+Ref material_reservations_lot_id_fkey: material_reservations.lot_id > inventory_lots.lot_id
+Ref material_reservations_warehouse_id_fkey: material_reservations.warehouse_id > warehouses.warehouse_id
+Ref material_reservations_work_order_id_fkey: material_reservations.work_order_id > work_orders.work_order_id
+Ref production_executions_work_order_id_fkey: production_executions.work_order_id > work_orders.work_order_id
+Ref production_executions_work_order_operation_id_fkey: production_executions.work_order_operation_id > work_order_operations.work_order_operation_id
+Ref production_receipt_lines_item_id_fkey: production_receipt_lines.item_id > items.item_id
+Ref production_receipt_lines_lot_id_fkey: production_receipt_lines.lot_id > inventory_lots.lot_id
+Ref production_receipt_lines_receipt_id_fkey: production_receipt_lines.receipt_id > production_receipts.receipt_id [delete: cascade]
+Ref production_receipt_lines_serial_id_fkey: production_receipt_lines.serial_id > serial_numbers.serial_id
+Ref production_receipt_lines_stock_movement_id_fkey: production_receipt_lines.stock_movement_id > stock_movements.movement_id
+Ref production_receipt_lines_warehouse_id_fkey: production_receipt_lines.warehouse_id > warehouses.warehouse_id
+Ref production_receipts_work_order_id_fkey: production_receipts.work_order_id > work_orders.work_order_id
+Ref quality_dispositions_lot_id_fkey: quality_dispositions.lot_id > inventory_lots.lot_id
+Ref quality_dispositions_receipt_id_fkey: quality_dispositions.receipt_id > production_receipts.receipt_id [delete: cascade]
+Ref wip_transactions_work_order_id_fkey: wip_transactions.work_order_id > work_orders.work_order_id
+Ref wip_transactions_work_order_operation_id_fkey: wip_transactions.work_order_operation_id > work_order_operations.work_order_operation_id
+Ref work_order_component_lines_bom_line_id_fkey: work_order_component_lines.bom_line_id > bom_lines.line_id
+Ref work_order_component_lines_component_item_id_fkey: work_order_component_lines.component_item_id > items.item_id
+Ref work_order_component_lines_work_order_id_fkey: work_order_component_lines.work_order_id > work_orders.work_order_id [delete: cascade]
+Ref work_order_cost_accumulators_work_order_id_fkey: work_order_cost_accumulators.work_order_id - work_orders.work_order_id
+Ref work_order_demand_allocations_sales_order_line_id_fkey: work_order_demand_allocations.sales_order_line_id > sales_order_lines.sales_order_line_id
+Ref work_order_demand_allocations_work_order_id_fkey: work_order_demand_allocations.work_order_id > work_orders.work_order_id [delete: cascade]
+Ref work_order_operations_work_center_id_fkey: work_order_operations.work_center_id > work_centers.work_center_id
+Ref work_order_operations_work_order_id_fkey: work_order_operations.work_order_id > work_orders.work_order_id [delete: cascade]
+Ref work_orders_bom_id_fkey: work_orders.bom_id > bom_headers.bom_id
+Ref work_orders_company_id_fkey: work_orders.company_id > companies.company_id
+Ref work_orders_output_warehouse_id_fkey: work_orders.output_warehouse_id > warehouses.warehouse_id
+Ref work_orders_plant_id_fkey: work_orders.plant_id > plants.plant_id
+Ref work_orders_product_item_id_fkey: work_orders.product_item_id > items.item_id
+Ref work_orders_source_routing_id_fkey: work_orders.source_routing_id > routings.routing_id
+
+TableGroup module_06_manufacturing_execution_quality {
+  work_orders
+  work_order_component_lines
+  work_order_operations
+  material_reservations
+  material_issues
+  material_issue_lines
+  wip_transactions
+  production_executions
+  production_receipts
+  production_receipt_lines
+  quality_dispositions
+  work_order_demand_allocations
+  work_order_cost_accumulators
+}
+

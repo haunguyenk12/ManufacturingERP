@@ -32,7 +32,7 @@ public class WorkCalendarController {
 
     private final WorkCalendarService workCalendarService;
 
-    @PostMapping("/api/v1/plants/{plantId}/work-calendars")
+    @PostMapping("/v1/plants/{plantId}/work-calendars")
     @Operation(summary = "Create a work calendar under a plant")
     public ResponseEntity<ApiResponse<WorkCalendarResponse>> create(
             @PathVariable UUID plantId, @Valid @RequestBody WorkCalendarCreateRequest request) {
@@ -40,7 +40,7 @@ public class WorkCalendarController {
                 .body(ApiResponse.created(workCalendarService.create(plantId, request)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}/work-calendars")
+    @GetMapping("/v1/plants/{plantId}/work-calendars")
     @Operation(summary = "List work calendars of a plant")
     public ResponseEntity<ApiResponse<PageResult<WorkCalendarResponse>>> list(
             @PathVariable UUID plantId,
@@ -53,13 +53,13 @@ public class WorkCalendarController {
                 plantId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/work-calendars/{calendarId}")
+    @GetMapping("/v1/work-calendars/{calendarId}")
     @Operation(summary = "Get a work calendar")
     public ResponseEntity<ApiResponse<WorkCalendarResponse>> get(@PathVariable UUID calendarId) {
         return ResponseEntity.ok(ApiResponse.ok(workCalendarService.get(calendarId)));
     }
 
-    @PatchMapping("/api/v1/work-calendars/{calendarId}")
+    @PatchMapping("/v1/work-calendars/{calendarId}")
     @Operation(summary = "Update name/effective range/weekly shifts/exceptions of a work calendar",
             description = "code and plantId are immutable after creation and are not part of this request body.")
     public ResponseEntity<ApiResponse<WorkCalendarResponse>> update(
@@ -67,19 +67,19 @@ public class WorkCalendarController {
         return ResponseEntity.ok(ApiResponse.ok(workCalendarService.update(calendarId, request)));
     }
 
-    @PostMapping("/api/v1/work-calendars/{calendarId}/activate")
+    @PostMapping("/v1/work-calendars/{calendarId}/activate")
     @Operation(summary = "Activate a work calendar")
     public ResponseEntity<ApiResponse<WorkCalendarResponse>> activate(@PathVariable UUID calendarId) {
         return ResponseEntity.ok(ApiResponse.ok(workCalendarService.activate(calendarId)));
     }
 
-    @PostMapping("/api/v1/work-calendars/{calendarId}/deactivate")
+    @PostMapping("/v1/work-calendars/{calendarId}/deactivate")
     @Operation(summary = "Deactivate a work calendar")
     public ResponseEntity<ApiResponse<WorkCalendarResponse>> deactivate(@PathVariable UUID calendarId) {
         return ResponseEntity.ok(ApiResponse.ok(workCalendarService.deactivate(calendarId)));
     }
 
-    @DeleteMapping("/api/v1/work-calendars/{calendarId}")
+    @DeleteMapping("/v1/work-calendars/{calendarId}")
     @Operation(summary = "Deactivate a work calendar (soft) — this IS the deactivate command",
             description = "Rule C6 forbids hard-deleting master data, so DELETE calls the same "
                     + "service method as POST .../deactivate; nothing is removed.")

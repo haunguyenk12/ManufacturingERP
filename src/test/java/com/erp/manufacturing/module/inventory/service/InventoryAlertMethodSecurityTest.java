@@ -8,6 +8,7 @@ import com.erp.manufacturing.module.inventory.repository.StockMovementRepository
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.organization.service.OrganizationScopeResolution;
+import com.erp.manufacturing.module.user.service.UserLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,7 +70,7 @@ class InventoryAlertMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("COMPANY"), eq(companyId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> alertService.getDashboard(ScopeResourceType.COMPANY, companyId))
+        assertThatThrownBy(() -> alertService.getDashboard(ScopeResourceType.COMPANY, companyId, null, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(organizationLookupService);
@@ -85,7 +86,7 @@ class InventoryAlertMethodSecurityTest {
                 .thenReturn(new OrganizationScopeResolution(
                         ScopeResourceType.COMPANY, companyId, companyId, List.of()));
 
-        assertThatCode(() -> alertService.getDashboard(ScopeResourceType.COMPANY, companyId))
+        assertThatCode(() -> alertService.getDashboard(ScopeResourceType.COMPANY, companyId, null, null))
                 .doesNotThrowAnyException();
     }
 
@@ -98,12 +99,14 @@ class InventoryAlertMethodSecurityTest {
                                                     InventoryAvailabilityService availabilityService,
                                                     OrganizationLookupService organizationLookupService,
                                                     StockMovementRepository stockMovementRepository,
+                                                    UserLookupService userLookupService,
                                                     InventoryMapper mapper) {
             return new InventoryAlertService(
                     settingRepository,
                     availabilityService,
                     organizationLookupService,
                     stockMovementRepository,
+                    userLookupService,
                     mapper);
         }
 
@@ -135,6 +138,11 @@ class InventoryAlertMethodSecurityTest {
         @Bean
         StockMovementRepository stockMovementRepository() {
             return mock(StockMovementRepository.class);
+        }
+
+        @Bean
+        UserLookupService userLookupService() {
+            return mock(UserLookupService.class);
         }
     }
 }

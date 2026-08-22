@@ -28,8 +28,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -195,6 +198,62 @@ class SalesOrderServiceTest {
         verify(salesOrderRepository, never()).save(any());
     }
 
+    /**
+     * FE defect report 2026-08-10 ({@code B112}): a full line replace reuses {@code lineNo} 1..N, and
+     * in a single Hibernate flush the child INSERTs run before the orphan-removal DELETEs — so the
+     * replacement collided with {@code uk_sales_order_lines_order_line_no} and the whole PATCH failed.
+     * The order of operations is the fix, so it is what this pins: the deletes must be flushed
+     * <em>before</em> the first replacement line is built. A mocked repository cannot see the
+     * constraint itself — that is {@code SalesOrderUpdateLinesIT}'s job (rule {@code R7}) — but it can
+     * lock the sequence that keeps the two statements apart.
+     */
+    @Test
+    void update_replacingLines_flushesTheOrphanDeletesBeforeBuildingTheReplacements() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        UUID newItemId = UUID.randomUUID();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(itemLookupService.getActiveItem(newItemId))
+                .thenReturn(item(newItemId, order.getCompany(), "FG-3"));
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
+
+        service.update(salesOrderId, new SalesOrderUpdateRequest(1L, null, null, null,
+                List.of(new SalesOrderLineRequest(newItemId, new BigDecimal("15"), ORDER_DATE.plusDays(30)))));
+
+        InOrder inOrder = inOrder(salesOrderRepository, itemLookupService);
+        inOrder.verify(salesOrderRepository).flush();
+        inOrder.verify(itemLookupService).getActiveItem(newItemId);
+        inOrder.verify(salesOrderRepository).saveAndFlush(order);
+    }
+
+    /**
+     * The replacement lines are built after the deletes have already been flushed, so a line that is
+     * only rejected inside {@code buildLine} leaves the transaction holding flushed deletes. Nothing
+     * is committed — {@code saveAndFlush} is never reached and the single {@code @Transactional}
+     * rolls the flushed deletes back with everything else, so the order keeps its original lines.
+     */
+    @Test
+    void update_replacementLineFromAnotherCompany_flushesTheDeletesButNeverCommits() {
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        UUID foreignItemId = UUID.randomUUID();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(itemLookupService.getActiveItem(foreignItemId))
+                .thenReturn(item(foreignItemId, company(UUID.randomUUID()), "FG-OTHER"));
+
+        assertThatThrownBy(() -> service.update(salesOrderId, new SalesOrderUpdateRequest(
+                1L, null, null, null,
+                List.of(new SalesOrderLineRequest(foreignItemId, new BigDecimal("15"),
+                        ORDER_DATE.plusDays(30))))))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verify(salesOrderRepository).flush();
+        verify(salesOrderRepository, never()).saveAndFlush(any());
+        verify(salesOrderRepository, never()).save(any());
+    }
+
     @Test
     void update_nullLines_keepsExistingLines() {
         SalesOrder order = draftOrderWithTwoLines();
@@ -211,6 +270,8 @@ class SalesOrderServiceTest {
         assertThat(response.lines().get(0).itemSku()).isEqualTo("FG-1");
         assertThat(response.lines().get(1).itemSku()).isEqualTo("FG-2");
         verifyNoInteractions(itemLookupService);
+        // No replacement, so no orphan deletes to flush ahead of time either.
+        verify(salesOrderRepository, never()).flush();
     }
 
     @Test
@@ -436,6 +497,53 @@ class SalesOrderServiceTest {
                 .fulfilledQuantity(BigDecimal.ZERO)
                 .dueDate(dueDate)
                 .build();
+    }
+
+    // ── list / search (DEC-01) ─────────────────────────────────────────────
+
+    /**
+     * DEC-01 is one combined term over {@code orderNo} and {@code customerName}. The two repository
+     * methods differ only in that predicate, so the branch is what has to be pinned: routing a blank
+     * term into the text query would silently filter every row out through {@code like '%%'} logic
+     * changes, and routing a real term into the plain query would ignore the search entirely while
+     * still returning a plausible-looking page.
+     */
+    @Test
+    void list_withoutASearchTerm_usesThePlainScopedQuery() {
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        Company company = company(companyId);
+        Plant plant = plant(plantId, company);
+
+        when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
+        when(salesOrderRepository.search(eq(companyId), eq(plantId), isNull(), any()))
+                .thenReturn(Page.empty());
+
+        service.list(companyId, plantId, null, "   ", PageRequest.of(0, 20));
+
+        verify(salesOrderRepository).search(eq(companyId), eq(plantId), isNull(), any());
+        verify(salesOrderRepository, never()).searchWithText(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void list_withASearchTerm_forwardsTheTrimmedTermAndKeepsTheStatusFilter() {
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        Company company = company(companyId);
+        Plant plant = plant(plantId, company);
+
+        when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
+        when(salesOrderRepository.searchWithText(
+                eq(companyId), eq(plantId), eq(SalesOrderStatus.CONFIRMED), eq("acme"), any()))
+                .thenReturn(Page.empty());
+
+        service.list(companyId, plantId, SalesOrderStatus.CONFIRMED, "  acme  ", PageRequest.of(0, 20));
+
+        verify(salesOrderRepository).searchWithText(
+                eq(companyId), eq(plantId), eq(SalesOrderStatus.CONFIRMED), eq("acme"), any());
+        verify(salesOrderRepository, never()).search(any(), any(), any(), any());
     }
 
     private Company company(UUID companyId) {

@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings even when checked out on Windows. A single CR on the
+# `set -euo pipefail` line turns scripts/demo/seed-demo.sh into failures that look like API bugs;
+# stage 00 refuses to run if it finds one, and this keeps git from introducing them in the first
+# place.
+*.sh text eol=lf
+
+# The demo seeder carries Vietnamese display names and must stay UTF-8 without BOM.
+scripts/demo/** text eol=lf working-tree-encoding=UTF-8

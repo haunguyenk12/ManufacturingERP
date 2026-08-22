@@ -5,8 +5,9 @@
 # math and status gates all live in service code, so faking them with INSERT would risk violating
 # invariants the service layer enforces), a fresh, throwaway data set:
 #
-#   - Company -> Plant -> Warehouse
+#   - Company -> Plant -> Warehouse + Work Center
 #   - One RAW_MATERIAL item + one FINISHED_GOOD item, linked by an ACTIVE BOM (qty-per = 2, no scrap)
+#   - One ACTIVE Routing for the finished good, with an Assembly operation at the Work Center
 #   - AVAILABLE stock of the raw material in the warehouse (500 units — 300 more than the work
 #     order's requirement, so there is comfortable headroom left over for an over-BOM issue)
 #   - A Work Order (planned qty = 100 => required component qty = 200), planned, auto-reserved
@@ -18,7 +19,7 @@
 # Work Order where all four of those actions are still there to try. The script prints ready-to-run
 # curl commands for exactly those four actions at the end, with the real IDs already filled in.
 #
-# Every run creates brand-new Company/Plant/Warehouse/Items/BOM/Work Order codes (timestamp +
+# Every run creates brand-new Company/Plant/Warehouse/Work Center/Items/BOM/Routing/Work Order codes (timestamp +
 # random suffix) — safe to re-run any number of times, nothing to clean up first. The data is
 # ordinary rows through ordinary endpoints: dispose of it however you like (there is no special
 # teardown path — deactivate/cancel/close it like any other fixture, or just leave it, it costs
@@ -27,7 +28,7 @@
 # Requirements: curl, python (or python3) on PATH for JSON parsing (no jq dependency).
 #
 # Usage:
-#   BASE_URL=http://localhost:8080/api/v1 ADMIN_USERNAME=admin ADMIN_PASSWORD='Admin@123' \
+#   BASE_URL=http://localhost:8080/api/v1 ADMIN_USERNAME=<bootstrap-user> ADMIN_PASSWORD='<secret>' \
 #     ./scripts/seed-work-order-test-fixture.sh
 #
 # All three env vars are optional and default to the values above.
@@ -36,7 +37,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin@123}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:?Set ADMIN_PASSWORD explicitly; no default credential is allowed}"
 
 PY=python
 command -v "$PY" >/dev/null 2>&1 || PY=python3
@@ -123,6 +124,19 @@ call POST "/boms/$BOM_ID/lines" \
 log "Activating BOM"
 call POST "/boms/$BOM_ID/activate" >/dev/null
 
+log "Creating Work Center for the production routing"
+WORK_CENTER_RESP=$(call POST "/plants/$PLANT_ID/work-centers" \
+    "{\"code\":\"WOTEST-WC-$SUFFIX\",\"name\":\"WO Fixture Work Center $SUFFIX\",\"description\":\"Disposable FE test fixture\",\"capacityUnitType\":\"LINE\",\"capacityUnits\":1}")
+WORK_CENTER_ID=$(echo "$WORK_CENTER_RESP" | extract "d['result']['workCenterId']")
+
+log "Creating Routing with one Assembly operation"
+ROUTING_RESP=$(call POST "/companies/$COMPANY_ID/routings" \
+    "{\"itemId\":\"$FG_ITEM_ID\",\"code\":\"WOTEST-RT-$SUFFIX\",\"version\":\"A\",\"note\":\"WO test fixture routing\",\"operations\":[{\"sequence\":10,\"name\":\"Assembly\",\"workCenterId\":\"$WORK_CENTER_ID\",\"setupMinutes\":0,\"runMinutesPerUnit\":1}]}")
+ROUTING_ID=$(echo "$ROUTING_RESP" | extract "d['result']['routingId']")
+
+log "Activating Routing"
+call POST "/routings/$ROUTING_ID/activate" >/dev/null
+
 log "Receiving 500 units of raw material into the warehouse (AVAILABLE stock)"
 call POST /inventory/receive \
     "{\"itemId\":\"$RM_ITEM_ID\",\"warehouseId\":\"$WAREHOUSE_ID\",\"quantity\":500,\"reason\":\"WO test fixture initial stock\",\"referenceType\":\"TEST_FIXTURE\",\"referenceId\":\"$SUFFIX\"}" \
@@ -168,6 +182,8 @@ Fixture ready. Work Order status: $WO_STATUS
   Raw material    : $RM_ITEM_ID   (code WOTEST-RM-$SUFFIX)
   Finished good   : $FG_ITEM_ID   (code WOTEST-FG-$SUFFIX)
   BOM             : $BOM_ID   (ACTIVE, qty-per 2, scrap 0)
+  Work Center     : $WORK_CENTER_ID   (code WOTEST-WC-$SUFFIX, ACTIVE)
+  Routing         : $ROUTING_ID   (code WOTEST-RT-$SUFFIX, version A, ACTIVE)
   Work Order      : $WORK_ORDER_ID   (code $WORK_ORDER_NO, plannedQuantity 100)
   Component line  : $COMPONENT_LINE_ID   (requiredQuantity 200)
   Reservation     : $RESERVATION_ID   (ACTIVE, quantity $RESERVED_QTY, nothing consumed yet)
@@ -224,6 +240,8 @@ print(json.dumps({
     'rawMaterialItemId': '$RM_ITEM_ID',
     'finishedGoodItemId': '$FG_ITEM_ID',
     'bomId': '$BOM_ID',
+    'workCenterId': '$WORK_CENTER_ID',
+    'routingId': '$ROUTING_ID',
     'workOrderId': '$WORK_ORDER_ID',
     'workOrderNo': '$WORK_ORDER_NO',
     'componentLineId': '$COMPONENT_LINE_ID',

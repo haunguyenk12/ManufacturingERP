@@ -79,7 +79,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         String clientIp = ipExtractor.extract(request);
-        String path     = request.getRequestURI();
+        String path     = request.getRequestURI().substring(request.getContextPath().length());
 
         // ── Blacklist check ─────────────────────────────────────────────
         String blacklistReason = redisTemplate.opsForValue().get("rate:blacklist:ip:" + clientIp);

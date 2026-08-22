@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.inventory.service;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
+import com.erp.manufacturing.module.inventory.dto.ItemCreateRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.organization.domain.Company;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -36,12 +38,12 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Rule R2: covers only the new {@code activateItem} method (FE contract fix, 2026-08-06) — the repo
- * had no method-security test at all for {@link ItemService} before this. Retrofitting the existing
- * create/update/deactivate methods is out of scope for this change.
+ * Locks the dedicated Item Master permission codes. Item permissions intentionally no longer reuse
+ * PERM_INVENTORY_* because stock access and company-owned item master access have different scope
+ * semantics.
  */
 @SpringJUnitConfig(ItemMethodSecurityTest.Config.class)
-@DisplayName("ItemService method security — activateItem")
+@DisplayName("ItemService method security — dedicated Item permissions")
 class ItemMethodSecurityTest {
 
     @Autowired ItemService itemService;
@@ -61,20 +63,20 @@ class ItemMethodSecurityTest {
     }
 
     @Test
-    void activateItem_deniedWhenInventoryManageAccessMissing() {
+    void activateItem_deniedWhenItemManageAccessMissing() {
         UUID itemId = UUID.randomUUID();
-        when(inventoryPermissionGuard.hasItemAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(itemId)))
+        when(inventoryPermissionGuard.hasItemAccess(any(), eq("PERM_ITEM_MANAGE"), eq(itemId)))
                 .thenReturn(false);
 
         assertThatThrownBy(() -> itemService.activateItem(itemId))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(itemRepository);
-        verify(inventoryPermissionGuard).hasItemAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(itemId));
+        verify(inventoryPermissionGuard).hasItemAccess(any(), eq("PERM_ITEM_MANAGE"), eq(itemId));
     }
 
     @Test
-    void activateItem_allowedWhenInventoryManageAccessPresent() {
+    void activateItem_allowedWhenItemManageAccessPresent() {
         UUID itemId = UUID.randomUUID();
         Item item = Item.builder()
                 .itemId(itemId)
@@ -91,12 +93,41 @@ class ItemMethodSecurityTest {
                 .lotTracked(true)
                 .status(ItemStatus.INACTIVE)
                 .build();
-        when(inventoryPermissionGuard.hasItemAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(itemId)))
+        when(inventoryPermissionGuard.hasItemAccess(any(), eq("PERM_ITEM_MANAGE"), eq(itemId)))
                 .thenReturn(true);
         when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
         when(itemRepository.save(item)).thenReturn(item);
 
         assertThat(itemService.activateItem(itemId).status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void listItems_usesItemReadAtCompanyOrPlantScope() {
+        UUID companyId = UUID.randomUUID();
+        when(inventoryPermissionGuard.hasItemCompanyAccess(any(), eq("PERM_ITEM_READ"), eq(companyId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> itemService.listItems(companyId, PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(inventoryPermissionGuard)
+                .hasItemCompanyAccess(any(), eq("PERM_ITEM_READ"), eq(companyId));
+        verifyNoInteractions(itemRepository);
+    }
+
+    @Test
+    void createItem_usesItemManageAtCompanyOrPlantScope() {
+        UUID companyId = UUID.randomUUID();
+        when(inventoryPermissionGuard.hasItemCompanyAccess(any(), eq("PERM_ITEM_MANAGE"), eq(companyId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> itemService.createItem(companyId, new ItemCreateRequest(
+                "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true, false)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(inventoryPermissionGuard)
+                .hasItemCompanyAccess(any(), eq("PERM_ITEM_MANAGE"), eq(companyId));
+        verifyNoInteractions(itemRepository);
     }
 
     @Configuration

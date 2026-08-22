@@ -9,9 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -47,6 +51,20 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 @Slf4j
 public class TokenStoreService {
+
+    public enum RotationResult { ROTATED, NOT_FOUND, TOKEN_MISMATCH }
+
+    private static final DefaultRedisScript<Long> ROTATE_REFRESH_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if not current then return 0 end
+            if current ~= ARGV[1] then return -1 end
+            redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[5])
+            redis.call('SET', KEYS[4], ARGV[4], 'EX', ARGV[5])
+            redis.call('SET', KEYS[5], ARGV[3], 'EX', ARGV[5])
+            redis.call('SET', KEYS[6], ARGV[1], 'EX', ARGV[6])
+            redis.call('DEL', KEYS[1], KEYS[2])
+            return 1
+            """, Long.class);
 
     private static final String REFRESH_KEY_PREFIX      = "auth:refresh:";
     private static final String REFRESH_OWNER_KEY_PREFIX = "auth:refresh:owner:";
@@ -87,13 +105,58 @@ public class TokenStoreService {
      * access token out of the {@code Authorization} header at all.
      */
     public void saveRefreshToken(UUID userId, String tokenId, String refreshToken) {
+        saveRefreshToken(userId, tokenId, refreshToken, 0L);
+    }
+
+    /** Stores only a one-way digest of the opaque secret, bound to the user's auth version. */
+    public void saveRefreshToken(UUID userId, String tokenId, String refreshToken, long authVersion) {
         long ttlSeconds = jwtProperties.refreshTokenExpiryMs() / 1000;
-        redisTemplate.opsForValue().set(refreshKey(userId, tokenId), refreshToken, ttlSeconds, TimeUnit.SECONDS);
+        redisTemplate.opsForValue().set(refreshKey(userId, tokenId),
+                storedRefreshValue(refreshToken, authVersion), ttlSeconds, TimeUnit.SECONDS);
         redisTemplate.opsForValue().set(REFRESH_OWNER_KEY_PREFIX + tokenId, userId.toString(), ttlSeconds, TimeUnit.SECONDS);
     }
 
     public String getRefreshToken(UUID userId, String tokenId) {
         return redisTemplate.opsForValue().get(refreshKey(userId, tokenId));
+    }
+
+    public boolean matchesRefreshToken(UUID userId, String tokenId, String presentedToken, long authVersion) {
+        String stored = getRefreshToken(userId, tokenId);
+        if (stored == null) return false;
+        return MessageDigest.isEqual(stored.getBytes(StandardCharsets.UTF_8),
+                storedRefreshValue(presentedToken, authVersion).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Atomically verifies the old secret and rotates all refresh/session keys in one Redis script.
+     * No request can observe or reuse a partially rotated token pair.
+     */
+    public RotationResult rotateRefreshToken(UUID userId,
+                                             String oldTokenId,
+                                             String presentedOldToken,
+                                             String newTokenId,
+                                             String newRefreshToken,
+                                             Instant sessionStart,
+                                             long authVersion) {
+        long ttlSeconds = jwtProperties.refreshTokenExpiryMs() / 1000;
+        Long result = redisTemplate.execute(
+                ROTATE_REFRESH_SCRIPT,
+                List.of(
+                        refreshKey(userId, oldTokenId),
+                        sessionStartKey(userId, oldTokenId),
+                        refreshKey(userId, newTokenId),
+                        sessionStartKey(userId, newTokenId),
+                        REFRESH_OWNER_KEY_PREFIX + newTokenId,
+                        REFRESH_USED_KEY_PREFIX + oldTokenId),
+                storedRefreshValue(presentedOldToken, authVersion),
+                storedRefreshValue(newRefreshToken, authVersion),
+                userId.toString(),
+                String.valueOf(sessionStart.toEpochMilli()),
+                String.valueOf(ttlSeconds),
+                String.valueOf(REUSE_DETECTION_TTL_SEC));
+        if (result == null || result == 0L) return RotationResult.NOT_FOUND;
+        if (result < 0L) return RotationResult.TOKEN_MISMATCH;
+        return RotationResult.ROTATED;
     }
 
     /**
@@ -185,6 +248,14 @@ public class TokenStoreService {
     /** @return true if this tokenId was rotated away within the reuse-detection window. */
     public boolean wasRefreshTokenUsed(String tokenId) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(REFRESH_USED_KEY_PREFIX + tokenId));
+    }
+
+    /** A tokenId alone is not proof of reuse; the retired secret must match as well. */
+    public boolean wasRefreshTokenUsed(String tokenId, String presentedToken, long authVersion) {
+        String retiredDigest = redisTemplate.opsForValue().get(REFRESH_USED_KEY_PREFIX + tokenId);
+        if (retiredDigest == null) return false;
+        return MessageDigest.isEqual(retiredDigest.getBytes(StandardCharsets.UTF_8),
+                storedRefreshValue(presentedToken, authVersion).getBytes(StandardCharsets.UTF_8));
     }
 
     // ── Concurrent Refresh Race (advisory lock + rotation-result breadcrumb) ──
@@ -324,6 +395,18 @@ public class TokenStoreService {
 
     private String deviceSessionKey(UUID userId, String deviceId) {
         return SESSION_DEVICE_PREFIX + userId + ":" + deviceId;
+    }
+
+    private String storedRefreshValue(String token, long authVersion) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) hex.append(String.format("%02x", value));
+            return authVersion + ":" + hex;
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is required by the Java platform", impossible);
+        }
     }
 
     /**

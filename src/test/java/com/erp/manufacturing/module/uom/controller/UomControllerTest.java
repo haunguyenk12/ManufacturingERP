@@ -78,7 +78,7 @@ class UomControllerTest {
     void create_validRequest_returns201Created() throws Exception {
         when(uomService.create(any(UomCreateRequest.class))).thenReturn(sampleUom("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/uoms")
+        mockMvc.perform(post("/v1/uoms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"kg","name":"Kilogram","description":"Base mass unit"}
@@ -93,7 +93,7 @@ class UomControllerTest {
     @Test
     @DisplayName("create: blank name returns 400 VALIDATION_ERROR with the field name")
     void create_blankName_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/uoms")
+        mockMvc.perform(post("/v1/uoms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"KG","name":""}
@@ -111,7 +111,7 @@ class UomControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "UOM code already exists: KG"));
 
-        mockMvc.perform(post("/api/v1/uoms")
+        mockMvc.perform(post("/v1/uoms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"KG","name":"Kilogram"}
@@ -127,7 +127,7 @@ class UomControllerTest {
         when(uomService.get(UOM_ID))
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND, "UOM not found with id: " + UOM_ID));
 
-        mockMvc.perform(get("/api/v1/uoms/" + UOM_ID))
+        mockMvc.perform(get("/v1/uoms/" + UOM_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -137,7 +137,7 @@ class UomControllerTest {
     void update_validRequest_returns200() throws Exception {
         when(uomService.update(eq(UOM_ID), any())).thenReturn(sampleUom("ACTIVE"));
 
-        mockMvc.perform(patch("/api/v1/uoms/" + UOM_ID)
+        mockMvc.perform(patch("/v1/uoms/" + UOM_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Kilogram (updated)"}
@@ -151,7 +151,7 @@ class UomControllerTest {
     void activate_returns200Active() throws Exception {
         when(uomService.activate(UOM_ID)).thenReturn(sampleUom("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/uoms/" + UOM_ID + "/activate"))
+        mockMvc.perform(post("/v1/uoms/" + UOM_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"));
     }
@@ -161,7 +161,7 @@ class UomControllerTest {
     void deactivate_returns200Inactive() throws Exception {
         when(uomService.deactivate(UOM_ID)).thenReturn(sampleUom("INACTIVE"));
 
-        mockMvc.perform(post("/api/v1/uoms/" + UOM_ID + "/deactivate"))
+        mockMvc.perform(post("/v1/uoms/" + UOM_ID + "/deactivate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("INACTIVE"));
     }
@@ -172,7 +172,7 @@ class UomControllerTest {
         when(uomService.list(isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleUom("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/uoms"))
+        mockMvc.perform(get("/v1/uoms"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("KG"))
@@ -192,7 +192,7 @@ class UomControllerTest {
         when(uomService.list(isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/uoms").param("size", "500"))
+        mockMvc.perform(get("/v1/uoms").param("size", "500"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.size").value(100));
     }

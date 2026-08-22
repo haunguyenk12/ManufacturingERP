@@ -94,13 +94,28 @@ public class WorkCalendarLookupService {
                 .collect(Collectors.toSet());
     }
 
+    /**
+     * Loads the calendar for {@link WorkingWindowCalculator}: weekly shift rows join-fetched, the
+     * rest resolved lazily inside this read-only transaction.
+     *
+     * <p>Only ONE bag may be join-fetched per query, and this aggregate reaches three:
+     * {@code weeklyShifts}, {@code exceptions}, and {@code Shift.breaks} one association further
+     * out. The entity graph takes {@code weeklyShifts} (see
+     * {@link WorkCalendarRepository#findWithWeeklyShiftsByWorkCalendarId}); the other two resolve
+     * lazily while the session is still open.
+     *
+     * <p>{@code shift.breaks} deliberately has NO explicit touch here even though the calculator
+     * subtracts breaks from every shift window. A draft of the 2026-08-14 fix added one and a
+     * mutation run disproved it: removing the loop left all four cases of
+     * {@code WorkCalendarLookupServiceIT} green, because the calculator runs inside this same
+     * transaction and triggers the load itself, at identical query cost. It was noise that read
+     * like a safeguard. {@code exceptions} keeps its pre-existing touch — that one predates the fix
+     * and is out of its scope.
+     */
     private WorkCalendar loadWithExceptions(UUID workCalendarId) {
         WorkCalendar calendar = workCalendarRepository.findWithWeeklyShiftsByWorkCalendarId(workCalendarId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Work calendar", workCalendarId));
-        // Triggers the lazy `exceptions` collection while the session is still open — deliberately
-        // not part of the @EntityGraph above (see WorkCalendarRepository javadoc: two bag
-        // collections cannot be join-fetched together).
         calendar.getExceptions().size();
         return calendar;
     }

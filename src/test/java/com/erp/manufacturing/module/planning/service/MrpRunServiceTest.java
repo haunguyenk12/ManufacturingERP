@@ -5,6 +5,7 @@ import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.organization.service.OrganizationScopeResolution;
@@ -13,10 +14,12 @@ import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -24,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,7 +61,8 @@ class MrpRunServiceTest {
                 organizationLookupService,
                 calculationService,
                 new MrpPlanningMapper(),
-                auditLogService);
+                auditLogService,
+                new IdempotencySupport(new ObjectMapper().findAndRegisterModules()));
     }
 
     @Test
@@ -90,13 +95,14 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
         when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
-        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> {
+        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
             MrpRun run = invocation.getArgument(0);
             if (run.getMrpRunId() == null) {
                 run.setMrpRunId(UUID.randomUUID());
             }
             return run;
         });
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(planningDemandRepository.findOpenDemandsForRun(
                 company.getCompanyId(),
                 plant.getPlantId(),
@@ -126,7 +132,7 @@ class MrpRunServiceTest {
                 warehouse.getWarehouseId(),
                 LocalDate.now(),
                 LocalDate.now().plusDays(30),
-                null));
+                null), null);
 
         assertThat(response.status()).isEqualTo(MrpRunStatus.COMPLETED.name());
         assertThat(response.totalDemandLines()).isEqualTo(1);
@@ -175,13 +181,14 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
         when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
-        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> {
+        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
             MrpRun run = invocation.getArgument(0);
             if (run.getMrpRunId() == null) {
                 run.setMrpRunId(UUID.randomUUID());
             }
             return run;
         });
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(planningDemandRepository.findOpenDemandsForRun(
                 company.getCompanyId(),
                 plant.getPlantId(),
@@ -219,7 +226,7 @@ class MrpRunServiceTest {
                 warehouse.getWarehouseId(),
                 LocalDate.now(),
                 LocalDate.now().plusDays(30),
-                null));
+                null), null);
 
         assertThat(response.shortageLines()).isEqualTo(2);            // the covered line is not a shortage
         assertThat(response.plannedWorkOrders()).isEqualTo(1);
@@ -242,13 +249,14 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
         when(planningDemandRepository.findSelectedDemandsForRun(List.of(selected.getPlanningDemandId())))
                 .thenReturn(List.of(selected));
-        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> {
+        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
             MrpRun run = invocation.getArgument(0);
             if (run.getMrpRunId() == null) {
                 run.setMrpRunId(UUID.randomUUID());
             }
             return run;
         });
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculationService.calculate(any(MrpRun.class), eq(List.of(selected)), anyCollection()))
                 .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
 
@@ -258,7 +266,7 @@ class MrpRunServiceTest {
                 warehouse.getWarehouseId(),
                 LocalDate.now(),
                 LocalDate.now().plusDays(30),
-                List.of(selected.getPlanningDemandId())));
+                List.of(selected.getPlanningDemandId())), null);
 
         assertThat(response.totalDemandLines()).isEqualTo(1);
         verify(planningDemandRepository).findSelectedDemandsForRun(List.of(selected.getPlanningDemandId()));
@@ -285,7 +293,7 @@ class MrpRunServiceTest {
                 null,
                 LocalDate.now(),
                 LocalDate.now().plusDays(30),
-                List.of(foreignDemand.getPlanningDemandId()))))
+                List.of(foreignDemand.getPlanningDemandId())), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
@@ -312,7 +320,7 @@ class MrpRunServiceTest {
                 null,
                 LocalDate.now(),
                 LocalDate.now().plusDays(30),
-                List.of(cancelled.getPlanningDemandId()))))
+                List.of(cancelled.getPlanningDemandId())), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -392,6 +400,138 @@ class MrpRunServiceTest {
                 .name("Plant 1")
                 .status(OrganizationStatus.ACTIVE)
                 .build();
+    }
+
+    /**
+     * The frontend sent one Idempotency-Key three times with an identical body and got three runs
+     * (RUN-63033D7C / RUN-EA182AFB / RUN-4C77B225) — the header was ignored. Each duplicate run
+     * produces its own parallel set of supply suggestions for the same demand, which is how a
+     * conversion later "went missing": it had been done on a different run's proposal.
+     */
+    @Test
+    @DisplayName("run: replaying a key with the same payload returns the first run without "
+            + "recalculating anything")
+    void run_replayedKeyWithSamePayload_returnsTheExistingRunAndDoesNotRecalculate() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        MrpRunCreateRequest request = new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null);
+        MrpRun existing = existingRun(company, plant, request);
+        when(mrpRunRepository.findByIdempotencyKey("run-key-1")).thenReturn(Optional.of(existing));
+
+        MrpRunResponse response = service.run(request, "run-key-1");
+
+        assertThat(response.mrpRunId()).isEqualTo(existing.getMrpRunId());
+        assertThat(response.code()).isEqualTo(existing.getCode());
+        // The whole point: no second calculation, no second run row, no demand snapshot.
+        verifyNoInteractions(calculationService, mrpRunDemandRepository, planningDemandRepository);
+        verify(mrpRunRepository, never()).saveAndFlush(any(MrpRun.class));
+        verify(mrpRunRepository, never()).save(any(MrpRun.class));
+    }
+
+    @Test
+    @DisplayName("run: replaying a key with a different payload is 409 IDEMPOTENCY_CONFLICT, not a "
+            + "silent replay of the first run")
+    void run_replayedKeyWithDifferentPayload_throwsIdempotencyConflictBeforeAnyWrite() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        MrpRunCreateRequest first = new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null);
+        MrpRun existing = existingRun(company, plant, first);
+        when(mrpRunRepository.findByIdempotencyKey("run-key-1")).thenReturn(Optional.of(existing));
+
+        MrpRunCreateRequest changedHorizon = new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(60), null);
+
+        assertThatThrownBy(() -> service.run(changedHorizon, "run-key-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.IDEMPOTENCY_CONFLICT));
+
+        verify(mrpRunRepository, never()).saveAndFlush(any(MrpRun.class));
+        verifyNoInteractions(calculationService, mrpRunDemandRepository);
+    }
+
+    @Test
+    @DisplayName("run: a fresh key is stored on the run row together with the payload fingerprint")
+    void run_freshKey_isPersistedOnTheRunWithItsPayloadHash() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        when(mrpRunRepository.findByIdempotencyKey("run-key-2")).thenReturn(Optional.empty());
+        when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        when(planningDemandRepository.findOpenDemandsForRun(any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        when(organizationLookupService.resolveScope(eq(ScopeResourceType.PLANT), eq(plant.getPlantId())))
+                .thenReturn(new OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
+                .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
+        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
+            MrpRun run = invocation.getArgument(0);
+            run.setMrpRunId(UUID.randomUUID());
+            return run;
+        });
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.run(new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null), "  run-key-2  ");
+
+        ArgumentCaptor<MrpRun> saved = ArgumentCaptor.forClass(MrpRun.class);
+        verify(mrpRunRepository).saveAndFlush(saved.capture());
+        // Trimmed by normalizeKey — the stored key must be what a replay will look up.
+        assertThat(saved.getValue().getIdempotencyKey()).isEqualTo("run-key-2");
+        assertThat(saved.getValue().getPayloadHash()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("run: without the header nothing changes — no replay lookup, a new run every time")
+    void run_withoutAnIdempotencyKey_neverConsultsTheReplayLookup() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        when(planningDemandRepository.findOpenDemandsForRun(any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        when(organizationLookupService.resolveScope(eq(ScopeResourceType.PLANT), eq(plant.getPlantId())))
+                .thenReturn(new OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
+                .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
+        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
+            MrpRun run = invocation.getArgument(0);
+            run.setMrpRunId(UUID.randomUUID());
+            return run;
+        });
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.run(new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null), null);
+
+        verify(mrpRunRepository, never()).findByIdempotencyKey(any());
+        ArgumentCaptor<MrpRun> saved = ArgumentCaptor.forClass(MrpRun.class);
+        verify(mrpRunRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getIdempotencyKey()).isNull();
+        assertThat(saved.getValue().getPayloadHash()).isNull();
+    }
+
+    private MrpRun existingRun(Company company, Plant plant, MrpRunCreateRequest request) {
+        MrpRun run = MrpRun.builder()
+                .mrpRunId(UUID.randomUUID())
+                .company(company)
+                .plant(plant)
+                .horizonStartDate(request.horizonStartDate())
+                .horizonEndDate(request.horizonEndDate())
+                .idempotencyKey("run-key-1")
+                .payloadHash(new IdempotencySupport(new ObjectMapper().findAndRegisterModules()).payloadHash(request))
+                .build();
+        run.assignCode();
+        return run;
     }
 
     private Company company(UUID companyId) {

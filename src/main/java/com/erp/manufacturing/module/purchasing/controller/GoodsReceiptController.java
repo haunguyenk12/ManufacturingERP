@@ -24,7 +24,7 @@ public class GoodsReceiptController {
 
     private final GoodsReceiptService goodsReceiptService;
 
-    @PostMapping("/api/v1/purchase-orders/{purchaseOrderId}/goods-receipts")
+    @PostMapping("/v1/purchase-orders/{purchaseOrderId}/goods-receipts")
     @Operation(summary = "Post goods receipt for purchase order")
     public ResponseEntity<ApiResponse<GoodsReceiptResponse>> postGoodsReceipt(
             @PathVariable UUID purchaseOrderId,
@@ -34,7 +34,7 @@ public class GoodsReceiptController {
                 .body(ApiResponse.created(goodsReceiptService.post(purchaseOrderId, request, idempotencyKey)));
     }
 
-    @GetMapping("/api/v1/purchase-orders/{purchaseOrderId}/goods-receipts")
+    @GetMapping("/v1/purchase-orders/{purchaseOrderId}/goods-receipts")
     @Operation(summary = "List goods receipts for purchase order")
     public ResponseEntity<ApiResponse<PageResult<GoodsReceiptResponse>>> listGoodsReceipts(
             @PathVariable UUID purchaseOrderId,
@@ -46,7 +46,7 @@ public class GoodsReceiptController {
                 purchaseOrderId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/api/v1/goods-receipts/{goodsReceiptId}/cancel")
+    @PostMapping("/v1/goods-receipts/{goodsReceiptId}/cancel")
     @Operation(summary = "Cancel a posted goods receipt")
     public ResponseEntity<ApiResponse<GoodsReceiptResponse>> cancelGoodsReceipt(
             @PathVariable UUID goodsReceiptId,
@@ -54,7 +54,7 @@ public class GoodsReceiptController {
         return ResponseEntity.ok(ApiResponse.ok(goodsReceiptService.cancel(goodsReceiptId, request)));
     }
 
-    @GetMapping("/api/v1/goods-receipts/{goodsReceiptId}")
+    @GetMapping("/v1/goods-receipts/{goodsReceiptId}")
     @Operation(summary = "Get goods receipt")
     public ResponseEntity<ApiResponse<GoodsReceiptResponse>> getGoodsReceipt(
             @PathVariable UUID goodsReceiptId) {

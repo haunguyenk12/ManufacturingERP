@@ -18,6 +18,7 @@ import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.inventory.service.LotStatusChangeCommand;
+import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
@@ -39,6 +40,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -65,8 +67,9 @@ import java.util.stream.Stream;
  *       {@code AVAILABLE} is also the single trigger for sales order fulfilment (spec §7.1, F6).</li>
  * </ol>
  *
- * <p>The QC step has two shapes, because output that is not lot-tracked has no lot to carry
- * {@code HOLD}: see {@link #dispositionLots} and {@link #dispositionWithoutLots}.
+ * <p>The QC step has two shapes. Lots carry HOLD in {@code InventoryLot.status}; non-tracked output
+ * carries it in {@code StockBalance.qualityHoldQuantity}: see {@link #dispositionLots} and
+ * {@link #dispositionWithoutLots}.
  */
 @Service
 @RequiredArgsConstructor
@@ -102,6 +105,9 @@ public class ProductionReceiptService {
     private final IdempotencySupport idempotency;
     private final TraceIdProvider traceIdProvider;
 
+    @Autowired(required = false)
+    private InventoryLotRepository lotRepository;
+
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_RECEIPT_MANAGE', #workOrderId)")
     @Auditable(action = AuditAction.PRODUCTION_RECEIPT_CREATED, entityType = "ProductionReceipt", entityIdExpression = "receiptId.toString()")
@@ -125,6 +131,7 @@ public class ProductionReceiptService {
                     "Only a DRAFT receipt can be submitted");
         }
         support.ensureReceiptable(receipt.getWorkOrder());
+        validateReceiptLotIntent(receipt);
         receipt.submit(Instant.now());
         return toResponse(receiptRepository.save(receipt));
     }
@@ -139,6 +146,7 @@ public class ProductionReceiptService {
         ProductionReceipt receipt = findPendingReceipt(workOrderId, receiptId);
         WorkOrder workOrder = receipt.getWorkOrder();
         support.ensureReceiptable(workOrder);
+        validateReceiptLotIntent(receipt);
 
         BigDecimal alreadyReceipted = workOrder.getCompletedQuantity();
         BigDecimal totalReceived = BigDecimal.ZERO;
@@ -157,7 +165,8 @@ public class ProductionReceiptService {
                     null,
                     line.getRequestedSerialCode()),
                     idempotency.childKey(receipt.getIdempotencyKey() + ":approve", index),
-                    LotStatus.HOLD);
+                    LotStatus.HOLD,
+                    false);
 
             StockMovement movement = movementResult.movement();
             line.setStockMovement(movement);
@@ -241,6 +250,11 @@ public class ProductionReceiptService {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "QC disposition has already been recorded for this receipt");
         }
+        if (receipt.getWorkOrder().getProductItem().isLotTracked()
+                && receipt.getLines().stream().anyMatch(line -> line.getLot() == null)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.OUTPUT_LOT_NOT_POSTED,
+                    "QC can only disposition the output lot created or reused at receipt approval");
+        }
         String reason = support.trimToNull(request.reason());
         if (reason == null) {
             throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED,
@@ -263,7 +277,7 @@ public class ProductionReceiptService {
         } else if (!serialLines.isEmpty()) {
             dispositionedQuantity = dispositionSerials(receipt, serialLines, request.result(), reason);
         } else {
-            dispositionedQuantity = dispositionWithoutLots(receipt, request.result(), reason);
+            dispositionedQuantity = dispositionWithoutLots(receipt, request.result());
         }
 
         // Spec §7.1: fulfilment is driven by QC release and nothing else. REJECTED output stays on
@@ -330,43 +344,26 @@ public class ProductionReceiptService {
     }
 
     /**
-     * QC on output that is not lot-tracked (D5, debt #17). Without a lot there is nothing to move out
-     * of {@code HOLD} — approval put the goods straight into free stock — so the verdict is recorded
-     * on the <em>receipt</em> ({@code qcResult}/{@code qcReason}/{@code qcAt}/{@code qcBy}) and no
+     * QC on output that is not lot-tracked. Without a lot, approval records the pending quantity in
+     * {@code StockBalance.qualityHoldQuantity}. The verdict is recorded on the <em>receipt</em>
+     * ({@code qcResult}/{@code qcReason}/{@code qcAt}/{@code qcBy}) and no
      * {@code quality_dispositions} row is written: that table is one row per lot by definition, and a
      * row without a lot would contradict it. A QC report built from that table therefore does not see
      * these receipts.
      *
-     * <p>{@code AVAILABLE} changes no balance and creates no movement — the goods have been usable
-     * since approval, so the only thing this decision unlocks is fulfilment. {@code REJECTED} must
-     * change stock, because defective goods that are already usable would otherwise ship: it
-     * withdraws them with an {@code ADJUST_OUT} movement (B39, rewritten in D5).
-     *
-     * <p>If the goods have already left the warehouse the withdrawal fails with
-     * {@code INSUFFICIENT_AVAILABLE_STOCK} and the whole disposition rolls back. That is deliberate:
-     * defective output already issued or shipped is a real incident needing a human, not something to
-     * paper over by rejecting a quantity the ledger cannot give back.
+     * <p>{@code AVAILABLE} atomically releases that hold without moving on-hand quantity.
+     * {@code REJECTED} leaves the quantity on hand and held. In both cases the receipt QC fields are
+     * the traceable decision; only AVAILABLE unlocks Sales Order fulfilment.
      */
     private BigDecimal dispositionWithoutLots(ProductionReceipt receipt,
-                                              QualityDispositionResult result,
-                                              String reason) {
+                                              QualityDispositionResult result) {
         BigDecimal dispositionedQuantity = BigDecimal.ZERO;
-        int index = 0;
         for (ProductionReceiptLine line : receipt.getLines()) {
-            index++;
-            if (result == QualityDispositionResult.REJECTED) {
-                movementService.adjust(new InventoryAdjustCommand(
+            if (result == QualityDispositionResult.AVAILABLE) {
+                movementService.releaseQualityHold(
                         line.getItem().getItemId(),
                         line.getWarehouse().getWarehouseId(),
-                        null,
-                        null,
-                        line.getQuantity().negate(),
-                        reason,
-                        WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
-                        receipt.getWorkOrder().getWorkOrderId().toString(),
-                        null,
-                        null),
-                        idempotency.childKey(receipt.getIdempotencyKey() + ":qc-reject", index));
+                        line.getQuantity());
             }
             dispositionedQuantity = dispositionedQuantity.add(line.getQuantity());
         }
@@ -530,6 +527,7 @@ public class ProductionReceiptService {
             throw ExceptionFactory.custom(ValidationErrorCode.LOT_REQUIRED,
                     "Lot-tracked output requires a lot number or lot id");
         }
+        validateNewLotIntent(workOrder, request.lotId(), request.lotNumber());
         // Symmetric to the lot check above (B41 sibling): a serial-tracked receipt always names
         // exactly one physical unit, so quantity must be 1 and the serial code is mandatory.
         if (workOrder.getProductItem().isSerialTracked()) {
@@ -557,6 +555,46 @@ public class ProductionReceiptService {
                 .build());
 
         return toResponse(receiptRepository.save(receipt));
+    }
+
+    private void validateReceiptLotIntent(ProductionReceipt receipt) {
+        if (!receipt.getWorkOrder().getProductItem().isLotTracked()) {
+            return;
+        }
+        for (ProductionReceiptLine line : receipt.getLines()) {
+            validateNewLotIntent(receipt.getWorkOrder(),
+                    line.getLot() == null ? null : line.getLot().getLotId(),
+                    line.getRequestedLotCode());
+        }
+    }
+
+    /**
+     * Lot codes are trimmed and case-sensitive. Supplying a code means create-new and therefore
+     * rejects duplicates; supplying lotId is the only explicit partial-reuse contract.
+     */
+    private void validateNewLotIntent(WorkOrder workOrder, UUID lotId, String lotCode) {
+        if (!workOrder.getProductItem().isLotTracked()) {
+            return;
+        }
+        String normalizedCode = support.trimToNull(lotCode);
+        if (lotId != null) {
+            var lot = itemLookupService.getLotForItem(workOrder.getProductItem(), lotId);
+            if (normalizedCode != null && !normalizedCode.equals(lot.getLotCode())) {
+                throw ExceptionFactory.custom(BusinessErrorCode.LOT_ITEM_MISMATCH,
+                        "lotId and lotNumber identify different lots");
+            }
+            if (lot.getStatus() != LotStatus.HOLD) {
+                throw ExceptionFactory.custom(BusinessErrorCode.LOT_REUSE_NOT_ALLOWED,
+                        "Only a HOLD lot can be reused by a partial production receipt");
+            }
+            return;
+        }
+        if (normalizedCode != null && lotRepository != null
+                && lotRepository.findByItemItemIdAndLotCode(
+                        workOrder.getProductItem().getItemId(), normalizedCode).isPresent()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
+                    "Lot code already exists; send its lotId only for an eligible partial receipt");
+        }
     }
 
     /** Resolves the author/approver/QC usernames of a single receipt in one query. */

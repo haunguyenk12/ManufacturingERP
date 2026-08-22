@@ -42,16 +42,26 @@ public class InventoryMovementService {
     }
 
     /**
-     * Receives stock and, when a new lot has to be created, opens it in {@code initialStatusForNewLot}
-     * instead of {@code AVAILABLE}. Production receipt approval uses {@link LotStatus#HOLD} so the
-     * output is not usable until quality releases it.
+     * Receives stock under the requested initial quality state. For a new lot, that state is carried
+     * by the lot status. For output with neither a lot nor a serial, {@link LotStatus#HOLD} is carried
+     * by {@code StockBalance.qualityHoldQuantity}. Production receipt approval uses HOLD so either
+     * tracking shape remains unavailable until quality releases it.
      * <p>
-     * The status applies to <b>newly created lots only</b> — an existing lot keeps its current status.
+     * For lot-tracked items the status applies to <b>newly created lots only</b> — an existing lot
+     * keeps its current status. The explicit balance hold applies only when neither lot nor serial
+     * exists.
      */
     @Transactional
     public InventoryMovementResult receive(InventoryReceiveCommand command,
                                            String idempotencyKey,
                                            LotStatus initialStatusForNewLot) {
+        return receive(command, idempotencyKey, initialStatusForNewLot, true);
+    }
+
+    public InventoryMovementResult receive(InventoryReceiveCommand command,
+                                           String idempotencyKey,
+                                           LotStatus initialStatusForNewLot,
+                                           boolean allowImplicitLotReuse) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         Optional<StockMovement> existing =
                 findReplay(normalizedKey, MovementType.RECEIVE);
@@ -63,12 +73,16 @@ public class InventoryMovementService {
         Item item = findActiveItem(command.itemId());
         Warehouse warehouse = findActiveWarehouse(command.warehouseId());
         ensureSameCompany(item, warehouse);
-        InventoryLot lot = resolveReceiveLot(item, command.lotId(), command.lotCode(), initialStatusForNewLot);
+        InventoryLot lot = resolveReceiveLot(
+                item, command.lotId(), command.lotCode(), initialStatusForNewLot, allowImplicitLotReuse);
         BigDecimal quantity = requirePositive(command.quantity());
         SerialNumber serial = resolveReceiveSerial(item, command.serialId(), command.serialCode(), quantity);
 
         StockBalance balance = findOrCreateBalance(item, warehouse, lot);
         balance.increase(quantity);
+        if (initialStatusForNewLot == LotStatus.HOLD && lot == null && serial == null) {
+            balance.holdForQuality(quantity);
+        }
         balanceRepository.save(balance);
 
         StockMovement movement = StockMovement.builder()
@@ -88,6 +102,27 @@ public class InventoryMovementService {
                 .createdAt(Instant.now())
                 .build();
         return new InventoryMovementResult(movementRepository.save(movement), true);
+    }
+
+    /**
+     * Releases non-lot, non-serial production output from its quality hold. No stock movement is
+     * written because on-hand quantity does not move; the Production Receipt QC decision is the
+     * authoritative audit event. This method only changes how much of the existing balance may be
+     * reserved/issued/planned.
+     */
+    @Transactional
+    public void releaseQualityHold(UUID itemId, UUID warehouseId, BigDecimal quantity) {
+        Item item = findActiveItem(itemId);
+        Warehouse warehouse = findActiveWarehouse(warehouseId);
+        ensureSameCompany(item, warehouse);
+        BigDecimal positiveQuantity = requirePositive(quantity);
+        StockBalance balance = findBalance(item, warehouse, null);
+        if (balance.getQualityHoldQuantity().compareTo(positiveQuantity) < 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Insufficient quality-held stock to release");
+        }
+        balance.releaseQualityHold(positiveQuantity);
+        balanceRepository.save(balance);
     }
 
     @Transactional
@@ -363,7 +398,9 @@ public class InventoryMovementService {
         }
     }
 
-    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode, LotStatus initialStatusForNewLot) {
+    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode,
+                                           LotStatus initialStatusForNewLot,
+                                           boolean allowImplicitLotReuse) {
         if (!item.isLotTracked()) {
             ensureNoLotProvided(lotId, lotCode);
             return null;
@@ -372,13 +409,21 @@ public class InventoryMovementService {
             return findLotForItem(item, lotId);
         }
         String normalizedLotCode = requireLotCode(lotCode);
-        return lotRepository.findByItemItemIdAndLotCode(item.getItemId(), normalizedLotCode)
-                .orElseGet(() -> lotRepository.save(InventoryLot.builder()
+        Optional<InventoryLot> existing = lotRepository.findByItemItemIdAndLotCode(
+                item.getItemId(), normalizedLotCode);
+        if (existing.isPresent()) {
+            if (!allowImplicitLotReuse) {
+                throw ExceptionFactory.custom(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
+                        "Lot code already exists; send lotId for an explicit partial receipt");
+            }
+            return existing.get();
+        }
+        return lotRepository.save(InventoryLot.builder()
                         .item(item)
                         .lotCode(normalizedLotCode)
                         .status(initialStatusForNewLot)
                         .receivedAt(Instant.now())
-                        .build()));
+                        .build());
     }
 
     private InventoryLot resolveExistingLotForOutbound(Item item, UUID lotId, String lotCode) {

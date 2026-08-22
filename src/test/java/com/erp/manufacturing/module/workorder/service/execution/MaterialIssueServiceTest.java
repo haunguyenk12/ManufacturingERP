@@ -12,13 +12,16 @@ import com.erp.manufacturing.module.bom.domain.BomStatus;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.service.InventoryAvailabilityService;
 import com.erp.manufacturing.module.inventory.service.InventoryIssueCommand;
+import com.erp.manufacturing.module.inventory.service.InventoryLotLookupService;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementResult;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueDecisionRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssuePostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueResponse;
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
@@ -68,6 +71,7 @@ class MaterialIssueServiceTest {
     @Mock WorkOrderPermissionGuard workOrderPermissionGuard;
     @Mock UserLookupService userLookupService;
     @Mock WorkOrderCostAccumulatorService costAccumulatorService;
+    @Mock InventoryLotLookupService inventoryLotLookupService;
 
     MaterialIssueService service;
 
@@ -87,7 +91,8 @@ class MaterialIssueServiceTest {
                 new ManufacturingExecutionMapper(),
                 new TraceIdProvider(),
                 userLookupService,
-                costAccumulatorService);
+                costAccumulatorService,
+                inventoryLotLookupService);
     }
 
     @AfterEach
@@ -109,17 +114,129 @@ class MaterialIssueServiceTest {
 
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(issueRepository.findByWorkOrderWorkOrderId(eq(workOrder.getWorkOrderId()), any()))
+        when(issueRepository.findByWorkOrder(eq(workOrder.getWorkOrderId()), isNull(), any()))
                 .thenReturn(new PageImpl<>(List.of(first, second)));
         when(issueLineRepository.findByIssueIssueIdIn(any())).thenReturn(List.of());
         when(userLookupService.findUsernames(any())).thenReturn(Map.of(authorId, "storekeeper1"));
 
-        var page = service.list(workOrder.getWorkOrderId(), PageRequest.of(0, 20));
+        var page = service.list(workOrder.getWorkOrderId(), null, PageRequest.of(0, 20));
 
         assertThat(page.content()).extracting(MaterialIssueResponse::createdByUsername)
                 .containsExactly("storekeeper1", "storekeeper1");
         assertThat(page.content().get(0).workOrderCode()).isEqualTo(workOrder.getWorkOrderNo());
         verify(userLookupService, times(1)).findUsernames(any());
+    }
+
+    /**
+     * A PENDING_APPROVAL line has no {@code lot} — that link is only made when approval posts the
+     * movement — so the code has to come from the batch map, and it has to be <b>one</b> query for
+     * the whole page (rules C14/C15). Resolving per row would render identically and only show up as
+     * load, which is exactly the N+1 the approval queue was meant to avoid.
+     */
+    @Test
+    void list_pendingLineThatNamedItsLotById_resolvesTheLotCodeInOneBatchQuery() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        WorkOrderComponentLine componentLine = workOrder.getComponentLines().get(0);
+        UUID lotId = UUID.randomUUID();
+        MaterialIssue first = pendingIssueNamingLotById(workOrder, componentLine, lotId);
+        MaterialIssue second = pendingIssueNamingLotById(workOrder, componentLine, lotId);
+
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(issueRepository.findByWorkOrder(eq(workOrder.getWorkOrderId()), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(first, second)));
+        when(issueLineRepository.findByIssueIssueIdIn(any()))
+                .thenReturn(List.of(first.getLines().get(0), second.getLines().get(0)));
+        when(userLookupService.findUsernames(any())).thenReturn(Map.of());
+        when(inventoryLotLookupService.findLotCodes(any())).thenReturn(Map.of(lotId, "LOT-A"));
+
+        var page = service.list(workOrder.getWorkOrderId(), MaterialIssueStatus.PENDING_APPROVAL,
+                PageRequest.of(0, 20));
+
+        assertThat(page.content()).flatExtracting(MaterialIssueResponse::lines)
+                .extracting(MaterialIssueLineResponse::lotNumber)
+                .containsExactly("LOT-A", "LOT-A");
+        assertThat(page.content().get(0).lines().get(0).lotId()).isEqualTo(lotId);
+        verify(inventoryLotLookupService, times(1)).findLotCodes(any());
+    }
+
+    /**
+     * A line that typed its lot code needs nothing looked up, and neither does a posted line that is
+     * already linked to a lot. Asking anyway would put a query behind every page of ordinary issue
+     * history for no gain.
+     */
+    @Test
+    void list_lineThatAlreadyKnowsItsLotCode_asksTheLookupForNothing() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        WorkOrderComponentLine componentLine = workOrder.getComponentLines().get(0);
+        MaterialIssue issue = pendingIssueNamingLotById(workOrder, componentLine, null);
+        issue.getLines().get(0).setRequestedLotCode("LOT-TYPED");
+
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(issueRepository.findByWorkOrder(eq(workOrder.getWorkOrderId()), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(issue)));
+        when(issueLineRepository.findByIssueIssueIdIn(any())).thenReturn(List.of(issue.getLines().get(0)));
+        when(userLookupService.findUsernames(any())).thenReturn(Map.of());
+        when(inventoryLotLookupService.findLotCodes(any())).thenReturn(Map.of());
+
+        var page = service.list(workOrder.getWorkOrderId(), null, PageRequest.of(0, 20));
+
+        assertThat(page.content().get(0).lines().get(0).lotNumber()).isEqualTo("LOT-TYPED");
+        verify(inventoryLotLookupService).findLotCodes(argThat(ids -> ids.isEmpty()));
+    }
+
+    /**
+     * A line may carry both identifiers. Approval resolves the lot by id
+     * ({@code InventoryMovementService.resolveExistingLot} only falls back to the code), so the queue
+     * must show the code of the lot that will actually be consumed. Echoing the typed code instead
+     * would show the approver one lot while a different one leaves the warehouse.
+     */
+    @Test
+    void list_lineCarryingBothIdentifiers_showsTheLotApprovalWillActuallyConsume() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        WorkOrderComponentLine componentLine = workOrder.getComponentLines().get(0);
+        UUID lotId = UUID.randomUUID();
+        MaterialIssue issue = pendingIssueNamingLotById(workOrder, componentLine, lotId);
+        issue.getLines().get(0).setRequestedLotCode("LOT-STALE-TYPED");
+
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(issueRepository.findByWorkOrder(eq(workOrder.getWorkOrderId()), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(issue)));
+        when(issueLineRepository.findByIssueIssueIdIn(any())).thenReturn(List.of(issue.getLines().get(0)));
+        when(userLookupService.findUsernames(any())).thenReturn(Map.of());
+        when(inventoryLotLookupService.findLotCodes(any())).thenReturn(Map.of(lotId, "LOT-REAL"));
+
+        var page = service.list(workOrder.getWorkOrderId(), null, PageRequest.of(0, 20));
+
+        assertThat(page.content().get(0).lines().get(0).lotNumber()).isEqualTo("LOT-REAL");
+    }
+
+    private MaterialIssue pendingIssueNamingLotById(WorkOrder workOrder,
+                                                    WorkOrderComponentLine componentLine,
+                                                    UUID lotId) {
+        MaterialIssue issue = MaterialIssue.builder()
+                .issueId(UUID.randomUUID())
+                .code("MI-PENDING")
+                .workOrder(workOrder)
+                .status(MaterialIssueStatus.PENDING_APPROVAL)
+                .idempotencyKey(UUID.randomUUID().toString())
+                .lines(new ArrayList<>())
+                .build();
+        issue.getLines().add(MaterialIssueLine.builder()
+                .issueLineId(UUID.randomUUID())
+                .issue(issue)
+                .componentLine(componentLine)
+                .item(componentLine.getComponentItem())
+                .warehouse(workOrder.getOutputWarehouse())
+                .quantity(new BigDecimal("5"))
+                .requestedLotId(lotId)
+                .overIssue(true)
+                .overrideReason("Rework")
+                .reasonCode(MaterialIssueReasonCode.REWORK)
+                .build());
+        return issue;
     }
 
     private MaterialIssue issue(WorkOrder workOrder, UUID createdBy) {
@@ -373,7 +490,7 @@ class MaterialIssueServiceTest {
     }
 
     @Test
-    void issue_exceedRemaining_withoutPermission_shouldThrowAccessDenied() {
+    void issue_exceedRemaining_operatorCreatesPendingRequestWithoutStockImpact() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
         WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
         Warehouse warehouse = workOrder.getOutputWarehouse();
@@ -383,18 +500,17 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
-                .thenReturn(false);
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("99"), null)));
+                issueLine(line, warehouse, new BigDecimal("99"), "Needs rework")));
         UUID workOrderId = workOrder.getWorkOrderId();
 
-        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-OVER"))
-                .isInstanceOf(AccessDeniedException.class);
+        MaterialIssueResponse response = service.post(workOrderId, request, "KEY-OVER");
 
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
         verify(movementService, never()).issue(any(), anyString());
-        verify(issueRepository, never()).save(any());
+        assertThat(line.getIssuedQuantity()).isZero();
     }
 
     @Test
@@ -408,8 +524,6 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
-                .thenReturn(true);
 
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
                 issueLine(line, warehouse, new BigDecimal("12"), "   ")));
@@ -425,24 +539,19 @@ class MaterialIssueServiceTest {
     }
 
     @Test
-    void issue_exceedRemaining_withPermissionAndReason_shouldSucceed() {
+    void issue_exceedRemaining_withReason_shouldRemainPendingUntilManagerApproval() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
         WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
         Warehouse warehouse = workOrder.getOutputWarehouse();
-        StockMovement movement = movement(line.getComponentItem(), warehouse);
         authenticate();
 
         when(issueRepository.findWithLinesByIdempotencyKey("KEY-APPROVED")).thenReturn(Optional.empty());
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
-                .thenReturn(true);
-        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-APPROVED:L1")))
-                .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+        MaterialIssueResponse response = service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
                 issueLine(line, warehouse, new BigDecimal("12"), " Scrap rework "))), "KEY-APPROVED");
 
         ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
@@ -450,9 +559,185 @@ class MaterialIssueServiceTest {
         MaterialIssueLine savedLine = captor.getValue().getLines().get(0);
         assertThat(savedLine.isOverIssue()).isTrue();
         assertThat(savedLine.getOverrideReason()).isEqualTo("Scrap rework");
-        // DB constraint has been relaxed to issued_quantity >= 0, so this is now persistable.
+        assertThat(savedLine.getReasonCode()).isEqualTo(MaterialIssueReasonCode.OTHER);
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
+        assertThat(line.getIssuedQuantity()).isZero();
+        verifyNoInteractions(movementService);
+    }
+
+    /**
+     * A stranded PENDING_APPROVAL request is the failure mode the Over-BOM gate exists to prevent:
+     * a lot-tracked component has no reservation to inherit a lot from, so a request without one
+     * cannot ever be approved — the movement at approval time refuses it. Caught at request time the
+     * operator can still say which lot they took; caught at approval time nobody can fix it.
+     */
+    @Test
+    void issue_overBomForALotTrackedComponentWithoutALot_isRejectedAtRequestTime() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        line.getComponentItem().setLotTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        authenticate();
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-NOLOT")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(
+                warehouse.getWarehouseId(), workOrder.getPlant().getPlantId())).thenReturn(warehouse);
+
+        MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("25"), "Rework")));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-NOLOT"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.LOT_REQUIRED));
+
+        verify(issueRepository, never()).save(any());
+        verifyNoInteractions(movementService);
+    }
+
+    /** The same request is accepted once it names the lot — the guard must not block the happy path. */
+    @Test
+    void issue_overBomForALotTrackedComponentNamingTheLot_isAcceptedAsPending() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        line.getComponentItem().setLotTracked(true);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        UUID lotId = UUID.randomUUID();
+        authenticate();
+
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-WITHLOT")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(
+                warehouse.getWarehouseId(), workOrder.getPlant().getPlantId())).thenReturn(warehouse);
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueResponse response = service.post(workOrder.getWorkOrderId(),
+                new MaterialIssuePostRequest("Issue", List.of(new MaterialIssueLineRequest(
+                        line.getComponentLineId(), null, warehouse.getWarehouseId(), lotId, null, null,
+                        new BigDecimal("25"), null, "Rework", MaterialIssueReasonCode.REWORK, null))),
+                "KEY-WITHLOT");
+
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
+        ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertThat(captor.getValue().getLines().get(0).getRequestedLotId()).isEqualTo(lotId);
+        verifyNoInteractions(movementService);
+    }
+
+    /**
+     * DEC-09: posting stock is what approval buys. The request already existed and already carried
+     * the quantity, so a mutation that moved the movement call back into {@code post} would keep
+     * every earlier assertion green — this is the case that pins the stock impact to the approval.
+     */
+    @Test
+    void approve_pendingRequest_postsTheMovementAndOnlyThenCountsTheIssuedQuantity() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialIssue pending = pendingIssue(workOrder, line, warehouse, new BigDecimal("12"));
+        StockMovement movement = movement(line.getComponentItem(), warehouse);
+
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(movementService.issue(any(InventoryIssueCommand.class), eq(pending.getIdempotencyKey() + ":approve:L1")))
+                .thenReturn(new InventoryMovementResult(movement, true));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueResponse response = service.approve(workOrder.getWorkOrderId(), pending.getIssueId());
+
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.POSTED.name());
         assertThat(line.getIssuedQuantity()).isEqualByComparingTo("12");
-        assertThat(line.getIssuedQuantity()).isGreaterThan(line.getRequiredQuantity());
+        verify(costAccumulatorService).accumulateMaterialCost(workOrder, line.getComponentItem(), new BigDecimal("12"));
+        verify(wipTransactionService).recordMaterialIssued(workOrder, new BigDecimal("12"), pending.getIssueId());
+    }
+
+    @Test
+    void approve_anAlreadyDecidedRequest_throwsStateConflictWithoutPostingAnything() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        MaterialIssue posted = pendingIssue(workOrder, line, workOrder.getOutputWarehouse(), new BigDecimal("12"));
+        posted.markPosted(Instant.now(), UUID.randomUUID());
+        UUID workOrderId = workOrder.getWorkOrderId();
+        UUID issueId = posted.getIssueId();
+
+        when(issueRepository.findWithLinesByIssueId(issueId)).thenReturn(Optional.of(posted));
+
+        assertThatThrownBy(() -> service.approve(workOrderId, issueId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(movementService, wipTransactionService, costAccumulatorService);
+        verify(issueRepository, never()).save(any());
+    }
+
+    /** DEC-09 requires a reason on reject; a silent rejection leaves the operator no explanation. */
+    @Test
+    void reject_withoutAReason_throwsBeforeRecordingTheDecision() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        MaterialIssue pending = pendingIssue(workOrder, line, workOrder.getOutputWarehouse(), new BigDecimal("12"));
+        UUID workOrderId = workOrder.getWorkOrderId();
+        UUID issueId = pending.getIssueId();
+        MaterialIssueDecisionRequest blank = new MaterialIssueDecisionRequest("   ");
+
+        when(issueRepository.findWithLinesByIssueId(issueId)).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.reject(workOrderId, issueId, blank))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.APPROVAL_REASON_REQUIRED));
+
+        assertThat(pending.getStatus()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL);
+        verify(issueRepository, never()).save(any());
+        verifyNoInteractions(movementService);
+    }
+
+    @Test
+    void reject_withAReason_recordsTheDecisionAndLeavesStockUntouched() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        MaterialIssue pending = pendingIssue(workOrder, line, workOrder.getOutputWarehouse(), new BigDecimal("12"));
+
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueResponse response = service.reject(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueDecisionRequest("  Not justified  "));
+
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.REJECTED.name());
+        assertThat(pending.getRejectionReason()).isEqualTo("Not justified");
+        assertThat(line.getIssuedQuantity()).isZero();
+        verifyNoInteractions(movementService, wipTransactionService, costAccumulatorService);
+    }
+
+    private MaterialIssue pendingIssue(WorkOrder workOrder,
+                                       WorkOrderComponentLine componentLine,
+                                       Warehouse warehouse,
+                                       BigDecimal quantity) {
+        MaterialIssue issue = MaterialIssue.builder()
+                .issueId(UUID.randomUUID())
+                .code("MI-TEST")
+                .workOrder(workOrder)
+                .status(MaterialIssueStatus.PENDING_APPROVAL)
+                .idempotencyKey("KEY-PENDING")
+                .lines(new ArrayList<>())
+                .build();
+        issue.getLines().add(MaterialIssueLine.builder()
+                .issueLineId(UUID.randomUUID())
+                .issue(issue)
+                .componentLine(componentLine)
+                .item(componentLine.getComponentItem())
+                .warehouse(warehouse)
+                .quantity(quantity)
+                .overIssue(true)
+                .overrideReason("Rework")
+                .reasonCode(MaterialIssueReasonCode.REWORK)
+                .build());
+        return issue;
     }
 
     private void authenticate() {
@@ -473,7 +758,9 @@ class MaterialIssueServiceTest {
                 null,
                 quantity,
                 null,
-                overrideReason);
+                overrideReason,
+                MaterialIssueReasonCode.OTHER,
+                null);
     }
 
     private StockMovement movement(Item item, Warehouse warehouse) {

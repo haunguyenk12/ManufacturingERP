@@ -1,0 +1,39 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:1/security_test_only
+    username: security_test
+    password: test-only-not-a-production-secret
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 1
+      password: test-only-not-a-production-secret
+
+server:
+  port: 0
+
+app:
+  jwt:
+    secret: test-only-secret-key-that-is-at-least-32-bytes-long
+    issuer: manufacturing-erp-test
+    audience: manufacturing-erp-test-clients
+    access-token-expiry-ms: 900000
+    refresh-token-expiry-ms: 604800000
+    absolute-session-timeout-ms: 2592000000
+  security:
+    trusted-proxies: 127.0.0.1,::1
+  cors:
+    allowed-origins: http://localhost
+    allowed-methods: GET,POST,PATCH,PUT,DELETE,OPTIONS
+    allowed-headers: Authorization,Content-Type,Idempotency-Key,X-Plant-Id,X-Trace-Id
+    exposed-headers: X-Trace-Id,Retry-After
+    allow-credentials: true
+    max-age-seconds: 60
+  data-import:
+    max-rows: 5000
+  rate-limit:
+    enabled: true
+    rules: []

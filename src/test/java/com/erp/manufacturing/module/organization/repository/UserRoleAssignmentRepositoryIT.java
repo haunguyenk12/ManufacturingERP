@@ -20,6 +20,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -124,6 +126,75 @@ class UserRoleAssignmentRepositoryIT extends AbstractPostgresIntegrationTest {
                 AssignmentStatus.ACTIVE, RoleStatus.ACTIVE, OrganizationStatus.ACTIVE, OrganizationStatus.ACTIVE);
     }
 
+    private UUID setupSystemAdminAssignment(ScopeType scopeType, boolean attachResource) {
+        String suffix = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        User user = User.builder()
+                .username("admin-query-" + suffix)
+                .email("admin-query-" + suffix + "@test.local")
+                .password("encoded")
+                .status(UserStatus.ACTIVE)
+                .build();
+        user.setCreatedAt(now);
+        user.setUpdatedAt(now);
+        user = entityManager.persistFlushFind(user);
+
+        Role admin = entityManager.getEntityManager()
+                .createQuery("select r from Role r where r.code = 'ADMIN' and r.companyId is null", Role.class)
+                .getSingleResult();
+        AccessScope scope = AccessScope.builder()
+                .code("ADMIN_SCOPE_" + suffix)
+                .name("Admin scope " + suffix)
+                .scopeType(scopeType)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        scope.setCreatedAt(now);
+        scope.setUpdatedAt(now);
+        scope = entityManager.persistFlushFind(scope);
+
+        UserRoleAssignment assignment = UserRoleAssignment.builder()
+                .userId(user.getUserId())
+                .roleId(admin.getRoleId())
+                .scopeId(scope.getScopeId())
+                .status(AssignmentStatus.ACTIVE)
+                .build();
+        assignment.setCreatedAt(now);
+        assignment.setUpdatedAt(now);
+        entityManager.persistAndFlush(assignment);
+        if (attachResource) {
+            attachResource(scope.getScopeId(), ScopeResourceType.PLANT, UUID.randomUUID());
+        }
+        entityManager.clear();
+        return user.getUserId();
+    }
+
+    private boolean queryGlobalSystemAdmin(UUID userId) {
+        return repository.existsActiveGlobalSystemAdminAssignment(
+                userId, Instant.now(), AssignmentStatus.ACTIVE, RoleStatus.ACTIVE,
+                OrganizationStatus.ACTIVE);
+    }
+
+    @Test
+    void existsActiveGlobalSystemAdminAssignment_validGlobalAssignment_returnsTrue() {
+        UUID userId = setupSystemAdminAssignment(ScopeType.GLOBAL, false);
+
+        assertThat(queryGlobalSystemAdmin(userId)).isTrue();
+    }
+
+    @Test
+    void existsActiveGlobalSystemAdminAssignment_scopedAssignment_returnsFalse() {
+        UUID userId = setupSystemAdminAssignment(ScopeType.PLANT, true);
+
+        assertThat(queryGlobalSystemAdmin(userId)).isFalse();
+    }
+
+    @Test
+    void existsActiveGlobalSystemAdminAssignment_globalScopeWithResource_returnsFalse() {
+        UUID userId = setupSystemAdminAssignment(ScopeType.GLOBAL, true);
+
+        assertThat(queryGlobalSystemAdmin(userId)).isFalse();
+    }
+
     @Test
     void existsActivePermissionInScopeType_assignmentInactive_returnsFalse() {
         TestData data = setupAssignment(AssignmentStatus.INACTIVE, RoleStatus.ACTIVE,
@@ -172,7 +243,7 @@ class UserRoleAssignmentRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(queryExists(data)).isTrue();
     }
 
-    // ── findActiveScopeResourcePermissionRowsForUser (GET /api/v1/auth/me) ──────────────────────
+    // ── findActiveScopeResourcePermissionRowsForUser (GET /api/auth/v1/me) ──────────────────────
     //
     // Same B32 shape as above (assignment/role/permission/scope status + expiresAt), plus the two
     // behaviours specific to this query: the LEFT JOIN on AccessScopeResource, and one row per
@@ -341,5 +412,28 @@ class UserRoleAssignmentRepositoryIT extends AbstractPostgresIntegrationTest {
             assertThat(row.resourceType()).isEqualTo(ScopeResourceType.PLANT);
             assertThat(row.permissionCode()).isEqualTo(data.permissionCode());
         });
+    }
+
+    /**
+     * Round-trips {@code expires_at} through Postgres on the exact query
+     * {@code GET /access/assignments} runs — the integration test asked for in the frontend's
+     * 2026-08-13 report, where a future expiry appeared to be lost.
+     *
+     * <p>It was not lost: the instant persisted fine and only the JSON serialisation was wrong
+     * (epoch number instead of ISO, debt #27). This pins the half that report doubted, so the
+     * question does not have to be re-litigated by hand: what goes into the column is what the
+     * filtered read comes back with, to the second, across a {@code TIMESTAMPTZ} boundary.
+     */
+    @Test
+    void search_returnsTheExpiresAtInstantThatWasPersisted() {
+        Instant expiresAt = Instant.parse("2026-08-20T16:59:59Z");
+        ScopeAssignmentData data = setupScopeAssignment(AssignmentStatus.ACTIVE, RoleStatus.ACTIVE,
+                OrganizationStatus.ACTIVE, OrganizationStatus.ACTIVE, expiresAt, ScopeType.GLOBAL);
+
+        Page<UserRoleAssignment> page = repository.search(
+                data.userId(), null, data.scopeId(), PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent().get(0).getExpiresAt()).isEqualTo(expiresAt);
     }
 }

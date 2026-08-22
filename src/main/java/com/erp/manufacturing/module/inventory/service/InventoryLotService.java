@@ -56,11 +56,25 @@ public class InventoryLotService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("@inventoryPermissionGuard.hasLotAccess(authentication, 'PERM_INVENTORY_READ', #lotId)")
-    public InventoryLotDetailResponse get(UUID lotId) {
+    @PreAuthorize("#warehouseId != null ? "
+            + "@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', 'WAREHOUSE', #warehouseId) : "
+            + "@inventoryPermissionGuard.hasLotCompanyAccess(authentication, 'PERM_INVENTORY_READ', #lotId)")
+    public InventoryLotDetailResponse get(UUID lotId, UUID warehouseId) {
         InventoryLot lot = findLot(lotId);
-        List<StockBalance> balances = balanceRepository.findByLotLotId(lotId);
-        return mapper.toLotDetailResponse(lot, balances, findOriginMovement(lot));
+        if (warehouseId == null) {
+            List<StockBalance> balances = balanceRepository.findByLotLotId(lotId);
+            return mapper.toLotDetailResponse(lot, balances, findOriginMovement(lot));
+        }
+
+        StockBalance balance = balanceRepository
+                .findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                        lot.getItem().getItemId(), warehouseId, lotId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Stock balance for lot in warehouse", lotId));
+        return mapper.toLotDetailResponse(
+                lot,
+                List.of(balance),
+                findOriginMovement(lot, warehouseId));
     }
 
     @Transactional
@@ -109,6 +123,13 @@ public class InventoryLotService {
     private StockMovement findOriginMovement(InventoryLot lot) {
         return movementRepository
                 .findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(lot.getLotId(), MovementType.RECEIVE)
+                .orElse(null);
+    }
+
+    private StockMovement findOriginMovement(InventoryLot lot, UUID warehouseId) {
+        return movementRepository
+                .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                        warehouseId, lot.getLotId(), MovementType.RECEIVE)
                 .orElse(null);
     }
 }

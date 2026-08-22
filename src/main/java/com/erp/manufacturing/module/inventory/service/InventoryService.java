@@ -90,6 +90,19 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', 'WAREHOUSE', #warehouseId)")
+    public PageResult<StockBalanceAggregateResponse> listAggregateBalances(
+            UUID warehouseId, UUID itemId, Pageable pageable) {
+        ensureWarehouseExists(warehouseId);
+        return PageResult.from(balanceRepository.aggregateBalances(warehouseId, itemId, pageable)
+                .map(row -> new StockBalanceAggregateResponse(
+                        row.getItemId(), row.getItemCode(), row.getItemName(), row.getUom(),
+                        row.getWarehouseId(), row.getOnHandQuantity(), row.getReservedQuantity(),
+                        row.getAvailableQuantity(), row.getQualityHoldQuantity(), row.getRejectedQuantity(),
+                        row.getExpiredQuantity(), row.getLotCount(), row.getUpdatedAt())));
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', 'WAREHOUSE', #warehouseId)")
     public PageResult<StockMovementResponse> listMovements(UUID warehouseId, UUID itemId, UUID lotId, Pageable pageable) {
         ensureWarehouseExists(warehouseId);
         Page<StockMovement> page;

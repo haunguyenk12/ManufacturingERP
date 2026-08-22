@@ -24,22 +24,27 @@ public class InventoryPermissionGuard {
             return false;
         }
         return itemRepository.findById(itemId)
-                .map(item -> permissionGuard.hasResourceAccess(
+                .map(item -> permissionGuard.hasCompanyOrPlantAccess(
                         authentication,
                         permissionCode,
-                        "COMPANY",
                         item.getCompany().getCompanyId()))
                 .orElse(false);
     }
 
+    @Transactional(readOnly = true)
+    public boolean hasItemCompanyAccess(Authentication authentication,
+                                        String permissionCode,
+                                        UUID companyId) {
+        return permissionGuard.hasCompanyOrPlantAccess(authentication, permissionCode, companyId);
+    }
+
     /**
-     * Resolves {@code lot → item → company} to a COMPANY-scoped check (C2-2). Lot detail
-     * ({@code GET /inventory/lots/{lotId}}) has no {@code warehouseId} in the request to check
-     * against directly — a lot can span more than one warehouse — so it is scoped one level up,
-     * mirroring {@link #hasItemAccess}.
+     * Resolves {@code lot → item → company} for the company-wide detail mode (C2-2). The normal FE
+     * flow supplies {@code warehouseId} and is authorized directly by {@code PermissionGuard}; this
+     * stricter fallback is only for callers requesting balances across every warehouse.
      */
     @Transactional(readOnly = true)
-    public boolean hasLotAccess(Authentication authentication, String permissionCode, UUID lotId) {
+    public boolean hasLotCompanyAccess(Authentication authentication, String permissionCode, UUID lotId) {
         if (lotId == null) {
             return false;
         }

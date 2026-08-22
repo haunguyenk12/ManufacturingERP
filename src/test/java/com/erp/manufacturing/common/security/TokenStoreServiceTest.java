@@ -90,7 +90,8 @@ class TokenStoreServiceTest {
 
         verify(valueOps).set(
                 eq("auth:refresh:" + userId + ":tid-1"),
-                eq("refresh-token"),
+                org.mockito.ArgumentMatchers.argThat(value -> value.startsWith("0:")
+                        && !value.contains("refresh-token")),
                 eq(REFRESH_EXPIRY_SEC),
                 eq(TimeUnit.SECONDS));
     }

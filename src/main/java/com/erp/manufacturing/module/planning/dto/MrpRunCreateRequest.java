@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.planning.dto;
 
 import jakarta.validation.constraints.NotNull;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -15,8 +16,20 @@ import java.util.UUID;
 public record MrpRunCreateRequest(
         @NotNull UUID companyId,
         @NotNull UUID plantId,
+        @Schema(deprecated = true, description = "Compatibility alias; use demandWarehouseId")
         UUID warehouseId,
         @NotNull LocalDate horizonStartDate,
         @NotNull LocalDate horizonEndDate,
-        List<UUID> demandLineIds
-) {}
+        List<UUID> demandLineIds,
+        UUID demandWarehouseId
+) {
+    public MrpRunCreateRequest(UUID companyId, UUID plantId, UUID warehouseId,
+                               LocalDate horizonStartDate, LocalDate horizonEndDate,
+                               List<UUID> demandLineIds) {
+        this(companyId, plantId, warehouseId, horizonStartDate, horizonEndDate, demandLineIds, null);
+    }
+
+    public UUID effectiveDemandWarehouseId() {
+        return demandWarehouseId != null ? demandWarehouseId : warehouseId;
+    }
+}

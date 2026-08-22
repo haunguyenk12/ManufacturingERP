@@ -59,26 +59,22 @@ class ItemServiceTest {
     }
 
     @Test
-    void createItem_serialTrackedAlone_succeeds() {
+    void createItem_serialTrackedAlone_isRejectedBecauseSerialIsDeferred() {
         UUID companyId = UUID.randomUUID();
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
-        when(itemRepository.existsByCompanyCompanyIdAndCode(companyId, "SN-001")).thenReturn(false);
-        when(itemRepository.save(any(Item.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.createItem(companyId, new ItemCreateRequest(
-                "SN-001", "Router", ItemType.FINISHED_GOOD, "EA", false, true));
-
-        ArgumentCaptor<Item> captor = ArgumentCaptor.forClass(Item.class);
-        verify(itemRepository).save(captor.capture());
-        assertThat(captor.getValue().isLotTracked()).isFalse();
-        assertThat(captor.getValue().isSerialTracked()).isTrue();
+        assertThatThrownBy(() -> service.createItem(companyId, new ItemCreateRequest(
+                "SN-001", "Router", ItemType.FINISHED_GOOD, "EA", false, true)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+        verify(itemRepository, never()).save(any());
     }
 
     @Test
     void createItem_bothLotAndSerialTracked_throwsOperationNotAllowedBeforeSaving() {
         UUID companyId = UUID.randomUUID();
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
-        when(itemRepository.existsByCompanyCompanyIdAndCode(companyId, "SN-002")).thenReturn(false);
 
         assertThatThrownBy(() -> service.createItem(companyId, new ItemCreateRequest(
                 "SN-002", "Router", ItemType.FINISHED_GOOD, "EA", true, true)))

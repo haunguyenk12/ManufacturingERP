@@ -1,5 +1,15 @@
 # API Guide cho Frontend — Manufacturing ERP
 
+> **Audit update ngày 2026-08-17:** `GET /audit-logs/{auditLogId}` nay trả field-level diff thật trong
+> `changes[]` cho các audit mới (`oldValue`/`newValue` giữ đúng kiểu JSON). Các đoạn lịch sử nói mảng
+> này luôn rỗng đã được thay thế bởi hành vi mới này.
+
+> **Thông báo thay đổi URL ngày 2026-08-17:** `/api` hiện là context path toàn ứng dụng và `/v1`
+> nằm ở method mapping. Năm nhóm `auth`, `admin/users`, `users`, `access`, `sales-orders` đã đổi vị trí
+> `/v1`; xem bảng migration và cấu hình Axios tại
+> [`fe-api-v1-migration-guide.md`](./fe-api-v1-migration-guide.md). Các URL cũ của năm nhóm này xuất
+> hiện bên dưới chỉ còn giá trị lịch sử và không còn là route đang chạy.
+
 > **Nguồn của tài liệu này:** đọc trực tiếp từ **code đang chạy** (controller + DTO + enum + error code),
 > rồi đối chiếu ngược với `docs/fe-spec-omniplant.md`. Chỗ nào backend **lệch** so với spec FE đều
 > được ghi rõ ở [§9](#9-những-chỗ-lệch-so-với-spec-fe). Toàn bộ luồng ở [§4](#4-luồng-sản-xuất-đầu-cuối)
@@ -68,7 +78,8 @@ Trước `C2-5` backend **không có một dòng cấu hình CORS nào** ⇒ m�
 ### 1.2 Account dev để test phân quyền *(thêm ở `C2-5`)*
 
 Chạy `src/main/resources/db/dev-seed.sql` (hướng dẫn ở đầu file đó) để có 1 company + **2 plant** +
-6 warehouse + 3 account. **Mật khẩu của cả ba: `Admin@123`.**
+6 warehouse + 3 account. Mật khẩu phải được cấp dưới dạng BCrypt qua biến
+`demo_password_hash` khi chạy seed; repository không còn chứa mật khẩu dùng chung.
 
 | Username | Role | Scope | Dùng để |
 |---|---|---|---|
@@ -195,6 +206,17 @@ Sai định dạng UUID trong header → `400 FIELD_FORMAT_INVALID` (không ph�
 
 🔴 **Đừng dùng `parseFloat`/`Number` cho quantity.** Backend dùng `BigDecimal` scale 6; JS float sẽ
 làm tròn sai ở nghiệp vụ tồn kho. Dùng `decimal.js` / `big.js`.
+
+> **[2026-08-12] Hai dòng ngày/giờ ở trên nay đúng với code.** Từ trước tới ngày này chúng là *lời
+> hứa*, không phải sự thật: một `@Bean ObjectMapper` trong `RedisConfig` đè ObjectMapper của Spring
+> Boot nên `spring.jackson.*` bị vô hiệu im lặng ⇒ `LocalDate` đi ra dạng **mảng** `[2026,8,15]` và
+> `Instant` dạng **số epoch**. Bean đó đã bị xoá; wire format nay là ISO ở **mọi** endpoint. Client nào
+> đang tự parse mảng số/epoch thì nay nhận chuỗi ISO — FE đã xác nhận adapter của họ chấp nhận cả hai
+> nên đây không phải breaking change trong thực tế.
+>
+> **Field `null` KHÔNG đổi** — vẫn xuất hiện đầy đủ trong payload (`"cancelReason": null`), không bị
+> lược bỏ. Chỉ envelope là đã lược từ trước (`result`/`errors` biến mất khi null, §1.1). Guard:
+> `JsonWireFormatTest`.
 
 ---
 
@@ -371,6 +393,10 @@ Sales Order ──confirm──► Planning Demand
 | Warehouse | `GET /api/v1/plants/{plantId}/warehouses` |
 | Item | `GET /api/v1/companies/{companyId}/items` |
 
+Item Master dùng `PERM_ITEM_READ` cho list/detail và `PERM_ITEM_MANAGE` cho create/update/activate/
+deactivate (`V57`). User scope Plant được truy cập Item của Company cha; Company khác vẫn trả `403`.
+Không gate Item bằng `PERM_INVENTORY_*`.
+
 `ItemResponse.lotTracked` quyết định màn hình receipt có **bắt buộc** nhập `lotNumber` hay không.
 Tương tự, `ItemResponse.serialTracked` (P5, 2026-08-06) quyết định màn hình có **bắt buộc** nhập
 `serialNumber` hay không — **hai cờ này loại trừ nhau**, một item chỉ có thể là lot-tracked, serial-
@@ -441,6 +467,23 @@ field này nằm cạnh nhau và rất dễ nhầm.
 Response `MrpRunResponse` chứa sẵn header cho màn hình: `code` (vd `RUN-A1B2C3D4`), `status`,
 `grossDemandQuantity`, và 4 ô summary `shortageLines` / `plannedWorkOrders` /
 `plannedPurchaseRecommendations` / `blockedProposals`.
+
+> 🔴 **[2026-08-14] Endpoint này nay có `Idempotency-Key` — TRƯỚC ĐÓ HEADER BỊ BỎ QUA HOÀN TOÀN.**
+> Gửi cùng một key với **cùng** payload ⇒ trả lại **đúng run đã tạo lần đầu** (không chạy MRP lần
+> hai). Gửi cùng key với payload **khác** ⇒ `409 IDEMPOTENCY_CONFLICT`. **Không** gửi header ⇒ hành vi
+> y như cũ: mỗi lần gọi là một run mới.
+>
+> Vì sao quan trọng hơn vẻ ngoài: mỗi run sinh **một bộ suggestion riêng** cho cùng nhu cầu. Ba run
+> trùng ⇒ ba bộ proposal song song, và convert proposal của run này rồi mở màn hình của run kia sẽ
+> trông như "convert bị mất". Retry mù (transport retry) trên endpoint này là cách dễ nhất tự tạo ra
+> tình huống đó — hãy gắn `Idempotency-Key` cho mọi lần chạy MRP từ script seed hoặc từ nút bấm có
+> thể double-click.
+>
+> Hai điều cần biết:
+> 1. **Run kết thúc `FAILED` vẫn giữ key của nó.** Muốn chạy lại sau khi thất bại thì **đổi key mới** —
+>    gửi lại key cũ chỉ trả về đúng cái run `FAILED` đó.
+> 2. **Hai request cùng key chạy song song**: request thứ hai trả `409 RESOURCE_ALREADY_EXISTS` (không
+>    phải `IDEMPOTENCY_CONFLICT`) và trả **ngay**, không chờ run thứ nhất tính xong.
 
 **`GET /api/v1/planning-runs/{runId}/requirements`** (mặc định `size=50`, sort `requirementLevel asc`)
 
@@ -534,10 +577,45 @@ Từ `BLOCKED` vẫn **reserve tiếp được** để thoát ra — đó là đ
 
 > Cần xuất nhiều dòng cùng lúc, hoặc xuất **vượt định mức**: dùng
 > `POST /api/v1/work-orders/{workOrderId}/material-issues` với `lines[]` và `overrideReason`.
-> Xuất vượt cần quyền `PERM_MATERIAL_ISSUE_OVERRIDE`; thiếu `overrideReason` → `422`.
 > 🔴 Component **serial-tracked**: endpoint phẳng (`quantity` bất kỳ) **không dùng được** — mỗi dòng
 > serial-tracked phải là `quantity: 1` kèm `serialId` cụ thể, nên phải đi qua `lines[]` với **N dòng**
 > cho N đơn vị (mỗi dòng gọi `movementService.issue` một serial riêng).
+
+#### 🔴 Xuất vượt định mức (Over-BOM) nay là hai bước — `DEC-09`
+
+Trước đây một dòng vượt định mức kèm `overrideReason` **ghi tồn kho ngay**. Nay **không**:
+
+| Bước | Gọi gì | Ai | Kết quả |
+|---|---|---|---|
+| 1. Đề nghị | `POST /work-orders/{id}/material-issues` với dòng vượt định mức | Operator (`PERM_MATERIAL_ISSUE_MANAGE`) | `201` + `status: "PENDING_APPROVAL"` — **tồn kho không đổi một chữ số nào**, `issuedQuantity` của component **không** tăng |
+| 2a. Duyệt | `POST /work-orders/{id}/material-issues/{issueId}/approve` | Manager (`PERM_MATERIAL_ISSUE_APPROVE`) | `200` + `status: "POSTED"` — **đây** mới là lúc movement được ghi, `issuedQuantity` tăng, chi phí được cộng |
+| 2b. Từ chối | `POST /work-orders/{id}/material-issues/{issueId}/reject` với `{ "reason": "…" }` | Manager (`PERM_MATERIAL_ISSUE_APPROVE`) | `200` + `status: "REJECTED"` — tồn kho không đổi |
+
+Dòng **trong** định mức vẫn `POSTED` ngay ở bước 1 như cũ — hành vi không đổi.
+
+**Hàng đợi duyệt là filter phía server** (thêm 2026-08-21), không phải lọc trong trình duyệt:
+
+```http
+GET /api/v1/material-issues?plantId={…}&status=PENDING_APPROVAL     # cả nhà máy
+GET /api/v1/work-orders/{workOrderId}/material-issues?status=PENDING_APPROVAL   # một lệnh sản xuất
+```
+
+`status` nhận `PENDING_APPROVAL` · `POSTED` · `REJECTED` · `CANCELLED`; vắng mặt = không lọc. Giá trị
+lạ trả `400 VALIDATION_ERROR`.
+
+🔴 **Sắp xếp mặc định đổi từ `postedAt` sang `requestedAt`.** Chứng từ chờ duyệt **chưa có** `postedAt`
+(nó `null` tới lúc duyệt), nên sắp xếp hàng đợi theo cột đó không sắp xếp được gì. `requestedAt` có
+trên mọi chứng từ.
+
+**`lines[].lotNumber` luôn có mã lô, kể cả khi chứng từ còn chờ duyệt** — backend resolve sẵn bằng
+**một** query cho cả trang, FE không cần gọi `GET /inventory/lots/{lotId}` cho từng dòng. Khi dòng
+mang cả `lotId` lẫn `lotNumber` mà hai thứ lệch nhau, giá trị trả về là mã của lô ứng với **`lotId`**
+— đúng lô mà bước duyệt sẽ xuất kho.
+
+Mỗi dòng nhận thêm 3 field tuỳ chọn phục vụ truy vết rework (`DEC-08`):
+`reasonCode` ∈ `REWORK` · `PROCESS_LOSS` · `DAMAGE` · `SETUP_LOSS` · `OTHER`, `reason` (mô tả tự do),
+`sourceExecutionId` (phải trỏ tới một Production Execution **có `reworkQuantity > 0` của chính WO đó**,
+nếu không → `409 STATE_CONFLICT`).
 
 Xem lịch sử: `GET /api/v1/material-issues?plantId={…}&workOrderId={…}` (workOrderId tuỳ chọn).
 `MaterialIssueResponse.code` là số chứng từ dạng `MI-3F2A9C01`.
@@ -545,8 +623,10 @@ Xem lịch sử: `GET /api/v1/material-issues?plantId={…}&workOrderId={…}` (
 | Lỗi | Nghĩa |
 |---|---|
 | `409 RESERVATION_EXCEEDED` | Xuất quá phần còn lại của reservation |
-| `409 INSUFFICIENT_AVAILABLE_STOCK` | Kho không đủ |
-| `409 STATE_CONFLICT` | WO không ở `RELEASED`/`IN_PROGRESS` |
+| `409 INSUFFICIENT_AVAILABLE_STOCK` | Kho không đủ (kiểm lại **lúc duyệt**, không chỉ lúc đề nghị) |
+| `409 STATE_CONFLICT` | WO không ở `RELEASED`/`IN_PROGRESS`, hoặc chứng từ đã được quyết định rồi |
+| `409 OVER_BOM_APPROVAL_REQUIRED` | Nhiều dòng cùng một component cộng lại vượt định mức giữa chừng — gửi lại thành một đề nghị Over-BOM |
+| `400 APPROVAL_REASON_REQUIRED` | `reject` thiếu `reason` |
 
 ---
 
@@ -641,10 +721,13 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 
 | Kết quả | Tác động |
 |---|---|
-| `AVAILABLE` | Lot `HOLD` → `AVAILABLE` ⇒ hàng dùng được ⇒ **Sales Order được fulfill** ⇒ status đơn roll-up sang `PARTIALLY_FULFILLED`/`FULFILLED` |
-| `REJECTED` | Lot → `REJECTED` (hoặc rút hàng bằng `ADJUST_OUT` nếu item không lot-tracked). **Không** fulfill |
+| `AVAILABLE` | Lot `HOLD` → `AVAILABLE`; với `NON_TRACKED`, giải phóng `qualityHoldQuantity`. Hàng dùng được và **Sales Order được fulfill** |
+| `REJECTED` | Lot → `REJECTED`; với `NON_TRACKED`, giữ nguyên on-hand và `qualityHoldQuantity`. **Không** fulfill |
 
 - Receipt **vẫn giữ** `status = "APPROVED"` sau QC; kết quả nằm ở `qcResult`/`qcReason`/`qcAt`.
+- Với `NON_TRACKED`, `outputLotStatus = null` là đúng vì không có lot. FE hiển thị chờ QC khi
+  `status = "APPROVED" && qcResult == null`; tồn bị giữ được công bố ở
+  `GET /inventory/balances` qua `qualityHoldQuantity` và đã bị trừ khỏi `availableQuantity`.
 - Chỉ QC được **một lần** — gọi lần hai → `409 STATE_CONFLICT`.
 - `reason` **bắt buộc** cho cả hai kết quả.
 
@@ -748,7 +831,8 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Danh sách reservation | `GET /work-orders/{id}/material-reservations` | `PERM_MATERIAL_RESERVATION_MANAGE` |
 | Huỷ reservation | `DELETE /work-orders/{id}/material-reservations/{rid}` | `PERM_MATERIAL_RESERVATION_MANAGE` |
 | Xuất 1 dòng | `POST /material-issues` | `PERM_MATERIAL_ISSUE_MANAGE` |
-| Xuất nhiều dòng / override | `POST /work-orders/{id}/material-issues` | `PERM_MATERIAL_ISSUE_MANAGE` (+ `_OVERRIDE`) |
+| Xuất nhiều dòng / đề nghị Over-BOM | `POST /work-orders/{id}/material-issues` | `PERM_MATERIAL_ISSUE_MANAGE` |
+| Duyệt / từ chối đề nghị Over-BOM | `POST /work-orders/{id}/material-issues/{issueId}/approve\|reject` | **`PERM_MATERIAL_ISSUE_APPROVE`** (ADMIN + MANAGER) |
 | Lịch sử xuất (plant) | `GET /material-issues?plantId=&workOrderId=` | `PERM_MATERIAL_ISSUE_MANAGE` |
 | Candidate báo sản lượng | `GET /production-executions/candidates?plantId=` | `PERM_PRODUCTION_EXECUTION_READ` |
 | Báo sản lượng | `POST /work-orders/{id}/production-executions` | `PERM_PRODUCTION_EXECUTION_MANAGE` |
@@ -778,11 +862,75 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > từ response gần nhất (`GET` hoặc bất kỳ action nào) → gửi lại nguyên giá trị đó làm `expectedVersion`
 > trên `PATCH` tiếp theo → response của `PATCH` trả `version` **mới** (đã +1) → dùng cho lần sau. Lệch
 > `expectedVersion` (đơn đã bị người khác sửa) trả `409 CONCURRENT_MODIFICATION`.
+>
+> 🔴 **[Sửa 2026-08-10] `PATCH /sales-orders/{id}` kèm `lines[]` trước đây LUÔN trả
+> `RESOURCE_ALREADY_EXISTS` ("Data constraint violation") — nay chạy đúng.** Hai điều FE cần biết:
+> (1) Full replace là **thay toàn bộ**: mọi dòng cũ bị xoá, dòng mới nhận `salesOrderLineId` **mới** và
+> `lineNo` đánh lại `1..N` theo đúng thứ tự phần tử trong `lines[]` — **đừng** cache
+> `salesOrderLineId` qua một lần `PATCH`. FE **không** gửi `lineNo` hay id dòng (server cấp, `B47`).
+> (2) `version` nay bump **đúng một lần** cho **mọi** `PATCH` thành công, kể cả `PATCH` chỉ có `lines[]`
+> (trước đây trường hợp đó không bump — hai người sửa dòng đồng thời sẽ ghi đè nhau im lặng).
+> `Idempotency-Key` **không** có tác dụng trên endpoint này (chỉ POST ghi tồn kho dùng nó); chống áp
+> dụng hai lần đã có sẵn nhờ `expectedVersion` — gửi lại **cùng** payload lần hai trả
+> `409 CONCURRENT_MODIFICATION`, không phải 200 với kết quả cũ.
+
 | Tồn kho | `GET /inventory/balances?warehouseId=` (bắt buộc) `&itemId=` (tuỳ chọn) |
 | Lịch sử movement | `GET /inventory/movements?warehouseId=` (**bắt buộc**) `&itemId=&lotId=` (tuỳ chọn) |
+
+> 🔴 **[2026-08-14 — ĐỔI HÀNH VI] Dòng của lot `HOLD`/`REJECTED`/`EXPIRED` nay trả
+> `availableQuantity = 0`.** Áp dụng cho `GET /inventory/balances`, `GET /inventory/lots` và
+> `GET /inventory/lots/{lotId}` (mảng `balances[]`). Trước đó ba endpoint này báo số dương cho hàng mà
+> `B3` cấm xuất/giữ chỗ — tức FE hiển thị hàng dùng được trong khi MRP và dashboard (đọc qua aggregate
+> có lọc lot status) báo `0` cho **đúng lô hàng đó**. Đây là **sửa sai**, nhưng nếu FE đang hiển thị
+> con số cũ thì màn hình sẽ đổi.
+>
+> - `quantity`/`onHandQuantity` **giữ nguyên số thật** — hàng vẫn tồn tại vật lý, chỉ là chưa dùng
+>   được. Đừng suy ra "hết hàng"; lý do nằm ở `status` của lot.
+> - `qualityHoldQuantity` **không** đổi: nó là số hàng chờ QC của tồn **không** lot-tracked. Với lot
+>   thì lý do giữ hàng đọc ở `lot.status`, không phải ở cột này. Nói cách khác, đẳng thức
+>   `available = quantity − reserved − qualityHold` chỉ đúng cho dòng có lot `AVAILABLE` hoặc dòng
+>   không lot; dòng lot bị giữ thì `available = 0` bất kể ba số kia.
+> - Loại trừ dựa trên **`lot.status`**, **không** dựa trên `expiresAt`: một lot đã quá hạn nhưng vẫn
+>   `AVAILABLE` thì **vẫn tính là available**. Hệ thống chưa có job tự đẩy lot quá hạn sang `EXPIRED` —
+>   muốn chặn theo ngày thì đó là yêu cầu riêng.
 | Nhập/xuất/điều chỉnh thủ công | `POST /inventory/receive` · `/issue` · `/adjust` |
-| Dashboard tồn kho | `GET /reports/inventory-dashboard` |
-| Cảnh báo tồn thấp | `GET /reports/low-stock` |
+| Dashboard tồn kho | `GET /reports/inventory-dashboard?scopeType=&scopeId=` (**cả hai bắt buộc**) `&lowStockLimit=&movementLimit=` (tuỳ chọn) |
+| Cảnh báo tồn thấp | `GET /reports/low-stock?scopeType=&scopeId=` (**cả hai bắt buộc**) `&status=` (tuỳ chọn) |
+
+> 🔴 **[2026-08-14] Dashboard là MỘT request duy nhất — không phải gọi thêm Item/Warehouse/User để
+> lấy nhãn.** `scopeType` ∈ `COMPANY | PLANT | WAREHOUSE`, `scopeId` là id tương ứng; quyền là
+> `PERM_INVENTORY_READ` **trên đúng scope đó** (scope ngoài phạm vi assignment ⇒ `403
+> PERMISSION_DENIED`, scope không tồn tại ⇒ `404 ENTITY_NOT_FOUND`). Những gì response trả:
+>
+> - `generatedAt` — thời điểm server tính snapshot (ISO-8601 UTC). Không cache, mọi con số đọc live.
+> - **Đếm theo dòng `(item, warehouse)`**, không theo item: ngưỡng cấu hình theo kho nên cùng một item
+>   ở hai kho là **hai** dòng cảnh báo độc lập. `okCount + lowStockCount + reorderNeededCount` = số
+>   setting `ACTIVE` trong scope. `totalItemCount` = số item **có setting `ACTIVE`** trong scope (không
+>   phải số item của Company). `totalWarehouseCount` **có tính** kho `INACTIVE` — hàng trong kho đã
+>   ngừng hoạt động vẫn là hàng có thật.
+> - Mỗi dòng cảnh báo có `uomCode`, `onHandQuantity`, `reservedQuantity`, `qualityHoldQuantity`,
+>   `availableQuantity`, `shortageQuantity`. Đẳng thức: `available = onHand − reserved − qualityHold`,
+>   trong đó `onHand` **đã loại** lot không `AVAILABLE` (`HOLD`/`REJECTED`/`EXPIRED` không đóng góp
+>   một đơn vị nào, kể cả vào `onHand`). Không bao giờ âm — DB có CHECK constraint ép
+>   `reserved + qualityHold <= quantity`.
+> - `shortageQuantity = max(0, max(safetyStock, reorderPoint) − available)` — số cần bổ sung để dòng
+>   về `OK`. **Không** phải chỉ khoảng cách tới reorder point: trong repo này `safetyStock ≥
+>   reorderPoint` là cấu hình thường gặp, dùng reorder point một mình thì mọi dòng `LOW_STOCK` báo 0.
+> - Trạng thái loại trừ nhau: `available <= reorderPoint` ⇒ `REORDER_NEEDED`; ngược lại
+>   `available < safetyStock` ⇒ `LOW_STOCK`; còn lại `OK`. `REORDER_NEEDED` nặng hơn `LOW_STOCK`.
+> - `topLowStockLines` sắp xếp **nặng trước**: `REORDER_NEEDED` → shortage giảm dần → `itemCode` →
+>   `warehouseCode`; **không** chứa dòng `OK`. `recentMovements` sắp xếp `createdAt desc`, hoà thì
+>   `movementId desc` (thứ tự ổn định giữa hai lần gọi).
+> - `lowStockLimit` / `movementLimit`: mặc định **10**, kẹp về khoảng `[1, 20]` (giá trị ngoài khoảng
+>   **không** trả lỗi, chỉ bị kẹp — giống quy tắc `size` của phân trang).
+> - `recentMovements[]` là DTO riêng của dashboard: có `itemCode`/`itemName`/`uomCode`/
+>   `warehouseCode`/`warehouseName`/`actorUserId`/`actorUsername`, **không** có `idempotencyKey`.
+>   `GET /inventory/movements` giữ nguyên hình dạng cũ, không đổi.
+> - `referenceType`/`referenceId` là **id chứng từ nguồn, không phải số chứng từ nghiệp vụ** — chưa có
+>   `referenceNo`. `uomCode` lấy từ `items.unit` (text tự do, chưa nối FK sang UOM master).
+>
+> `GET /reports/low-stock` dùng **cùng** hình dạng dòng và **cùng** thứ tự sắp xếp, chỉ khác là giữ cả
+> dòng `OK` và trả **mảng trần** (không phân trang — một dòng cho mỗi ngưỡng đã cấu hình).
 | UOM (đơn vị tính, **global**) | `GET /uoms` · `POST /uoms` · `GET/PATCH /uoms/{id}` · `POST /uoms/{id}/activate` · `POST /uoms/{id}/deactivate` |
 
 > 🔴 **UOM không có `companyId`/`plantId`** — danh mục chung cho toàn hệ thống, không lọc theo company.
@@ -946,6 +1094,18 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Scope: xem / sửa `name`+`description` | `GET/PATCH /access/scopes/{scopeId}` |
 | Scope: activate / deactivate | `POST /access/scopes/{scopeId}/activate` · `/deactivate` |
 | Tra cứu assignment | `GET /access/assignments?userId=&roleId=&scopeId=&page=&size=` (cả 3 filter tuỳ chọn) |
+| **Role: đọc permission đang có** | **`GET /access/roles/{roleId}/permissions?page=&size=`** *(2026-08-12)* |
+| **Scope: đọc resource đang có** | **`GET /access/scopes/{scopeId}/resources?page=&size=`** *(2026-08-12)* |
+
+> **[2026-08-12] Hai endpoint đọc membership ở trên là nguồn authoritative duy nhất** cho màn hình
+> phân quyền — `RoleResponse` **không** nhúng `permissions[]` và `AccessScopeResponse` **không** nhúng
+> `resources[]` (giữ nguyên, không breaking change). Dựng checkbox bằng cách so
+> `GET /access/permissions` (catalog) với `GET /access/roles/{roleId}/permissions` (đang có), **không**
+> suy từ role code hay dữ liệu hardcode.
+> `roleId`/`scopeId` không tồn tại trả **404 `ENTITY_NOT_FOUND`**, không phải page rỗng — page rỗng
+> nghĩa là "role có thật, chưa được cấp quyền nào", hai chuyện khác nhau.
+> Danh sách trả về **gồm cả permission đã `INACTIVE`** nếu role vẫn đang giữ: đó là grant có thật,
+> ẩn đi sẽ khiến lần save kế tiếp âm thầm gỡ mất nó. Rẽ nhánh hiển thị theo field `status`.
 
 > 🔴 **Role/Scope dùng verb `POST .../activate`+`.../deactivate`, KHÁC với BOM/Routing/UOM ở trên**
 > (`DELETE` = deactivate). Đây là 2 pattern verb khác nhau tồn tại song song trong cùng API, không
@@ -967,9 +1127,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > company/plant cụ thể, nên **không** có cross-check `X-Plant-Id` trên filter `plantId` (khác
 > `PlanningDemandController`, nơi header có ý nghĩa vì có hai nguồn plant để đối chiếu).
 >
-> **`changes[]` trên response chi tiết luôn rỗng hôm nay** — bảng `audit_log_changes` tồn tại từ lâu
-> (migration `V6`) nhưng chưa có dòng code nào ghi field-level diff vào đó (đợt 2, chưa xếp lịch). FE
-> đã xác nhận màn hình Audit dùng được với `changes[]` rỗng.
+> Response audit trả `entityName` thay cho `entityId`; `entityId` vẫn được giữ làm query parameter.
+> `entityName` là snapshot tên/mã/số chứng từ tại thời điểm thao tác và có thể `null` với dữ liệu lịch
+> sử trước migration `V65`. Response chi tiết trả field-level diff thật trong `changes[]` cho audit mới.
 >
 > **`plantId` trên mọi dòng — kể cả dòng mới tạo hôm nay — vẫn là `null`.** Cột thêm ở `V54` nhưng chỉ
 > dừng ở mức schema; chưa có code nào populate nó lúc ghi audit log (việc đó chạm `RequestContext`/
@@ -984,12 +1144,13 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Việc | Endpoint |
 |---|---|
 | Danh sách lot trong một kho | `GET /inventory/lots?warehouseId=&itemId=&status=&search=&expiryFrom=&expiryTo=&page=&size=&sortBy=&sortDir=` (`warehouseId` **bắt buộc**, mọi filter khác tuỳ chọn) |
-| Chi tiết một lot — số lượng theo **từng kho** | `GET /inventory/lots/{lotId}` |
+| Chi tiết một lot trong kho đang xem | `GET /inventory/lots/{lotId}?warehouseId=` (`warehouseId` nên luôn gửi từ màn list) |
 | Đổi trạng thái lot (`AVAILABLE`/`HOLD`/`REJECTED`) | `POST /inventory/lots/{lotId}/status` — body `{warehouseId, newStatus, reason, referenceType?, referenceId?}`, header `Idempotency-Key` tuỳ chọn |
 
 > 🔴 **Một lot có thể có hàng ở nhiều kho** — bảng `stock_balances` unique theo `(item, warehouse,
 > lot)`, không phải `(item, lot)`. Vì vậy list bắt buộc `warehouseId` (giống `/inventory/balances`),
-> còn detail không nêu kho — trả `balances[]`, mỗi phần tử một kho, thay vì đoán một kho duy nhất.
+> detail có `warehouseId` chỉ trả balance và nguồn RECEIVE của đúng kho được phép xem. Chỉ
+> company/global/admin mới được bỏ param để nhận toàn bộ `balances[]`.
 >
 > 🔴 **`POST .../status` không cho lot `HOLD` từ Production Receipt tự do thoát `HOLD`.** Nếu lot
 > đang `HOLD` vì vừa được sản xuất ra và chưa qua QC, gọi endpoint này với `newStatus` khác `HOLD` sẽ
@@ -1002,7 +1163,12 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > `newStatus` chỉ nhận `AVAILABLE`/`HOLD`/`REJECTED` — gửi `EXPIRED` trả `422
 > OPERATION_NOT_ALLOWED` (chưa có luồng nghiệp vụ nào chuyển tay sang `EXPIRED`).
 >
-> `manufactureDate` trên response là alias của ngày nhận hàng (`receivedAt`), không phải cột riêng.
+> 🔴 **Ngày nhận hàng authoritative là `receivedAt`** (thêm 2026-08-21). Đừng gắn nhãn "Ngày nhận" cho
+> `createdAt` — `createdAt`/`updatedAt` là dấu thời gian **audit của dòng dữ liệu**, chỉ trùng
+> `receivedAt` với lot được tạo bởi chính lần nhận đầu tiên của nó, và lệch đi với lot được nhập bổ
+> sung về sau. `manufactureDate` là **alias cũ mang đúng cùng giá trị `receivedAt`**, giữ lại để client
+> hiện tại không gãy; tên của nó sai nghĩa (hệ thống **không** lưu ngày sản xuất riêng) nên đừng hiển
+> thị nó như ngày sản xuất.
 > `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` cho biết lot này sinh ra
 > từ đâu (vd `referenceType="WORK_ORDER"` + `referenceId` là `workOrderId` nếu sinh từ production
 > receipt, `referenceType="GOODS_RECEIPT"` nếu nhận từ PO) — có thể `null` nếu không tìm thấy movement

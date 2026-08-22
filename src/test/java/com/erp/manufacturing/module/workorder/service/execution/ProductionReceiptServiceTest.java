@@ -305,7 +305,7 @@ class ProductionReceiptServiceTest {
 
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(movementService.receive(any(InventoryReceiveCommand.class),
-                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD)))
+                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
         when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -313,7 +313,7 @@ class ProductionReceiptServiceTest {
         service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
 
         ArgumentCaptor<InventoryReceiveCommand> commandCaptor = ArgumentCaptor.forClass(InventoryReceiveCommand.class);
-        verify(movementService).receive(commandCaptor.capture(), anyString(), eq(LotStatus.HOLD));
+        verify(movementService).receive(commandCaptor.capture(), anyString(), eq(LotStatus.HOLD), eq(false));
         assertThat(commandCaptor.getValue().serialCode()).isEqualTo("SN-2");
         assertThat(receipt.getLines().get(0).getSerial()).isSameAs(serial);
         assertThat(workOrder.getCompletedQuantity()).isEqualByComparingTo("1");
@@ -560,14 +560,14 @@ class ProductionReceiptServiceTest {
         StockMovement movement = movement(workOrder.getProductItem(), warehouse);
 
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
-        when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD)))
+        when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
         when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
 
-        verify(movementService).receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD));
+        verify(movementService).receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false));
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.APPROVED);
         // This is the number debt #25 could never reach: everything produced is now warehoused.
         assertThat(workOrder.getCompletedQuantity()).isEqualByComparingTo("10");
@@ -648,7 +648,7 @@ class ProductionReceiptServiceTest {
 
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(movementService.receive(any(InventoryReceiveCommand.class),
-                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD)))
+                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
         when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -656,7 +656,7 @@ class ProductionReceiptServiceTest {
         service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
 
         verify(movementService).receive(any(InventoryReceiveCommand.class),
-                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD));
+                eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false));
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.APPROVED);
         assertThat(receipt.getApprovedAt()).isNotNull();
         assertThat(receipt.getLines().get(0).getStockMovement()).isSameAs(movement);
@@ -678,7 +678,7 @@ class ProductionReceiptServiceTest {
         StockMovement movement = movement(workOrder.getProductItem(), warehouse);
 
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
-        when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD)))
+        when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
         when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -954,7 +954,7 @@ class ProductionReceiptServiceTest {
      * good stranded: allocations existed but nothing could ever fulfil them.
      */
     @Test
-    void qcDisposition_available_onOutputWithoutALot_fulfilsWithoutTouchingLotsOrStock() {
+    void qcDisposition_available_onOutputWithoutALot_releasesQualityHoldAndFulfils() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
         ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(),
                 new BigDecimal("6"), ProductionReceiptStatus.APPROVED, null);
@@ -969,10 +969,14 @@ class ProductionReceiptServiceTest {
         // so a receipt without a lot would hand fulfilment a silent zero. Assert the real number.
         verify(allocationService).fulfill(same(workOrder), argThat(quantity ->
                 quantity.compareTo(new BigDecimal("6")) == 0));
+        verify(movementService).releaseQualityHold(
+                workOrder.getProductItem().getItemId(),
+                workOrder.getOutputWarehouse().getWarehouseId(),
+                new BigDecimal("6"));
         // No lot exists, so there is no lot status to change and no per-lot audit row to write
         // (decision A2: quality_dispositions is one row per lot by definition).
         verify(movementService, never()).changeLotStatus(any(), anyString());
-        // AVAILABLE changes nothing in the ledger: the goods have been in free stock since approval.
+        // On-hand does not move; AVAILABLE releases only the explicit non-lot quality hold.
         verify(movementService, never()).adjust(any(), anyString());
         verifyNoInteractions(dispositionRepository, wipTransactionService);
 
@@ -983,11 +987,11 @@ class ProductionReceiptServiceTest {
     }
 
     /**
-     * B39 rewritten in D5: defective output that is not lot-tracked is already usable, so REJECTED has
-     * to take it back out of stock or the ledger would let a customer ship it.
+     * Defective output that is not lot-tracked stays on hand and quality-held. It never becomes
+     * reservable and is not silently erased from inventory history.
      */
     @Test
-    void qcDisposition_rejected_onOutputWithoutALot_withdrawsTheStockAndNeverFulfils() {
+    void qcDisposition_rejected_onOutputWithoutALot_keepsQualityHoldAndNeverFulfils() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
         Warehouse warehouse = workOrder.getOutputWarehouse();
         ProductionReceipt receipt = receipt(workOrder, warehouse,
@@ -999,21 +1003,9 @@ class ProductionReceiptServiceTest {
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Failed hardness"));
 
-        ArgumentCaptor<InventoryAdjustCommand> commandCaptor =
-                ArgumentCaptor.forClass(InventoryAdjustCommand.class);
-        verify(movementService).adjust(commandCaptor.capture(),
-                eq(receipt.getIdempotencyKey() + ":qc-reject:L1"));
-        InventoryAdjustCommand command = commandCaptor.getValue();
-        // A negative delta is what makes InventoryMovementService emit ADJUST_OUT / direction OUT.
-        assertThat(command.quantityDelta()).isEqualByComparingTo("-6");
-        assertThat(command.itemId()).isEqualTo(workOrder.getProductItem().getItemId());
-        assertThat(command.warehouseId()).isEqualTo(warehouse.getWarehouseId());
-        assertThat(command.lotId()).isNull();
-        assertThat(command.lotCode()).isNull();
-        assertThat(command.reason()).isEqualTo("Failed hardness");
-        assertThat(command.referenceId()).isEqualTo(workOrder.getWorkOrderId().toString());
-
         verify(movementService, never()).changeLotStatus(any(), anyString());
+        verify(movementService, never()).releaseQualityHold(any(), any(), any());
+        verify(movementService, never()).adjust(any(), anyString());
         assertThat(receipt.getQcResult()).isEqualTo(QualityDispositionResult.REJECTED);
         // B62 still holds on the new path: rejected output never reaches a sales order.
         verifyNoInteractions(allocationService, dispositionRepository);

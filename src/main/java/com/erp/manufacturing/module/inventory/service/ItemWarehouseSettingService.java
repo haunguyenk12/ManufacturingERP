@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -48,6 +49,9 @@ public class ItemWarehouseSettingService {
         setting.setSafetyStock(request.safetyStock());
         setting.setReorderPoint(request.reorderPoint());
         setting.setLeadTimeDays(request.leadTimeDays());
+        releaseDefaultRoleFromOtherWarehouses(setting, warehouse, request.defaultSupply(), request.defaultOutput());
+        setting.setDefaultSupply(request.defaultSupply());
+        setting.setDefaultOutput(request.defaultOutput());
         setting.activate();
         return mapper.toResponse(settingRepository.save(setting));
     }
@@ -99,5 +103,52 @@ public class ItemWarehouseSettingService {
 
     private boolean isNegative(BigDecimal value) {
         return value == null || value.compareTo(BigDecimal.ZERO) < 0;
+    }
+
+    /**
+     * Moves a default role onto this warehouse by taking it off whichever warehouse held it, in the
+     * same transaction.
+     *
+     * <p>Refusing the write instead (the earlier behaviour) forced the caller into two calls — clear
+     * the old default, then set the new one — with no transaction spanning them. A failure between
+     * the two leaves the plant with <b>no</b> default for that role, which is worse than either end
+     * state: MRP then reports {@code AMBIGUOUS_WAREHOUSE_POLICY} and blocks every suggestion for the
+     * item until someone notices. One call that moves the flag cannot land in that hole.
+     *
+     * <p>The flush is load-bearing, not tidiness. {@code trg_item_warehouse_default_role} (V66)
+     * rejects a row claiming a role another ACTIVE row already holds, and Hibernate is free to order
+     * this UPDATE after the caller's. Releasing the old holders first and flushing before the caller
+     * writes keeps the database from ever seeing two claimants — the same ordering lesson as the
+     * Sales Order line replacement in CLAUDE.md §0.40.
+     */
+    private void releaseDefaultRoleFromOtherWarehouses(ItemWarehouseSetting current,
+                                                       Warehouse warehouse,
+                                                       boolean defaultSupply,
+                                                       boolean defaultOutput) {
+        if (!defaultSupply && !defaultOutput) {
+            return;
+        }
+        List<ItemWarehouseSetting> displaced = settingRepository
+                .findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                        current.getItem().getItemId(), warehouse.getPlant().getPlantId(),
+                        ItemWarehouseSettingStatus.ACTIVE)
+                .stream()
+                .filter(setting -> current.getSettingId() == null
+                        || !current.getSettingId().equals(setting.getSettingId()))
+                .filter(setting -> (defaultSupply && setting.isDefaultSupply())
+                        || (defaultOutput && setting.isDefaultOutput()))
+                .toList();
+        if (displaced.isEmpty()) {
+            return;
+        }
+        for (ItemWarehouseSetting setting : displaced) {
+            if (defaultSupply) {
+                setting.setDefaultSupply(false);
+            }
+            if (defaultOutput) {
+                setting.setDefaultOutput(false);
+            }
+        }
+        settingRepository.saveAllAndFlush(displaced);
     }
 }

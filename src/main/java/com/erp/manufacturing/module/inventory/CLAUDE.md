@@ -8,7 +8,7 @@
 | # | Bất biến | Test bảo vệ |
 |---|---|---|
 | B1 | `stock_movements` là **append-only ledger** — không sửa/xoá lịch sử. Sửa sai bằng adjustment/reversal movement mới | `GoodsReceiptServiceTest.cancelPosted_*` |
-| B2 | `available = quantity − reserved_quantity`. **Tồn đã reserve không được issue thường** | `InventoryMovementServiceTest.issue_reservedStockIsNotAvailableForUnreservedIssue` |
+| B2 | `available = quantity − reserved_quantity − quality_hold_quantity`. **Tồn đã reserve hoặc đang chờ QC không được issue thường**. `quality_hold_quantity` là carrier HOLD cho output không lot/serial, không được giả làm reservation | `InventoryMovementServiceTest.issue_reservedStockIsNotAvailableForUnreservedIssue`, `.receive_nonTrackedItemWithHoldStatus_increasesOnHandAndQualityHoldButNotAvailable`, `.releaseQualityHold_nonTrackedStock_makesItAvailableWithoutChangingOnHand`, `StockBalanceRepositoryIT` |
 | B3 | Chỉ lot `AVAILABLE` được reserve/issue. Lot `HOLD` / `REJECTED` / `EXPIRED` bị từ chối | `InventoryMovementServiceTest.issue_holdLot_failsBeforeStockMutation` |
 | B4 | Item và Warehouse phải **cùng company** — không cross-company leak | `InventoryMovementServiceTest.receive_itemAndWarehouseInDifferentCompanies_fails` |
 | B5 | POST tạo movement phải **idempotent** theo `Idempotency-Key`: gửi trùng → trả kết quả cũ, **không** cộng tồn lần 2. Phạm vi của "trùng" là **`(idempotency_key, movement_type)`** (`D6`/`V37`), **không** phải key một mình — cùng key ở nghiệp vụ khác là 2 chứng từ độc lập | `InventoryMovementServiceTest.receive_duplicateIdempotencyKey_*`, `GoodsReceiptServiceTest.postDuplicateIdempotency_*` |
@@ -18,7 +18,7 @@
 
 | # | Nợ | Phát hiện | Trạng thái |
 |---|---|---|---|
-| 1 | `StockBalanceRepository.aggregateAvailableQuantities` / `aggregatePlanningQuantities` / `aggregateAvailableQuantitiesByWarehouse` đều lọc bằng `(b.lot is null or b.lot.status = :availableStatus)`. Dereferencing `b.lot.status` như path expression khiến Hibernate sinh **INNER JOIN** tới `inventory_lots` — dòng `StockBalance` có `lot_id IS NULL` (item không lot-tracked) **không bao giờ** khớp JOIN đó nên bị loại khỏi kết quả, bất kể nhánh `is null` trong JPQL. Vi phạm ý định nghiệp vụ của **B3**. Ảnh hưởng: `InventoryAvailabilityService` và MRP planning tính thiếu tồn kho cho mọi item không lot-tracked | `StockBalanceRepositoryIT` (T4.4) | ✅ **ĐÃ SỬA (`F1.6`, 2026-07-26)** — cả 3 query dùng `left join b.lot l` tường minh + `(l is null or l.status = :availableStatus)`. `StockBalanceRepositoryIT` nay assert hành vi **đúng** (12.000000 và 30/7/23) và trở thành regression guard: quay lại implicit join ⇒ 2 test đỏ |
+| 1 | `StockBalanceRepository.aggregateAvailableQuantities` / `aggregatePlanningQuantities` / `aggregateAvailableQuantitiesByWarehouse` đều lọc bằng `(b.lot is null or b.lot.status = :availableStatus)`. Dereferencing `b.lot.status` như path expression khiến Hibernate sinh **INNER JOIN** tới `inventory_lots` — dòng `StockBalance` có `lot_id IS NULL` (item không lot-tracked) **không bao giờ** khớp JOIN đó nên bị loại khỏi kết quả, bất kể nhánh `is null` trong JPQL. Vi phạm ý định nghiệp vụ của **B3**. Ảnh hưởng: `InventoryAvailabilityService` và MRP planning tính thiếu tồn kho cho mọi item không lot-tracked | `StockBalanceRepositoryIT` (T4.4) | ✅ **ĐÃ SỬA (`F1.6`, cập nhật `FE4-5B3`)** — cả 3 query dùng `left join b.lot l` và nay trừ cả `quality_hold_quantity`. Test assert 9 available và planning 30/7/17, bảo vệ đồng thời non-lot join lẫn QC hold |
 
 ## Bất Biến Bổ Sung (F1)
 
@@ -91,9 +91,10 @@ trên dữ liệu `InventoryLot`/`StockBalance`/`StockMovement` đã tồn tại
 | B102 | 🔴 **`POST /inventory/lots/{lotId}/status` không cho lot `HOLD` sinh từ Production Receipt chưa QC tự do thoát `HOLD`** — FE xác nhận (`docs/capstone2-api-gap-response.md §5` câu 2, 2026-08-06). Tín hiệu đúng **không** nằm trong `module/inventory` một mình: heuristic cùng-module (suy nguồn gốc từ `referenceType` của `RECEIVE` movement sớm nhất) có lỗ hổng thật — lot đã QC hợp lệ một lần (thoát `HOLD`) rồi bị thủ công đưa lại `HOLD` qua **chính** endpoint này sẽ bị chặn vĩnh viễn, vì heuristic không biết QC đã từng xảy ra. Đóng bằng lookup cross-module thật (xem B103) | `InventoryLotServiceTest.changeStatus_holdEscapeBlockedWhenQcRequired`, `.changeStatus_holdEscapeAllowedWhenQcNotRequired`, `.changeStatus_intoHold_neverConsultsQcLookup` |
 | B103 | Gate ở B102 gọi `LotQcOriginLookupService.requiresQcDispositionBeforeRelease(lotId)` (`module/workorder/service/query/`, entry point cross-module theo `C7`) — **chỉ** đúng khi lot có dòng `ProductionReceiptLine` tham chiếu **và** chưa từng có `QualityDisposition`. Gate **chỉ** được gọi khi `current == HOLD && target != HOLD` — mọi chuyển **vào** `HOLD`, hoặc chuyển trạng thái của lot chưa từng qua sản xuất, không consult lookup này | `LotQcOriginLookupServiceTest` (4 case, cả 2 boolean) |
 | B104 | `InventoryMovementService.changeLotStatus` (đã có từ `F2`) **không đổi một dòng nào** — gate B102 nằm ở tầng gọi (`InventoryLotService`, method mới), gọi **trước khi** delegate xuống. Nhờ vậy luồng QC disposition hiện có (`ProductionReceiptService.dispositionLots`, cũng là một cách hợp lệ để thoát `HOLD`) hoàn toàn không bị ảnh hưởng | Không có test regression nào đỏ trong `ProductionReceiptServiceTest`/`ProductionFlowE2EIT` sau phase này — bằng chứng bằng cách không đổi |
-| B105 | Một lot có thể tồn tại ở **nhiều warehouse** (`uk_stock_balances_item_warehouse_lot` unique theo `(item, warehouse, lot)`, không phải `(item, lot)`) — `GET /inventory/lots` **bắt buộc** `warehouseId` (đúng tiền lệ `/inventory/balances`/`/inventory/movements`); `GET /inventory/lots/{lotId}` không nêu warehouse, trả `balances[]` — mảng theo từng kho, không đoán một kho duy nhất | `StockBalanceRepositoryIT.findByLotLotId_returnsAllWarehouseRowsForALotThatSpansTwoWarehouses`, `InventoryLotServiceTest.get_returnsRealBalancesAcrossWarehouses` |
-| B106 | `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` trên response lot lấy từ `RECEIVE` `StockMovement` **sớm nhất** của lot (`StockMovementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc`) — thuần trong `module/inventory`, không cần cross-module. Đây **chỉ** phục vụ hiển thị "nguồn gốc" cho FE; **không** dùng để quyết định gate B102 (xem lý do ở B102) | `InventoryLotServiceTest.list_mapsRowsAndResolvesOrigin` |
-| B109 | **[FE contract fix, 2026-08-06]** `POST /items/{id}/activate` (mới) — **không** permission mới, tái dùng `PERM_INVENTORY_MANAGE` qua `inventoryPermissionGuard.hasItemAccess` (guard đã gác `updateItem`/`deactivateItem`). Idempotent. **Chặn nếu company cha đang `INACTIVE`** (`OPERATION_NOT_ALLOWED`, 422) — cùng bất biến vừa lập ở `module/organization/CLAUDE.md` B108, quyết định tường minh của user (`AskUserQuestion`), chiều *activate* trước đó chưa từng có check này (chỉ *create* mới có, ở `createItem`) | `ItemServiceTest.activateItem_*` (happy path, idempotent, parent-inactive chặn trước khi save), `ItemMethodSecurityTest` (file **mới** — repo chưa từng có method-security test nào cho `ItemService` trước phase này; chỉ phủ `activateItem`, không lùi lại phủ `create`/`update`/`deactivate`), `ItemControllerTest.activate_*` |
+| B105 | Một lot có thể tồn tại ở **nhiều warehouse** (`uk_stock_balances_item_warehouse_lot` unique theo `(item, warehouse, lot)`, không phải `(item, lot)`). `GET /inventory/lots` bắt buộc `warehouseId`. `GET /inventory/lots/{lotId}` nhận `warehouseId` tuỳ chọn: có param thì authorize theo `WAREHOUSE` và chỉ trả đúng một balance của kho đó; không có param thì chỉ company/global/admin được xem toàn bộ `balances[]`. Không được cho phép theo một warehouse rồi trả balance của warehouse khác | `InventoryLotServiceTest.get_withWarehouse_returnsOnlyThatWarehouseData`, `.get_returnsRealBalancesAcrossWarehouses`, `InventoryLotMethodSecurityTest.get_withWarehouse_*` |
+| B106 | `sourceMovementType`/`sourceReferenceType`/`sourceReferenceId`/`sourceAt` trên response lot lấy từ `RECEIVE` `StockMovement` **sớm nhất**. Với detail có `warehouseId`, source cũng phải thuộc đúng warehouse đó; chế độ company-wide và list giữ lookup theo lot hiện có. Đây chỉ phục vụ hiển thị nguồn gốc cho FE, không dùng để quyết định gate B102 | `InventoryLotServiceTest.list_mapsRowsAndResolvesOrigin`, `.get_withWarehouse_returnsOnlyThatWarehouseData` |
+| B109 | **[FE contract fix, 2026-08-06; permission superseded by B110/V57]** `POST /items/{id}/activate` idempotent. **Chặn nếu company cha đang `INACTIVE`** (`OPERATION_NOT_ALLOWED`, 422). Từ V57 endpoint này dùng `PERM_ITEM_MANAGE`, không còn dùng `PERM_INVENTORY_MANAGE` | `ItemServiceTest.activateItem_*`, `ItemMethodSecurityTest`, `ItemControllerTest.activate_*` |
+| B110 | **[FE-4 5C, 2026-08-09]** Item Master có contract riêng `PERM_ITEM_READ/MANAGE`. Item là master data dùng chung trong Company: assignment ở một Plant cho phép truy cập Item của Company cha nhưng không Company khác. `PERM_INVENTORY_*` chỉ còn gác stock/lot/movement/item-warehouse setting. V57 sao chép grant cũ để giữ custom role | `PermissionGuardTest.plantScopedItemPermissionAllowsSharedItemMasterOnlyInOwningCompany`, `InventoryPermissionGuardTest`, `ItemMethodSecurityTest`, `PermissionCatalogTest`, `FlywayMigrationIT.migrate_v57_*` |
 
 **Quyết định cần nhớ:**
 
@@ -109,10 +110,57 @@ trên dữ liệu `InventoryLot`/`StockBalance`/`StockMovement` đã tồn tại
 3. `POST /inventory/lots/{lotId}/status` chỉ nhận target ∈ {`AVAILABLE`, `HOLD`, `REJECTED`} —
    `EXPIRED` bị từ chối (`OPERATION_NOT_ALLOWED`, 422) vì chưa có luồng chuyển-tay-sang-`EXPIRED`
    nào đã xác lập trong repo (`coding-rules.md §11.5`, tránh code speculative).
-4. Permission tái dùng nguyên vẹn: `PERM_INVENTORY_READ` (list, get — get qua
-   `InventoryPermissionGuard.hasLotAccess`, resolve `lot → item → company`, mirror `hasItemAccess`),
+4. Permission tái dùng nguyên vẹn: `PERM_INVENTORY_READ` (list và detail có `warehouseId` kiểm tra
+   theo warehouse; detail không có param qua `InventoryPermissionGuard.hasLotCompanyAccess`),
    `PERM_INVENTORY_MOVE` (changeStatus — cùng quyền gác `receive`/`issue`/`adjust`). **Không**
    permission mới ⇒ không migration seed, không đụng `docs/roles-and-permissions.md`.
 5. `@Auditable(action = AuditAction.INVENTORY_LOT_STATUS_CHANGED, ...)` là action **mới**, tách khỏi
    `QC_DISPOSITION_RECORDED` — hai hành động khác nhau dù cùng đổi `lot.status`: một cái đi qua QC,
    một cái là thao tác kho thủ công.
+
+## Bất Biến Inventory Dashboard (2026-08-14)
+
+Nguồn: `BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md` (FE). **Không migration**, không permission
+mới, không endpoint mới — `GET /reports/inventory-dashboard` và `GET /reports/low-stock` đã có từ
+trước, phase này bổ sung field hiển thị + hợp đồng thứ tự/limit. Bản ghi: `CLAUDE.md §0.43`.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B114 | Một dòng cảnh báo là một cặp **`(item, warehouse)`** — ngưỡng cấu hình theo kho, nên cùng item ở hai kho là hai dòng độc lập với hai status độc lập, và ba count trạng thái là **loại trừ nhau**. `shortageQuantity = max(0, max(safetyStock, reorderPoint) − available)`: phải tính theo **cả hai** ngưỡng, vì `LOW_STOCK` theo định nghĩa là dải **giữa** hai ngưỡng ⇒ công thức chỉ-reorder-point sẽ báo `0` cho mọi dòng `LOW_STOCK` (nghiệm thu mutation: đổi về reorder-point-only ⇒ đúng 1 case đỏ). `available = onHand − reserved − qualityHold` với `onHand` **đã loại** lot không `AVAILABLE`; không clamp `max(0, …)` vì hai CHECK constraint (`V16`, `V56`) đã ép `reserved + qualityHold <= quantity` — clamp ở đây chỉ che được vi phạm, không sửa được gì | `InventoryAlertServiceTest.listAlerts_lineCarriesTheUnitTheAvailabilityTermsAndTheShortage`, `.listAlerts_okLine_reportsNoShortage`, `.listAlerts_sameItemInTwoWarehouses_isEvaluatedIndependently`, `StockBalanceRepositoryIT.aggregateStockQuantitiesByWarehouse_splitsPerWarehouse_andKeepsTheTermsBehindAvailability` |
+| B115 | Dashboard là **một** aggregate read: mọi nhãn (item, warehouse, uom, username) resolve server-side, tối đa **2 query** cho khối movement bất kể `movementLimit` (trang ledger + **một** batch username, rule C14). 🔴 `findRecentByWarehouseIds` phải giữ `left join fetch m.lot` — inner join làm **mọi** movement của item không lot-tracked biến mất khỏi feed (nghiệm thu mutation: đổi thành inner ⇒ **3/3** case IT đỏ, trong khi unit test dùng mock vẫn xanh). Movement không có `created_by` phải trả `actorUsername = null`, **không** được tra map bằng khoá `null` (`Map.of().get(null)` ném NPE — mutation bỏ guard ⇒ 1 case đỏ) | `InventoryAlertServiceTest.getDashboard_recentMovementsCarryLabelsAndResolveActorsInOneBatch`, `StockMovementRepositoryIT` (3 case) |
+
+**Quyết định cần nhớ:**
+
+1. `uomCode` = `Item.unit` (text tự do). `items` **vẫn chưa** có FK sang `uoms` (`C2-3` cố ý dừng ở
+   đó) — dashboard chỉ hiển thị lại thứ item master đang có, không tự chuẩn hoá.
+2. `recentMovements[]` dùng DTO **riêng** (`DashboardRecentMovementResponse`), không mở rộng
+   `StockMovementResponse` của `GET /inventory/movements` — hai endpoint trả lời hai câu hỏi khác
+   nhau, và chỉ dashboard mới đáng trả giá join nhãn (trang cố định ≤ 20 dòng).
+3. `referenceNo` (số chứng từ nghiệp vụ) **cố ý chưa làm**: `referenceType` là text tự do do service
+   ghi (`WORK_ORDER`, `GOODS_RECEIPT`, …) nên resolve nó cần một lookup cross-module **cho mỗi loại**.
+   FE xếp nó vào nhóm "nên có", không phải tối thiểu.
+4. `lowStockLimit`/`movementLimit` **kẹp** về `[1, 20]` thay vì trả 400 — theo đúng tiền lệ
+   `PageableFactory` (`A4`) của repo, không phải bỏ sót validate.
+5. `getStockQuantitiesByWarehouse` **thay** `getAvailableQuantitiesByWarehouse` (không phải thêm
+   mới): consumer duy nhất của nó cần cả ba số hạng, giữ hai method là hai query cho cùng dữ liệu.
+
+## Bất Biến Available Theo Lot Status (2026-08-14)
+
+Nguồn: `live-data-audit.md` (FE) — lot `HOLD` hiển thị `available = 2` trên `GET /inventory/lots` và
+`GET /inventory/balances`. **Không migration**, không permission mới, không endpoint mới. Bản ghi:
+`CLAUDE.md §0.44`.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B116 | `availableQuantity` **trên response** phải bằng `0` khi `lot.status != AVAILABLE` (B3 cấm issue/reserve lot đó), trong khi `onHandQuantity`/`quantity` **giữ nguyên số thật** — hàng có tồn tại, chỉ là chưa dùng được; giấu nó đi là phá màn hình kiểm kê. 🔴 **Sửa ở `InventoryMapper.issuableQuantity`, KHÔNG sửa `StockBalance.availableQuantity()`**: domain method là phép tính thuần theo dòng và có **3 gate ghi tồn kho** gọi nó **sau khi** đã tự validate lot status (`InventoryMovementService`, `WorkOrderExecutionSupport`, `MaterialReservationService`) — cho nó tự đọc `lot.status` sẽ làm đường QC `adjust` rút hàng khỏi lot `REJECTED` (`§0.13`) nổ `INSUFFICIENT_STOCK`. Lượng đang giữ **không** đổ vào `qualityHoldQuantity`: cột đó là carrier QC cho hàng **không** có lot (B2/V56); lý do của lot nằm ở `lot.status`, vốn đã có trong mọi response | `InventoryMapperTest` (9 case, cả 3 method mapper × AVAILABLE/HOLD/REJECTED/EXPIRED/không-lot), `InventoryLotServiceTest.list_lotOnHold_reportsZeroAvailableWithoutHidingOnHand` |
+
+**Quyết định cần nhớ:**
+
+1. 🔴 **Triệu chứng gốc là hai con số mâu thuẫn trong cùng một hệ thống**, không phải "thiếu field":
+   `StockBalanceRepository.aggregate*` (MRP + dashboard) **luôn** lọc lot ≠ `AVAILABLE`, còn read model
+   theo dòng thì không ⇒ cùng một lô hàng, dashboard nói `0`, danh sách lot nói `2`. Khi thêm bất kỳ
+   read model tồn kho nào về sau, câu hỏi phải là *"số này có khớp aggregate không?"*.
+2. **`EXPIRED` cũng bằng `0`** dù chưa có luồng nào tự chuyển lot sang `EXPIRED` — cùng một điều kiện
+   `!= AVAILABLE`, không liệt kê status theo tên. 🔴 Nhưng lưu ý: loại trừ dựa trên **status**, không
+   dựa trên `expiresAt < now` — lot quá hạn mà vẫn `AVAILABLE` **vẫn tính là available**. Đó là hiện
+   trạng thật của repo (không có job hết hạn lot), đã nói rõ với FE.

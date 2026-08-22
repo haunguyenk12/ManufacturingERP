@@ -27,7 +27,7 @@ public class PlanningDemandController {
     private final PlanningDemandService planningDemandService;
     private final PlantContextResolver plantContextResolver;
 
-    @PostMapping("/api/v1/planning/demands")
+    @PostMapping("/v1/planning/demands")
     @Operation(summary = "Create planning demand")
     public ResponseEntity<ApiResponse<PlanningDemandResponse>> create(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
@@ -37,7 +37,7 @@ public class PlanningDemandController {
                 .body(ApiResponse.created(planningDemandService.create(request)));
     }
 
-    @GetMapping("/api/v1/planning/demands")
+    @GetMapping("/v1/planning/demands")
     @Operation(summary = "List planning demands")
     public ResponseEntity<ApiResponse<PageResult<PlanningDemandResponse>>> list(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
@@ -55,13 +55,13 @@ public class PlanningDemandController {
                 companyId, plantId, warehouseId, itemId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/planning/demands/{demandId}")
+    @GetMapping("/v1/planning/demands/{demandId}")
     @Operation(summary = "Get planning demand")
     public ResponseEntity<ApiResponse<PlanningDemandResponse>> get(@PathVariable UUID demandId) {
         return ResponseEntity.ok(ApiResponse.ok(planningDemandService.get(demandId)));
     }
 
-    @PatchMapping("/api/v1/planning/demands/{demandId}/cancel")
+    @PatchMapping("/v1/planning/demands/{demandId}/cancel")
     @Operation(summary = "Cancel planning demand")
     public ResponseEntity<ApiResponse<PlanningDemandResponse>> cancel(@PathVariable UUID demandId) {
         return ResponseEntity.ok(ApiResponse.ok(planningDemandService.cancel(demandId)));

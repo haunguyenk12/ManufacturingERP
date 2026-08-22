@@ -24,6 +24,10 @@ public record SupplySuggestionResponse(
         String plantCode,
         UUID warehouseId,
         String warehouseCode,
+        UUID outputWarehouseId,
+        String outputWarehouseCode,
+        UUID receivingWarehouseId,
+        String receivingWarehouseCode,
         UUID itemId,
         String itemSku,
         String itemName,
@@ -48,4 +52,25 @@ public record SupplySuggestionResponse(
         UUID convertedWorkOrderId,
         Instant createdAt,
         Instant updatedAt
-) {}
+) {
+    public SupplySuggestionResponse(UUID supplySuggestionId, UUID mrpRunId, UUID requirementLineId,
+                                    UUID companyId, String companyCode, UUID plantId, String plantCode,
+                                    UUID warehouseId, String warehouseCode, UUID itemId, String itemSku,
+                                    String itemName, String uom, String supplyType, BigDecimal suggestedQuantity,
+                                    LocalDate neededByDate, LocalDate suggestedOrderDate,
+                                    String sourceRoutingCode, String sourceRoutingVersion, String status,
+                                    String exceptionState, List<String> messages, String decisionNote,
+                                    String convertedReferenceType, UUID convertedReferenceId,
+                                    UUID convertedWorkOrderId, Instant createdAt, Instant updatedAt) {
+        this(supplySuggestionId, mrpRunId, requirementLineId, companyId, companyCode, plantId,
+                plantCode, warehouseId, warehouseCode,
+                "MAKE".equals(supplyType) ? warehouseId : null,
+                "MAKE".equals(supplyType) ? warehouseCode : null,
+                "BUY".equals(supplyType) ? warehouseId : null,
+                "BUY".equals(supplyType) ? warehouseCode : null,
+                itemId, itemSku, itemName, uom, supplyType, suggestedQuantity, neededByDate,
+                suggestedOrderDate, sourceRoutingCode, sourceRoutingVersion, status, exceptionState,
+                messages, decisionNote, convertedReferenceType, convertedReferenceId,
+                convertedWorkOrderId, createdAt, updatedAt);
+    }
+}

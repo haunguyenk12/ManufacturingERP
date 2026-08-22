@@ -53,7 +53,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         MaterialIssue first = persistIssue(persistWorkOrder(fixture));
         MaterialIssue second = persistIssue(persistWorkOrder(fixture));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactlyInAnyOrder(first.getIssueId(), second.getIssueId());
     }
@@ -66,7 +66,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(persistWorkOrder(fixture));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), wanted.getWorkOrderId(), PageRequest.of(0, 20)))
+                fixture.plant.getPlantId(), wanted.getWorkOrderId(), null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(mine.getIssueId());
     }
@@ -80,7 +80,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         MaterialIssue mine = persistIssue(persistWorkOrder(fixture));
         persistIssue(persistWorkOrder(other));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(mine.getIssueId());
     }
@@ -99,7 +99,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(persistWorkOrder(fixture));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), foreign.getWorkOrderId(), PageRequest.of(0, 20)))
+                fixture.plant.getPlantId(), foreign.getWorkOrderId(), null, PageRequest.of(0, 20)))
                 .isEmpty();
     }
 
@@ -186,6 +186,79 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         workOrder.setCreatedAt(now);
         workOrder.setUpdatedAt(now);
         return entityManager.persistFlushFind(workOrder);
+    }
+
+    /**
+     * The Over-BOM approval queue is a server-side filter, so the predicate has to work in the
+     * database, not in the caller. A page of POSTED history that happens to contain no pending row
+     * would look identical to a correctly filtered empty queue, which is why both directions and the
+     * unfiltered baseline are asserted together.
+     */
+    @Test
+    void findByPlant_withAStatusFilter_returnsOnlyThatStatus() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        MaterialIssue posted = persistIssue(workOrder);
+        MaterialIssue pending = persistIssue(workOrder, MaterialIssueStatus.PENDING_APPROVAL);
+        persistIssue(workOrder, MaterialIssueStatus.REJECTED);
+
+        UUID plantId = fixture.plant.getPlantId();
+        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.PENDING_APPROVAL,
+                PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId)
+                .containsExactly(pending.getIssueId());
+        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.POSTED, PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId)
+                .containsExactly(posted.getIssueId());
+        assertThat(repository.findByPlant(plantId, null, null, PageRequest.of(0, 20)))
+                .hasSize(3);
+    }
+
+    /** The status filter must not override the plant predicate it is combined with. */
+    @Test
+    void findByPlant_withAStatusFilter_stillExcludesAnotherPlant() {
+        Fixture fixture = persistFixture();
+        Fixture other = persistFixture();
+        MaterialIssue mine = persistIssue(persistWorkOrder(fixture), MaterialIssueStatus.PENDING_APPROVAL);
+        persistIssue(persistWorkOrder(other), MaterialIssueStatus.PENDING_APPROVAL);
+
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null,
+                MaterialIssueStatus.PENDING_APPROVAL, PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId)
+                .containsExactly(mine.getIssueId());
+    }
+
+    @Test
+    void findByWorkOrder_filtersByStatusAndStaysInsideTheWorkOrder() {
+        Fixture fixture = persistFixture();
+        WorkOrder mine = persistWorkOrder(fixture);
+        WorkOrder other = persistWorkOrder(fixture);
+        MaterialIssue pending = persistIssue(mine, MaterialIssueStatus.PENDING_APPROVAL);
+        persistIssue(mine);
+        persistIssue(other, MaterialIssueStatus.PENDING_APPROVAL);
+
+        assertThat(repository.findByWorkOrder(mine.getWorkOrderId(), MaterialIssueStatus.PENDING_APPROVAL,
+                PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId)
+                .containsExactly(pending.getIssueId());
+        assertThat(repository.findByWorkOrder(mine.getWorkOrderId(), null, PageRequest.of(0, 20)))
+                .hasSize(2);
+    }
+
+    private MaterialIssue persistIssue(WorkOrder workOrder, MaterialIssueStatus status) {
+        Instant now = Instant.now();
+        MaterialIssue issue = MaterialIssue.builder()
+                .workOrder(workOrder)
+                .status(status)
+                .idempotencyKey(UUID.randomUUID().toString())
+                // Only a POSTED document has a postedAt — that is exactly why the approval queue
+                // cannot be sorted by it.
+                .postedAt(status == MaterialIssueStatus.POSTED ? now : null)
+                .requestedAt(now)
+                .build();
+        issue.setCreatedAt(now);
+        issue.setUpdatedAt(now);
+        return entityManager.persistFlushFind(issue);
     }
 
     private MaterialIssue persistIssue(WorkOrder workOrder) {

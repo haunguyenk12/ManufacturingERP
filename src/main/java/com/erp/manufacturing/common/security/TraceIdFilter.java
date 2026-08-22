@@ -38,7 +38,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         // Support distributed tracing – reuse upstream traceId if provided
         String traceId = Optional.ofNullable(request.getHeader("X-Trace-Id"))
-                .filter(s -> !s.isBlank())
+                .filter(s -> s.matches("[A-Za-z0-9._-]{1,64}"))
                 .orElse(UUID.randomUUID().toString().replace("-", "").substring(0, 16));
 
         String clientIp = ipExtractor.extract(request);

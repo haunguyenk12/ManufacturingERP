@@ -1,0 +1,264 @@
+Project manufacturing_erp_04_purchasing {
+  database_type: 'PostgreSQL'
+  Note: 'Manufacturing ERP 04-purchasing module. Source: live PostgreSQL schema after Flyway V65 (add entity name to audit logs). External tables are relationship-only stubs.'
+}
+
+Table suppliers {
+  supplier_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  code varchar(100) [not null]
+  name varchar(255) [not null]
+  email varchar(255)
+  phone varchar(60)
+  address text
+  tax_code varchar(100)
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (company_id, code) [unique, name: 'uk_suppliers_company_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_suppliers_status']
+  }
+}
+
+Table item_suppliers {
+  item_supplier_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  supplier_id uuid [not null]
+  supplier_item_code varchar(120)
+  lead_time_days integer [not null, default: 0]
+  minimum_order_quantity numeric(19,6)
+  unit_price numeric(19,6)
+  currency_code varchar(3)
+  preferred boolean [not null, default: false]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (item_id, supplier_id) [unique, name: 'uk_item_suppliers_item_supplier']
+  }
+
+  checks {
+    `lead_time_days >= 0` [name: 'chk_item_suppliers_lead_time']
+    `minimum_order_quantity IS NULL OR minimum_order_quantity > 0::numeric` [name: 'chk_item_suppliers_moq']
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_item_suppliers_status']
+    `unit_price IS NULL OR unit_price >= 0::numeric` [name: 'chk_item_suppliers_unit_price']
+  }
+}
+
+Table purchase_requisitions {
+  purchase_requisition_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plant_id uuid [not null]
+  warehouse_id uuid [not null]
+  requisition_no varchar(100) [not null]
+  status varchar(20) [not null, default: 'DRAFT']
+  needed_by_date date [not null]
+  source_type varchar(80)
+  source_id uuid
+  decision_note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (company_id, requisition_no) [unique, name: 'uk_purchase_requisitions_company_no']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'APPROVED'::character varying, 'REJECTED'::character varying, 'CONVERTED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_purchase_requisitions_status']
+  }
+}
+
+Table purchase_requisition_lines {
+  purchase_requisition_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  purchase_requisition_id uuid [not null]
+  item_id uuid [not null]
+  supplier_id uuid
+  requested_quantity numeric(19,6) [not null]
+  approved_quantity numeric(19,6)
+  needed_by_date date [not null]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `approved_quantity IS NULL OR approved_quantity > 0::numeric` [name: 'chk_pr_lines_approved_quantity']
+    `requested_quantity > 0::numeric` [name: 'chk_pr_lines_requested_quantity']
+  }
+}
+
+Table purchase_orders {
+  purchase_order_id uuid [pk, not null, default: `gen_random_uuid()`]
+  company_id uuid [not null]
+  plant_id uuid [not null]
+  warehouse_id uuid [not null]
+  supplier_id uuid [not null]
+  purchase_order_no varchar(100) [not null]
+  status varchar(30) [not null, default: 'DRAFT']
+  order_date date [not null]
+  expected_date date [not null]
+  source_requisition_id uuid
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (company_id, purchase_order_no) [unique, name: 'uk_purchase_orders_company_no']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['DRAFT'::character varying, 'SENT'::character varying, 'PARTIALLY_RECEIVED'::character varying, 'RECEIVED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_purchase_orders_status']
+  }
+}
+
+Table purchase_order_lines {
+  purchase_order_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  purchase_order_id uuid [not null]
+  purchase_requisition_line_id uuid
+  item_id uuid [not null]
+  ordered_quantity numeric(19,6) [not null]
+  received_quantity numeric(19,6) [not null, default: 0]
+  unit_price numeric(19,6)
+  currency_code varchar(3)
+  expected_date date [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `ordered_quantity > 0::numeric` [name: 'chk_po_lines_ordered_quantity']
+    `received_quantity >= 0::numeric AND received_quantity <= ordered_quantity` [name: 'chk_po_lines_received_quantity']
+    `unit_price IS NULL OR unit_price >= 0::numeric` [name: 'chk_po_lines_unit_price']
+  }
+}
+
+Table goods_receipts {
+  goods_receipt_id uuid [pk, not null, default: `gen_random_uuid()`]
+  purchase_order_id uuid [not null]
+  warehouse_id uuid [not null]
+  receipt_no varchar(100) [not null]
+  status varchar(20) [not null, default: 'POSTED']
+  posted_at timestamptz [not null, default: `now()`]
+  idempotency_key varchar(120) [not null]
+  note text
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  cancelled_at timestamptz
+  cancel_note text
+  payload_hash varchar(64)
+
+  indexes {
+    (purchase_order_id, idempotency_key) [unique, name: 'uk_goods_receipts_po_idempotency']
+  }
+
+  checks {
+    `status::text <> 'CANCELLED'::text OR cancelled_at IS NOT NULL` [name: 'chk_goods_receipt_cancelled_at']
+    `status::text = ANY (ARRAY['POSTED'::character varying, 'CANCELLED'::character varying]::text[])` [name: 'chk_goods_receipts_status']
+  }
+}
+
+Table goods_receipt_lines {
+  goods_receipt_line_id uuid [pk, not null, default: `gen_random_uuid()`]
+  goods_receipt_id uuid [not null]
+  purchase_order_line_id uuid [not null]
+  item_id uuid [not null]
+  lot_id uuid
+  lot_code varchar(120)
+  received_quantity numeric(19,6) [not null]
+  stock_movement_id uuid [not null]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `received_quantity > 0::numeric` [name: 'chk_gr_lines_received_quantity']
+  }
+}
+
+Table companies [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  company_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table inventory_lots [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  lot_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table items [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  item_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table plants [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  plant_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table stock_movements [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  movement_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table warehouses [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  warehouse_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Ref goods_receipt_lines_goods_receipt_id_fkey: goods_receipt_lines.goods_receipt_id > goods_receipts.goods_receipt_id
+Ref goods_receipt_lines_item_id_fkey: goods_receipt_lines.item_id > items.item_id
+Ref goods_receipt_lines_lot_id_fkey: goods_receipt_lines.lot_id > inventory_lots.lot_id
+Ref goods_receipt_lines_purchase_order_line_id_fkey: goods_receipt_lines.purchase_order_line_id > purchase_order_lines.purchase_order_line_id
+Ref goods_receipt_lines_stock_movement_id_fkey: goods_receipt_lines.stock_movement_id > stock_movements.movement_id
+Ref goods_receipts_purchase_order_id_fkey: goods_receipts.purchase_order_id > purchase_orders.purchase_order_id
+Ref goods_receipts_warehouse_id_fkey: goods_receipts.warehouse_id > warehouses.warehouse_id
+Ref item_suppliers_item_id_fkey: item_suppliers.item_id > items.item_id
+Ref item_suppliers_supplier_id_fkey: item_suppliers.supplier_id > suppliers.supplier_id
+Ref purchase_order_lines_item_id_fkey: purchase_order_lines.item_id > items.item_id
+Ref purchase_order_lines_purchase_order_id_fkey: purchase_order_lines.purchase_order_id > purchase_orders.purchase_order_id
+Ref purchase_order_lines_purchase_requisition_line_id_fkey: purchase_order_lines.purchase_requisition_line_id > purchase_requisition_lines.purchase_requisition_line_id
+Ref purchase_orders_company_id_fkey: purchase_orders.company_id > companies.company_id
+Ref purchase_orders_plant_id_fkey: purchase_orders.plant_id > plants.plant_id
+Ref purchase_orders_source_requisition_id_fkey: purchase_orders.source_requisition_id > purchase_requisitions.purchase_requisition_id
+Ref purchase_orders_supplier_id_fkey: purchase_orders.supplier_id > suppliers.supplier_id
+Ref purchase_orders_warehouse_id_fkey: purchase_orders.warehouse_id > warehouses.warehouse_id
+Ref purchase_requisition_lines_item_id_fkey: purchase_requisition_lines.item_id > items.item_id
+Ref purchase_requisition_lines_purchase_requisition_id_fkey: purchase_requisition_lines.purchase_requisition_id > purchase_requisitions.purchase_requisition_id
+Ref purchase_requisition_lines_supplier_id_fkey: purchase_requisition_lines.supplier_id > suppliers.supplier_id
+Ref purchase_requisitions_company_id_fkey: purchase_requisitions.company_id > companies.company_id
+Ref purchase_requisitions_plant_id_fkey: purchase_requisitions.plant_id > plants.plant_id
+Ref purchase_requisitions_warehouse_id_fkey: purchase_requisitions.warehouse_id > warehouses.warehouse_id
+Ref suppliers_company_id_fkey: suppliers.company_id > companies.company_id
+
+TableGroup module_04_purchasing {
+  suppliers
+  item_suppliers
+  purchase_requisitions
+  purchase_requisition_lines
+  purchase_orders
+  purchase_order_lines
+  goods_receipts
+  goods_receipt_lines
+}
+

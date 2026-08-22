@@ -13,6 +13,7 @@ import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.organization.domain.Role;
+import com.erp.manufacturing.module.organization.domain.RoleStatus;
 import com.erp.manufacturing.module.organization.dto.MyAccessScopeResponse;
 import com.erp.manufacturing.module.organization.service.AccessControlService;
 import com.erp.manufacturing.module.user.domain.User;
@@ -81,7 +82,11 @@ class AuthServiceTest {
     void setUp() {
         Role adminRole = Role.builder()
                 .roleId(UUID.randomUUID())
+                .code("ADMIN")
                 .name("ADMIN")
+                .companyId(null)
+                .system(true)
+                .status(RoleStatus.ACTIVE)
                 .build();
         testUser = User.builder()
                 .userId(UUID.randomUUID())
@@ -103,6 +108,11 @@ class AuthServiceTest {
         // an unstubbed boolean-returning mock method returns false, which would otherwise make every
         // single refresh test in this class pay the real 150ms sleepBriefly() wait for no reason.
         lenient().when(tokenStore.acquireRefreshLock(anyString())).thenReturn(true);
+        lenient().when(tokenStore.matchesRefreshToken(any(), anyString(), anyString(), anyLong()))
+                .thenReturn(true);
+        lenient().when(tokenStore.rotateRefreshToken(any(), anyString(), anyString(), anyString(),
+                anyString(), any(Instant.class), anyLong()))
+                .thenReturn(TokenStoreService.RotationResult.ROTATED);
     }
 
     // ── Login success ──────────────────────────────────────────────────────
@@ -126,7 +136,7 @@ class AuthServiceTest {
         // Device session registered
         verify(tokenStore).saveDeviceSession(eq(testUser.getUserId()), any(), eq("192.168.1.100"));
         // Refresh token persisted
-        verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), any(), eq("refresh-token"));
+        verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), any(), eq("refresh-token"), eq(0L));
         // Fail counter cleared
         verify(tokenStore).resetFailCount("testuser");
     }
@@ -254,21 +264,11 @@ class AuthServiceTest {
         assertThat(response.tokenId()).isNotEqualTo("old-tid");
         assertThat(response.expiresIn()).isEqualTo(900L);
 
-        // Rotation must both revoke the old tokenId AND persist the new one
-        verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
-        verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
+        // Compare + create + retire is one Redis operation; no partially rotated state is visible.
+        verify(tokenStore).rotateRefreshToken(eq(testUser.getUserId()), eq("old-tid"),
+                eq("old-refresh"), eq(response.tokenId()), eq("new-refresh"),
+                any(Instant.class), eq(0L));
         verify(tokenStore).extendDeviceSession(testUser.getUserId(), response.deviceId());
-
-        // B80: the "used" marker must be written while the old key still exists. Any other order
-        // leaves a gap where a concurrent replay reads neither and looks like a plain expiry.
-        InOrder rotation = inOrder(tokenStore);
-        rotation.verify(tokenStore).saveRefreshToken(eq(testUser.getUserId()), eq(response.tokenId()), eq("new-refresh"));
-        rotation.verify(tokenStore).markRefreshTokenUsed("old-tid");
-        rotation.verify(tokenStore).deleteRefreshToken(testUser.getUserId(), "old-tid");
-
-        // Concurrent refresh race: the winner publishes the result so a duplicate request racing on
-        // "old-tid" can be handed this same pair instead of being misdiagnosed as a reuse attack.
-        verify(tokenStore).saveRotationResult("old-tid", response.tokenId());
     }
 
     @Test
@@ -278,7 +278,7 @@ class AuthServiceTest {
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
-        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+        when(tokenStore.wasRefreshTokenUsed("old-tid", "old-refresh", 0L)).thenReturn(true);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -354,7 +354,7 @@ class AuthServiceTest {
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
         // Never rotated away within the RTR window ⇒ this is an ordinary expiry, not a replay (B80)
-        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(false);
+        when(tokenStore.wasRefreshTokenUsed("old-tid", "old-refresh", 0L)).thenReturn(false);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -373,6 +373,8 @@ class AuthServiceTest {
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn("other-refresh");
+        when(tokenStore.matchesRefreshToken(testUser.getUserId(), "old-tid", "old-refresh", 0L))
+                .thenReturn(false);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -395,52 +397,39 @@ class AuthServiceTest {
     // must be handed the already-rotated pair, not force-logged-out as a thief.
 
     @Test
-    @DisplayName("Refresh racing a just-completed rotation of the same tokenId absorbs the winner's " +
-            "pair instead of throwing TOKEN_REUSE_DETECTED")
+    @DisplayName("A duplicate refresh never receives the winner's rotated secret")
     void refresh_concurrentDuplicate_absorbsRotationResultInsteadOfThrowingReuseDetected() {
         when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         // "old-tid" was already rotated away by a winner request moments ago.
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
-        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
-        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn("winners-refresh");
-        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("fresh.access");
-        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
+        when(tokenStore.wasRefreshTokenUsed("old-tid", "old-refresh", 0L)).thenReturn(true);
 
-        var response = authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest);
+        assertThatThrownBy(() -> authService.refresh(
+                new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.TOKEN_REUSE_DETECTED));
 
-        assertThat(response.accessToken()).isEqualTo("fresh.access");
-        assertThat(response.refreshToken()).isEqualTo("winners-refresh");
-        assertThat(response.tokenId()).isEqualTo("new-tid");
-
-        // This must NOT be diagnosed as an attack: no reuse check, no force-logout, no second pair
-        // minted, no re-rotation of anything.
-        verify(tokenStore, never()).wasRefreshTokenUsed(any());
-        verify(tokenStore, never()).deleteAllUserTokens(any());
-        verify(tokenStore, never()).deleteAllDeviceSessions(any());
-        verify(tokenStore, never()).saveRefreshToken(any(), any(), any());
-        verify(tokenStore, never()).saveSessionStart(any(), any(), any());
-        verifyNoInteractions(auditLogService);
+        verifyNoInteractions(jwtTokenProvider);
     }
 
     @Test
-    @DisplayName("Refresh racing a just-completed rotation still extends the resolved device session")
+    @DisplayName("A tokenId without its matching secret cannot extend a device session")
     void refresh_concurrentDuplicate_extendsDeviceSession() {
         when(tokenStore.getTokenOwner("old-tid")).thenReturn(testUser.getUserId());
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
-        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
-        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn("winners-refresh");
-        when(jwtTokenProvider.generateAccessToken(testPrincipal)).thenReturn("fresh.access");
-        when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
 
-        var response = authService.refresh(
-                new RefreshRequest("old-refresh", "old-tid", "device-42"), httpRequest);
+        assertThatThrownBy(() -> authService.refresh(
+                new RefreshRequest("wrong-secret", "old-tid", "device-42"), httpRequest))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
 
-        assertThat(response.deviceId()).isEqualTo("device-42");
-        verify(tokenStore).extendDeviceSession(testUser.getUserId(), "device-42");
+        verify(tokenStore, never()).extendDeviceSession(any(), anyString());
     }
 
     @Test
@@ -451,10 +440,8 @@ class AuthServiceTest {
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
-        when(tokenStore.getRotationResult("old-tid")).thenReturn("new-tid");
         // The referenced new pair is gone too (e.g. it also expired) — don't hand out nothing.
-        when(tokenStore.getRefreshToken(testUser.getUserId(), "new-tid")).thenReturn(null);
-        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+        when(tokenStore.wasRefreshTokenUsed("old-tid", "old-refresh", 0L)).thenReturn(true);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -472,8 +459,7 @@ class AuthServiceTest {
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
         when(tokenStore.getRefreshToken(testUser.getUserId(), "old-tid")).thenReturn(null);
-        when(tokenStore.getRotationResult("old-tid")).thenReturn(null);
-        when(tokenStore.wasRefreshTokenUsed("old-tid")).thenReturn(true);
+        when(tokenStore.wasRefreshTokenUsed("old-tid", "old-refresh", 0L)).thenReturn(true);
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshRequest("old-refresh", "old-tid", null), httpRequest))
@@ -554,7 +540,9 @@ class AuthServiceTest {
         // B81: the EXACT original instant, not "now". Stamping now here would reset the absolute
         // clock on every refresh and disable the timeout — with a byte-identical response, so this
         // assertion on the argument is the only thing standing between the feature and a no-op.
-        verify(tokenStore).saveSessionStart(testUser.getUserId(), response.tokenId(), originalStart);
+        verify(tokenStore).rotateRefreshToken(eq(testUser.getUserId()), eq("old-tid"),
+                eq("old-refresh"), eq(response.tokenId()), eq("new-refresh"),
+                eq(originalStart), eq(0L));
     }
 
     @Test
@@ -576,7 +564,9 @@ class AuthServiceTest {
         // closed would log out every signed-in user the moment this deploys, buying no security.
         verify(tokenStore, never()).deleteAllUserTokens(any());
         ArgumentCaptor<Instant> stamped = ArgumentCaptor.forClass(Instant.class);
-        verify(tokenStore).saveSessionStart(eq(testUser.getUserId()), eq(response.tokenId()), stamped.capture());
+        verify(tokenStore).rotateRefreshToken(eq(testUser.getUserId()), eq("old-tid"),
+                eq("old-refresh"), eq(response.tokenId()), eq("new-refresh"),
+                stamped.capture(), eq(0L));
         assertThat(stamped.getValue()).isBetween(beforeCall, Instant.now());
     }
 
@@ -645,6 +635,7 @@ class AuthServiceTest {
     void logoutAll_deletesAllTokensAndSessions() {
         when(httpRequest.getAttribute("authenticatedUserId")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(testPrincipal);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
 
         authService.logoutAll(httpRequest);
 
@@ -693,7 +684,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("resetPassword – valid token updates the password and force-logs-out every session")
     void resetPassword_validToken_updatesPasswordAndForcesLogoutEverywhere() {
-        when(passwordResetTokenService.resolveUserId("reset-tok-1"))
+        when(passwordResetTokenService.consumeUserId("reset-tok-1"))
                 .thenReturn(Optional.of(testUser.getUserId()));
         when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
         when(passwordEncoder.encode("NewPassw0rd!")).thenReturn("$2a$12$newEncodedPassword");
@@ -703,7 +694,7 @@ class AuthServiceTest {
 
         assertThat(testUser.getPassword()).isEqualTo("$2a$12$newEncodedPassword");
         verify(userRepository).save(testUser);
-        verify(passwordResetTokenService).invalidate("reset-tok-1", testUser.getUserId());
+        verify(passwordResetTokenService).consumeUserId("reset-tok-1");
         verify(tokenStore).deleteAllUserTokens(testUser.getUserId());
         verify(tokenStore).deleteAllDeviceSessions(testUser.getUserId());
         verify(auditLogService).logAuth(eq(testUser.getUserId()), eq("testuser"),
@@ -713,7 +704,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("resetPassword – unknown/expired token throws RESET_TOKEN_INVALID before touching anything")
     void resetPassword_invalidToken_throwsResetTokenInvalidBeforeTouchingAnything() {
-        when(passwordResetTokenService.resolveUserId("bad-tok")).thenReturn(Optional.empty());
+        when(passwordResetTokenService.consumeUserId("bad-tok")).thenReturn(Optional.empty());
 
         ResetPasswordRequest request = new ResetPasswordRequest("bad-tok", "NewPassw0rd!");
         assertThatThrownBy(() -> authService.resetPassword(request, httpRequest))

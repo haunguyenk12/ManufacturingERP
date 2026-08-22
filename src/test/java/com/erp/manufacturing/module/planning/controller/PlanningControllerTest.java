@@ -91,7 +91,7 @@ class PlanningControllerTest {
     void estimateProduction_validRequest_returns200() throws Exception {
         when(planningService.estimateProduction(any(ProductionEstimateRequest.class))).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/planning/production-estimates")
+        mockMvc.perform(post("/v1/planning/production-estimates")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(estimateBody()))
                 .andExpect(status().isOk())
@@ -107,7 +107,7 @@ class PlanningControllerTest {
     @Test
     @DisplayName("estimate: non-positive targetQuantity returns 400 VALIDATION_ERROR with the field name")
     void estimateProduction_nonPositiveQuantity_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/planning/production-estimates")
+        mockMvc.perform(post("/v1/planning/production-estimates")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"productItemId":"%s","scopeType":"PLANT","scopeId":"%s","targetQuantity":0}
@@ -128,7 +128,7 @@ class PlanningControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Product item must belong to the requested planning scope company"));
 
-        mockMvc.perform(post("/api/v1/planning/production-estimates")
+        mockMvc.perform(post("/v1/planning/production-estimates")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(estimateBody()))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
@@ -139,7 +139,7 @@ class PlanningControllerTest {
     @Test
     @DisplayName("estimate: missing request body returns 400 VALIDATION_ERROR (§5.4 unreadable body)")
     void estimateProduction_missingBody_returns400() throws Exception {
-        mockMvc.perform(post("/api/v1/planning/production-estimates")
+        mockMvc.perform(post("/v1/planning/production-estimates")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))

@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workorder.dto.execution;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -21,7 +22,7 @@ public record ProductionReceiptPostRequest(
         @NotNull UUID destinationWarehouseId,
         UUID lotId,
         @Size(max = 120) String lotNumber,
-        @Size(max = 120) String serialNumber,
+        @Schema(hidden = true) @Size(max = 120) String serialNumber,
         @NotNull @Positive BigDecimal quantity,
         @Size(max = 1000) String reason,
         @Size(max = 2000) String note

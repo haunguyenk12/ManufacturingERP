@@ -75,7 +75,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("AppException maps to the ErrorCode's declared HTTP status and code")
     void appException_mapsToDeclaredHttpStatusAndErrorCode() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/app"))
+        mockMvc.perform(get("/v1/test/exceptions/app"))
                 .andExpect(status().is(BusinessErrorCode.INSUFFICIENT_STOCK.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.INSUFFICIENT_STOCK.code()))
                 .andExpect(jsonPath("$.result").doesNotExist())
@@ -85,7 +85,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("MultiErrorException with field errors returns the errors array of {field, message}")
     void multiErrorException_withFieldErrors_returnsFieldErrorsArray() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/multi"))
+        mockMvc.perform(get("/v1/test/exceptions/multi"))
                 .andExpect(status().is(ValidationErrorCode.INVALID_INPUT.status().value()))
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("quantity"))
@@ -95,7 +95,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("@Valid failure on missing required field returns 400 INVALID_INPUT with a structured errors array")
     void validationFailure_missingRequiredField_returns400ValidationFailed() throws Exception {
-        mockMvc.perform(post("/api/v1/test/exceptions/validation")
+        mockMvc.perform(post("/v1/test/exceptions/validation")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
                         .contentType("application/json")
                         .content("{\"name\":\"\"}"))
@@ -108,7 +108,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Malformed JSON body returns 400 INVALID_INPUT instead of falling through to the 500 catch-all")
     void malformedJsonBody_returns400InvalidInput() throws Exception {
-        mockMvc.perform(post("/api/v1/test/exceptions/validation")
+        mockMvc.perform(post("/v1/test/exceptions/validation")
                         .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
                         .contentType("application/json")
                         .content("{\"name\": "))
@@ -125,7 +125,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Missing required query param returns 400 INVALID_INPUT naming the param, not a 500")
     void missingRequiredQueryParam_returns400NamingTheParameter() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/required-param"))
+        mockMvc.perform(get("/v1/test/exceptions/required-param"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("warehouseId"))
@@ -133,10 +133,37 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 
+    /**
+     * A call to a path no controller maps used to fall through to the catch-all and answer 500 — the
+     * shape of the {@code GET /access/roles/{id}/permissions} probe of 2026-08-12 (trace
+     * {@code bbad9f8c37824349}). Spring 6.1 hands unmatched requests to the static-resource handler,
+     * which throws {@code NoResourceFoundException}; nothing mapped it, so a misspelled or
+     * not-yet-implemented URL looked like a server crash and tripped 5xx alerting.
+     */
+    @Test
+    @DisplayName("Unmapped path returns 404 ENTITY_NOT_FOUND, not a 500")
+    void unmappedPath_returns404NotAnInternalServerError() throws Exception {
+        mockMvc.perform(get("/v1/test/exceptions/no-such-endpoint"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    /** Sibling boundary: a path that <em>does</em> exist but was called with the wrong verb stays a
+     *  405, so the new 404 branch above did not swallow it. */
+    @Test
+    @DisplayName("Existing path with the wrong HTTP verb stays 405, not 404")
+    void wrongVerbOnExistingPath_stays405() throws Exception {
+        mockMvc.perform(post("/v1/test/exceptions/app")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+    }
+
     @Test
     @DisplayName("Spring Security AccessDeniedException returns 403 ACCESS_DENIED")
     void accessDeniedException_returns403AccessDenied() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/access-denied"))
+        mockMvc.perform(get("/v1/test/exceptions/access-denied"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(AuthErrorCode.ACCESS_DENIED.code()));
     }
@@ -144,7 +171,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("DataIntegrityViolationException returns 409 RESOURCE_ALREADY_EXISTS")
     void dataIntegrityViolation_returns409ResourceAlreadyExists() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/data-integrity"))
+        mockMvc.perform(get("/v1/test/exceptions/data-integrity"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_ALREADY_EXISTS.code()));
     }
@@ -159,7 +186,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("ObjectOptimisticLockingFailureException returns 409 CONCURRENT_MODIFICATION")
     void optimisticLockConflict_returns409ConcurrentModification() throws Exception {
-        mockMvc.perform(get("/api/v1/test/exceptions/optimistic-lock"))
+        mockMvc.perform(get("/v1/test/exceptions/optimistic-lock"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.CONCURRENT_MODIFICATION.code()))
                 .andExpect(jsonPath("$.result").doesNotExist())
@@ -169,7 +196,7 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Unhandled generic exception returns 500 without leaking the original message or stack trace")
     void genericException_returns500WithoutLeakingStackTrace() throws Exception {
-        String body = mockMvc.perform(get("/api/v1/test/exceptions/generic"))
+        String body = mockMvc.perform(get("/v1/test/exceptions/generic"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.INTERNAL_SERVER_ERROR.code()))
                 .andExpect(header().exists("X-Trace-Id"))

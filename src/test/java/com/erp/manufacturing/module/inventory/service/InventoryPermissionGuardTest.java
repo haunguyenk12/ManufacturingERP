@@ -41,15 +41,15 @@ class InventoryPermissionGuardTest {
     }
 
     @Test
-    void hasItemAccess_delegatesToCompanyScope() {
+    void hasItemAccess_delegatesToCompanyOrPlantScope() {
         UUID itemId = UUID.randomUUID();
         UUID companyId = UUID.randomUUID();
         Authentication auth = new UsernamePasswordAuthenticationToken("user", null, java.util.List.of());
         when(itemRepository.findById(itemId)).thenReturn(Optional.of(item(itemId, companyId)));
-        when(permissionGuard.hasResourceAccess(auth, "PERM_INVENTORY_READ", "COMPANY", companyId))
+        when(permissionGuard.hasCompanyOrPlantAccess(auth, "PERM_ITEM_READ", companyId))
                 .thenReturn(true);
 
-        assertThat(guard.hasItemAccess(auth, "PERM_INVENTORY_READ", itemId)).isTrue();
+        assertThat(guard.hasItemAccess(auth, "PERM_ITEM_READ", itemId)).isTrue();
     }
 
     @Test
@@ -64,7 +64,17 @@ class InventoryPermissionGuardTest {
     }
 
     @Test
-    void hasLotAccess_delegatesToCompanyScopeViaItem() {
+    void hasItemCompanyAccess_delegatesToCompanyOrPlantScope() {
+        UUID companyId = UUID.randomUUID();
+        Authentication auth = new UsernamePasswordAuthenticationToken("user", null, java.util.List.of());
+        when(permissionGuard.hasCompanyOrPlantAccess(auth, "PERM_ITEM_MANAGE", companyId))
+                .thenReturn(true);
+
+        assertThat(guard.hasItemCompanyAccess(auth, "PERM_ITEM_MANAGE", companyId)).isTrue();
+    }
+
+    @Test
+    void hasLotCompanyAccess_delegatesToCompanyScopeViaItem() {
         UUID lotId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
         UUID companyId = UUID.randomUUID();
@@ -73,16 +83,16 @@ class InventoryPermissionGuardTest {
         when(permissionGuard.hasResourceAccess(auth, "PERM_INVENTORY_READ", "COMPANY", companyId))
                 .thenReturn(true);
 
-        assertThat(guard.hasLotAccess(auth, "PERM_INVENTORY_READ", lotId)).isTrue();
+        assertThat(guard.hasLotCompanyAccess(auth, "PERM_INVENTORY_READ", lotId)).isTrue();
     }
 
     @Test
-    void hasLotAccess_missingLotDenied() {
+    void hasLotCompanyAccess_missingLotDenied() {
         UUID lotId = UUID.randomUUID();
         Authentication auth = new UsernamePasswordAuthenticationToken("user", null, java.util.List.of());
         when(lotRepository.findById(lotId)).thenReturn(Optional.empty());
 
-        assertThat(guard.hasLotAccess(auth, "PERM_INVENTORY_READ", lotId)).isFalse();
+        assertThat(guard.hasLotCompanyAccess(auth, "PERM_INVENTORY_READ", lotId)).isFalse();
 
         verifyNoInteractions(permissionGuard);
     }

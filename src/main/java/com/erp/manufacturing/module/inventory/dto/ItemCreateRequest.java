@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 public record ItemCreateRequest(
         @NotBlank
@@ -25,5 +26,5 @@ public record ItemCreateRequest(
 
         boolean lotTracked,
 
-        boolean serialTracked
+        @Schema(hidden = true) boolean serialTracked
 ) {}

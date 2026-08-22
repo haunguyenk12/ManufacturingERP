@@ -106,6 +106,19 @@ public class MrpRun extends BaseEntity {
     private String errorMessage;
 
     /**
+     * Client-supplied {@code Idempotency-Key} (V58), {@code null} when the header was absent — the
+     * header is optional and every run created before V58 has none. {@code uk_mrp_runs_idempotency_key}
+     * is what actually stops a duplicate run; the replay lookup only decides whether to answer with
+     * the existing one.
+     */
+    @Column(name = "idempotency_key", length = 120)
+    private String idempotencyKey;
+
+    /** SHA-256 of the run request, so the same key replayed with a different body is a 409, not a silent replay. */
+    @Column(name = "payload_hash", length = 64)
+    private String payloadHash;
+
+    /**
      * Derives the human-facing run code (spec §2.4) from the identifier.
      *
      * <p>Must run as {@code @PrePersist} and not after {@code save()}: Hibernate snapshots the

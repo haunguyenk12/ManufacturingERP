@@ -1,5 +1,6 @@
 package com.erp.manufacturing.common.audit;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.erp.manufacturing.common.context.RequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * AOP aspect that intercepts methods annotated with {@link Auditable}.
  * Publishes an {@link AuditLogEvent} via {@link AuditLogService} after execution.
@@ -26,10 +30,12 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 public class AuditableAspect {
 
     private final AuditLogService  auditLogService;
+    private final AuditChangeCaptureService auditChangeCaptureService;
     private final ExpressionParser spelParser = new SpelExpressionParser();
 
     @Around("@annotation(auditable)")
     public Object audit(ProceedingJoinPoint pjp, Auditable auditable) throws Throwable {
+        Map<String, JsonNode> before = captureBefore(pjp, auditable);
         Object result;
         try {
             result = pjp.proceed();
@@ -48,16 +54,32 @@ public class AuditableAspect {
         try {
             String entityId = resolveEntityId(auditable.entityIdExpression(), result);
             String entityType = auditable.entityType().isBlank() ? null : auditable.entityType();
+            String entityName = auditChangeCaptureService.resolveEntityName(
+                    entityType, before, result);
+            List<AuditFieldChange> changes = auditChangeCaptureService.calculateChanges(
+                    auditable.action(), before, result);
             auditLogService.logEntity(
                     RequestContext.capture(currentRequest()),
                     auditable.action(),
                     entityType,
-                    entityId);
+                    entityId,
+                    entityName,
+                    changes);
         } catch (Exception auditEx) {
             log.error("[Audit] Failed to log success event", auditEx);
         }
 
         return result;
+    }
+
+    private Map<String, JsonNode> captureBefore(ProceedingJoinPoint pjp, Auditable auditable) {
+        try {
+            return auditChangeCaptureService.captureBefore(
+                    auditable.entityType(), pjp.getArgs(), auditable.action());
+        } catch (Exception auditEx) {
+            log.error("[Audit] Failed to capture entity state before command", auditEx);
+            return Map.of();
+        }
     }
 
     private String resolveEntityId(String expression, Object result) {

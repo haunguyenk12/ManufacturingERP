@@ -64,7 +64,13 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — FE contract fix Sales Order version + activate API vừa xong)* |
+| **Phase đang chạy** | *(không có — bộ dữ liệu demo dựng xong 2026-08-14, xem `§0.45`)* |
+| **Việc mới nhất** | **Bộ dữ liệu demo `VIETBIKE` + sửa lỗi P0 `MultipleBagFetchException`** ✅ **HOÀN THÀNH** (2026-08-14). Dựng `scripts/demo/` (1 orchestrator + 2 lib + 15 stage) seed lại **toàn bộ** dữ liệu demo từ DB trắng **qua REST API thật**, chủ đề nhà máy xe đạp, tên tiếng Việt có dấu, phủ **mọi** trạng thái của mọi vòng đời chứng từ. 🔴 **Lỗi P0 do chính bộ dữ liệu này phát hiện:** `WorkCalendarRepository` join-fetch **hai** bag (`weeklyShifts` + `Shift.breaks` — bag thứ hai nằm xa hơn một association) ⇒ **mọi** `POST /work-orders/{id}/release` qua lịch làm việc có ca **kèm giờ nghỉ** trả **500**; đây là **lần thứ ba** repo dính bẫy này (sau `§0.27`, `§0.29`). Sửa + `WorkCalendarLookupServiceIT` (class IT thứ **18**), nghiệm thu mutation 4/4 đỏ. Không migration, không permission mới, **không breaking change wire**. Bản ghi: **§0.45**, hướng dẫn demo: `docs/demo-dataset-guide.md` |
+| **Việc trước** | **Trả lời `live-data-audit.md`: available theo lot status + idempotency cho planning run** ✅ **HOÀN THÀNH** (2026-08-14). FE báo 3 mục; kết cục **khác nhau**: (1) 🔴 **bug thật** — `/inventory/balances` + `/inventory/lots*` báo `available > 0` cho lot `HOLD`/`REJECTED` vì `StockBalance.availableQuantity()` không đọc `lot.status`, trong khi aggregate của MRP/dashboard **có** lọc ⇒ một hệ thống hai con số; sửa ở `InventoryMapper.issuableQuantity` (**không** đụng domain method — 3 gate ghi tồn kho dựa vào nó). (2) 🟡 **gap thật** — `POST /planning-runs` bỏ qua `Idempotency-Key` (FE gửi 1 key 3 lần ⇒ 3 run); implement đầy đủ theo khuôn `stock_movements`, migration **`V58`**, header **tuỳ chọn**. (3) ✅ **báo nhầm** — "convert suggestion không atomic" **không có defect**, WO của họ sinh từ suggestion của **run khác** (đã `CONVERTED` đúng), suggestion họ nhắc chết vì trùng `workOrderNo` rồi rollback sạch; gốc rễ chính là (2). Bất biến **`B116`** (`module/inventory`), **`B117`** (`module/planning`). **Breaking change wire: có, hẹp** — `availableQuantity` của lot bị giữ nay là `0`. Bản ghi: **§0.44**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Việc trước đó** | **FE handoff: Inventory Dashboard API** ✅ **HOÀN THÀNH** (2026-08-14). Nguồn: `BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md`. FE chuyển `/dashboard` từ mock sang API thật, cần `GET /reports/inventory-dashboard` trả đủ nhãn để **một** request là đủ (không N+1 sang Item/Warehouse/User). Thêm: `generatedAt`; `uomCode`/`onHandQuantity`/`reservedQuantity`/`qualityHoldQuantity`/`shortageQuantity` trên alert line; DTO mới `DashboardRecentMovementResponse` (item/warehouse label + `actorUsername` batch-resolve); `lowStockLimit`/`movementLimit` (mặc định 10, kẹp `[1,20]`); thứ tự `REORDER_NEEDED` → shortage desc → `itemCode` → `warehouseCode`, ledger tie-break `movementId desc`. 🔴 `shortageQuantity` dùng **`max(safetyStock, reorderPoint)`**, không phải reorder point một mình như FE đề xuất — repo cấu hình `safetyStock ≥ reorderPoint` nên công thức FE đề xuất báo `0` cho **mọi** dòng `LOW_STOCK` (đã giải thích cho FE). Không migration, không permission mới. **Breaking change wire: nhẹ** — `recentMovements[]` đổi sang DTO riêng, mất `idempotencyKey` (FE chưa dùng, còn ở mock). Bất biến **`B114`**, **`B115`** (`module/inventory`). Bản ghi: **§0.43**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Bugfix mới nhất** | **Nợ #27: wire format ngày/giờ về ISO** ✅ **HOÀN THÀNH** (2026-08-12). FE yêu cầu tường minh (`ADMIN_RBAC_BACKEND_RESPONSE_REVIEW_2026-08-12.md §4`) **và** xác nhận adapter của họ nhận cả hai định dạng ⇒ điều kiện còn thiếu từ `§0.40` nay đã có. Xoá `@Bean ObjectMapper` trong `RedisConfig` — bean đó chỉ định dùng cho Redis nhưng làm `JacksonAutoConfiguration` của Boot nhường chỗ ⇒ **mọi** dòng `spring.jackson.*` chết lặng ⇒ `LocalDate` ra `[2026,8,8]`, `Instant` ra số epoch, ở **mọi** endpoint. 🔴 **Ghi đè `default-property-inclusion` `non_null` → `always`** (quyết định của user): để `non_null` có hiệu lực cùng lúc là xoá mọi field null khỏi mọi response — thay đổi payload toàn hệ thống không ai yêu cầu. Hệ quả phụ đã báo FE: field lạ trong request body nay bị bỏ qua thay vì 400. **Breaking change wire: CÓ** (nhưng là sửa sai — tài liệu hứa ISO từ đầu). Không migration, không permission mới. Bản ghi: **§0.42**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Bugfix trước** | **Admin RBAC: đọc membership Role↔Permission / Scope↔Resource + unmapped path trả 500** ✅ **HOÀN THÀNH** (2026-08-12). FE báo qua `ADMIN_RBAC_BACKEND_API_CONTRACT_REQUEST.md`. **Ba khoản sửa:** (1) **blocker** — `GET /access/roles/{roleId}/permissions` **không tồn tại** ⇒ FE không có cách hợp lệ nào biết role đang giữ quyền nào, không dựng được checkbox (chỉ có catalog toàn cục); (2) `GET /access/scopes/{scopeId}/resources` cũng thiếu — `addScopeResource` từ trước tới nay **chỉ ghi được, không đọc được**; (3) 🔴 **lỗi toàn cục, không riêng RBAC:** request tới path **không** có handler trả **500 `INTERNAL_SERVER_ERROR`** (trace `bbad9f8c37824349`) — Spring 6.1 ném `NoResourceFoundException`, không handler nào bắt nên rơi xuống catch-all ⇒ URL gõ sai trông như backend sập và alert 5xx nổ oan. Đây là **đúng cùng một lỗ hổng** `§0.24` đã vá cho `MissingServletRequestParameterException`, sót lại một loại. Không migration, không permission mới, **không breaking change wire**. Bất biến **`B113`** (`module/organization`). Bản ghi: **§0.41**, hướng dẫn FE: `FE_SingleTask_Response.md` |
+| **Bugfix trước đó** | **Sales Order full-replacement `PATCH` + version bump khi thay dòng** ✅ **HOÀN THÀNH** (2026-08-10). FE báo `PATCH /sales-orders/{id}` chỉ chạy được khi **không** kèm `lines[]`; kèm vào thì trả `Data constraint violation`. 🔴 **Hai bug thật, cả hai chỉ lộ trên Postgres thật — 977 case unit đều xanh:** (1) `clear()` + add lại `lineNo` 1..N trong **cùng một flush** ⇒ Hibernate xếp `INSERT` con **trước** `DELETE` orphan-removal ⇒ đụng `uk_sales_order_lines_order_line_no`; (2) phát hiện thêm lúc smoke test: `lines` là collection **inverse** (`mappedBy`) nên thay dòng **không** làm dirty header ⇒ PATCH chỉ có `lines` trả 200 mà `version` **đứng yên** ⇒ hai request thay dòng đồng thời đều qua check `expectedVersion` (**lost update**). Không migration, không breaking change wire. Bất biến **`B112`** (`module/sales`). Bản ghi: **§0.40**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Phase trước** | **FE contract fix: Sales Order `version` + activate API (Plant/Warehouse/Item)** ✅ **HOÀN THÀNH** (2026-08-08). FE báo 2 điểm khi tích hợp `PATCH /sales-orders/{id}`: (1) endpoint đòi `expectedVersion` nhưng không response nào trả `version`; (2) Plant/Warehouse/Item chỉ có `DELETE` (deactivate), không có đường quay lại `ACTIVE`. Sửa #1: `SalesOrderResponse` thêm `version`. Sửa #2: `POST /plants/{id}/activate`, `/warehouses/{id}/activate`, `/items/{id}/activate` (mới; **không** làm cho `Company` — ngoài phạm vi FE hỏi), tái dùng permission có sẵn, **chặn nếu cha đang `INACTIVE`** (422, quyết định tường minh của user qua `AskUserQuestion`). 🔴 **Bug thật phát hiện lúc smoke test thủ công, không phải giả định:** thêm `version` vào response mới lộ ra `SalesOrderService.update`/`confirm`/`cancel` dùng `save()` (không flush) rồi map response ngay trong transaction ⇒ `version` trả về **cũ hơn** giá trị vừa thật sự persist, khiến client dùng nó làm `expectedVersion` lần sau sẽ luôn bị `409 CONCURRENT_MODIFICATION` giả. Sửa bằng `saveAndFlush` ở cả 3 method. Không migration. Bất biến `B108` (`module/organization`), `B109` (`module/inventory`), `B111` (`module/sales`). Bản ghi: **§0.39**, hướng dẫn FE: `docs/fe-guide-sales-order-version-and-activate.md` |
 | **Phase trước đó** | **Bugfix P0 auth** ✅ **HOÀN THÀNH** (2026-08-06). FE báo 2 lỗi P0: (1) `/auth/refresh` trả `401 TOKEN_MALFORMED` dù `permitAll`; (2) access token hợp lệ dùng được ở `/auth/me` nhưng không dùng được ở endpoint khác. Nguyên nhân #1: `refresh()` bí mật phụ thuộc access token để resolve `userId` — sửa bằng reverse lookup `auth:refresh:owner:{tokenId}` (`TokenStoreService`), refresh giờ chỉ cần `{refreshToken, tokenId}`. `JwtAuthenticationFilter` thêm `BYPASS_PATHS` (login/refresh/forgot-password/reset-password — **không** gồm logout/logout-all, có lý do). Nguyên nhân #2: không tái hiện được từ code (đã loại trừ CORS) — rất có thể phía client; sửa được phần chẩn đoán sai: `JwtAuthEntryPoint` hardcode `TOKEN_MALFORMED` cho mọi request thiếu credential, nay dùng `AuthErrorCode.AUTHENTICATION_REQUIRED` mới, tách bạch "không gửi gì" khỏi "gửi nhưng hỏng". Không migration. Bất biến `B37` (`common/security`), `B107` (`module/auth`). Bản ghi: **§0.38** |
 | **Phase `C2-2`** | **`C2-2` – Inventory Lot lifecycle API** ✅ **HOÀN THÀNH** (2026-08-06). `GET /inventory/lots`, `GET /inventory/lots/{lotId}`, `POST /inventory/lots/{lotId}/status`. Không migration. Bất biến `B102`-`B106`. Bản ghi: **§0.37** |
@@ -73,8 +79,8 @@ do not delete 47 lines above
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
 | **Phase kế tiếp** | *(chưa chốt)* — track `C2-*`, `P*`, `D8` đều đã đóng hết. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
-| **Migration mới nhất** | **`V55__seed_audit_permission.sql`** (`C2-1`). `C2-2` **không có migration** (pure read/write API trên dữ liệu đã tồn tại) |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → `C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có, **không** thêm class IT mới) → bugfix P0 auth (2026-08-06): 942 case unit + 105 case IT / 14 class IT, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+17` unit: `JwtAuthenticationFilterTest` +13 (mới), `JwtAuthEntryPointTest` +1 (mới), `TokenStoreServiceTest` +3, `AuthServiceTest` +2 ròng (thêm 2 case mới, 1 case đổi tên/viết lại — không xoá), `JwtTokenProviderTest` −2 (xoá 2 case `extractClaimsFromExpired`, method đã orphan); `+0` IT — không đụng repository/JPQL nào) → **FE contract fix: Sales Order version + activate API (2026-08-08): 964 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 (`+22` unit: `OrganizationServiceTest` +6, `OrganizationMethodSecurityTest` +4, `OrganizationControllerTest` +4, `ItemServiceTest` +3, `ItemMethodSecurityTest` +2 (mới), `ItemControllerTest` +2, `SalesOrderServiceTest` +1 (`update_persistsThroughSaveAndFlush_...`, pin đúng `saveAndFlush`); `+0` IT — không migration, không JPQL mới) |
+| **Migration mới nhất** | **`V58__add_idempotency_to_mrp_runs.sql`** (2026-08-14). `mrp_runs` + `idempotency_key`/`payload_hash` + `UNIQUE`, nullable không backfill — làm `POST /planning-runs` replay-safe (`B117`). Trước đó: `V57__separate_item_master_permissions.sql` (FE-4 5C) |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → `C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có, **không** thêm class IT mới) → bugfix P0 auth (2026-08-06): 942 case unit + 105 case IT / 14 class IT, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+17` unit: `JwtAuthenticationFilterTest` +13 (mới), `JwtAuthEntryPointTest` +1 (mới), `TokenStoreServiceTest` +3, `AuthServiceTest` +2 ròng (thêm 2 case mới, 1 case đổi tên/viết lại — không xoá), `JwtTokenProviderTest` −2 (xoá 2 case `extractClaimsFromExpired`, method đã orphan); `+0` IT — không đụng repository/JPQL nào) → **FE contract fix: Sales Order version + activate API (2026-08-08): 964 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 (`+22` unit: `OrganizationServiceTest` +6, `OrganizationMethodSecurityTest` +4, `OrganizationControllerTest` +4, `ItemServiceTest` +3, `ItemMethodSecurityTest` +2 (mới), `ItemControllerTest` +2, `SalesOrderServiceTest` +1 (`update_persistsThroughSaveAndFlush_...`, pin đúng `saveAndFlush`); `+0` IT — không migration, không JPQL mới) → FE-4 5C Item Master permission (`V57`): 977 case unit → **bugfix Sales Order full-replacement PATCH (2026-08-10): 979 case unit + 110 case IT / 15 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+2` unit: `SalesOrderServiceTest` +2 (`update_replacingLines_flushesTheOrphanDeletesBeforeBuildingTheReplacements` dùng `InOrder`, `update_replacementLineFromAnotherCompany_flushesTheDeletesButNeverCommits`); `+4` IT từ `SalesOrderUpdateLinesIT` (**class IT thứ 15**, mới) — 🔴 đây là loại bug mà **chỉ** `*IT` bắt được, xem `§0.40`) → **fix contract Admin RBAC (2026-08-12): 994 case unit**, failures = 0, errors = 0 — đo bằng `mvn -o test` (`+15` unit: `AccessControlServiceTest` +4, `AccessControlMethodSecurityTest` +4, `AccessControlControllerTest` +5, `GlobalExceptionHandlerTest` +2). Phần IT của lần đó lúc nghiệm thu **chưa đo được** (Docker Desktop tắt giữa chừng, mọi class IT lỗi như nhau) — ✅ **đã đo bù cùng ngày**, xem mốc kế tiếp → **trả nợ #27 wire format ISO (2026-08-12): 997 case unit + 114 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+3` unit: `JsonWireFormatTest` +3 (mới); `+4` IT là của `RolePermissionRepositoryIT` (**class IT thứ 16**) từ lượt trước, nay mới chạy được thật — bản thân lượt này không thêm case IT nào, không đụng repository/JPQL) → **FE báo Assignment `expiresAt` mất (2026-08-13): 998 case unit + 115 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. 🔴 **Không sửa `src/main`** — chẩn đoán ra là cùng lỗi `§0.42`, môi trường FE test chưa chạy bản sửa (`+1` unit: `AccessControlControllerTest`; `+1` IT: `UserRoleAssignmentRepositoryIT`; `AccessControlServiceTest.assignRole_success` **sửa tại chỗ** theo `R10` — trước đó truyền `expiresAt` mà không assert gì về nó, xem `§0.42a`) → **FE handoff Dashboard API (2026-08-14): 1009 case unit + 119 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+11` unit: `InventoryAlertServiceTest` +7, `InventoryReportControllerTest` +3, `InventoryAvailabilityServiceTest` +1 ròng — 1 case cũ **sửa tại chỗ** theo `R10` khi `getAvailableQuantitiesByWarehouse` đổi thành `getStockQuantitiesByWarehouse`; `+4` IT: `StockMovementRepositoryIT` (**class IT thứ 17**, mới) 3 case + `StockBalanceRepositoryIT` +1) → **trả lời `live-data-audit.md` (2026-08-14): 1025 case unit + 120 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+16` unit: `InventoryMapperTest` +9 (mới), `InventoryLotServiceTest` +1, `MrpRunServiceTest` +4, `PlanningRunControllerTest` +2; `+1` IT: `FlywayMigrationIT.migrate_v58_*`, **không** thêm class IT mới. ⚠️ Lần chạy đầu **mọi** class IT lỗi vì Docker Desktop tắt giữa chừng — bẫy `§0.41`, phải bật lại rồi đo lại) → **bộ dữ liệu demo + sửa lỗi `MultipleBagFetchException` (2026-08-14): 1025 case unit / 127 class + 124 case IT / 18 class IT**, failures = 0, errors = 0 (`+0` unit — lượt này **không** thêm case unit nào, có chủ đích: lỗi nằm trong `@EntityGraph` nên unit test dùng mock repository không bao giờ dựng được câu query để bắt, xem `§0.45` hệ quả #2; `+4` IT từ `WorkCalendarLookupServiceIT`, **class IT thứ 18**, mới) |
 | **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`), `§0.37` (`C2-2`), `§0.38` (bugfix P0 auth), FE contract fix Sales Order version + activate API (2026-08-08) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
 | **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đã đóng hết, `C2-1`+`C2-2` xong 2026-08-06): cùng file §8** — bảng phase §8.1, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (roadmap) |
 
@@ -238,6 +244,7 @@ do not delete 47 lines above
 | 21 | ~~`GET /sales-orders/planning-demands` không trả `planningDemandId` mà `POST /planning-runs` cần~~ ✅ **ĐÃ TRẢ (`D10`, 2026-07-30)** – `PlanningDemandLineResponse` thêm `planningDemandId` (additive). Lấy qua **1 query batch** `PlanningDemandService.findOpenDemandIdsBySalesOrderLineIds` (rule `C7`+`C14`), **không** join JPQL xuyên module vì `referenceId` là `String`. Đóng nốt nửa còn lại của nợ #13 | ~~`D10`~~ |
 | 22 | ~~Work order tạo từ MRP không bao giờ release được qua API (reserve đòi `RELEASED`, release đòi reservation 100%)~~ ✅ **ĐÃ TRẢ (`D9`, 2026-07-30)** – thêm `WorkOrder.canReserve()` (mọi status trừ `COMPLETED`/`CANCELLED`) + `WorkOrderExecutionSupport.ensureReservable`; **chỉ** 2 call site reserve đổi sang gate mới, issue/execution/receipt/WIP vẫn `canExecute()`. B13 tách đôi. Thước đo: seam `forceStatus` trong `ProductionFlowE2EIT` đã **xoá**, bước 4-5 chạy reserve → release đúng thứ tự spec §11.1 | ~~`D9`~~ |
 | 23 | ~~`BLOCKED` của gate 1a không bao giờ được persist (throw trong chính transaction `REQUIRES_NEW` của nó ⇒ rollback-only)~~ ✅ **ĐÃ TRẢ (`D9`, 2026-07-30)** – tách `WorkOrderBlockRecorder` (bean riêng, `REQUIRES_NEW`, **return bình thường** nên commit được), gate gọi nó xong mới throw. Javadoc sai đã sửa. `ProductionFlowE2EIT` đọc lại từ DB để chứng minh row sống sót rollback — mock không kiểm được điều này | ~~`D9`~~ |
+| 27 | ~~🔴 **`RedisConfig` khai báo `@Bean ObjectMapper` trần ⇒ ghi đè ObjectMapper auto-config của Spring Boot cho TOÀN BỘ app, làm mọi cấu hình `spring.jackson.*` trong `application.yml` bị vô hiệu im lặng.** Hệ quả **đo được qua HTTP thật** (2026-08-10): `write-dates-as-timestamps: false` (`application.yml:54`) không có tác dụng ⇒ `LocalDate` serialize thành **mảng** `[2026, 8, 8]` và `Instant` thành **số epoch** `1786350234.709543`, trong khi `docs/api-guide-for-frontend.md:193-194` hứa với FE là ISO (`"2026-08-15"` / `"2026-08-03T08:00:00Z"`). `default-property-inclusion: non_null` cũng bị vô hiệu (đang bị `@JsonInclude` trên chính record `ApiResponse` che). Bean đó tồn tại để cấu hình serializer **Redis**, nhưng không đặt tên/`@Qualifier` nên thắng luôn vai trò ObjectMapper của web layer. **Ảnh hưởng mọi endpoint có field ngày/thời điểm**, không riêng sales.~~ ✅ **ĐÃ TRẢ (2026-08-12)** — FE yêu cầu tường minh chuyển sang ISO (`ADMIN_RBAC_BACKEND_RESPONSE_REVIEW_2026-08-12.md §4`) và xác nhận adapter của họ nhận **cả hai** định dạng, nên cửa sổ đổi wire mở ra mà không cần release đồng thời. Bean đã xoá; Boot tự cấu hình lại `ObjectMapper` (jsr310 sẵn trên classpath). 🔴 **`default-property-inclusion` cố ý ghi đè `non_null` → `always`**: để `non_null` có hiệu lực cùng lúc là **xoá mọi field null khỏi mọi response** — thay đổi payload toàn hệ thống mà không ai yêu cầu, phải là quyết định riêng có phối hợp FE (quyết định của user qua `AskUserQuestion`). Hệ quả phụ **có** xảy ra và đã báo FE: `fail-on-unknown-properties: false` nay có hiệu lực ⇒ field lạ trong request body bị bỏ qua thay vì trả 400. Bản ghi: **§0.42** | ~~*(chưa chốt)*~~ **2026-08-12** |
 
 ### 0.7 F3 – Sales Order + Planning Demand (ĐÃ HOÀN THÀNH 2026-07-26)
 
@@ -2080,7 +2087,7 @@ truyền `order.getVersion()`. Additive trên wire.
 |---|---|---|
 | `POST /plants/{id}/activate` | `PERM_ORG_MANAGE` (scope `PLANT`) | Company cha `INACTIVE` → `422 OPERATION_NOT_ALLOWED` |
 | `POST /warehouses/{id}/activate` | `PERM_ORG_MANAGE` (scope `WAREHOUSE`) | Plant cha `INACTIVE` → `422 OPERATION_NOT_ALLOWED` |
-| `POST /items/{id}/activate` | `PERM_INVENTORY_MANAGE` (qua `inventoryPermissionGuard.hasItemAccess`) | Company cha `INACTIVE` → `422 OPERATION_NOT_ALLOWED` |
+| `POST /items/{id}/activate` | `PERM_ITEM_MANAGE` (qua `inventoryPermissionGuard.hasItemAccess`, V57) | Company cha `INACTIVE` → `422 OPERATION_NOT_ALLOWED` |
 
 **Quyết định chốt với user (`AskUserQuestion`) trước khi viết code:** activate một record con khi cha
 đang `INACTIVE` phải bị **chặn** — đây là bất biến **đầu tiên** áp cho chiều *activate*; trước đó check
@@ -2121,6 +2128,565 @@ chiếu với `SELECT version FROM sales_orders` trong DB thật).
 
 **Breaking changes — wire: KHÔNG có** (thuần additive: 3 endpoint mới, 1 field mới `version` trên
 `SalesOrderResponse`). **Java positional: không có** — không đổi constructor nào có sẵn.
+
+---
+
+### 0.40 Bugfix P0: Sales Order Full-Replacement `PATCH` Chết Với `lines[]` + `version` Không Bump Khi Thay Dòng (2026-08-10)
+
+**Không** phase, **không** migration, **không** permission mới, **không** breaking change wire. Nguồn:
+`BACKEND_SALES_ORDER_LINES_PATCH_DEFECT_2026-08-10.md` (FE báo, tái hiện lần đầu 2026-08-08). Đây là
+bugfix thứ ba phát hiện từ báo cáo thật thay vì đối chiếu spec, sau `§0.24` và `§0.38`.
+
+| # | Lỗi | Cách sửa |
+|---|---|---|
+| 1 | `PATCH /sales-orders/{id}` kèm `lines[]` trả **`RESOURCE_ALREADY_EXISTS`** ("Data constraint violation"); **không** kèm `lines[]` thì chạy bình thường | `salesOrderRepository.flush()` **giữa** `clear()` và vòng lặp add trong `replaceLines` |
+| 2 | *(phát hiện thêm lúc smoke test, FE **không** báo)* PATCH **chỉ có** `lines[]` trả 200 nhưng `version` **đứng yên** | `order.setUpdatedAt(Instant.now())` trong `replaceLines` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Lỗi #1 là thứ tự flush của Hibernate, không phải mapping sai.** Trong **một** flush, Hibernate
+   xếp `INSERT` entity con **trước** `DELETE` của orphan-removal. Một full replace **bắt buộc** tái dùng
+   `lineNo` 1..N (`B47`/`B87` yêu cầu đúng thế), nên `INSERT` dòng mới luôn đụng
+   `uk_sales_order_lines_order_line_no` với dòng cũ **chưa kịp bị xoá** ⇒ chết **toàn bộ** PATCH, không
+   phải chỉ sai một dòng. `orphanRemoval = true` và `cascade = ALL` trên `SalesOrder.lines` **đều đã
+   đúng** — đừng đi sửa mapping. Cách sửa là **ép thứ tự tường minh**, không phải tin vào action
+   ordering của Hibernate: xoá → flush → mới build dòng thay thế.
+2. 🔴 **Lỗi #2 nguy hiểm hơn lỗi #1 dù không ai báo, vì nó im lặng.** `lines` là collection **inverse**
+   (`mappedBy = "salesOrder"`, FK nằm ở bảng con) ⇒ thay dòng **không** làm dirty row `sales_orders` ⇒
+   Hibernate không phát `UPDATE` nào ⇒ `@Version` không bump. Hệ quả: hai request thay dòng đồng thời
+   cùng đọc `version = n`, **cả hai** qua được check `expectedVersion`, request thứ hai ghi đè im lặng —
+   phá đúng thứ `expectedVersion` (`B87`) sinh ra để chặn. Lỗi #1 che nó suốt: trước bản sửa này mọi
+   PATCH có `lines[]` đều chết nên không ai thấy được `version` không đổi.
+3. 🔴 **Đừng dùng `LockModeType.OPTIMISTIC_FORCE_INCREMENT` cho lỗi #2.** Khi header **cũng** đổi
+   (chính là request FE gửi: `customerName` + `orderDate` + `note` + `lines`), entity đã dirty sẵn ⇒
+   `UPDATE` bình thường bump một lần **và** force-increment bump lần nữa ⇒ **+2**, phá luôn điều kiện
+   "đúng một lần" mà nó được thêm vào để bảo đảm. Làm dirty một field audit là cách duy nhất bump
+   **đúng một lần** ở **cả hai** trường hợp (có/không đổi header). Giá trị `updatedAt` gán tay bị
+   `@LastModifiedDate` ghi đè lúc flush — thứ cần là **tính dirty**, không phải giá trị.
+4. 🔴 **Cả hai lỗi đều vô hình với mock repository, và với coverage.** `SalesOrderServiceTest` phủ kín
+   `update` từ `C2-4` (5 case, kể cả case thay dòng) và **vẫn xanh** với cả hai bug — mock không có
+   constraint để vi phạm và không có `@Version` thật để không-bump. `SalesOrderUpdateLinesIT` (**class
+   IT thứ 15**) import service thật vào slice `@DataJpaTest` + Postgres thật; **nghiệm thu mutation**:
+   bỏ dòng `flush()` ⇒ **2/4** case đỏ với **đúng** thông báo `uk_sales_order_lines_order_line_no` FE
+   báo (case thứ 3 xanh có lý do đúng — nó chết trước khi tới flush). Đây là lần thứ tư repo học đúng
+   bài học `R7`, sau `§0.24` (`lower(bytea)`), `§0.27` (`MultipleBagFetchException`), `§0.28`
+   (`NOT NULL` sót trong `V44`).
+5. **`@DataJpaTest` slice cần bật auditing tường minh** (`@TestConfiguration` + `@EnableJpaAuditing` +
+   `AuditorAware` trả `Optional.empty()`): dòng do service build lấy `createdAt`/`updatedAt` (NOT NULL)
+   từ auditing đúng như production. Back-fill hai cột bằng tay trong test sẽ làm câu `INSERT` đang test
+   **khác** câu `INSERT` thật — mà `INSERT` chính là chỗ bug #1 sống.
+6. **`Idempotency-Key` KHÔNG được implement trên endpoint này** (grep `module/sales`: 0 kết quả) — đúng
+   `A2`, header đó dành cho POST ghi tồn kho, không phải PATCH master/chứng từ. Replay-safety của PATCH
+   đến từ `expectedVersion`: gửi lại **cùng** payload lần hai trả **409 `CONCURRENT_MODIFICATION`**
+   (version đã đi tiếp), tức không bao giờ áp dụng hai lần — nhưng **không** trả lại 200 với kết quả cũ
+   như FE checklist mong đợi. Đã ghi rõ cho FE, **không** tự implement (ngoài phạm vi, chưa ai yêu cầu).
+
+**Nghiệm thu:** `mvn -o clean verify` — **979 case unit + 110 case IT / 15 class IT, failures = 0,
+errors = 0** (baseline trước bugfix: 977 unit + 106 IT / 14 class). Kiểm chứng qua **HTTP thật**
+(`mvn -o spring-boot:run` port 8081, Postgres + Redis qua `docker-compose`, **không** phải
+Testcontainer) trên một DRAFT dùng-một-lần, đúng 8 mục FE checklist §9: request FE báo lỗi nay
+**200** (`X-Trace-Id: a3efc95f33ba430d`) · thay dòng chỉ với `lines[]` bump `version` 1→2 · thêm dòng
+thứ hai (`lineNo` 1,2) · bỏ một dòng còn một · header-only vẫn 200 và **không** đụng dòng nào ·
+`expectedVersion` cũ trả **409 `CONCURRENT_MODIFICATION`** · dòng thay thế `dueDate < orderDate` trả
+**422** và **không** field nào dính (`version` + `customerName` + dòng cũ y nguyên — chứng minh deletes
+đã flush **được rollback**) · `version` tăng **đúng một** đơn vị mỗi PATCH thành công (0→1→2→3→4→5) ·
+vòng đời `confirm`→`cancel` và gate `STATE_CONFLICT` trên đơn `CONFIRMED` không đổi.
+
+**Breaking changes — wire: KHÔNG có** (không đổi DTO, không endpoint mới, không mã lỗi mới). Hành vi
+**nới lỏng**: request trước đây luôn lỗi nay thành công. **Java positional: không có.**
+
+---
+
+### 0.41 Fix Contract Admin RBAC: Đọc Membership Role/Scope + Unmapped Path Trả 500 (2026-08-12)
+
+**Không** phase, **không** migration, **không** permission mới, **không** breaking change wire. Nguồn:
+`ADMIN_RBAC_BACKEND_API_CONTRACT_REQUEST.md` (FE). Bất biến **`B113`** (`module/organization`).
+
+> ⚠️ **Tài liệu nguồn là một BẢNG CÂU HỎI, không phải báo cáo lỗi.** Phần lớn nội dung của nó là xin
+> xác nhận contract (idempotency, thời điểm quyền có hiệu lực, error code…) — những thứ đó trả lời
+> **bằng tài liệu**, không phải bằng code. Chỉ **ba** mục là defect thật và chỉ ba mục đó được sửa;
+> phần còn lại đã trả lời trong `FE_SingleTask_Response.md`. Đừng đọc file yêu cầu đó rồi tưởng mọi ô
+> `☐` trong nó đều là việc phải code.
+
+| # | Lỗi | Cách sửa |
+|---|---|---|
+| 1 | **Blocker.** `GET /access/roles/{roleId}/permissions` **không tồn tại** ⇒ FE chỉ có catalog toàn cục, không có cách hợp lệ nào biết role đang giữ quyền nào | `RolePermissionRepository.findPermissionsByRoleId` + `AccessControlService.listRolePermissions` + endpoint |
+| 2 | `GET /access/scopes/{scopeId}/resources` thiếu — `addScopeResource` **chỉ ghi được, không đọc được** từ khi ra đời | `AccessScopeResourceRepository.findByScopeId` + `listScopeResources` + endpoint |
+| 3 | 🔴 **Toàn cục, không riêng RBAC:** path không có handler trả **500** thay vì 404 | `GlobalExceptionHandler` handler thứ **9** cho `NoResourceFoundException` + `NoHandlerFoundException` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Lỗi #3 là lần thứ hai repo mắc đúng một lỗ hổng.** `§0.24` đã vá
+   `MissingServletRequestParameterException` vì cùng lý do (rơi xuống catch-all ⇒ 500 cho một lỗi của
+   client), nhưng chỉ vá **một** loại. Spring 6.1 đẩy request không khớp handler nào sang
+   `ResourceHttpRequestHandler` ⇒ `NoResourceFoundException` ⇒ catch-all ⇒ 500. **Bài học:** khi thêm
+   handler cho một exception "client gọi sai", rà luôn các exception **anh em** của nó trong cùng
+   nhóm, đừng vá đúng cái vừa được báo.
+2. 🔴 **Nhánh 404 mới KHÔNG được nuốt mất 405.** Path **có** tồn tại mà gọi sai verb vẫn phải là
+   `HttpRequestMethodNotSupportedException` → 405 (handler 8). Có test canh **cả hai chiều**
+   (`unmappedPath_returns404…` và `wrongVerbOnExistingPath_stays405`) — một test cho nhánh mới thôi
+   thì không chứng minh được nó không lấn sang nhánh cũ.
+3. 🔴 **`findPermissionsByRoleId` cố ý KHÔNG lọc `status`.** Permission đã deactivate mà role vẫn
+   đang giữ thì vẫn phải trả về: đó là grant **có thật trong DB**. Lọc nó đi ⇒ admin thấy ô unchecked
+   ⇒ lần save kế tiếp **âm thầm gỡ** một quyền không ai định gỡ. Có test riêng
+   (`RolePermissionRepositoryIT.findPermissionsByRoleId_includesGrantedPermissionsThatAreNoLongerActive`).
+4. **Cả hai endpoint đọc trả 404 khi role/scope không tồn tại, không trả page rỗng** — page rỗng
+   không phân biệt được với "role có thật nhưng chưa được cấp quyền nào". Check tồn tại chạy **trước**
+   khi query membership (`verifyNoInteractions` canh đúng chỗ đó).
+5. **Chọn MỘT nguồn authoritative, đúng như FE yêu cầu:** endpoint riêng, **không** nhúng
+   `permissions[]` vào `RoleResponse`. Nhờ vậy `RoleResponse`/`AccessScopeResponse` **không đổi một
+   dòng nào** ⇒ zero breaking change, và list role không phải gánh một query membership cho mỗi dòng.
+6. **Không permission mới** — tái dùng `PERM_ACCESS_MANAGE` đúng khuôn `B88`. Không migration seed,
+   không đụng `docs/roles-and-permissions.md` (`C10` chỉ kích hoạt khi có permission **mới**).
+7. **Scope resource vẫn chỉ có `add` + `read`, cố ý chưa có `remove`/`replace-all`** — FE hỏi
+   "add, remove **hoặc** replace-all", tức chấp nhận backend chọn một. Đường thu hồi hiện có là
+   `deactivateScope` hoặc revoke assignment. Thêm `DELETE` khi chưa ai thật sự cần là code
+   speculative (`§11.5`), cùng lý do `Company` không có endpoint activate ở `§0.39`.
+
+**Nghiệm thu mutation (2, đã revert — **2/2 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Bỏ `NoResourceFoundException.class` khỏi `@ExceptionHandler`, giữ `NoHandlerFoundException` | **1** — `unmappedPath_returns404NotAnInternalServerError` (`404 != 500`) | Tái hiện **đúng** triệu chứng FE báo. `wrongVerbOnExistingPath_stays405` **vẫn xanh** ⇒ hai nhánh độc lập thật, không phải một test che cho cả hai |
+| 2 | Bỏ `findRoleById(roleId)` khỏi `listRolePermissions` | **1** — `listRolePermissions_unknownRole_throwsBeforeQueryingMembership` | ⚠️ Case thứ hai cũng đỏ nhưng **do `UnnecessaryStubbing`**, không phải kill hành vi — không tính là bằng chứng (đúng cảnh báo `§0.22` mutation #1) |
+
+**Nghiệm thu:** `mvn -o test` — **994 case unit, failures = 0, errors = 0** (baseline trước:
+979 unit; `+15` đúng bằng số case thêm mới). 🔴 **Phần IT CHƯA chạy được:** Docker Desktop trên máy
+dev tắt giữa chừng (`docker info` báo pipe `dockerDesktopLinuxEngine` không tồn tại) nên
+`AbstractPostgresIntegrationTest` không dựng được container ⇒ `RolePermissionRepositoryIT` (**class IT
+thứ 16**, mới) **và** mọi class IT có sẵn đều lỗi như nhau — đã xác nhận bằng
+`UserRoleAssignmentRepositoryIT` đỏ y hệt, nên **không** phải lỗi của test mới. Cũng **chưa** smoke
+test HTTP thật vì backend cần Postgres/Redis qua Docker. **Việc còn lại:** bật Docker rồi chạy
+`mvn -o clean verify` + smoke test 2 endpoint mới.
+>
+> ✅ **[2026-08-12, cùng ngày] Nợ nghiệm thu này đã đóng** trong lượt sửa `§0.42`: Docker bật lại,
+> `mvn -o clean verify` xanh — **114 case IT / 16 class IT** đúng bằng con số kỳ vọng ghi ở trên, tức
+> `RolePermissionRepositoryIT` chạy thật trên Postgres và 4 case của nó xanh. Đừng đọc đoạn "chưa đo
+> được" ở trên như trạng thái hiện tại.
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 2 endpoint mới; đổi **500 → 404** cho path
+không tồn tại là sửa sai, client đang chạy đúng không bị ảnh hưởng). **Java positional: không có** —
+chỉ thêm method mới, không đổi constructor nào.
+
+---
+
+### 0.42 Trả Nợ #27: Wire Format Ngày/Giờ Về ISO (2026-08-12)
+
+**Không** phase, **không** migration, **không** permission mới, **không** endpoint mới. Nguồn:
+`ADMIN_RBAC_BACKEND_RESPONSE_REVIEW_2026-08-12.md §4` — FE đề nghị tường minh chuyển canonical sang
+ISO **và** xác nhận adapter của họ nhận cả hai định dạng, tức cửa sổ đổi wire mở ra mà không cần
+release đồng thời hai bên. Đây là điều kiện còn thiếu suốt từ `§0.40` (2026-08-10) khiến nợ #27 nằm im.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| **Xoá** `@Bean ObjectMapper` | `RedisConfig` — thay bằng javadoc cảnh báo, xem hệ quả #1 |
+| `default-property-inclusion: non_null` → **`always`** | `application.yml` — **cố ý ghi đè**, xem hệ quả #2 |
+| Test guard mới `JsonWireFormatTest` (3 case) | `src/test/java/.../config/` |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Đừng bao giờ khai báo `@Bean ObjectMapper` ở bất kỳ `@Configuration` nào trong repo này.**
+   `JacksonAutoConfiguration` của Boot là `@ConditionalOnMissingBean` ⇒ **một** bean cùng kiểu, dù đặt
+   ở config chỉ phục vụ Redis, cũng thắng luôn vai trò mapper của **toàn bộ web layer** và làm **mọi**
+   dòng `spring.jackson.*` chết lặng. Không có lỗi, không có warning, không rớt test nào — chỉ có wire
+   format sai suốt nhiều tháng. Cần mapper riêng cho Redis thì dựng **cục bộ trong serializer**, không
+   expose thành bean.
+2. 🔴 **`always` không phải giá trị cũ, và cũng không phải giá trị viết trong file trước đó.** Bỏ bean
+   ObjectMapper "mở khoá" cùng lúc **cả ba** dòng `spring.jackson.*`, trong đó `non_null` sẽ **xoá mọi
+   field null khỏi mọi response** — đổi payload toàn hệ thống trong khi FE chỉ yêu cầu ISO. Quyết định
+   của user (`AskUserQuestion`): giữ nguyên hành vi null, ghi đè `always`, để việc bỏ null thành quyết
+   định riêng có phối hợp FE. `ApiResponse` vẫn tự lược `result`/`errors` bằng `@JsonInclude` của chính
+   nó — envelope không liên quan tới dòng config này, đừng nhầm hai chỗ.
+3. **Hệ quả phụ có thật, đã báo FE:** `fail-on-unknown-properties: false` nay **có hiệu lực** ⇒ field
+   lạ trong request body bị **bỏ qua** thay vì trả 400 như trước. Là nới lỏng (client đúng không bị
+   ảnh hưởng, và đây đúng ý định đã khai báo trong file config từ đầu), nhưng nghĩa là **gõ sai tên
+   field không còn báo lỗi** — chỉ còn thấy lỗi validate của field bắt buộc còn thiếu.
+4. 🔴 **`@WebMvcTest` KHÔNG bắt được lớp bug này và sẽ không bao giờ bắt được** — slice không nạp
+   `RedisConfig` nên nó luôn chạy với mapper "sạch" của Boot; 20/20 controller test vẫn xanh suốt thời
+   gian bug sống. `JsonWireFormatTest` vì thế dựng context bằng `ApplicationContextRunner` +
+   `ConfigDataApplicationContextInitializer` (đọc `application.yml` **thật**) + `JacksonAutoConfiguration`
+   + chính `RedisConfig` — đúng ba thành phần của app đang chạy, mà **không** cần Docker.
+
+**Nghiệm thu mutation (2, đã revert — **2/2 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Khai báo lại `@Bean ObjectMapper` trong `RedisConfig` | **2** — `localDate_isWrittenAsAnIsoStringNotAnArray`, `instant_isWrittenAsAnIsoUtcStringNotAnEpochNumber` | Tái hiện **đúng** triệu chứng FE báo. Case null **vẫn xanh** ⇒ ba case độc lập thật, không phải một điều kiện che cho cả ba |
+| 2 | `application.yml` đổi `always` → `non_null` | **1** — `nullFields_areStillPresentOnTheWire` | Quyết định giữ null ở hệ quả #2 là **test-backed**, không phải chỉ văn xuôi trong comment |
+
+**Nghiệm thu:** `mvn -o clean verify` — **997 case unit + 114 case IT / 16 class IT, failures = 0,
+errors = 0** (baseline trước: 994 unit; `+3` đúng bằng `JsonWireFormatTest`). 🔴 **Con số IT này là số
+ĐO THẬT với Docker bật** — nó đóng luôn khoản nghiệm thu còn treo của `§0.41` (`RolePermissionRepositoryIT`,
+class IT thứ 16, chạy được và xanh).
+
+**Smoke test HTTP thật** (`mvn -o spring-boot:run` port 8081, Postgres + Redis qua `docker-compose`,
+**không** phải Testcontainer) — đo trên **đúng bản ghi** mà `§0.40` từng đo ra định dạng sai:
+
+| Probe | Kết quả |
+|---|---|
+| `GET /sales-orders` — `orderDate` | **`"2026-08-08"`** (trước: `[2026, 8, 8]`) |
+| `GET /audit-logs` — `createdAt` | **`"2026-08-10T08:43:10.431001Z"`** (trước: số epoch) |
+| Field null (`description`, `plantId` trên audit log) | **vẫn có mặt** dạng `null` ⇒ quyết định #2 đúng trên wire |
+| `POST /access/roles` kèm field lạ trong body | **201** (trước: 400) ⇒ xác nhận hệ quả #3 |
+| `GET /access/roles/{id}/permissions` · unknown path | **200** (53 permission) · **404** ⇒ đóng nốt smoke test còn thiếu của `§0.41` |
+
+> ⚠️ Smoke test tạo một role `ZZ_SMOKE_UNKNOWN_FIELD` trong DB dev (bằng chứng cho probe field lạ) —
+> đã `deactivate`, **không** xoá được vì repo không có hard-delete cho role (`C6`).
+
+**Breaking changes — wire: CÓ, và đây là loại đổi rộng nhất repo từng làm trong một lượt** — mọi
+endpoint có field ngày/giờ đổi hình dạng (mảng/số → chuỗi ISO). Không phá client trong thực tế vì FE
+đã xác nhận nhận cả hai định dạng, và đây là **sửa sai**: `docs/api-guide-for-frontend.md §2.6` hứa ISO
+từ đầu. **Java positional: không có.**
+
+#### 0.42a Hệ quả đo được của nợ #27, báo dưới dạng một bug khác (2026-08-13)
+
+FE báo `ADMIN_RBAC_BACKEND_ASSIGNMENT_EXPIRY_GAP_2026-08-13.md`: `POST /access/assignments` kèm
+`expiresAt` tương lai trả và lưu `null`, đề nghị backend kiểm 4 chỗ (DTO bind, service persist, mapper,
+thêm `*IT`). **Không sửa một dòng `src/main` nào** — chẩn đoán ra đây là **cùng một** lỗi `§0.42`, chỉ
+là môi trường FE test chưa chạy bản sửa.
+
+| Build | Response `expiresAt` |
+|---|---|
+| Trước `§0.42` | `1787245199.000000000` — **giải mã đúng bằng `2026-08-20T16:59:59Z` FE gửi** |
+| Sau `§0.42` | `"2026-08-20T16:59:59Z"` |
+
+1. 🔴 **Bài học phương pháp, quan trọng hơn bản thân sự việc: A/B thật đã đảo ngược kết luận.** Lần
+   chạy đối chứng đầu tiên "chứng minh" build cũ cũng đúng — sai, vì tiến trình app cũ **vẫn giữ cổng
+   8081** (`TaskStop` không giết được tiến trình con `java`) nên cả hai lượt đo đều bắn vào **cùng một**
+   build. Chỉ lộ ra khi đọc kỹ exit code của lệnh chạy nền: `BUILD FAILURE — Port 8081 was already in
+   use`. ⇒ Khi A/B bằng cách restart app, **luôn** đo một field mốc để biết chắc build nào đang chạy
+   (ở đây: `audit-logs.createdAt` là số hay chuỗi), đừng tin là restart đã có hiệu lực.
+2. **Lỗ hổng test thật do vụ này lộ ra:** `AccessControlServiceTest.assignRole_success` **có** truyền
+   `expiresAt` nhưng **không assert gì về nó** ⇒ service/mapper bỏ rơi field vẫn xanh. Đã **sửa** case
+   đó theo `R10` (capture entity được `save` + assert cả response), không thêm case mới.
+3. **3 tầng test nay khoá `expiresAt`:** `UserRoleAssignmentRepositoryIT.search_returnsTheExpiresAtInstantThatWasPersisted`
+   (round-trip `TIMESTAMPTZ` qua **đúng** query của endpoint list), `AccessControlServiceTest.assignRole_success`
+   (persist + response), `AccessControlControllerTest.assignRole_withExpiresAt_...` (bind từ body +
+   trả ISO). Nghiệm thu mutation: đặt `insertable = false` cho cột ⇒ **2 case IT đỏ, 998 case unit vẫn
+   xanh** — minh hoạ lại rule `R7`; mapper trả `null` ⇒ case service đỏ. Cả hai đã revert.
+4. **`@WebMvcTest` không bao giờ tái hiện được lỗi gốc** (slice dùng mapper sạch của Boot), nên
+   controller test ở trên khoá *binding/echo*, còn cấu hình mapper vẫn là việc của `JsonWireFormatTest`
+   — hai trục khác nhau, đừng gộp.
+
+**Nghiệm thu:** `mvn -o clean verify` — **998 case unit + 115 case IT / 16 class IT, failures = 0,
+errors = 0** (`+1` unit: `AccessControlControllerTest`; `+1` IT: `UserRoleAssignmentRepositoryIT`;
+`AccessControlServiceTest` sửa tại chỗ nên không cộng case). Không migration, không breaking change.
+Trả lời FE: `FE_SingleTask_Response.md`.
+
+---
+
+### 0.43 FE Handoff: Inventory Dashboard API — Nhãn Hiển Thị + Hợp Đồng Đếm/Thứ Tự (2026-08-14)
+
+**Không** phase, **không** migration, **không** permission mới, **không** endpoint mới. Nguồn:
+`BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md` (FE) — FE chuyển `/dashboard` từ mock sang API thật và
+liệt kê field còn thiếu để **một** request là đủ, cộng 5 nhóm câu hỏi về ngữ nghĩa cần backend xác
+nhận. Bất biến **`B114`**, **`B115`** (`module/inventory/CLAUDE.md`).
+
+> ⚠️ **Phần lớn tài liệu nguồn là CÂU HỎI XÁC NHẬN, không phải yêu cầu code** (§5 count semantics, §5.2
+> availability, §5.3 alert status, §5.5 scope/quyền, §6 error contract). Những mục đó trả lời **bằng
+> tài liệu** — code đã đúng sẵn. Chỉ §4 ("field mới bắt buộc tối thiểu") và §5.4 (ordering/limit) là
+> việc phải viết code. Đừng đọc checklist §10 của FE rồi tưởng mọi ô là một thay đổi backend.
+
+| Nhóm | Nội dung |
+|---|---|
+| A | `InventoryDashboardResponse` + `generatedAt` (`Instant`, không cache — mọi số đọc live) |
+| B | `InventoryAlertLineResponse` + `uomCode`, `onHandQuantity`, `reservedQuantity`, `qualityHoldQuantity`, `shortageQuantity` (5 field, additive) |
+| C | `DashboardRecentMovementResponse` (**mới**) thay `StockMovementResponse` trong `recentMovements[]` |
+| D | `lowStockLimit`/`movementLimit` (mặc định 10, kẹp `[1,20]`), thứ tự sắp xếp cố định cho cả hai mảng |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **`shortageQuantity` CỐ Ý lệch công thức FE đề xuất, và đây là quyết định nghiệp vụ chứ không
+   phải hiểu nhầm.** FE đề nghị `max(0, reorderPoint − available)`. Trong repo này `resolveStatus`
+   xếp `LOW_STOCK` là dải **giữa** hai ngưỡng (`available > reorderPoint` nhưng `< safetyStock`), và
+   cấu hình thường gặp là `safetyStock ≥ reorderPoint` ⇒ công thức FE đề xuất trả **`0` cho mọi dòng
+   `LOW_STOCK`** — đúng những dòng cần con số đó nhất. Đang dùng
+   `max(0, max(safetyStock, reorderPoint) − available)`; với chính ví dụ số FE đưa (safety 20, reorder
+   100, available 77) hai công thức **cho cùng kết quả 23**, nên không có gì phải đàm phán lại trừ khi
+   FE đổi ý về convention ngưỡng.
+2. 🔴 **`left join fetch m.lot` trong `findRecentByWarehouseIds` là load-bearing, không phải tối ưu.**
+   Đổi thành inner join (rất dễ khi ai đó "dọn" ba dòng fetch cho đều nhau) làm **mọi** movement của
+   item không lot-tracked biến mất khỏi feed — mà phần lớn movement thật là loại đó. Nghiệm thu
+   mutation: **3/3** case của `StockMovementRepositoryIT` đỏ, trong khi `InventoryAlertServiceTest`
+   (mock repository) **vẫn xanh** — lần thứ năm repo gặp đúng bài học `R7` sau `§0.24`, `§0.27`,
+   `§0.28`, `§0.40`. Đó là lý do `StockMovementRepositoryIT` (**class IT thứ 17**) tồn tại.
+3. 🔴 **`Map.of()` ném NPE khi `get(null)`.** Movement ghi ngoài request của user có `created_by =
+   null`; nếu tra thẳng `usernames.get(movement.getCreatedBy())` thì batch map rỗng/immutable làm nổ
+   **cả** endpoint. Guard `getCreatedBy() == null ? null : …` có test riêng (mutation bỏ guard ⇒ 1 case
+   đỏ với `NullPointerException`).
+4. **`getAvailableQuantitiesByWarehouse` bị THAY, không phải bổ sung** — `getStockQuantitiesByWarehouse`
+   trả cả 4 số (`onHand`/`reserved`/`qualityHold`/`available`) trong **cùng một** query. Consumer duy
+   nhất của method cũ chính là dashboard, và nó cần cả bốn; giữ cả hai là hai query cho cùng dữ liệu
+   (`C14`). `StockAvailabilityByWarehouseProjection` đã xoá theo (orphan do chính thay đổi này tạo ra).
+5. **Không clamp `max(0, …)` cho availability** dù FE đề nghị. `chk_stock_balances_reserved_quantity`
+   (`V16`) + `chk_stock_balances_quality_hold_quantity` (`V56`) đã ép `reserved + qualityHold <=
+   quantity` trên **từng dòng** ⇒ tổng không thể âm. Clamp chỉ có tác dụng **che** một vi phạm
+   constraint nếu nó xảy ra thật — thà để lộ ra.
+6. **Limit kẹp `[1,20]` thay vì trả 400**, đúng tiền lệ `PageableFactory` (`A4`, `D7b.3`). Giá trị
+   **không parse được** (`?lowStockLimit=many`) vẫn là **400 `VALIDATION_ERROR`** qua handler
+   `MethodArgumentTypeMismatchException` — hai chuyện khác nhau, có test cho cả hai.
+7. **Mặc định giữ 10, không đổi thành 5 như FE đề xuất** — đổi mặc định là âm thầm thu hẹp payload của
+   một endpoint đang chạy; FE muốn 5 thì truyền `?lowStockLimit=5`. Đã nói rõ để FE phản hồi nếu muốn.
+8. **`referenceNo` (số chứng từ nghiệp vụ) cố ý CHƯA làm.** `referenceType` là text tự do do service
+   ghi (`WORK_ORDER`, `GOODS_RECEIPT`, `MANUAL_RECEIPT`, …) ⇒ resolve nó cần một lookup cross-module
+   **cho mỗi loại**, tức nhiều hướng phụ thuộc mới cho một field FE xếp vào nhóm "nên có". Không nằm
+   trong danh sách tối thiểu §4 của FE.
+9. **Không đụng `X-Plant-Id`.** `§5.6.1` bắt cross-check khi endpoint có **hai** nguồn plant;
+   `scopeType`/`scopeId` ở đây là đa hình (`COMPANY`/`PLANT`/`WAREHOUSE`) và bản thân nó **là** scope
+   được `@PreAuthorize` gác — không có giá trị thứ hai để đối chiếu.
+10. **`totalWarehouseCount` tính cả kho `INACTIVE`** (`OrganizationLookupService.resolveScope` không
+    lọc status) — giữ nguyên có chủ đích: hàng trong kho đã ngừng hoạt động vẫn là hàng có thật, và
+    `resolveScope` còn được MRP/reservation dùng chung nên đổi nó là đổi hành vi hoạch định.
+
+**Nghiệm thu mutation (3, đã revert — **3/3 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | `left join fetch m.lot` → `join fetch m.lot` | **3/3** `StockMovementRepositoryIT` | Unit test dùng mock **vẫn xanh** cùng lượt chạy ⇒ minh hoạ trực tiếp `R7`; đây là mutation giá trị nhất của lượt này |
+| 2 | `shortageQuantity` dùng `reorderPoint` một mình | **1** — `listAlerts_lineCarriesTheUnitTheAvailabilityTermsAndTheShortage` | Assert bằng **con số nghiệp vụ** (13 = max(20,8) − 7), không phải `isNotNull` (`R6`) |
+| 3 | Bỏ guard `getCreatedBy() == null` | **1** — `getDashboard_recentMovementsCarryLabelsAndResolveActorsInOneBatch` (`NullPointerException`) | Ledger row không có actor là trường hợp **thật**, không phải phòng thủ giả định |
+
+**Nghiệm thu:** `mvn -o clean verify` — **1009 case unit + 119 case IT / 17 class IT, failures = 0,
+errors = 0** (baseline trước: 998 unit + 115 IT / 16 class).
+
+**Smoke test HTTP thật** (`mvn -o spring-boot:run` port 8081, Postgres + Redis qua `docker-compose`,
+**không** phải Testcontainer). Dựng một fixture dùng-một-lần đúng theo "Definition of Ready" §9 của FE
+(1 company → 1 plant → 2 warehouse → 3 item, phủ đủ `OK` + `LOW_STOCK` + `REORDER_NEEDED` + 4 movement,
+trong đó **cùng một item ở hai kho** để chứng minh hai dòng độc lập):
+
+| Probe | Kết quả |
+|---|---|
+| `GET /reports/inventory-dashboard?scopeType=PLANT` | **200**, `X-Trace-Id: aeb44aafa5e14120`, `generatedAt` ISO, 3 alert line xếp `REORDER_NEEDED`(20) → `REORDER_NEEDED`(15) → `LOW_STOCK`(5) |
+| Nhãn trên `recentMovements[]` | `itemCode`/`itemName`/`uomCode`/`warehouseCode`/`warehouseName`/`actorUsername = "admin"` đủ, **không** cần gọi thêm API nào |
+| `scopeType=WAREHOUSE` + `lowStockLimit=2&movementLimit=2` | **200**, đúng 1 kho / 2 dòng / 2 movement (kẹp có tác dụng) |
+| Thiếu `scopeId` · `scopeType=GALAXY` | **400** `VALIDATION_ERROR` (kèm `errors[0].field`) |
+| `scopeId` không tồn tại | **404** `ENTITY_NOT_FOUND` |
+| Không gửi token | **401** `AUTHENTICATION_REQUIRED` |
+| `manager.a` (scope PLANT-A) gọi plant lạ | **403** `PERMISSION_DENIED` — không trả dữ liệu rỗng giả |
+
+> ⚠️ Fixture để lại trong DB dev (company `DASH<epoch>`): dữ liệu demo dùng-một-lần, không đụng dữ
+> liệu FE. Id cụ thể ghi trong `FE_SingleTask_Response.md` để FE dùng luôn làm scope demo.
+
+**Breaking changes — wire: có, hẹp.** `recentMovements[]` đổi từ `StockMovementResponse` sang
+`DashboardRecentMovementResponse`: **thêm** 7 field nhãn, **mất** `idempotencyKey` (chỉ mảng này; `GET
+/inventory/movements` **không đổi một dòng nào**). FE đang ở mock nên không có client nào đang đọc
+field đó. Alert line và `generatedAt` là thuần additive. **Java positional: có** —
+`InventoryAlertLineResponse` +5 component (cuối record), `InventoryDashboardResponse` +1 (`generatedAt`,
+cuối) và đổi kiểu phần tử `recentMovements`, `InventoryAlertService` constructor +1 tham số
+(`UserLookupService`), `InventoryAlertService.getDashboard` +2 tham số. Test cũ **sửa** theo `R10`,
+không xoá.
+
+---
+
+### 0.44 Trả Lời `live-data-audit.md`: Available Theo Lot Status + Idempotency Cho Planning Run (2026-08-14)
+
+**Không** phase, **không** permission mới, **không** endpoint mới. Migration **`V58`**. Nguồn:
+`live-data-audit.md` + `fixture-ids.json` (FE, cùng ngày) — FE seed dữ liệu live cho bộ slide và nêu
+**3 mục "Backend support required"**. Bất biến **`B116`** (`module/inventory`), **`B117`**
+(`module/planning`).
+
+> ⚠️ **Ba mục FE báo có ba kết cục khác nhau — đừng đọc lướt thành "sửa cả ba".** 1 bug thật, 1 gap
+> thật, **1 báo nhầm**. Mục #3 (convert suggestion "không atomic") **không có defect nào**; nó là hệ
+> quả nhìn thấy được của mục #2, và bằng chứng bác bỏ nằm ở dữ liệu thật, không phải ở suy luận.
+
+| # | FE báo | Kết luận | Bằng chứng quyết định |
+|---|---|---|---|
+| 1 | Lot `HOLD`/`REJECTED` vẫn báo available > 0 | 🔴 **Bug thật, đã sửa** | `StockBalance.availableQuantity()` là phép tính thuần theo dòng, **không đọc `lot.status`**; query DB xác nhận đúng số FE báo (HOLD → 2, REJECTED → 1). Trong khi `StockBalanceRepository.aggregate*` **có** lọc ⇒ **một hệ thống, hai con số** cho cùng lô hàng |
+| 2 | `POST /planning-runs` bỏ qua `Idempotency-Key` | 🟡 **Gap thật, đã implement** | `grep` module `planning` = **0** tham chiếu header; `mrp_runs` không có cột nào. 3 run trùng có thật trong DB. `best-practices.md A2` lại **đang hứa** MRP run có idempotency ⇒ tài liệu nói dối về code |
+| 3 | Convert suggestion không atomic | ✅ **KHÔNG phải lỗi, không sửa dòng nào** | `work_orders.planning_proposal_id` của WO họ trích dẫn trỏ tới suggestion `80e4985c` (run `EA182AFB`) — suggestion đó **đang `CONVERTED`** với reference đúng. Suggestion FE nhắc (`492763fd`) thuộc run **khác** (`63033D7C`), chưa từng convert: lần thử chết vì trùng `workOrderNo` và **rollback sạch** — đúng thiết kế |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Bug #1 sửa ở MAPPER, không sửa domain method — và đây là ranh giới an toàn, không phải lười.**
+   `StockBalance.availableQuantity()` có **15 call site**, trong đó **3 gate ghi tồn kho**
+   (`InventoryMovementService:561`, `WorkOrderExecutionSupport:104`, `MaterialReservationService:114`)
+   gọi nó **sau khi** đã tự validate lot status (`B3`) ⇒ sửa domain method **không** sửa được gì cho
+   chúng, nhưng **sẽ** làm đường QC `adjust` rút hàng khỏi lot `REJECTED` (`§0.13`) nổ
+   `INSUFFICIENT_STOCK`. Fix nằm ở `InventoryMapper.issuableQuantity`, dùng ở **cả 3** chỗ map response.
+2. 🔴 **`onHandQuantity` phải giữ số thật.** Hàng `HOLD` vẫn tồn tại vật lý — chỉ `availableQuantity`
+   về `0`. Giấu luôn on-hand là phá màn hình kiểm kê và biến một bug hiển thị thành một bug dữ liệu.
+3. **`qualityHoldQuantity` cố ý KHÔNG nhận lượng của lot `HOLD`** dù FE đề nghị. Cột đó là carrier QC
+   cho hàng **không** lot-tracked (`B2`/`V56`); nhồi thêm nghĩa thứ hai vào nó thì `REJECTED` vẫn
+   không thuộc "quality hold", nên FE vẫn phải đọc `lot.status` — tức đổi mà không đóng được gì.
+4. 🔴 **Bug #2 đẻ ra "bug" #3, và đó là bài học đáng nhớ nhất của lượt này:** mỗi run MRP sinh **một
+   bộ suggestion song song** cho cùng demand. Ba run trùng ⇒ ba bộ proposal; convert proposal của run
+   này rồi đọc proposal của run kia thì trông y hệt "transaction không atomic". Khi một client báo lỗi
+   nghiệp vụ "biến mất", hãy kiểm **id của bản ghi họ trích dẫn** trước khi đọc code — 2 câu SQL đã
+   bác bỏ toàn bộ mục #3.
+5. **Run `FAILED` vẫn chiếm key** (row ghi trước khi calculate, `run()` nuốt exception rồi đánh dấu
+   `FAILED`). Retry sau thất bại phải **đổi key**. Đã ghi javadoc + tài liệu FE, không để ngầm.
+6. **`saveAndFlush` cho row run đầu tiên**: key phải được chiếm ở DB **ngay**, nếu không một request
+   trùng key chạy song song sẽ tính hết cả run rồi mới đụng constraint — đúng thứ tính năng này sinh
+   ra để tránh (bài học save-vs-flush của `§0.39`, áp dụng lần thứ hai).
+7. **Header `Idempotency-Key` là TUỲ CHỌN.** `IdempotencySupport.normalizeKey` **ném lỗi** khi thiếu
+   key, nên chỉ được gọi trong nhánh có header — ép bắt buộc là breaking change với mọi client đang
+   chạy.
+8. **Hai phát hiện thêm trong artifact của FE** (họ chưa biết, đã báo lại):
+   `fixture-ids.json` ghi `planningRun = RUN-63033D7C` nhưng WO dùng cho slide lại sinh từ
+   `RUN-EA182AFB` ⇒ hai slide sẽ nói khác nhau về cùng một dòng công việc; và mojibake `BÃ...` **không
+   phải "legacy data"** mà do script seed của FE — `bom_headers.description` = `"Cấu trúc sản xuất
+   chuẩn cho " + <tên item>` với **tiền tố sạch, chỉ phần tên item hỏng**, trong khi `items.name` trong
+   DB sạch và backend **không có dòng code nào** ghép chuỗi đó (grep = 0 hit) ⇒ chuỗi hỏng do client
+   gửi lên, sửa tay vô ích vì reseed sẽ hỏng lại.
+
+**Nghiệm thu mutation (4, đã revert — **4/4 đụng `src/main` hoặc migration**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | `issuableQuantity` bỏ nhánh `status != AVAILABLE` | **7** — 6 case `InventoryMapperTest` + `InventoryLotServiceTest.list_lotOnHold_...` | Khoá ở **cả hai** tầng (mapper thuần và service thật), không phải chỉ một |
+| 2 | Bỏ nhánh replay khỏi `MrpRunService.run` | **2** — `run_replayedKeyWithSamePayload_...` (NPE vì chạy tiếp vào luồng đầy đủ), `run_replayedKeyWithDifferentPayload_...` | ⚠️ Case thứ ba đỏ vì `UnnecessaryStubbing`, **không** tính là kill (đúng cảnh báo `§0.22`) |
+| 3 | Giữ replay nhưng bỏ `ensureSamePayload` | **1** — `run_replayedKeyWithDifferentPayload_throwsIdempotencyConflictBeforeAnyWrite` | Replay đúng ≠ replay an toàn: thiếu vế này là **âm thầm** trả run cũ cho một payload khác |
+| 4 | Xoá `UNIQUE` khỏi `V58` (**migration**) | **1** — `FlywayMigrationIT.migrate_v58_...` | Bảo đảm thật nằm ở **DB**, không phải ở nhánh `if` trong service |
+
+**Nghiệm thu:** `mvn -o clean verify` — **1025 case unit + 120 case IT / 17 class IT, failures = 0,
+errors = 0** (baseline trước: 1009 unit + 119 IT). ⚠️ Docker Desktop **tắt giữa chừng** lần chạy đầu
+(`Could not find a valid Docker environment` ⇒ **mọi** class IT lỗi như nhau) — đúng bẫy `§0.41`; phải
+bật lại rồi đo lại, đừng đọc lần chạy đó như kết quả thật.
+
+**Smoke test HTTP thật** (`mvn -o spring-boot:run` port 8081, Postgres + Redis qua `docker-compose`) —
+đo trên **đúng** bản ghi FE trích dẫn, không phải fixture tự dựng:
+
+| Probe | Kết quả |
+|---|---|
+| `GET /inventory/lots?warehouseId=dc5d66e5-…` | HOLD `C2-DEMO-LOT-0810154309` → `available 0` (trước: `2`), `onHand` vẫn `2`; REJECTED `SLIDE-260814-FG-REJECTED` → `available 0`, `onHand` vẫn `1` |
+| Cùng warehouse, lot `AVAILABLE` (`FE0-LOT-2107`, `SLIDE-260814-FG-PARTIAL`) | **không đổi** (`5`, `3`) ⇒ sửa không quá tay |
+| `GET /inventory/balances?warehouseId=dc5d66e5-…` | y hệt — hai read model nay nói cùng một con số |
+| `POST /planning-runs` ×2 cùng key + payload | Cả hai trả **`RUN-CCBDDAFF`**, `count(mrp_runs)` 10 → **11** (trước đây sẽ là 12) |
+| Cùng key, đổi `horizonEndDate` | **409 `IDEMPOTENCY_CONFLICT`** |
+| **Không** gửi header | **201**, run mới `RUN-38B890AB`, `idempotency_key = NULL` ⇒ không hồi quy |
+| Trace id của request thành công | `692dcfbfcab04400` |
+
+**Breaking changes — wire: CÓ (hẹp nhưng thấy được trên UI).** `availableQuantity` của dòng lot
+`HOLD`/`REJECTED`/`EXPIRED` đổi từ số dương → `0` trên `GET /inventory/balances`,
+`GET /inventory/lots`, `GET /inventory/lots/{lotId}`. Là **sửa sai** (số cũ mâu thuẫn với chính
+MRP/dashboard của cùng hệ thống). `Idempotency-Key` trên `/planning-runs` là **tuỳ chọn** ⇒ **không**
+breaking. **Java positional:** `MrpRunService.run(...)` +1 tham số, constructor +1
+(`IdempotencySupport`). Test cũ **sửa** theo `R10`, không xoá.
+
+---
+
+### 0.45 Bộ Dữ Liệu Demo `VIETBIKE` + Sửa Lỗi P0 `MultipleBagFetchException` (2026-08-14)
+
+**Không** phase, **không** migration, **không** permission mới, **không** breaking change wire.
+Yêu cầu của user: *"seed full data lại từ đầu để chuẩn bị cho demo, đặt tên rõ ràng, đẹp, dễ đọc dễ
+nhớ"*. Bất biến bị sửa: mục 4 của `module/shift/CLAUDE.md` (viết lại).
+
+**Bốn quyết định chốt với user (`AskUserQuestion`) trước khi viết code:** seed **qua REST API** chứ
+không INSERT thẳng · phủ **đầy đủ mọi trạng thái** chứ không chỉ một luồng happy-path · chủ đề **nhà
+máy xe đạp** · **xoá sạch DB dựng lại từ đầu** (script cố ý **không** idempotent). Quyết định thứ
+năm phát sinh giữa chừng: **sửa lỗi backend** thay vì né trong dữ liệu seed.
+
+| Thành phần | Nội dung |
+|---|---|
+| `scripts/demo/seed-demo.sh` | Orchestrator, source lần lượt 15 stage trong **cùng một shell** |
+| `scripts/demo/lib/common.sh` | `call` / `call_expect` / `assert_status` / `remember` / date helper / guard |
+| `scripts/demo/lib/catalogue.sh` | **Toàn bộ** mã, tên, số lượng. Không có một lời gọi HTTP nào |
+| `scripts/demo/stages/*.sh` | 15 stage, từ preflight tới manifest |
+| `demo-ids.json` | 170 định danh, sinh lúc chạy (không commit) |
+| `docs/demo-dataset-guide.md` | Bảng tra cứu khi thuyết trình + kịch bản 8 phút |
+| `.gitattributes` | `*.sh text eol=lf` — CRLF trên dòng `set -euo pipefail` phá script theo kiểu trông như lỗi API |
+
+**🔴 Lỗi P0 do chính bộ dữ liệu này phát hiện — phần quan trọng nhất của lượt làm việc.**
+`WorkCalendarRepository.findWithWeeklyShiftsByWorkCalendarId` khai báo `@EntityGraph` gồm
+`"weeklyShifts.shift.breaks"` cạnh `"weeklyShifts"` ⇒ join-fetch **hai** bag ⇒
+`MultipleBagFetchException` ⇒ **mọi** `POST /work-orders/{id}/release` mà tổ sản xuất có gắn lịch,
+và lịch đó dùng ca **có giờ nghỉ**, trả **500 `INTERNAL_SERVER_ERROR`**. Tức là mọi lịch nhà máy
+thực tế. Sửa: bỏ `.breaks` khỏi graph, để nó lazy-load trong cùng transaction.
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Lần thứ BA repo dính đúng bẫy này** (sau `§0.27` `operations`+`componentLines`, `§0.29`
+   `weeklyShifts`+`exceptions`). Điểm khác của lần này, và là lý do nó lọt: hai lần trước **cả hai
+   bag nằm trên cùng một entity** nên nhìn graph là thấy; lần này bag thứ hai nằm **cách một
+   association** (`weeklyShifts.shift.breaks`). ⇒ Quy tắc: trước khi thêm path vào một
+   `@EntityGraph` đã có collection, **đi hết association** và hỏi path đó có giải ra `List` không —
+   đừng chỉ nhìn các field của entity gốc.
+2. 🔴 **Không test nào bắt được, và lý do đáng ghi hơn bản thân lỗi.** Unit test mock repository nên
+   **không bao giờ dựng câu query**; các `*IT` có sẵn tuy có `Shift` nhưng **không ca nào có
+   break**, nên bag thứ hai chưa từng bị chạm. Bộ dữ liệu demo là thứ đầu tiên trong repo có đủ
+   **ca có giờ nghỉ + lịch trỏ tới nó + một WO được release**. `WorkCalendarLookupServiceIT` (class
+   IT thứ **18**) là guard. Đây là bài học `R7` lần thứ **sáu** (sau `§0.24`, `§0.27`, `§0.28`,
+   `§0.40`, `§0.43`).
+3. ⚠️ **Bản nháp của bản sửa có một dòng thừa mà mutation đã bác bỏ.** Nó thêm
+   `weeklyShifts.forEach(w -> w.getShift().getBreaks().size())` vào `loadWithExceptions` kèm javadoc
+   khẳng định "thiếu dòng này sẽ âm thầm báo dư giờ làm". Chạy mutation bỏ dòng đó ⇒ **cả 4 case vẫn
+   xanh**: `WorkingWindowCalculator` chạy trong đúng transaction ấy và tự trigger load, đúng bằng số
+   query. Dòng đó chỉ **trông giống** biện pháp an toàn. Đã gỡ, javadoc viết lại theo sự thật đo
+   được. Bài học: một khẳng định trong comment cũng phải qua mutation như một assertion.
+4. 🔴 **Seed phải qua API, không INSERT thẳng** — mã chứng từ sinh ở `@PrePersist` (`B68`, `B79`),
+   `stock_balances` là **projection** của `stock_movements`, WO chụp ảnh BOM/routing lúc create
+   (`B12`, `B49`), `@Version`/`created_by`/audit do tầng service và AOP ghi. INSERT tay tạo ra những
+   dòng mà chính hệ thống **không bao giờ sinh ra được**.
+5. 🔴 **409 khi release KHÔNG chứng minh WO đã vào `BLOCKED`.** `WorkOrderService.release` có **ba**
+   guard và **hai** trong số đó ném cùng `STATE_CONFLICT`, nhưng chỉ guard material-readiness mới
+   persist `BLOCKED` (guard "BOM không có dòng nào" chạy trước và không persist gì). Vì thế mọi bước
+   trong stage 70 đều `assert_status` đọc lại sau khi gọi — thiếu nó thì script "chạy thành công"
+   trong khi WO nằm ở `DRAFT`.
+6. 🔴 **`reserveAutomatically` resolve phạm vi PLANT, không phải kho đầu ra của WO.** Muốn một WO
+   thiếu vật tư một cách chắc chắn thì component phải vắng mặt ở **mọi kho của nhà máy** — đó là vai
+   trò của `BANH-20` (không nhập kho ở đâu cả). Đừng "tiện tay" nhập kho cho nó.
+7. 🔴 **`READY` vs `WARNING` của đề xuất MRP do PHẠM VI KHO CỦA LƯỢT CHẠY quyết định, không phải do
+   vật tư.** `WARNING` chỉ đến từ `SYSTEM_FALLBACK_USED` = không có `ItemWarehouseSetting` `ACTIVE`
+   cho **kho của lượt chạy**. Bộ dữ liệu tạo đúng **một** dòng như vậy (`XE-PHO-26` @ `KHO-TP`,
+   hai ngưỡng bằng 0) để một lượt chạy cho ra cả hai trạng thái. Stage 99 **không được** ghi đè nó.
+8. **Ngưỡng cảnh báo tồn kho tính TỪ tồn khả dụng thật ở cuối lượt seed**, không hardcode: tới bước
+   đó reservation/issue/QC/goods-receipt đã dịch chuyển hết các con số, số cứng chọn từ đầu sẽ trôi
+   sang nhóm khác. Kết quả đo được: **7 `OK` / 4 `LOW_STOCK` / 5 `REORDER_NEEDED`**.
+9. **Mốc lịch neo vào "thứ Hai kế tiếp", không phải "hôm nay + N".** Bản đầu dùng `+2 ngày`, chạy
+   hôm thứ Sáu ⇒ rơi vào Chủ nhật ⇒ bảng năng lực báo quá tải vì **lý do nhàm chán** (không ai làm
+   hôm đó, capacity 0, `utilizationPercent` `null`) thay vì lý do cần minh hoạ. Và `TO-HAN` phải để
+   `capacityUnits = 1`: năng lực = phút làm việc **nhân** số tổ, để 4 thì 1240 phút tải trên 3540
+   phút năng lực = 35%, không quá tải. Sau khi sửa: **140.11%, `overload = true`**.
+10. **Hàm tạo entity phải set biến toàn cục `NEW_ID`, không được `echo` rồi gọi trong `$(...)`** —
+    command substitution chạy ở **subshell**, nên `remember` bên trong không lưu được gì về shell
+    cha: entity có thật trong DB nhưng biến mất khỏi `demo-ids.json`.
+11. **`extract` phải đọc stdin dạng bytes rồi decode UTF-8 tường minh.** `json.load(sys.stdin)` trên
+    Windows dùng code page ANSI (cp1252) và chết với `'charmap' codec can't decode byte 0x8d` —
+    nhưng chỉ khi byte đó tình cờ rơi vào payload, nên nó chạy đúng cả trăm lần rồi hỏng ở một cái
+    tên không ai sửa. Phát hiện lúc viết smoke test, không phải lúc seed.
+12. **Manifest lồng theo dấu chấm, mà username có dấu chấm** ⇒ `users.quanly.hanoi` bung thành
+    `users → quanly → hanoi`. Đã đổi: khoá là slug (`quanly_hanoi`), username thành **giá trị**.
+
+**Nghiệm thu mutation (2, đã revert — 2/2 đụng `src/main`):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Trả `"weeklyShifts.shift.breaks"` vào `@EntityGraph` | **4/4** `WorkCalendarLookupServiceIT` | Tái hiện **đúng** `MultipleBagFetchException` của lỗi production |
+| 2 | Bỏ vòng lặp `.size()` cho `breaks` khỏi `loadWithExceptions` | **0** — vẫn xanh | 🔴 Kết quả **giá trị nhất**: bác bỏ chính khẳng định trong bản nháp javadoc, dòng code đó là thừa. Xem hệ quả #3 |
+
+**Nghiệm thu:** `mvn -o test` — **1025 case unit / 127 class, failures = 0, errors = 0** (đúng bằng
+baseline `§0.44`, bản sửa không phá gì). `mvn -o verify` phần IT — **124 case IT / 18 class IT,
+failures = 0, errors = 0** (baseline: 120 IT / 17 class; `+4` IT từ `WorkCalendarLookupServiceIT`,
+class IT thứ 18).
+
+**Nghiệm thu bộ dữ liệu** (Postgres + Redis qua `docker compose`, backend thật, **không** phải
+Testcontainer) — census SQL trên mọi bảng chứng từ cho thấy **đủ toàn bộ** trạng thái mục tiêu:
+
+| Bảng | Trạng thái có mặt |
+|---|---|
+| `work_orders` | DRAFT · PLANNED · BLOCKED · RELEASED · IN_PROGRESS · COMPLETED · CLOSED · CANCELLED (**đủ 8**) |
+| `production_receipts` | DRAFT · PENDING_APPROVAL · APPROVED · REJECTED (**đủ 4**) |
+| `inventory_lots` | AVAILABLE · HOLD · REJECTED |
+| `sales_orders` | DRAFT · CONFIRMED · IN_PRODUCTION · PARTIALLY_FULFILLED · FULFILLED · CANCELLED (**đủ 6**) |
+| `purchase_requisitions` | DRAFT · APPROVED · CONVERTED · REJECTED · CANCELLED (**đủ 5**) |
+| `purchase_orders` | DRAFT · SENT · PARTIALLY_RECEIVED · RECEIVED · CANCELLED (**đủ 5**) |
+| `goods_receipts` | POSTED · CANCELLED |
+| `supply_suggestions` | status DRAFT/APPROVED/REJECTED/CONVERTED · exception READY/WARNING/BLOCKED · type MAKE/BUY |
+| `planning_demands` | OPEN · CANCELLED |
+
+Smoke API: dashboard 7/4/5 ba nhóm cảnh báo · lô `HOLD`/`REJECTED` báo `available = 0` mà `onHand`
+vẫn còn hàng · bảng năng lực có ngày `TO-HAN` **140.11% quá tải** và `TO-KCS` `capacity = null` ·
+`SO-1004` `PARTIALLY_FULFILLED` 6/10 · variance ra tiền thật (chuẩn 116,4tr, thực tế 17,3tr) ·
+`quanly.saigon` gọi plant HANOI trả **403**, gọi plant của mình trả **200**.
+
+**Kiểm tra mojibake:** `items` / `bom_headers` / `sales_orders` đều **0 dòng** khớp `Ã|Â|á»|áº`;
+tên tiếng Việt hiện đúng dấu trong DB. Script còn tự kiểm round-trip UTF-8 ngay sau khi tạo công ty
+đầu tiên và **dừng lại** nếu shell mã hoá sai — đóng đúng lỗi FE từng mắc (`§0.44` hệ quả #8).
+
+**Trạng thái KHÔNG seed được, đã kiểm và ghi rõ trong guide** (không phải thiếu sót):
+`PlanningDemandStatus.CONSUMED` (không dòng code nào set), `MrpRunStatus.FAILED`,
+`ProductionReceiptStatus.CANCELLED` (enum khai báo nhưng không endpoint nào dẫn tới),
+`LotStatus.EXPIRED`, nhập mua hàng theo số sê-ri.
 
 ---
 
@@ -2294,6 +2860,7 @@ com.erp.manufacturing
 | Bất biến Costing B91-B92 + entry points `ItemStandardCostLookupService` (`P3`) | `src/main/java/com/erp/manufacturing/module/costing/CLAUDE.md` | Chỉ khi chạm `module/costing/**` |
 | **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
 | **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
+| **Bộ dữ liệu demo** (chủ đề nhà máy xe đạp `VIETBIKE`: tài khoản, cây BOM, ma trận trạng thái, kịch bản thuyết trình, các trạng thái **không** seed được) | `docs/demo-dataset-guide.md` | Đọc thủ công — cặp với `scripts/demo/seed-demo.sh`. 🔴 Sửa dữ liệu demo thì sửa **`scripts/demo/lib/catalogue.sh`**, không sửa các file trong `stages/` |
 | **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và **5 câu hỏi đang chờ FE trả lời** — `C2-1`/`C2-2` bị chặn cho tới khi có câu 1 và 2 |
 
 > 🔴 **`docs/api-guide-for-frontend.md` là tài liệu FE đang dùng để wire API.** Phase nào đổi

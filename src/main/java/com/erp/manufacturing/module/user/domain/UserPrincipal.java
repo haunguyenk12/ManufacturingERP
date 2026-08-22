@@ -6,7 +6,9 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,6 +24,8 @@ public class UserPrincipal implements UserDetails {
     private final String username;
     private final String password;
     private final boolean active;
+    private final long authVersion;
+    private final boolean globalAdmin;
     private final Collection<? extends GrantedAuthority> authorities;
 
     public UserPrincipal(User user) {
@@ -29,22 +33,40 @@ public class UserPrincipal implements UserDetails {
     }
 
     public UserPrincipal(User user, Collection<String> dynamicRoleCodes, Collection<String> permissionCodes) {
+        this(user, dynamicRoleCodes, permissionCodes, false);
+    }
+
+    public UserPrincipal(User user,
+                         Collection<String> dynamicRoleCodes,
+                         Collection<String> permissionCodes,
+                         boolean verifiedDynamicGlobalAdmin) {
         this.userId    = user.getUserId();
         this.username  = user.getUsername();
         this.password  = user.getPassword();
         this.active    = user.isActive();
+        this.authVersion = user.getAuthVersion();
+        this.globalAdmin = verifiedDynamicGlobalAdmin || safe(user.getRoles()).stream()
+                .anyMatch(UserPrincipal::isAuthoritativeGlobalAdminRole);
 
         Set<String> authorityNames = new HashSet<>();
-        user.getRoles().stream()
-                .map(role -> role.getCode() != null ? role.getCode() : role.getName())
+        safe(user.getRoles()).stream()
+                .filter(role -> !isReservedAdminCode(role.getCode()))
+                .map(com.erp.manufacturing.module.organization.domain.Role::getCode)
                 .map(UserPrincipal::toRoleAuthority)
+                .filter(name -> name != null)
                 .forEach(authorityNames::add);
-        dynamicRoleCodes.stream()
+        safe(dynamicRoleCodes).stream()
+                .filter(code -> !isReservedAdminCode(code))
                 .map(UserPrincipal::toRoleAuthority)
+                .filter(name -> name != null)
                 .forEach(authorityNames::add);
-        permissionCodes.stream()
+        safe(permissionCodes).stream()
                 .map(UserPrincipal::toPermissionAuthority)
+                .filter(name -> name != null)
                 .forEach(authorityNames::add);
+        if (globalAdmin) {
+            authorityNames.add("ROLE_ADMIN");
+        }
 
         this.authorities = authorityNames.stream()
                 .map(SimpleGrantedAuthority::new)
@@ -52,13 +74,40 @@ public class UserPrincipal implements UserDetails {
     }
 
     private static String toRoleAuthority(String roleCode) {
-        String normalized = roleCode.trim().toUpperCase();
+        if (roleCode == null || roleCode.isBlank()) {
+            return null;
+        }
+        String normalized = roleCode.trim().toUpperCase(Locale.ROOT);
         return normalized.startsWith("ROLE_") ? normalized : "ROLE_" + normalized;
     }
 
     private static String toPermissionAuthority(String permissionCode) {
-        String normalized = permissionCode.trim().toUpperCase();
+        if (permissionCode == null || permissionCode.isBlank()) {
+            return null;
+        }
+        String normalized = permissionCode.trim().toUpperCase(Locale.ROOT);
         return normalized.startsWith("PERM_") ? normalized : "PERM_" + normalized;
+    }
+
+    private static boolean isAuthoritativeGlobalAdminRole(
+            com.erp.manufacturing.module.organization.domain.Role role) {
+        return role != null
+                && role.isSystem()
+                && role.isActive()
+                && role.getCompanyId() == null
+                && isReservedAdminCode(role.getCode());
+    }
+
+    private static boolean isReservedAdminCode(String code) {
+        if (code == null) {
+            return false;
+        }
+        String normalized = code.trim().toUpperCase(Locale.ROOT);
+        return normalized.equals("ADMIN") || normalized.equals("ROLE_ADMIN");
+    }
+
+    private static <T> Collection<T> safe(Collection<T> values) {
+        return values == null ? Collections.emptySet() : values;
     }
 
     @Override public Collection<? extends GrantedAuthority> getAuthorities() { return authorities; }

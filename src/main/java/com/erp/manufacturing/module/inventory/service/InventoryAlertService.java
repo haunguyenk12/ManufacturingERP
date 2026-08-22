@@ -1,16 +1,17 @@
 package com.erp.manufacturing.module.inventory.service;
 
 import com.erp.manufacturing.module.inventory.domain.*;
+import com.erp.manufacturing.module.inventory.dto.DashboardRecentMovementResponse;
 import com.erp.manufacturing.module.inventory.dto.InventoryAlertLineResponse;
 import com.erp.manufacturing.module.inventory.dto.InventoryDashboardResponse;
 import com.erp.manufacturing.module.inventory.dto.InventoryDashboardShortageSummaryResponse;
-import com.erp.manufacturing.module.inventory.dto.StockMovementResponse;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.organization.service.OrganizationScopeResolution;
+import com.erp.manufacturing.module.user.service.UserLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,13 +27,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InventoryAlertService {
 
-    private static final int DASHBOARD_ALERT_LIMIT = 10;
-    private static final int RECENT_MOVEMENT_LIMIT = 10;
+    static final int DEFAULT_DASHBOARD_LIMIT = 10;
+    static final int MAX_DASHBOARD_LIMIT = 20;
 
     private final ItemWarehouseSettingRepository settingRepository;
     private final InventoryAvailabilityService availabilityService;
     private final OrganizationLookupService organizationLookupService;
     private final StockMovementRepository stockMovementRepository;
+    private final UserLookupService userLookupService;
     private final InventoryMapper mapper;
 
     @Transactional(readOnly = true)
@@ -45,21 +48,22 @@ public class InventoryAlertService {
                 .toList();
     }
 
+    /**
+     * @param lowStockLimit how many alert lines to return, clamped to {@code [1, 20]};
+     *        {@code null} means {@value #DEFAULT_DASHBOARD_LIMIT}
+     * @param movementLimit how many ledger rows to return, same clamping
+     */
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', #scopeType.name(), #scopeId)")
-    public InventoryDashboardResponse getDashboard(ScopeResourceType scopeType, UUID scopeId) {
+    public InventoryDashboardResponse getDashboard(ScopeResourceType scopeType,
+                                                   UUID scopeId,
+                                                   Integer lowStockLimit,
+                                                   Integer movementLimit) {
         OrganizationScopeResolution scope = organizationLookupService.resolveScope(scopeType, scopeId);
         List<InventoryAlertLineResponse> lines = buildAlertLines(scope);
         List<InventoryAlertLineResponse> actionableLines = lines.stream()
                 .filter(line -> !InventoryAlertStatus.OK.name().equals(line.status()))
-                .limit(DASHBOARD_ALERT_LIMIT)
-                .toList();
-
-        List<StockMovementResponse> recentMovements = scope.warehouseIds().isEmpty()
-                ? List.of()
-                : stockMovementRepository.findRecentByWarehouseIds(
-                        scope.warehouseIds(), PageRequest.of(0, RECENT_MOVEMENT_LIMIT)).stream()
-                .map(mapper::toResponse)
+                .limit(clampLimit(lowStockLimit))
                 .toList();
 
         return new InventoryDashboardResponse(
@@ -73,7 +77,42 @@ public class InventoryAlertService {
                 countByStatus(lines, InventoryAlertStatus.REORDER_NEEDED),
                 buildShortageSummary(lines),
                 actionableLines,
-                recentMovements);
+                loadRecentMovements(scope, clampLimit(movementLimit)),
+                Instant.now());
+    }
+
+    private int clampLimit(Integer requested) {
+        if (requested == null) {
+            return DEFAULT_DASHBOARD_LIMIT;
+        }
+        return Math.max(1, Math.min(requested, MAX_DASHBOARD_LIMIT));
+    }
+
+    /**
+     * Two queries for the whole block regardless of page size (rule C14): the ledger page itself, then
+     * one batch lookup that turns {@code created_by} into a username.
+     */
+    private List<DashboardRecentMovementResponse> loadRecentMovements(OrganizationScopeResolution scope, int limit) {
+        if (scope.warehouseIds().isEmpty()) {
+            return List.of();
+        }
+
+        List<StockMovement> movements = stockMovementRepository.findRecentByWarehouseIds(
+                scope.warehouseIds(), PageRequest.of(0, limit));
+        if (movements.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, String> usernames = userLookupService.findUsernames(movements.stream()
+                .map(StockMovement::getCreatedBy)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet()));
+
+        return movements.stream()
+                .map(movement -> mapper.toDashboardMovementResponse(
+                        movement,
+                        movement.getCreatedBy() == null ? null : usernames.get(movement.getCreatedBy())))
+                .toList();
     }
 
     private List<InventoryAlertLineResponse> buildAlertLines(OrganizationScopeResolution scope) {
@@ -90,21 +129,23 @@ public class InventoryAlertService {
         Set<UUID> itemIds = settings.stream()
                 .map(setting -> setting.getItem().getItemId())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<InventoryAvailabilityService.ItemWarehouseAvailabilityKey, BigDecimal> availableByItemWarehouse =
-                availabilityService.getAvailableQuantitiesByWarehouse(itemIds, scope.warehouseIds());
+        Map<InventoryAvailabilityService.ItemWarehouseAvailabilityKey,
+                InventoryAvailabilityService.WarehouseStockQuantity> quantitiesByItemWarehouse =
+                availabilityService.getStockQuantitiesByWarehouse(itemIds, scope.warehouseIds());
 
         return settings.stream()
-                .map(setting -> toAlertLine(setting, availableByItemWarehouse.getOrDefault(
+                .map(setting -> toAlertLine(setting, quantitiesByItemWarehouse.getOrDefault(
                         new InventoryAvailabilityService.ItemWarehouseAvailabilityKey(
                                 setting.getItem().getItemId(),
                                 setting.getWarehouse().getWarehouseId()),
-                        BigDecimal.ZERO)))
+                        InventoryAvailabilityService.WarehouseStockQuantity.zero())))
                 .sorted(alertComparator())
                 .toList();
     }
 
-    private InventoryAlertLineResponse toAlertLine(ItemWarehouseSetting setting, BigDecimal availableQuantity) {
-        InventoryAlertStatus status = resolveStatus(setting, availableQuantity);
+    private InventoryAlertLineResponse toAlertLine(ItemWarehouseSetting setting,
+                                                   InventoryAvailabilityService.WarehouseStockQuantity quantity) {
+        InventoryAlertStatus status = resolveStatus(setting, quantity.availableQuantity());
         return new InventoryAlertLineResponse(
                 setting.getSettingId(),
                 setting.getItem().getItemId(),
@@ -116,8 +157,13 @@ public class InventoryAlertService {
                 setting.getSafetyStock(),
                 setting.getReorderPoint(),
                 setting.getLeadTimeDays(),
-                availableQuantity,
-                status.name());
+                quantity.availableQuantity(),
+                status.name(),
+                setting.getItem().getUnit(),
+                quantity.onHandQuantity(),
+                quantity.reservedQuantity(),
+                quantity.qualityHoldQuantity(),
+                shortageQuantity(setting, quantity.availableQuantity()));
     }
 
     private InventoryAlertStatus resolveStatus(ItemWarehouseSetting setting, BigDecimal availableQuantity) {
@@ -128,6 +174,16 @@ public class InventoryAlertService {
             return InventoryAlertStatus.LOW_STOCK;
         }
         return InventoryAlertStatus.OK;
+    }
+
+    /**
+     * How much has to be replenished for the line to reach {@code OK}, which means clearing
+     * <b>both</b> thresholds — not only the reorder point. Using the reorder point alone would report
+     * {@code 0} for every {@code LOW_STOCK} line, and {@code LOW_STOCK} is by definition the band
+     * between the two thresholds.
+     */
+    private BigDecimal shortageQuantity(ItemWarehouseSetting setting, BigDecimal availableQuantity) {
+        return positiveDifference(setting.getSafetyStock().max(setting.getReorderPoint()), availableQuantity);
     }
 
     private long countByStatus(List<InventoryAlertLineResponse> lines, InventoryAlertStatus status) {
@@ -160,9 +216,15 @@ public class InventoryAlertService {
         return difference.compareTo(BigDecimal.ZERO) > 0 ? difference : BigDecimal.ZERO;
     }
 
+    /**
+     * Worst first: {@code REORDER_NEEDED} before {@code LOW_STOCK} before {@code OK}, then the largest
+     * shortage, then a stable alphabetical fallback so two equally urgent lines never swap places
+     * between calls.
+     */
     private Comparator<InventoryAlertLineResponse> alertComparator() {
         return Comparator
                 .comparingInt((InventoryAlertLineResponse line) -> statusRank(line.status()))
+                .thenComparing(InventoryAlertLineResponse::shortageQuantity, Comparator.reverseOrder())
                 .thenComparing(InventoryAlertLineResponse::itemCode)
                 .thenComparing(InventoryAlertLineResponse::warehouseCode);
     }

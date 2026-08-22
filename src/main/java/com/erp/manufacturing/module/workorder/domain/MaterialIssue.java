@@ -48,9 +48,21 @@ public class MaterialIssue extends BaseEntity {
     @Column(name = "payload_hash", length = 64)
     private String payloadHash;
 
-    @Column(name = "posted_at", nullable = false)
+    @Column(name = "requested_at", nullable = false)
     @Builder.Default
-    private Instant postedAt = Instant.now();
+    private Instant requestedAt = Instant.now();
+
+    @Column(name = "posted_at")
+    private Instant postedAt;
+
+    @Column(name = "decided_at")
+    private Instant decidedAt;
+
+    @Column(name = "decided_by")
+    private UUID decidedBy;
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
 
     /**
      * Business traceability, persisted on the document (spec §4). Not the {@code X-Trace-Id}
@@ -83,5 +95,23 @@ public class MaterialIssue extends BaseEntity {
         if (code == null) {
             code = "MI-" + issueId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
         }
+    }
+
+    public boolean isPendingApproval() {
+        return status == MaterialIssueStatus.PENDING_APPROVAL;
+    }
+
+    public void markPosted(Instant now, UUID actor) {
+        status = MaterialIssueStatus.POSTED;
+        postedAt = now;
+        decidedAt = now;
+        decidedBy = actor;
+    }
+
+    public void reject(Instant now, UUID actor, String reason) {
+        status = MaterialIssueStatus.REJECTED;
+        decidedAt = now;
+        decidedBy = actor;
+        rejectionReason = reason;
     }
 }

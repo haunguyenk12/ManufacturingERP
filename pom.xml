@@ -24,6 +24,7 @@
         <springdoc.version>2.5.0</springdoc.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <lombok.version>1.18.32</lombok.version>
+        <poi.version>5.5.1</poi.version>
     </properties>
 
     <dependencies>
@@ -108,6 +109,22 @@
             <version>${springdoc.version}</version>
         </dependency>
 
+        <!--
+          ── Apache POI (.xlsx) ──
+          Spreadsheet import/export. Chosen over EasyExcel because that library binds columns to a
+          POJO through @ExcelProperty annotations, i.e. the customer's column names would live in
+          Java; this importer keeps the mapping in data (import_profiles) so a new file shape is a
+          row, not a class. Chosen over spring-batch-excel because that wraps POI anyway while
+          dragging in a JobRepository and its BATCH_* tables, duplicating the restart/progress
+          bookkeeping that import_runs/import_rows already do — and expose to the user.
+          poi-ooxml pulls in poi itself; the version is not managed by Spring Boot, hence explicit.
+        -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+
         <!-- ── Lombok ── -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -170,6 +187,17 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+
+            <!-- Tests must never inherit a developer's local dev profile or .env file. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <spring.profiles.active>test</spring.profiles.active>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
 

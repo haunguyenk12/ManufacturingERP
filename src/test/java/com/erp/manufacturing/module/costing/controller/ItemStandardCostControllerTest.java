@@ -75,7 +75,7 @@ class ItemStandardCostControllerTest {
         when(itemStandardCostService.upsert(eq(COMPANY_ID), eq(ITEM_ID), any(ItemStandardCostRequest.class)))
                 .thenReturn(sampleResponse());
 
-        mockMvc.perform(put("/api/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
+        mockMvc.perform(put("/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"materialCost":5,"laborCost":2,"overheadCost":1}
@@ -89,7 +89,7 @@ class ItemStandardCostControllerTest {
     @Test
     @DisplayName("upsert: negative materialCost returns 400 VALIDATION_ERROR with the field name")
     void upsert_negativeMaterialCost_returns400WithFieldError() throws Exception {
-        mockMvc.perform(put("/api/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
+        mockMvc.perform(put("/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"materialCost":-1,"laborCost":2,"overheadCost":1}
@@ -107,7 +107,7 @@ class ItemStandardCostControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Item standard cost not found for item: " + ITEM_ID));
 
-        mockMvc.perform(get("/api/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost"))
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -118,7 +118,7 @@ class ItemStandardCostControllerTest {
         when(itemStandardCostService.list(eq(COMPANY_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/companies/" + COMPANY_ID + "/items/standard-costs"))
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items/standard-costs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].itemCode").value("RM-001"))
@@ -136,7 +136,7 @@ class ItemStandardCostControllerTest {
         when(itemStandardCostService.list(eq(COMPANY_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/companies/" + COMPANY_ID + "/items/standard-costs").param("size", "500"))
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items/standard-costs").param("size", "500"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.size").value(100));
     }

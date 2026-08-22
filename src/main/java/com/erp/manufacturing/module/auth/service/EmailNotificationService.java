@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 public class EmailNotificationService {
 
     public void sendPasswordResetEmail(String email, String resetToken) {
-        log.info("[EMAIL-MOCK] Password reset requested for {} — token={} (valid 15m). "
-                + "Frontend reset link: /reset-password?token={}", email, resetToken, resetToken);
+        // resetToken is a bearer credential and must never enter application/provider logs.
+        log.info("[EMAIL-MOCK] Password reset notification queued for {} (token redacted)", email);
     }
 }

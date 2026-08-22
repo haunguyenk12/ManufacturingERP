@@ -22,5 +22,9 @@ public record MaterialIssueResponse(
          */
         String createdByUsername,
         String note,
-        List<MaterialIssueLineResponse> lines
+        List<MaterialIssueLineResponse> lines,
+        Instant requestedAt,
+        Instant decidedAt,
+        UUID decidedBy,
+        String rejectionReason
 ) {}

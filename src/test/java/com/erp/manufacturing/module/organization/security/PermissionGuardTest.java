@@ -13,10 +13,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -82,7 +84,7 @@ class PermissionGuardTest {
     }
 
     @Test
-    void plantScopeAllowsWarehouseAccess() {
+    void plantScopedInventoryReadAllowsWarehouseAccess() {
         UUID userId = UUID.randomUUID();
         UUID companyId = UUID.randomUUID();
         UUID plantId = UUID.randomUUID();
@@ -90,16 +92,16 @@ class PermissionGuardTest {
         Authentication auth = auth(userId);
 
         when(assignmentRepository.existsActiveResourcePermission(
-                eq(userId), eq("PERM_ORG_READ"), eq(ScopeResourceType.WAREHOUSE), eq(warehouseId), any(Instant.class),
+                eq(userId), eq("PERM_INVENTORY_READ"), eq(ScopeResourceType.WAREHOUSE), eq(warehouseId), any(Instant.class),
                 eq(AssignmentStatus.ACTIVE), eq(RoleStatus.ACTIVE), eq(OrganizationStatus.ACTIVE), eq(OrganizationStatus.ACTIVE)))
                 .thenReturn(false);
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse(warehouseId, plantId, companyId)));
         when(assignmentRepository.existsActiveResourcePermission(
-                eq(userId), eq("PERM_ORG_READ"), eq(ScopeResourceType.PLANT), eq(plantId), any(Instant.class),
+                eq(userId), eq("PERM_INVENTORY_READ"), eq(ScopeResourceType.PLANT), eq(plantId), any(Instant.class),
                 eq(AssignmentStatus.ACTIVE), eq(RoleStatus.ACTIVE), eq(OrganizationStatus.ACTIVE), eq(OrganizationStatus.ACTIVE)))
                 .thenReturn(true);
 
-        assertThat(guard.hasResourceAccess(auth, "PERM_ORG_READ", "WAREHOUSE", warehouseId)).isTrue();
+        assertThat(guard.hasResourceAccess(auth, "PERM_INVENTORY_READ", "WAREHOUSE", warehouseId)).isTrue();
     }
 
     @Test
@@ -135,10 +137,45 @@ class PermissionGuardTest {
         assertThat(guard.hasResourceAccess(auth, "PERM_ORG_READ", "WAREHOUSE", otherWarehouseId)).isFalse();
     }
 
+    @Test
+    void plantScopedItemPermissionAllowsSharedItemMasterOnlyInOwningCompany() {
+        UUID userId = UUID.randomUUID();
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        UUID otherCompanyId = UUID.randomUUID();
+        Authentication auth = auth(userId);
+
+        when(assignmentRepository.existsActiveResourcePermission(
+                eq(userId), eq("PERM_ITEM_READ"), eq(ScopeResourceType.COMPANY), eq(companyId), any(Instant.class),
+                eq(AssignmentStatus.ACTIVE), eq(RoleStatus.ACTIVE), eq(OrganizationStatus.ACTIVE), eq(OrganizationStatus.ACTIVE)))
+                .thenReturn(false);
+        when(plantRepository.findByCompanyCompanyId(eq(companyId), any()))
+                .thenReturn(new PageImpl<>(List.of(plant(plantId, companyId))));
+        when(assignmentRepository.existsActiveResourcePermission(
+                eq(userId), eq("PERM_ITEM_READ"), eq(ScopeResourceType.PLANT), eq(plantId), any(Instant.class),
+                eq(AssignmentStatus.ACTIVE), eq(RoleStatus.ACTIVE), eq(OrganizationStatus.ACTIVE), eq(OrganizationStatus.ACTIVE)))
+                .thenReturn(true);
+
+        assertThat(guard.hasCompanyOrPlantAccess(auth, "PERM_ITEM_READ", companyId)).isTrue();
+
+        when(assignmentRepository.existsActiveResourcePermission(
+                eq(userId), eq("PERM_ITEM_READ"), eq(ScopeResourceType.COMPANY), eq(otherCompanyId), any(Instant.class),
+                eq(AssignmentStatus.ACTIVE), eq(RoleStatus.ACTIVE), eq(OrganizationStatus.ACTIVE), eq(OrganizationStatus.ACTIVE)))
+                .thenReturn(false);
+        when(plantRepository.findByCompanyCompanyId(eq(otherCompanyId), any()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        assertThat(guard.hasCompanyOrPlantAccess(auth, "PERM_ITEM_READ", otherCompanyId)).isFalse();
+    }
+
     private Authentication authWithLegacyRole(String roleName) {
         Role role = Role.builder()
                 .roleId(UUID.randomUUID())
+                .code(roleName)
                 .name(roleName)
+                .companyId(null)
+                .system(true)
+                .status(RoleStatus.ACTIVE)
                 .build();
         User user = user(UUID.randomUUID(), Set.of(role));
         UserPrincipal principal = new UserPrincipal(user);

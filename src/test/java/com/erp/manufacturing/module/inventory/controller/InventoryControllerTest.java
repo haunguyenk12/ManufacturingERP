@@ -89,7 +89,7 @@ class InventoryControllerTest {
         when(inventoryService.receive(any(StockReceiveRequest.class), eq("KEY-1")))
                 .thenReturn(movementResponse("KEY-1"));
 
-        mockMvc.perform(post("/api/v1/inventory/receive")
+        mockMvc.perform(post("/v1/inventory/receive")
                         .header("Idempotency-Key", "KEY-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -106,7 +106,7 @@ class InventoryControllerTest {
         when(inventoryService.receive(any(StockReceiveRequest.class), eq(null)))
                 .thenReturn(movementResponse(null));
 
-        mockMvc.perform(post("/api/v1/inventory/receive")
+        mockMvc.perform(post("/v1/inventory/receive")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"itemId":"%s","warehouseId":"%s","quantity":10}
@@ -125,14 +125,14 @@ class InventoryControllerTest {
                 {"itemId":"%s","warehouseId":"%s","quantity":10}
                 """.formatted(ITEM_ID, WAREHOUSE_ID);
 
-        String firstResponse = mockMvc.perform(post("/api/v1/inventory/receive")
+        String firstResponse = mockMvc.perform(post("/v1/inventory/receive")
                         .header("Idempotency-Key", "KEY-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        String secondResponse = mockMvc.perform(post("/api/v1/inventory/receive")
+        String secondResponse = mockMvc.perform(post("/v1/inventory/receive")
                         .header("Idempotency-Key", "KEY-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -151,7 +151,7 @@ class InventoryControllerTest {
         when(inventoryService.issue(any(StockIssueRequest.class), eq(null)))
                 .thenThrow(new AppException(BusinessErrorCode.INSUFFICIENT_STOCK));
 
-        mockMvc.perform(post("/api/v1/inventory/issue")
+        mockMvc.perform(post("/v1/inventory/issue")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"itemId":"%s","warehouseId":"%s","quantity":10}
@@ -165,14 +165,15 @@ class InventoryControllerTest {
     void getBalances_returns200PagedResult() throws Exception {
         StockBalanceResponse balance = new StockBalanceResponse(
                 UUID.randomUUID(), ITEM_ID, WAREHOUSE_ID, null, null,
-                BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN, Instant.now());
+                BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.TEN, Instant.now());
         Page<StockBalanceResponse> page = new PageImpl<>(List.of(balance));
         when(inventoryService.listBalances(eq(WAREHOUSE_ID), eq(null), any()))
                 .thenReturn(PageResult.from(page));
 
-        mockMvc.perform(get("/api/v1/inventory/balances").param("warehouseId", WAREHOUSE_ID.toString()))
+        mockMvc.perform(get("/v1/inventory/balances").param("warehouseId", WAREHOUSE_ID.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.result.content[0].itemId").value(ITEM_ID.toString()));
+                .andExpect(jsonPath("$.result.content[0].itemId").value(ITEM_ID.toString()))
+                .andExpect(jsonPath("$.result.content[0].qualityHoldQuantity").value(0));
     }
 }

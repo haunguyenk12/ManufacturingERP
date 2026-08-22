@@ -71,6 +71,22 @@ chứng minh permission **có dòng trong bảng `permissions`**, còn "được
 
 ---
 
+## FE-4 5C — Item Master permission contract (`V57`)
+
+Item Master không còn dùng chung `PERM_INVENTORY_READ/MANAGE` với tồn kho. Wire contract chính thức:
+
+| Permission | ADMIN | MANAGER | OPERATOR | Phạm vi |
+|---|:---:|:---:|:---:|---|
+| `PERM_ITEM_READ` | ✅ | ✅ | ✅ | Company hoặc một Plant thuộc Company chứa Item |
+| `PERM_ITEM_MANAGE` | ✅ | ✅ | ❌ | Company hoặc một Plant thuộc Company chứa Item |
+
+Item là master data dùng chung cho các Plant trong cùng Company. Vì vậy assignment ở `PLANT-A` được
+đọc Item của Company chứa `PLANT-A`, nhưng không mở Item của Company khác. `PERM_INVENTORY_*` tiếp tục
+chỉ dùng cho stock balance, lot, movement và item-warehouse setting. `V57` sao chép grant từ hai quyền
+Inventory cũ sang hai quyền Item mới để giữ nguyên custom role đã cấu hình trước migration.
+
+---
+
 ## 🛡️ ADMIN
 
 **Trách nhiệm:** Cấu hình hệ thống, quản lý tổ chức và kiểm soát truy cập.  
@@ -79,7 +95,7 @@ ADMIN **không** can thiệp vào luồng sản xuất hay mua hàng.
 ### Master Data
 | Quyền | Mô tả |
 |-------|-------|
-| `ITEM_WRITE` | Tạo / sửa / vô hiệu Item (vật tư, bán thành phẩm, thành phẩm) |
+| `PERM_ITEM_MANAGE` | Tạo / sửa / activate / vô hiệu Item (vật tư, bán thành phẩm, thành phẩm) |
 | `LOT_WRITE` | Quản lý Lot/Batch: trạng thái AVAILABLE · HOLD · REJECTED · EXPIRED |
 | `BOM_WRITE` | Tạo / sửa BOM Header & BOM Lines |
 | `SUPPLIER_WRITE` | Tạo / sửa Supplier Master và Item Supplier |
@@ -117,7 +133,8 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 ### Master Data (View & Manage)
 | Quyền | Mô tả |
 |-------|-------|
-| `ITEM_READ` | Xem danh mục vật tư, cài đặt item |
+| `PERM_ITEM_READ` | Xem danh mục Item của Company |
+| `PERM_ITEM_MANAGE` | Tạo / sửa / activate / vô hiệu Item; không cấp cho OPERATOR |
 | `BOM_READ` | Xem BOM và cây BOM |
 | `SUPPLIER_READ` | Xem danh sách nhà cung cấp |
 | `ORG_READ` | Xem cấu trúc tổ chức (Company / Plant / Warehouse) |
@@ -208,6 +225,7 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `WO_RELEASE` | Phát lệnh (RELEASED) / Huỷ Work Order |
 | `WO_VARIANCE_READ` | Xem sai lệch kế hoạch vs thực tế (Variance) |
 | `PERM_MATERIAL_ISSUE_OVERRIDE` | Cấp vật tư **vượt định mức BOM** kèm lý do bắt buộc (Gate 1b) |
+| `PERM_MATERIAL_ISSUE_APPROVE` | **Duyệt / từ chối** đề nghị xuất vượt định mức đang chờ (`DEC-09`, `V66`). Đề nghị chỉ **ghi tồn kho lúc được duyệt**; từ chối bắt buộc kèm lý do |
 | `PERM_PRODUCTION_RECEIPT_APPROVE` | Duyệt / Từ chối Production Receipt đang chờ (Gate 1c) |
 | `PERM_PRODUCTION_EXECUTION_MANAGE` | Báo cáo sản lượng xưởng (`F5`, `V33`) – MANAGER cũng có để sửa/bổ sung thay ca |
 | `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng (`F5`, `V33`) |
@@ -215,7 +233,7 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 ### Quality Control
 | Quyền | Mô tả |
 |-------|-------|
-| `PERM_QUALITY_DISPOSITION` | QC disposition: giải phóng lot thành phẩm khỏi `HOLD` sang `AVAILABLE` hoặc `REJECTED` (`F2`, `V27`). **[F6]** Nhánh `AVAILABLE` còn tăng `fulfilledQuantity` của Sales Order line được allocate — fulfillment là **hệ quả** của quyền này, `F6` **không** thêm permission mới (spec §7.1). **[D5]** Áp dụng cho **cả** output không lot-tracked (phán quyết trên receipt thay vì trên lot; `REJECTED` rút hàng bằng `ADJUST_OUT`) — `D5` cũng **không** thêm permission mới |
+| `PERM_QUALITY_DISPOSITION` | QC disposition: giải phóng lot thành phẩm khỏi `HOLD` sang `AVAILABLE` hoặc `REJECTED` (`F2`, `V27`). Nhánh `AVAILABLE` còn tăng `fulfilledQuantity` của Sales Order line được allocate. Áp dụng cho cả output không lot-tracked: phán quyết nằm trên receipt; `AVAILABLE` giải phóng `quality_hold_quantity`, `REJECTED` giữ hàng on-hand nhưng tiếp tục hold. Không thêm permission mới |
 
 ### Reports
 | Quyền | Mô tả |
@@ -268,6 +286,7 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 ### Inventory
 | Quyền | Mô tả |
 |-------|-------|
+| `PERM_ITEM_READ` | Xem Item Master dùng chung của Company chứa Plant được gán |
 | `STOCK_BALANCE_READ` | Xem tồn kho, lịch sử movement |
 | `STOCK_RECEIVE` | Nhập kho thủ công (RECEIVE movement) |
 | `STOCK_ISSUE` | Xuất kho thủ công (ISSUE movement) |
@@ -289,10 +308,11 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 | `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng của Work Order (`F5`, `V33`) |
 | `WO_VARIANCE_READ` | Xem sai lệch kế hoạch vs thực tế (Variance) |
 
-> **Separation of duties (P1 + F2):** OPERATOR **KHÔNG** có `PERM_MATERIAL_ISSUE_OVERRIDE`,
-> `PERM_PRODUCTION_RECEIPT_APPROVE` và `PERM_QUALITY_DISPOSITION`. Người xuất/nhập không được tự
-> duyệt phần vượt định mức hoặc thành phẩm của chính mình, và người sản xuất không được tự cho
-> hàng của mình qua QC — cả ba quyền này chỉ cấp cho ADMIN và MANAGER (`V24`, `V27`).
+> **Separation of duties (P1 + F2 + `DEC-09`):** OPERATOR **KHÔNG** có `PERM_MATERIAL_ISSUE_OVERRIDE`,
+> **`PERM_MATERIAL_ISSUE_APPROVE`**, `PERM_PRODUCTION_RECEIPT_APPROVE` và `PERM_QUALITY_DISPOSITION`.
+> Người xuất/nhập không được tự duyệt phần vượt định mức hoặc thành phẩm của chính mình, và người
+> sản xuất không được tự cho hàng của mình qua QC — cả bốn quyền này chỉ cấp cho ADMIN và MANAGER
+> (`V24`, `V27`, `V66`).
 
 ### Reports
 | Quyền | Mô tả |

@@ -191,7 +191,7 @@ mọi request, CORS spec cấm wildcard trên credentialed request. Gửi cho ch
 
 ### 6.2 Account test — chạy `db/dev-seed.sql`
 
-1 company + **2 plant** + 6 warehouse + 3 account, **mật khẩu chung `Admin@123`**:
+1 company + **2 plant** + 6 warehouse + 3 account; mật khẩu BCrypt được truyền khi chạy seed và không nằm trong repository:
 `manager.a` (MANAGER@PLANT-A), `operator.a` (OPERATOR@PLANT-A), `manager.b` (MANAGER@PLANT-B).
 Hướng dẫn chạy nằm ở đầu chính file SQL. Nó **không** phải Flyway migration — có chủ đích, để dữ liệu
 demo không bao giờ tới môi trường thật.

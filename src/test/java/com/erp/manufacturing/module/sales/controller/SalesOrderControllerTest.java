@@ -106,7 +106,7 @@ class SalesOrderControllerTest {
     void create_validRequest_returns201Created() throws Exception {
         when(salesOrderService.create(any(SalesOrderCreateRequest.class))).thenReturn(sampleResponse("DRAFT", 0L));
 
-        mockMvc.perform(post("/api/v1/sales-orders")
+        mockMvc.perform(post("/sales-orders/v1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody(PLANT_ID)))
                 .andExpect(status().isCreated())
@@ -120,7 +120,7 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("create: X-Plant-Id disagreeing with the body plantId returns 409 STATE_CONFLICT (§5.6.1)")
     void create_plantHeaderMismatch_returns409BeforeReachingService() throws Exception {
-        mockMvc.perform(post("/api/v1/sales-orders")
+        mockMvc.perform(post("/sales-orders/v1")
                         .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody(PLANT_ID)))
@@ -139,7 +139,7 @@ class SalesOrderControllerTest {
         when(salesOrderService.update(eq(SALES_ORDER_ID), any(SalesOrderUpdateRequest.class)))
                 .thenReturn(sampleResponse("DRAFT", 2L));
 
-        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+        mockMvc.perform(patch("/sales-orders/v1/" + SALES_ORDER_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"expectedVersion":1,"customerName":"New Customer"}
@@ -153,7 +153,7 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("update: missing expectedVersion returns 400 VALIDATION_ERROR naming the field")
     void update_missingExpectedVersion_returns400() throws Exception {
-        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+        mockMvc.perform(patch("/sales-orders/v1/" + SALES_ORDER_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -170,7 +170,7 @@ class SalesOrderControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.CONCURRENT_MODIFICATION,
                         "Sales order was modified by another request"));
 
-        mockMvc.perform(patch("/api/v1/sales-orders/" + SALES_ORDER_ID)
+        mockMvc.perform(patch("/sales-orders/v1/" + SALES_ORDER_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"expectedVersion":1}
@@ -186,7 +186,7 @@ class SalesOrderControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only DRAFT sales orders can be confirmed"));
 
-        mockMvc.perform(post("/api/v1/sales-orders/" + SALES_ORDER_ID + "/confirm"))
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/confirm"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -198,7 +198,7 @@ class SalesOrderControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Sales order not found with id: " + SALES_ORDER_ID));
 
-        mockMvc.perform(get("/api/v1/sales-orders/" + SALES_ORDER_ID))
+        mockMvc.perform(get("/sales-orders/v1/" + SALES_ORDER_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -209,7 +209,7 @@ class SalesOrderControllerTest {
         when(salesOrderService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("CONFIRMED")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/sales-orders")
+        mockMvc.perform(get("/sales-orders/v1")
                         .param("companyId", COMPANY_ID.toString())
                         .param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())

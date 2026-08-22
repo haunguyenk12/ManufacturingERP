@@ -19,7 +19,7 @@
 | # | Bất biến | Test bảo vệ |
 |---|---|---|
 | B58 | Suggestion `BLOCKED` **không bao giờ** thành work order. Lỗi trả về đúng message code đã chặn nó (`MISSING_BOM` / `MISSING_ROUTING`, 409), không phải một code chung chung | `SupplySuggestionServiceTest.convertToWorkOrder_blockedSuggestion_failsWithTheMessageCodeThatBlockedIt`, `.convertToWorkOrder_blockedByMissingBom_reportsMissingBomNotMissingRouting` |
-| B59 | Item **manufacturable** thiếu BOM/Routing `ACTIVE` vẫn sinh proposal MAKE, ở trạng thái `BLOCKED` + message code. Không được **im lặng bỏ qua** — planner phải nhìn thấy dòng để biết master data nào cần sửa (spec §2.1) | `MrpCalculationServiceTest.calculate_manufacturableItemWithoutActiveBom_stillEmitsABlockedMakeProposal`, `.calculate_makeItemWithoutActiveRouting_blocksTheProposalWithMissingRouting` |
+| B59 | Item **manufacturable** thiếu BOM/Routing `ACTIVE` vẫn sinh proposal MAKE, ở trạng thái `BLOCKED` + message code. Không được **im lặng bỏ qua** — planner phải nhìn thấy dòng để biết master data nào cần sửa (spec §2.1). `MATERIAL_SHORTAGE` chỉ mô tả shortage của item mà proposal đang bù và **không tự làm BLOCKED**; một FG level 0 thiếu vẫn có code này dù component level 1 đã `COVERED` | `MrpCalculationServiceTest.calculate_manufacturableItemWithoutActiveBom_stillEmitsABlockedMakeProposal`, `.calculate_makeItemWithoutActiveRouting_blocksTheProposalWithMissingRouting`, `.calculate_componentCovered_materialShortageOnlyDescribesTheFinishedGoodAndDoesNotBlockMake` |
 | B60 | `demandLineIds` được gửi ⇒ **chỉ** những demand đó vào run; demand khác company/plant/warehouse của run ⇒ `RESOURCE_NOT_FOUND` (404), demand không `OPEN` ⇒ `STATE_CONFLICT` (409). Cả hai fail **trước khi** `MrpRun` được ghi | `MrpRunServiceTest.run_withDemandLineIds_plansOnlyTheSelectedDemandsAndSkipsTheHorizonSweep`, `.run_demandLineIdOfAnotherPlant_isRejectedAsNotFoundBeforeTheRunIsCreated`, `.run_cancelledDemandLineId_isRejectedWithStateConflict` |
 | B61 | `settingSource = SYSTEM_DEFAULT` ⇔ item-warehouse setting `ACTIVE` **không tồn tại** ⇒ safety stock / reorder point / lead time = 0. Không được bịa giá trị mặc định khác | `InventoryAvailabilityServiceTest.getPlanningQuantities_noActiveSetting_reportsFallbackAndCountsExcludedLots`, `MrpCalculationServiceTest.calculate_noItemWarehouseSetting_recordsSystemDefaultSourceAndWarns` |
 
@@ -44,6 +44,36 @@
 | B78 | `supply_suggestions.source_routing_code` / `_version` là **snapshot đóng băng** routing `ACTIVE` **lúc chạy run**, cùng hợp đồng với `work_orders.source_routing_code` (`B49`) — không phải lookup sống, routing sửa sau đó **không** viết lại lịch sử. `NULL` **là thông tin**: proposal `BUY` không có routing nào, và proposal `MAKE` không có routing `ACTIVE` chính là ca `BLOCKED` + `MISSING_ROUTING` (`B58`/`B59`). 🔴 Đọc qua **`RoutingLookupService.findActiveRoutingSummaries`** — 1 query/cấp BOM (`C14`); `keySet()` của nó trả lời luôn câu hỏi "có routing `ACTIVE` không?" nên **đừng** thêm lại một query id-set thứ hai bên cạnh | `MrpCalculationServiceTest.calculate_makeProposal_freezesTheActiveRoutingCodeAndVersion_buyProposalCarriesNone`, `.calculate_makeItemWithoutActiveRouting_blocksTheProposalWithMissingRouting` (null), `MrpRunServiceTest.run_snapshotsDemandAndPersistsCalculationOutput`, `PlanningRunControllerTest.listSuggestions_exposesTheFrozenRoutingSnapshot` |
 
 ---
+
+## Bất Biến Idempotency Của Planning Run (2026-08-14)
+
+Nguồn: `live-data-audit.md` (FE) — gửi **một** `Idempotency-Key` ba lần với payload y hệt và nhận về
+**ba** run (`RUN-63033D7C`, `RUN-EA182AFB`, `RUN-4C77B225`). Migration **`V58`**. Bản ghi:
+`CLAUDE.md §0.44`.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B117 | `POST /planning-runs` nhận `Idempotency-Key` **tuỳ chọn**. Có key + đã tồn tại run mang key đó ⇒ trả **đúng run cũ**, **không** chạy calculate lần hai (assertion mạnh nhất là `verifyNoInteractions(calculationService)`, không phải so id). Có key + payload khác ⇒ `409 IDEMPOTENCY_CONFLICT` **trước** mọi lần ghi. Không có key ⇒ hành vi **y hệt trước V58**. Scope replay (`findByIdempotencyKey`, toàn bảng) phải khớp `uk_mrp_runs_idempotency_key` — cùng bài học `B69` của `stock_movements`, chỉ khác là ở đây **một key = một lần chạy** nên constraint không kèm cột thứ hai | `MrpRunServiceTest.run_replayedKeyWithSamePayload_returnsTheExistingRunAndDoesNotRecalculate`, `.run_replayedKeyWithDifferentPayload_throwsIdempotencyConflictBeforeAnyWrite`, `.run_freshKey_isPersistedOnTheRunWithItsPayloadHash`, `.run_withoutAnIdempotencyKey_neverConsultsTheReplayLookup`, `PlanningRunControllerTest.run_forwardsTheIdempotencyKeyHeader`, `FlywayMigrationIT.migrate_v58_rejectsADuplicateRunKeyButStillAllowsManyRunsWithoutOne` |
+
+**Quyết định cần nhớ:**
+
+1. 🔴 **Run `FAILED` VẪN chiếm key.** Row run được ghi **trước** khi calculate (để có id cho requirement/
+   suggestion), và `run()` **nuốt** exception rồi đánh dấu `FAILED` thay vì ném ra ⇒ key đã thuộc về
+   run đó vĩnh viễn. Muốn chạy lại sau thất bại: **dùng key mới**. Đây là hệ quả của thiết kế sẵn có,
+   không phải thiếu sót — đã ghi vào javadoc `run()` và tài liệu FE.
+2. **`saveAndFlush` cho row run đầu tiên, không phải `save`.** Key phải được "chiếm" ở DB **ngay**;
+   nếu để flush hoãn tới commit thì một request trùng key chạy song song sẽ tính hết cả run rồi mới
+   đụng constraint — đúng thứ tính năng này sinh ra để tránh (bài học save-vs-flush của `§0.39`).
+3. **Hai request song song cùng key ⇒ request thứ hai `409 RESOURCE_ALREADY_EXISTS`** (từ
+   `DataIntegrityViolationException`), **không** phải `IDEMPOTENCY_CONFLICT` và **không** chờ run thứ
+   nhất xong. Chấp nhận có chủ đích: nó fail nhanh, và đây là ca hiếm (double-click), không phải
+   đường đi chính.
+4. 🔴 **Ba run trùng của FE còn kéo theo một "lỗi" thứ hai mà backend KHÔNG có:** mỗi run sinh một bộ
+   suggestion song song cho cùng demand, nên FE convert suggestion của run này rồi đọc suggestion của
+   run kia và tưởng `convertToWorkOrder` không atomic. Đã kiểm chứng bằng dữ liệu thật:
+   `work_orders.planning_proposal_id` trỏ đúng suggestion `CONVERTED`, còn suggestion họ nhắc tới
+   thuộc run khác và chưa từng convert (lần thử của nó chết vì trùng `workOrderNo` rồi rollback sạch).
+   `convertToWorkOrder` **không đổi một dòng nào** trong lần sửa này.
 
 ## Quyết định thiết kế cần nhớ (`F5-B`)
 

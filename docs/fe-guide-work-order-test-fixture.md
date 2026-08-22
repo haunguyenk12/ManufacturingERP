@@ -36,7 +36,7 @@ headroom để test xuất vượt BOM.
 ## Chạy thế nào
 
 ```bash
-# Mặc định: BASE_URL=http://localhost:8080/api/v1, ADMIN_USERNAME=admin, ADMIN_PASSWORD=Admin@123
+# Không có mật khẩu mặc định; phải truyền ADMIN_USERNAME và ADMIN_PASSWORD rõ ràng.
 ./scripts/seed-work-order-test-fixture.sh
 
 # Hoặc override:

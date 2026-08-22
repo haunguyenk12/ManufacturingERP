@@ -21,20 +21,20 @@ import org.springframework.web.bind.annotation.*;
 /**
  * Authentication endpoints.
  *
- * <p>Base path: /api/v1/auth/. Every endpoint is permit-all in {@code SecurityConfig} except
+ * <p>Base path: /api/auth/v1/. Every endpoint is permit-all in {@code SecurityConfig} except
  * {@code /me}, which requires a valid, unexpired token (see {@code SecurityConfig} for the matcher
  * that carves it out) — {@code forgot-password}/{@code reset-password} (D8c) are unauthenticated by
  * nature, same as {@code login}/{@code refresh}.
  */
 @RestController
-@RequestMapping("/api/v1/auth")
+@RequestMapping("/auth")
 @RequiredArgsConstructor
 @Tag(name = "Authentication", description = "Login, logout, token refresh")
 public class AuthController {
 
     private final AuthService authService;
 
-    @PostMapping("/login")
+    @PostMapping("/v1/login")
     @Operation(summary = "Login and receive access/refresh token pair")
     public ResponseEntity<ApiResponse<AuthResponse>> login(
             @Valid @RequestBody LoginRequest request,
@@ -54,7 +54,7 @@ public class AuthController {
                         : "Login successful."));
     }
 
-    @PostMapping("/refresh")
+    @PostMapping("/v1/refresh")
     @Operation(summary = "Refresh access token using refresh token (rotation)")
     public ResponseEntity<ApiResponse<AuthResponse>> refresh(
             @Valid @RequestBody RefreshRequest request,
@@ -62,7 +62,7 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request, httpRequest)));
     }
 
-    @PostMapping("/logout")
+    @PostMapping("/v1/logout")
     @Operation(summary = "Logout current session")
     public ResponseEntity<ApiResponse<Void>> logout(
             @Valid @RequestBody LogoutRequest request,
@@ -71,20 +71,20 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.noContent("Logged out successfully"));
     }
 
-    @PostMapping("/logout-all")
+    @PostMapping("/v1/logout-all")
     @Operation(summary = "Logout from all devices (revoke all sessions)")
     public ResponseEntity<ApiResponse<Void>> logoutAll(HttpServletRequest httpRequest) {
         authService.logoutAll(httpRequest);
         return ResponseEntity.ok(ApiResponse.noContent("Logged out from all devices"));
     }
 
-    @GetMapping("/me")
+    @GetMapping("/v1/me")
     @Operation(summary = "Get current user profile, permissions, and accessible scopes")
     public ResponseEntity<ApiResponse<MeResponse>> me(HttpServletRequest httpRequest) {
         return ResponseEntity.ok(ApiResponse.ok(authService.me(httpRequest)));
     }
 
-    @PostMapping("/forgot-password")
+    @PostMapping("/v1/forgot-password")
     @Operation(summary = "Request a password reset link",
             description = "Always returns 200 with the same generic message, whether or not the "
                     + "email belongs to a real account (account enumeration prevention).")
@@ -95,7 +95,7 @@ public class AuthController {
                 "If this email exists, a reset link has been sent"));
     }
 
-    @PostMapping("/reset-password")
+    @PostMapping("/v1/reset-password")
     @Operation(summary = "Reset password using a reset token",
             description = "401 RESET_TOKEN_INVALID if the token is unknown or expired. On success, "
                     + "every existing session for the account is logged out.")

@@ -23,7 +23,7 @@ public class BomController {
 
     private final BomService bomService;
 
-    @PostMapping("/api/v1/companies/{companyId}/boms")
+    @PostMapping("/v1/companies/{companyId}/boms")
     @Operation(summary = "Create BOM under company")
     public ResponseEntity<ApiResponse<BomResponse>> createBom(
             @PathVariable UUID companyId,
@@ -32,7 +32,7 @@ public class BomController {
                 .body(ApiResponse.created(bomService.createBom(companyId, request)));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}/boms")
+    @GetMapping("/v1/companies/{companyId}/boms")
     @Operation(summary = "List BOMs by company")
     public ResponseEntity<ApiResponse<PageResult<BomResponse>>> listBoms(
             @PathVariable UUID companyId,
@@ -46,13 +46,13 @@ public class BomController {
                 companyId, parentItemId, status, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/boms/{bomId}")
+    @GetMapping("/v1/boms/{bomId}")
     @Operation(summary = "Get BOM")
     public ResponseEntity<ApiResponse<BomResponse>> getBom(@PathVariable UUID bomId) {
         return ResponseEntity.ok(ApiResponse.ok(bomService.getBom(bomId)));
     }
 
-    @PatchMapping("/api/v1/boms/{bomId}")
+    @PatchMapping("/v1/boms/{bomId}")
     @Operation(summary = "Update BOM")
     public ResponseEntity<ApiResponse<BomResponse>> updateBom(
             @PathVariable UUID bomId,
@@ -60,7 +60,7 @@ public class BomController {
         return ResponseEntity.ok(ApiResponse.ok(bomService.updateBom(bomId, request)));
     }
 
-    @DeleteMapping("/api/v1/boms/{bomId}")
+    @DeleteMapping("/v1/boms/{bomId}")
     @Operation(summary = "Deactivate BOM (soft) — this IS the deactivate command",
             description = "There is no POST /boms/{bomId}/deactivate. Rule C6 forbids hard-deleting "
                     + "business documents, so DELETE moves the revision to INACTIVE and nothing is "
@@ -71,7 +71,7 @@ public class BomController {
         return ResponseEntity.ok(ApiResponse.noContent("BOM deactivated successfully"));
     }
 
-    @PostMapping("/api/v1/boms/{bomId}/lines")
+    @PostMapping("/v1/boms/{bomId}/lines")
     @Operation(summary = "Add BOM line")
     public ResponseEntity<ApiResponse<BomResponse>> addLine(
             @PathVariable UUID bomId,
@@ -80,7 +80,7 @@ public class BomController {
                 .body(ApiResponse.created(bomService.addLine(bomId, request)));
     }
 
-    @PatchMapping("/api/v1/bom-lines/{lineId}")
+    @PatchMapping("/v1/bom-lines/{lineId}")
     @Operation(summary = "Update BOM line")
     public ResponseEntity<ApiResponse<BomResponse>> updateLine(
             @PathVariable UUID lineId,
@@ -88,26 +88,26 @@ public class BomController {
         return ResponseEntity.ok(ApiResponse.ok(bomService.updateLine(lineId, request)));
     }
 
-    @DeleteMapping("/api/v1/bom-lines/{lineId}")
+    @DeleteMapping("/v1/bom-lines/{lineId}")
     @Operation(summary = "Delete BOM line")
     public ResponseEntity<ApiResponse<Void>> deleteLine(@PathVariable UUID lineId) {
         bomService.deleteLine(lineId);
         return ResponseEntity.ok(ApiResponse.noContent("BOM line deleted successfully"));
     }
 
-    @PostMapping("/api/v1/boms/{bomId}/activate")
+    @PostMapping("/v1/boms/{bomId}/activate")
     @Operation(summary = "Activate BOM")
     public ResponseEntity<ApiResponse<BomResponse>> activateBom(@PathVariable UUID bomId) {
         return ResponseEntity.ok(ApiResponse.ok(bomService.activateBom(bomId)));
     }
 
-    @GetMapping("/api/v1/items/{itemId}/active-bom")
+    @GetMapping("/v1/items/{itemId}/active-bom")
     @Operation(summary = "Get active BOM by item")
     public ResponseEntity<ApiResponse<BomResponse>> getActiveBomByItem(@PathVariable UUID itemId) {
         return ResponseEntity.ok(ApiResponse.ok(bomService.getActiveBomByItem(itemId)));
     }
 
-    @GetMapping("/api/v1/boms/{bomId}/tree")
+    @GetMapping("/v1/boms/{bomId}/tree")
     @Operation(summary = "Get BOM tree")
     public ResponseEntity<ApiResponse<BomTreeNodeResponse>> getBomTree(@PathVariable UUID bomId) {
         return ResponseEntity.ok(ApiResponse.ok(bomService.getBomTree(bomId)));

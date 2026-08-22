@@ -52,6 +52,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -97,8 +98,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (debt #17) — that test is the acceptance evidence for the fix, and a third covers what its
  * {@code REJECTED} branch does to stock.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.MOCK,
+        properties = "app.rate-limit.enabled=false")
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 @DisplayName("Production flow end-to-end (spec §11.1)")
 class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
@@ -152,7 +156,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         long movementsBefore = stockMovementRepository.count();
 
         // ── 1. Confirm the sales order ⇒ independent demand for MRP ──────────────────────────────
-        JsonNode order = result(post("/api/v1/sales-orders")
+        JsonNode order = result(post("/sales-orders/v1")
                 .content(json(Map.of(
                         "companyId", fixture.companyId,
                         "plantId", fixture.plantId,
@@ -166,7 +170,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         UUID salesOrderId = uuid(order, "salesOrderId");
         UUID salesOrderLineId = uuid(order.get("lines").get(0), "salesOrderLineId");
 
-        JsonNode confirmed = result(post("/api/v1/sales-orders/{id}/confirm", salesOrderId), 200);
+        JsonNode confirmed = result(post("/sales-orders/v1/{id}/confirm", salesOrderId), 200);
         assertThat(confirmed.get("status").asText()).isEqualTo("CONFIRMED");
 
         PlanningDemand demand = planningDemandRepository.findAll().stream()
@@ -177,13 +181,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         // The planner screen the demand id comes from is GET /sales-orders/planning-demands, which
         // exposes salesOrderLineId but not planningDemandId — so the id POST /planning-runs expects
         // is not reachable through the API. Read it from the repository and see debt #21.
-        JsonNode demandLines = result(get("/api/v1/sales-orders/planning-demands")
+        JsonNode demandLines = result(get("/sales-orders/v1/planning-demands")
                 .param("plantId", fixture.plantId.toString())
                 .param("horizonEnd", HORIZON_END.toString()), 200);
         assertThat(ids(demandLines, "salesOrderLineId")).contains(salesOrderLineId);
 
         // ── 2. Planning run over exactly that demand line ───────────────────────────────────────
-        JsonNode run = result(post("/api/v1/planning-runs")
+        JsonNode run = result(post("/v1/planning-runs")
                 .content(json(Map.of(
                         "companyId", fixture.companyId,
                         "plantId", fixture.plantId,
@@ -202,7 +206,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(run.get("plannedPurchaseRecommendations").asInt()).isZero();
         assertThat(run.get("blockedProposals").asInt()).isZero();
 
-        JsonNode suggestions = result(get("/api/v1/planning-runs/{id}/suggestions", runId), 200)
+        JsonNode suggestions = result(get("/v1/planning-runs/{id}/suggestions", runId), 200)
                 .get("content");
         // The component is fully covered by stock, so the finished good is the only shortage.
         assertThat(suggestions.size()).as("suggestions were %s", suggestions).isEqualTo(1);
@@ -220,23 +224,23 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         UUID suggestionId = uuid(suggestion, "supplySuggestionId");
 
         // ── 3. Approve + convert ⇒ work order carrying a demand allocation ──────────────────────
-        result(post("/api/v1/supply-suggestions/{id}/approve", suggestionId)
+        result(post("/v1/supply-suggestions/{id}/approve", suggestionId)
                 .content(json(Map.of("decisionNote", "approved by E2E"))), 200);
-        JsonNode converted = result(post("/api/v1/supply-suggestions/{id}/convert-to-work-order", suggestionId)
+        JsonNode converted = result(post("/v1/supply-suggestions/{id}/convert-to-work-order", suggestionId)
                 .content(json(Map.of("outputWarehouseId", fixture.warehouseId))), 200);
         UUID workOrderId = uuid(converted, "convertedWorkOrderId");
 
-        JsonNode workOrder = result(get("/api/v1/work-orders/{id}", workOrderId), 200);
+        JsonNode workOrder = result(get("/v1/work-orders/{id}", workOrderId), 200);
         assertThat(workOrder.get("allocations").size()).isEqualTo(1);
         JsonNode allocation = workOrder.get("allocations").get(0);
         assertThat(uuid(allocation, "salesOrderLineId")).isEqualTo(salesOrderLineId);
         assertThat(new BigDecimal(allocation.get("allocatedQuantity").asText()))
                 .isEqualByComparingTo(ORDERED_QUANTITY);
-        assertThat(result(get("/api/v1/sales-orders/{id}", salesOrderId), 200).get("status").asText())
+        assertThat(result(get("/sales-orders/v1/{id}", salesOrderId), 200).get("status").asText())
                 .isEqualTo("IN_PRODUCTION");
 
         // ── 4. Reserve (FEFO) — straight after convert, no release needed first (D9) ────────────
-        JsonNode reservations = result(post("/api/v1/work-orders/{id}/reserve", workOrderId), 201);
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
         assertThat(reservations.size()).as("reservations were %s", reservations).isEqualTo(1);
         UUID reservationId = uuid(reservations.get(0), "reservationId");
         assertThat(new BigDecimal(reservations.get(0).get("quantity").asText()))
@@ -245,12 +249,12 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
 
         // ── 5. Release now that reservation covers 100% (gate 1a / B14, happy path) ─────────────
-        assertThat(result(post("/api/v1/work-orders/{id}/release", workOrderId), 200)
+        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId), 200)
                 .get("status").asText()).isEqualTo("RELEASED");
 
         // ── 6. Issue the reserved component ─────────────────────────────────────────────────────
         String issueKey = "E2E-ISSUE-" + fixture.suffix;
-        JsonNode issue = result(post("/api/v1/material-issues")
+        JsonNode issue = result(post("/v1/material-issues")
                 .header("Idempotency-Key", issueKey)
                 .content(json(Map.of(
                         "workOrderId", workOrderId,
@@ -261,7 +265,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // ── 7. Shop floor reports good output — this, not the receipt, advances the work order ──
         String executionKey = "E2E-EXEC-" + fixture.suffix;
-        JsonNode execution = result(post("/api/v1/work-orders/{id}/production-executions", workOrderId)
+        JsonNode execution = result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", executionKey)
                 .content(json(Map.of("goodQuantity", GOOD_REPORTED,
                         "actualStartedAt", EXEC_STARTED_AT,
@@ -277,7 +281,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(issue.get("code").asText())
                 .isEqualTo("MI-" + issue.get("issueId").asText().substring(0, 8).toUpperCase(Locale.ROOT));
 
-        JsonNode afterExecution = result(get("/api/v1/work-orders/{id}", workOrderId), 200);
+        JsonNode afterExecution = result(get("/v1/work-orders/{id}", workOrderId), 200);
         assertThat(afterExecution.get("status").asText()).isEqualTo("IN_PROGRESS");
         assertThat(new BigDecimal(afterExecution.get("actualGoodQuantity").asText()))
                 .isEqualByComparingTo(GOOD_REPORTED);
@@ -286,7 +290,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // ── 8. Draft receipt must not touch inventory ───────────────────────────────────────────
         String receiptKey = "E2E-RECEIPT-" + fixture.suffix;
-        JsonNode receipt = result(post("/api/v1/work-orders/{id}/production-receipts", workOrderId)
+        JsonNode receipt = result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", receiptKey)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
@@ -297,13 +301,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
-        assertThat(result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/submit",
+        assertThat(result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
                 workOrderId, receiptId), 200).get("status").asText()).isEqualTo("PENDING_APPROVAL");
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         // ── 9. Approve: stock arrives, but the lot is HOLD so nothing is usable yet ─────────────
-        JsonNode approved = result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/approve",
+        JsonNode approved = result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
                 workOrderId, receiptId), 200);
         assertThat(approved.get("status").asText()).isEqualTo("APPROVED");
         assertThat(approved.get("approvedByUsername").asText()).isEqualTo("admin");
@@ -312,14 +316,14 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(GOOD_REPORTED);
         // The single most valuable assertion here: on-hand rose, available did not.
         assertThat(availableQuantity(fixture.finishedGoodId)).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(new BigDecimal(result(get("/api/v1/work-orders/{id}", workOrderId), 200)
+        assertThat(new BigDecimal(result(get("/v1/work-orders/{id}", workOrderId), 200)
                 .get("completedQuantity").asText())).isEqualByComparingTo(GOOD_REPORTED);
         // Fulfilment has not started: QC has not passed judgement yet (B62).
         assertThat(new BigDecimal(salesOrderLine(salesOrderId).get("fulfilledQuantity").asText()))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         // ── 10. QC releases the lot ⇒ stock becomes usable and the order is partly fulfilled ────
-        JsonNode qc = result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
+        JsonNode qc = result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
                 workOrderId, receiptId)
                 .content(json(Map.of("result", "AVAILABLE", "reason", "Passed E2E inspection"))), 200);
         assertThat(qc.get("qcResult").asText()).isEqualTo("AVAILABLE");
@@ -334,7 +338,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(GOOD_REPORTED);
         assertThat(new BigDecimal(fulfilledLine.get("openQuantity").asText()))
                 .isEqualByComparingTo(ORDERED_QUANTITY.subtract(GOOD_REPORTED));
-        assertThat(result(get("/api/v1/sales-orders/{id}", salesOrderId), 200).get("status").asText())
+        assertThat(result(get("/sales-orders/v1/{id}", salesOrderId), 200).get("status").asText())
                 .isEqualTo("PARTIALLY_FULFILLED");
 
         // ── 11. Replaying every mutation with its original key changes nothing ──────────────────
@@ -342,7 +346,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // The flat issue endpoint replays the original document instead of failing on the reservation
         // it already consumed (debt #24, fixed in D10): same key ⇒ same issue id back.
-        JsonNode replayedIssue = result(post("/api/v1/material-issues")
+        JsonNode replayedIssue = result(post("/v1/material-issues")
                 .header("Idempotency-Key", issueKey)
                 .content(json(Map.of(
                         "workOrderId", workOrderId,
@@ -350,12 +354,12 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "quantity", COMPONENT_REQUIREMENT))), 201);
         assertThat(uuid(replayedIssue, "issueId")).isEqualTo(uuid(issue, "issueId"));
 
-        result(post("/api/v1/work-orders/{id}/production-executions", workOrderId)
+        result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", executionKey)
                 .content(json(Map.of("goodQuantity", GOOD_REPORTED,
                         "actualStartedAt", EXEC_STARTED_AT,
                         "actualEndedAt", EXEC_ENDED_AT))), 201);
-        result(post("/api/v1/work-orders/{id}/production-receipts", workOrderId)
+        result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", receiptKey)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
@@ -367,7 +371,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(GOOD_REPORTED);
-        assertThat(new BigDecimal(result(get("/api/v1/work-orders/{id}", workOrderId), 200)
+        assertThat(new BigDecimal(result(get("/v1/work-orders/{id}", workOrderId), 200)
                 .get("actualGoodQuantity").asText())).isEqualByComparingTo(GOOD_REPORTED);
         // The whole flow writes exactly three ledger rows: ISSUE of the component, RECEIVE of the
         // output, and the LOT_STATUS_CHANGE that QC records with direction NONE (F2, B39) — a
@@ -390,7 +394,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("Release gate: BLOCKED survives the refusal, and reserving out of it leads to RELEASED")
     void releaseWithoutReservation_persistsBlocked_andReservingOutOfItAllowsRelease() throws Exception {
-        UUID workOrderId = uuid(result(post("/api/v1/plants/{plantId}/work-orders", fixture.plantId)
+        UUID workOrderId = uuid(result(post("/v1/plants/{plantId}/work-orders", fixture.plantId)
                 .content(json(Map.of(
                         "workOrderNo", "WO-GATE-" + fixture.suffix,
                         "productItemId", fixture.finishedGoodId,
@@ -399,7 +403,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // Release with nothing reserved: refused. The message proves the release gate itself ran,
         // rather than the "no component requirements" guard that sits before it.
-        mockMvc.perform(withDefaults(post("/api/v1/work-orders/{id}/release", workOrderId)))
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/release", workOrderId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers
@@ -414,13 +418,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(blocked.getBlockReason()).isEqualTo("1/1 components short on reservation");
 
         // Debt #22: reserving is exactly what a planner does next, and BLOCKED must not stand in the way.
-        JsonNode reservations = result(post("/api/v1/work-orders/{id}/reserve", workOrderId), 201);
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
         assertThat(reservations.size()).isEqualTo(1);
         assertThat(new BigDecimal(reservations.get(0).get("quantity").asText()))
                 .isEqualByComparingTo(COMPONENT_REQUIREMENT);
 
         // With coverage complete the same call now succeeds, and the block fields are cleared.
-        assertThat(result(post("/api/v1/work-orders/{id}/release", workOrderId), 200)
+        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId), 200)
                 .get("status").asText()).isEqualTo("RELEASED");
         WorkOrder released = workOrderRepository.findById(workOrderId).orElseThrow();
         assertThat(released.getBlockedAt()).isNull();
@@ -449,7 +453,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     void productionFlow_fulfilsTheSalesOrderForOutputThatIsNotLotTracked() throws Exception {
         NonLotFixture product = seedNonLotTrackedFinishedGood();
 
-        JsonNode order = result(post("/api/v1/sales-orders")
+        JsonNode order = result(post("/sales-orders/v1")
                 .content(json(Map.of(
                         "companyId", fixture.companyId,
                         "plantId", fixture.plantId,
@@ -462,14 +466,14 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                                 "dueDate", DUE_DATE.toString()))))), 201);
         UUID salesOrderId = uuid(order, "salesOrderId");
         UUID salesOrderLineId = uuid(order.get("lines").get(0), "salesOrderLineId");
-        result(post("/api/v1/sales-orders/{id}/confirm", salesOrderId), 200);
+        result(post("/sales-orders/v1/{id}/confirm", salesOrderId), 200);
 
         PlanningDemand demand = planningDemandRepository.findAll().stream()
                 .filter(d -> salesOrderLineId.toString().equals(d.getReferenceId()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("Confirming the order did not create a planning demand"));
 
-        JsonNode run = result(post("/api/v1/planning-runs")
+        JsonNode run = result(post("/v1/planning-runs")
                 .content(json(Map.of(
                         "companyId", fixture.companyId,
                         "plantId", fixture.plantId,
@@ -477,7 +481,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "horizonStartDate", ORDER_DATE.toString(),
                         "horizonEndDate", HORIZON_END.toString(),
                         "demandLineIds", List.of(demand.getPlanningDemandId())))), 201);
-        JsonNode suggestions = result(get("/api/v1/planning-runs/{id}/suggestions",
+        JsonNode suggestions = result(get("/v1/planning-runs/{id}/suggestions",
                 uuid(run, "mrpRunId")), 200).get("content");
         assertThat(suggestions.size()).as("suggestions were %s", suggestions).isEqualTo(1);
         // Exactly what the customer ordered — no safety-stock padding to keep the work order short
@@ -486,50 +490,52 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(ORDERED_QUANTITY);
         UUID suggestionId = uuid(suggestions.get(0), "supplySuggestionId");
 
-        result(post("/api/v1/supply-suggestions/{id}/approve", suggestionId)
+        result(post("/v1/supply-suggestions/{id}/approve", suggestionId)
                 .content(json(Map.of("decisionNote", "approved by E2E"))), 200);
-        UUID workOrderId = uuid(result(post("/api/v1/supply-suggestions/{id}/convert-to-work-order", suggestionId)
+        UUID workOrderId = uuid(result(post("/v1/supply-suggestions/{id}/convert-to-work-order", suggestionId)
                 .content(json(Map.of("outputWarehouseId", fixture.warehouseId))), 200), "convertedWorkOrderId");
 
         // The work order is planned for exactly the ordered quantity, so the allocation covers the
         // whole line. (That allocation is capped by the open quantity too — covered by B63's unit
         // tests, which can arrange a surplus this scenario deliberately no longer has.)
-        JsonNode allocation = result(get("/api/v1/work-orders/{id}", workOrderId), 200)
+        JsonNode allocation = result(get("/v1/work-orders/{id}", workOrderId), 200)
                 .get("allocations").get(0);
         assertThat(new BigDecimal(allocation.get("allocatedQuantity").asText()))
                 .isEqualByComparingTo(ORDERED_QUANTITY);
 
-        result(post("/api/v1/work-orders/{id}/reserve", workOrderId), 201);
-        result(post("/api/v1/work-orders/{id}/release", workOrderId), 200);
-        result(post("/api/v1/work-orders/{id}/production-executions", workOrderId)
+        result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId), 200);
+        result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-NOLOT-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", ORDERED_QUANTITY,
                         "actualStartedAt", EXEC_STARTED_AT,
                         "actualEndedAt", EXEC_ENDED_AT))), 201);
         // Debt #25 in one assertion: reporting the full plan completes the work order (B53), and the
         // goods still have to be warehoused afterwards. Before D11 the next three calls were 409.
-        assertThat(result(get("/api/v1/work-orders/{id}", workOrderId), 200).get("status").asText())
+        assertThat(result(get("/v1/work-orders/{id}", workOrderId), 200).get("status").asText())
                 .isEqualTo("COMPLETED");
 
-        UUID receiptId = uuid(result(post("/api/v1/work-orders/{id}/production-receipts", workOrderId)
+        UUID receiptId = uuid(result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", "E2E-NOLOT-RECEIPT-" + fixture.suffix)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
                         "quantity", ORDERED_QUANTITY))), 201), "receiptId");
-        result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/submit",
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
                 workOrderId, receiptId), 200);
-        result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/approve",
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
                 workOrderId, receiptId), 200);
 
-        // The asymmetry that makes this case different from the lot-tracked one: with no lot to hold
-        // the goods back, approval alone already makes them available. QC has nothing to release.
-        assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(ORDERED_QUANTITY);
+        // NON_TRACKED output has no lot row, so StockBalance.qualityHoldQuantity carries the same
+        // gate: approval increases on-hand but nothing is reservable before QC.
+        assertThat(onHandQuantity(product.itemId, fixture.warehouseId))
+                .isEqualByComparingTo(ORDERED_QUANTITY);
+        assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(BigDecimal.ZERO);
         // B62 still decides fulfilment, so nothing has shipped yet.
         assertThat(new BigDecimal(salesOrderLine(salesOrderId).get("fulfilledQuantity").asText()))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         long movementsBeforeQc = stockMovementRepository.count();
-        JsonNode qc = result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
+        JsonNode qc = result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
                 workOrderId, receiptId)
                 .content(json(Map.of("result", "AVAILABLE", "reason", "Passed E2E inspection"))), 200);
         assertThat(qc.get("qcResult").asText()).isEqualTo("AVAILABLE");
@@ -544,76 +550,74 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(ORDERED_QUANTITY);
         assertThat(new BigDecimal(fulfilledLine.get("openQuantity").asText()))
                 .isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(result(get("/api/v1/sales-orders/{id}", salesOrderId), 200).get("status").asText())
+        assertThat(result(get("/sales-orders/v1/{id}", salesOrderId), 200).get("status").asText())
                 .isEqualTo("FULFILLED");
     }
 
     /**
-     * The other half of D5: rejecting output that is not lot-tracked has to take the goods back out of
-     * stock, because approval already made them usable and there is no lot status to spoil instead
-     * (B39, rewritten in D5). Only a real balance can show that, which is why this lives here.
+     * Rejecting output that is not lot-tracked keeps it on hand and quality-held. Only a real balance
+     * can prove both halves of that contract, which is why this lives here.
      */
     @Test
-    @DisplayName("QC REJECTED on output without a lot withdraws the goods with ADJUST_OUT")
-    void qcRejection_onOutputThatIsNotLotTracked_withdrawsTheGoodsFromStock() throws Exception {
+    @DisplayName("QC REJECTED on output without a lot keeps on-hand stock unavailable")
+    void qcRejection_onOutputThatIsNotLotTracked_keepsTheGoodsOnQualityHold() throws Exception {
         NonLotFixture product = seedNonLotTrackedFinishedGood();
-        UUID workOrderId = uuid(result(post("/api/v1/plants/{plantId}/work-orders", fixture.plantId)
+        UUID workOrderId = uuid(result(post("/v1/plants/{plantId}/work-orders", fixture.plantId)
                 .content(json(Map.of(
                         "workOrderNo", "WO-NOLOT-REJ-" + fixture.suffix,
                         "productItemId", product.itemId,
                         "outputWarehouseId", fixture.warehouseId,
                         "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
-        result(post("/api/v1/work-orders/{id}/reserve", workOrderId), 201);
-        result(post("/api/v1/work-orders/{id}/release", workOrderId), 200);
-        result(post("/api/v1/work-orders/{id}/production-executions", workOrderId)
+        result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId), 200);
+        result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-REJ-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", GOOD_REPORTED,
                         "actualStartedAt", EXEC_STARTED_AT,
                         "actualEndedAt", EXEC_ENDED_AT))), 201);
 
-        UUID receiptId = uuid(result(post("/api/v1/work-orders/{id}/production-receipts", workOrderId)
+        UUID receiptId = uuid(result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", "E2E-REJ-RECEIPT-" + fixture.suffix)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
                         "quantity", GOOD_REPORTED))), 201), "receiptId");
-        result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/submit",
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
                 workOrderId, receiptId), 200);
-        result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/approve",
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
                 workOrderId, receiptId), 200);
-        assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(GOOD_REPORTED);
+        assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(BigDecimal.ZERO);
 
-        result(post("/api/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
                 workOrderId, receiptId)
                 .content(json(Map.of("result", "REJECTED", "reason", "Failed E2E inspection"))), 200);
 
-        // On hand and available both fall: the defective units are gone from the ledger, so nothing
-        // downstream can issue or ship them.
+        // Defective units remain traceable on hand, but the hold keeps them unavailable downstream.
         assertThat(onHandQuantity(product.itemId, fixture.warehouseId))
-                .isEqualByComparingTo(BigDecimal.ZERO);
+                .isEqualByComparingTo(GOOD_REPORTED);
         assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(stockMovementRepository.findAll().stream()
                 .filter(m -> m.getItem().getItemId().equals(product.itemId))
                 .filter(m -> m.getMovementType() == MovementType.ADJUST_OUT)
                 .map(StockMovement::getQuantity)
                 .toList())
-                .containsExactly(GOOD_REPORTED.setScale(6));
+                .isEmpty();
     }
 
     /** Closed work orders still refuse reservation — the widened rule has a floor (B13). */
     @Test
     @DisplayName("A cancelled work order cannot be reserved against")
     void reserve_onCancelledWorkOrder_isStillRefused() throws Exception {
-        UUID workOrderId = uuid(result(post("/api/v1/plants/{plantId}/work-orders", fixture.plantId)
+        UUID workOrderId = uuid(result(post("/v1/plants/{plantId}/work-orders", fixture.plantId)
                 .content(json(Map.of(
                         "workOrderNo", "WO-CANCELLED-" + fixture.suffix,
                         "productItemId", fixture.finishedGoodId,
                         "outputWarehouseId", fixture.warehouseId,
                         "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
         // Spec §3.2 (F7): cancelling requires a reason.
-        result(post("/api/v1/work-orders/{id}/cancel", workOrderId)
+        result(post("/v1/work-orders/{id}/cancel", workOrderId)
                 .content(json(Map.of("reason", "Cancelled by E2E scenario"))), 200);
 
-        mockMvc.perform(withDefaults(post("/api/v1/work-orders/{id}/reserve", workOrderId)))
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/reserve", workOrderId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
 
@@ -755,7 +759,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     }
 
     private JsonNode salesOrderLine(UUID salesOrderId) throws Exception {
-        return result(get("/api/v1/sales-orders/{id}", salesOrderId), 200).get("lines").get(0);
+        return result(get("/sales-orders/v1/{id}", salesOrderId), 200).get("lines").get(0);
     }
 
     /** Performs the request, asserts the HTTP status, and returns the {@code result} payload. */

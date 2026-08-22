@@ -286,7 +286,7 @@ Toàn bộ endpoint dưới `/api/v1/auth`: **chỉ có 4** — `login`, `refres
 ### 7.2 Login thật và nội dung JWT
 
 ```
-POST /api/v1/auth/login  {"username":"admin","password":"Admin@123"}  → HTTP 200
+POST /api/v1/auth/login  {"username":"<bootstrap-user>","password":"<secret>"}  → HTTP 200
 ```
 ```
 envelope keys : ['code', 'result', 'message']        ← KHÔNG có 'errors' (xác nhận NON_NULL)
@@ -332,7 +332,7 @@ cho team backend nhưng **chưa sửa** — ngoài phạm vi của phase thêm `
 
 ```
 GET /api/v1/auth/me   (không token)                      → HTTP 401
-POST /api/v1/auth/login {"username":"admin","password":"Admin@123"}  → HTTP 200
+POST /api/v1/auth/login {"username":"<bootstrap-user>","password":"<secret>"}  → HTTP 200
 GET /api/v1/auth/me   (Authorization: Bearer <token>)     → HTTP 200
 {
   "code": "SUCCESS",

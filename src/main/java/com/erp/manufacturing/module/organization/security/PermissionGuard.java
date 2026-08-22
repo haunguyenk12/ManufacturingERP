@@ -7,6 +7,7 @@ import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import com.erp.manufacturing.module.organization.domain.RoleStatus;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
@@ -29,13 +30,17 @@ public class PermissionGuard {
 
     @Transactional(readOnly = true)
     public boolean hasPermission(Authentication authentication, String permissionCode) {
+        String normalizedPermission = normalizePermissionCode(permissionCode);
+        if (normalizedPermission == null) {
+            return false;
+        }
         if (isAdmin(authentication)) {
             return true;
         }
         return principalUserId(authentication)
                 .map(userId -> assignmentRepository.existsActivePermissionInScopeType(
                         userId,
-                        normalizePermissionCode(permissionCode),
+                        normalizedPermission,
                         ScopeType.GLOBAL,
                         Instant.now(),
                         AssignmentStatus.ACTIVE,
@@ -50,11 +55,17 @@ public class PermissionGuard {
                                      String permissionCode,
                                      String resourceType,
                                      UUID resourceId) {
-        if (isAdmin(authentication)) {
-            return true;
-        }
         if (resourceId == null) {
             return false;
+        }
+
+        String normalizedPermission = normalizePermissionCode(permissionCode);
+        ScopeResourceType type = normalizeResourceType(resourceType);
+        if (normalizedPermission == null || type == null) {
+            return false;
+        }
+        if (isAdmin(authentication)) {
+            return true;
         }
 
         Optional<UUID> userId = principalUserId(authentication);
@@ -62,16 +73,8 @@ public class PermissionGuard {
             return false;
         }
 
-        String normalizedPermission = normalizePermissionCode(permissionCode);
         if (hasPermission(authentication, normalizedPermission)) {
             return true;
-        }
-
-        ScopeResourceType type;
-        try {
-            type = ScopeResourceType.valueOf(resourceType.trim().toUpperCase(Locale.ROOT));
-        } catch (RuntimeException e) {
-            return false;
         }
 
         return switch (type) {
@@ -79,6 +82,44 @@ public class PermissionGuard {
             case PLANT -> hasPlantAccess(userId.get(), normalizedPermission, resourceId);
             case WAREHOUSE -> hasWarehouseAccess(userId.get(), normalizedPermission, resourceId);
         };
+    }
+
+    /**
+     * Authorizes company-owned master data for a user assigned either to the company itself or to
+     * one of its plants. This deliberately does not change {@link #hasResourceAccess}: most
+     * company resources must keep the normal top-down scope rule, while shared item master data is
+     * consumed by every plant in the owning company.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasCompanyOrPlantAccess(Authentication authentication,
+                                           String permissionCode,
+                                           UUID companyId) {
+        if (companyId == null) {
+            return false;
+        }
+
+        String normalizedPermission = normalizePermissionCode(permissionCode);
+        if (normalizedPermission == null) {
+            return false;
+        }
+        if (isAdmin(authentication)) {
+            return true;
+        }
+
+        Optional<UUID> userId = principalUserId(authentication);
+        if (userId.isEmpty()) {
+            return false;
+        }
+
+        if (hasPermission(authentication, normalizedPermission)
+                || hasDirectResourcePermission(
+                        userId.get(), normalizedPermission, ScopeResourceType.COMPANY, companyId)) {
+            return true;
+        }
+
+        return plantRepository.findByCompanyCompanyId(companyId, Pageable.unpaged()).stream()
+                .anyMatch(plant -> hasDirectResourcePermission(
+                        userId.get(), normalizedPermission, ScopeResourceType.PLANT, plant.getPlantId()));
     }
 
     private boolean hasPlantAccess(UUID userId, String permissionCode, UUID plantId) {
@@ -127,6 +168,8 @@ public class PermissionGuard {
     private boolean isAdmin(Authentication authentication) {
         return authentication != null
                 && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof UserPrincipal principal
+                && principal.isGlobalAdmin()
                 && authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .anyMatch(ADMIN_AUTHORITY::equals);
@@ -137,13 +180,27 @@ public class PermissionGuard {
             return Optional.empty();
         }
         if (authentication.getPrincipal() instanceof UserPrincipal principal) {
-            return Optional.of(principal.getUserId());
+            return Optional.ofNullable(principal.getUserId());
         }
         return Optional.empty();
     }
 
     private String normalizePermissionCode(String permissionCode) {
+        if (permissionCode == null || permissionCode.isBlank()) {
+            return null;
+        }
         String normalized = permissionCode.trim().toUpperCase(Locale.ROOT);
         return normalized.startsWith("PERM_") ? normalized : "PERM_" + normalized;
+    }
+
+    private ScopeResourceType normalizeResourceType(String resourceType) {
+        if (resourceType == null || resourceType.isBlank()) {
+            return null;
+        }
+        try {
+            return ScopeResourceType.valueOf(resourceType.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 }

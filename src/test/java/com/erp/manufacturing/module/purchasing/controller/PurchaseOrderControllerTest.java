@@ -90,7 +90,7 @@ class PurchaseOrderControllerTest {
         when(purchaseOrderService.create(any(PurchaseOrderCreateRequest.class)))
                 .thenReturn(sampleResponse("DRAFT"));
 
-        mockMvc.perform(post("/api/v1/purchase-orders")
+        mockMvc.perform(post("/v1/purchase-orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"companyId":"%s","plantId":"%s","warehouseId":"%s","supplierId":"%s",
@@ -106,7 +106,7 @@ class PurchaseOrderControllerTest {
     @Test
     @DisplayName("create: empty lines[] fails @Valid before reaching the service")
     void create_withoutLines_returns400ValidationError() throws Exception {
-        mockMvc.perform(post("/api/v1/purchase-orders")
+        mockMvc.perform(post("/v1/purchase-orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"companyId":"%s","plantId":"%s","warehouseId":"%s","supplierId":"%s",
@@ -127,7 +127,7 @@ class PurchaseOrderControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only DRAFT purchase orders can be cancelled"));
 
-        mockMvc.perform(post("/api/v1/purchase-orders/" + ORDER_ID + "/cancel"))
+        mockMvc.perform(post("/v1/purchase-orders/" + ORDER_ID + "/cancel"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -138,7 +138,7 @@ class PurchaseOrderControllerTest {
         when(purchaseOrderService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), eq(null), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("SENT")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/purchase-orders")
+        mockMvc.perform(get("/v1/purchase-orders")
                         .param("companyId", COMPANY_ID.toString())
                         .param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())

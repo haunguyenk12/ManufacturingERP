@@ -46,6 +46,14 @@ public class ItemWarehouseSetting extends BaseEntity {
     @Builder.Default
     private Integer leadTimeDays = 0;
 
+    @Column(name = "is_default_supply", nullable = false)
+    @Builder.Default
+    private boolean defaultSupply = false;
+
+    @Column(name = "is_default_output", nullable = false)
+    @Builder.Default
+    private boolean defaultOutput = false;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default

@@ -22,6 +22,12 @@ public enum BusinessErrorCode implements ErrorCode {
     NEGATIVE_QUANTITY         ("NEGATIVE_QUANTITY",         "Quantity cannot be negative",                   HttpStatus.UNPROCESSABLE_ENTITY),
     ITEM_ALREADY_ISSUED       ("ITEM_ALREADY_ISSUED",       "Item has already been issued",                  HttpStatus.CONFLICT),
     LOT_NOT_ELIGIBLE          ("LOT_NOT_ELIGIBLE",          "Lot status does not allow this operation",      HttpStatus.CONFLICT),
+    LOT_CODE_ALREADY_EXISTS   ("LOT_CODE_ALREADY_EXISTS",   "Lot code already exists for this item",        HttpStatus.CONFLICT),
+    LOT_REUSE_NOT_ALLOWED     ("LOT_REUSE_NOT_ALLOWED",     "The selected lot cannot be reused",            HttpStatus.CONFLICT),
+    LOT_ITEM_MISMATCH         ("LOT_ITEM_MISMATCH",         "Lot belongs to a different item",              HttpStatus.CONFLICT),
+    LOT_WAREHOUSE_CONFLICT    ("LOT_WAREHOUSE_CONFLICT",    "Lot cannot be used in this warehouse",         HttpStatus.CONFLICT),
+    OUTPUT_LOT_NOT_POSTED     ("OUTPUT_LOT_NOT_POSTED",     "Receipt output lot has not been posted",       HttpStatus.CONFLICT),
+    RECEIPT_STATE_CONFLICT    ("RECEIPT_STATE_CONFLICT",    "Receipt state does not allow this operation",  HttpStatus.CONFLICT),
     SERIAL_NOT_ELIGIBLE       ("SERIAL_NOT_ELIGIBLE",       "Serial status does not allow this operation",   HttpStatus.CONFLICT),
 
     // ── BOM / Manufacturing ────────────────────────────────────────────────
@@ -35,6 +41,10 @@ public enum BusinessErrorCode implements ErrorCode {
     MRP_CALCULATION_ERROR     ("MRP_CALCULATION_ERROR",     "MRP calculation failed",                        HttpStatus.INTERNAL_SERVER_ERROR),
     PRODUCTION_ORDER_CLOSED   ("PRODUCTION_ORDER_CLOSED",   "Production order is already closed",            HttpStatus.CONFLICT),
     RESERVATION_EXCEEDED      ("RESERVATION_EXCEEDED",      "Quantity exceeds the remaining reservation",    HttpStatus.CONFLICT),
+    BOM_REQUIREMENT_EXCEEDED  ("BOM_REQUIREMENT_EXCEEDED",  "Quantity exceeds the BOM requirement",          HttpStatus.CONFLICT),
+    OVER_BOM_APPROVAL_REQUIRED("OVER_BOM_APPROVAL_REQUIRED", "Over-BOM issue requires manager approval",      HttpStatus.CONFLICT),
+    MISSING_WAREHOUSE_POLICY  ("MISSING_WAREHOUSE_POLICY",  "No warehouse policy resolves this requirement", HttpStatus.CONFLICT),
+    AMBIGUOUS_WAREHOUSE_POLICY("AMBIGUOUS_WAREHOUSE_POLICY", "Multiple warehouses match without a default",   HttpStatus.CONFLICT),
     PLANNED_QUANTITY_EXCEEDED ("PLANNED_QUANTITY_EXCEEDED", "Quantity exceeds the planned limit",            HttpStatus.CONFLICT),
 
     // ── System ─────────────────────────────────────────────────────────────

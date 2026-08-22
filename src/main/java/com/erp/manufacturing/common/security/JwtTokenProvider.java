@@ -16,7 +16,9 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +33,8 @@ import java.util.UUID;
 @Slf4j
 public class JwtTokenProvider {
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private final JwtProperties jwtProperties;
 
     // ── Token generation ────────────────────────────────────────────────────
@@ -42,7 +46,11 @@ public class JwtTokenProvider {
         return Jwts.builder()
                 .subject(userDetails.getUsername())
                 .id(UUID.randomUUID().toString())
+                .issuer(jwtProperties.issuer())
+                .audience().add(jwtProperties.audience()).and()
                 .claim("roles", roles)
+                .claim("ver", userDetails instanceof com.erp.manufacturing.module.user.domain.UserPrincipal principal
+                        ? principal.getAuthVersion() : 0L)
                 .issuedAt(Date.from(Instant.now()))
                 .expiration(Date.from(Instant.now().plusMillis(jwtProperties.accessTokenExpiryMs())))
                 .signWith(getSigningKey())
@@ -50,7 +58,9 @@ public class JwtTokenProvider {
     }
 
     public String generateRefreshToken() {
-        return UUID.randomUUID().toString();
+        byte[] value = new byte[32];
+        SECURE_RANDOM.nextBytes(value);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
 
     // ── Token validation & parsing ────────────────────────────────────────
@@ -64,11 +74,17 @@ public class JwtTokenProvider {
      */
     public Claims validateAndExtractClaims(String token) {
         try {
-            return Jwts.parser()
+            Claims claims = Jwts.parser()
                     .verifyWith(getSigningKey())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            if (!jwtProperties.issuer().equals(claims.getIssuer())
+                    || claims.getAudience() == null
+                    || !claims.getAudience().contains(jwtProperties.audience())) {
+                throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_MALFORMED);
+            }
+            return claims;
         } catch (ExpiredJwtException e) {
             throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_EXPIRED);
         } catch (JwtException | IllegalArgumentException e) {

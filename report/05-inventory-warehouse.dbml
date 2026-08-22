@@ -1,0 +1,148 @@
+Project manufacturing_erp_05_inventory_warehouse {
+  database_type: 'PostgreSQL'
+  Note: 'Manufacturing ERP 05-inventory-warehouse module. Source: live PostgreSQL schema after Flyway V65 (add entity name to audit logs). External tables are relationship-only stubs.'
+}
+
+Table inventory_lots {
+  lot_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  lot_code varchar(120) [not null]
+  status varchar(20) [not null, default: 'AVAILABLE']
+  received_at timestamptz
+  expires_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (item_id, lot_code) [unique, name: 'uk_inventory_lots_item_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['AVAILABLE'::character varying, 'HOLD'::character varying, 'REJECTED'::character varying, 'EXPIRED'::character varying]::text[])` [name: 'chk_inventory_lots_status']
+  }
+}
+
+Table serial_numbers {
+  serial_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  serial_code varchar(120) [not null]
+  status varchar(20) [not null, default: 'AVAILABLE']
+  received_at timestamptz
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  indexes {
+    (item_id, serial_code) [unique, name: 'uk_serial_numbers_item_code']
+  }
+
+  checks {
+    `status::text = ANY (ARRAY['AVAILABLE'::character varying, 'REJECTED'::character varying, 'ISSUED'::character varying]::text[])` [name: 'chk_serial_numbers_status']
+  }
+}
+
+Table item_warehouse_settings {
+  setting_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  safety_stock numeric(19,6) [not null, default: 0]
+  reorder_point numeric(19,6) [not null, default: 0]
+  lead_time_days integer [not null, default: 0]
+  status varchar(20) [not null, default: 'ACTIVE']
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+
+  checks {
+    `lead_time_days >= 0` [name: 'chk_item_wh_settings_lead_time_days']
+    `reorder_point >= 0::numeric` [name: 'chk_item_wh_settings_reorder_point']
+    `safety_stock >= 0::numeric` [name: 'chk_item_wh_settings_safety_stock']
+    `status::text = ANY (ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying]::text[])` [name: 'chk_item_wh_settings_status']
+  }
+}
+
+Table stock_balances {
+  balance_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  lot_id uuid
+  quantity numeric(19,6) [not null, default: 0]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  updated_by uuid
+  version bigint [default: 0]
+  reserved_quantity numeric(19,6) [not null, default: 0]
+  quality_hold_quantity numeric(19,6) [not null, default: 0]
+
+  checks {
+    `quality_hold_quantity >= 0::numeric AND (reserved_quantity + quality_hold_quantity) <= quantity` [name: 'chk_stock_balances_quality_hold_quantity']
+    `quantity >= 0::numeric` [name: 'chk_stock_balances_quantity']
+    `reserved_quantity >= 0::numeric AND reserved_quantity <= quantity` [name: 'chk_stock_balances_reserved_quantity']
+  }
+}
+
+Table stock_movements {
+  movement_id uuid [pk, not null, default: `gen_random_uuid()`]
+  item_id uuid [not null]
+  warehouse_id uuid [not null]
+  lot_id uuid
+  movement_type varchar(30) [not null]
+  direction varchar(10) [not null]
+  quantity numeric(19,6) [not null]
+  reason text
+  reference_type varchar(80)
+  reference_id varchar(120) [note: 'Polymorphic business-document identifier selected by reference_type.']
+  idempotency_key varchar(120) [not null]
+  created_at timestamptz [not null, default: `now()`]
+  created_by uuid
+  payload_hash varchar(64)
+  trace_id varchar(64)
+  serial_id uuid
+
+  indexes {
+    (idempotency_key, movement_type) [unique, name: 'uk_stock_movements_idempotency_key']
+  }
+
+  checks {
+    `direction::text = ANY (ARRAY['IN'::character varying, 'OUT'::character varying, 'NONE'::character varying]::text[])` [name: 'chk_stock_movements_direction']
+    `quantity > 0::numeric` [name: 'chk_stock_movements_quantity']
+    `movement_type::text = ANY (ARRAY['RECEIVE'::character varying, 'ISSUE'::character varying, 'ADJUST_IN'::character varying, 'ADJUST_OUT'::character varying, 'REVERSAL'::character varying, 'LOT_STATUS_CHANGE'::character varying]::text[])` [name: 'chk_stock_movements_type']
+  }
+}
+
+Table items [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  item_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Table warehouses [note: 'External reference table. Only relationship columns are shown; see its owning module for the full definition.'] {
+  warehouse_id uuid [pk, not null, default: `gen_random_uuid()`]
+}
+
+Ref inventory_lots_item_id_fkey: inventory_lots.item_id > items.item_id
+Ref item_warehouse_settings_item_id_fkey: item_warehouse_settings.item_id > items.item_id
+Ref item_warehouse_settings_warehouse_id_fkey: item_warehouse_settings.warehouse_id > warehouses.warehouse_id
+Ref serial_numbers_item_id_fkey: serial_numbers.item_id > items.item_id
+Ref stock_balances_item_id_fkey: stock_balances.item_id > items.item_id
+Ref stock_balances_lot_id_fkey: stock_balances.lot_id > inventory_lots.lot_id
+Ref stock_balances_warehouse_id_fkey: stock_balances.warehouse_id > warehouses.warehouse_id
+Ref stock_movements_item_id_fkey: stock_movements.item_id > items.item_id
+Ref stock_movements_lot_id_fkey: stock_movements.lot_id > inventory_lots.lot_id
+Ref stock_movements_serial_id_fkey: stock_movements.serial_id > serial_numbers.serial_id
+Ref stock_movements_warehouse_id_fkey: stock_movements.warehouse_id > warehouses.warehouse_id
+
+TableGroup module_05_inventory_warehouse {
+  inventory_lots
+  serial_numbers
+  item_warehouse_settings
+  stock_balances
+  stock_movements
+}
+

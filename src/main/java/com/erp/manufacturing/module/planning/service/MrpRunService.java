@@ -7,6 +7,7 @@ import com.erp.manufacturing.common.context.RequestContext;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.Plant;
@@ -26,6 +27,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -34,6 +36,7 @@ import java.time.Instant;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -50,18 +53,52 @@ public class MrpRunService {
     private final MrpCalculationService calculationService;
     private final MrpPlanningMapper mapper;
     private final AuditLogService auditLogService;
+    private final IdempotencySupport idempotency;
 
+    /**
+     * Runs MRP synchronously.
+     *
+     * @param idempotencyKey optional {@code Idempotency-Key} header (V58). Absent ⇒ behaviour is
+     *        exactly what it always was: every call starts a new run. Present ⇒ the key is claimed
+     *        by the run row, and replaying it returns that same run instead of computing a second
+     *        one over the same demand.
+     *        <p>Two consequences that are deliberate and documented for clients:
+     *        <ul>
+     *          <li>A run that ends {@code FAILED} still owns its key, because the row is written
+     *              before the calculation and this method records failure rather than rethrowing.
+     *              Retrying after a failure therefore needs a <em>new</em> key.</li>
+     *          <li>Two concurrent submissions of one key do not queue: the second loses the race on
+     *              {@code uk_mrp_runs_idempotency_key} and fails fast with
+     *              {@code RESOURCE_ALREADY_EXISTS}, rather than blocking for the whole calculation.</li>
+     *        </ul>
+     */
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MRP_RUN', 'PLANT', #request.plantId())")
     @Auditable(action = AuditAction.MRP_RUN_CREATED, entityType = "MrpRun", entityIdExpression = "mrpRunId.toString()")
-    public MrpRunResponse run(MrpRunCreateRequest request) {
+    public MrpRunResponse run(MrpRunCreateRequest request, String idempotencyKey) {
+        String normalizedKey = StringUtils.hasText(idempotencyKey)
+                ? idempotency.normalizeKey(idempotencyKey)
+                : null;
+        if (normalizedKey != null) {
+            Optional<MrpRun> replayed = mrpRunRepository.findByIdempotencyKey(normalizedKey);
+            if (replayed.isPresent()) {
+                idempotency.ensureSamePayload(replayed.get().getPayloadHash(), request);
+                return mapper.toResponse(replayed.get());
+            }
+        }
         validateHorizon(request);
         Company company = organizationLookupService.getActiveCompany(request.companyId());
         Plant plant = organizationLookupService.getActivePlant(request.plantId());
         ensurePlantBelongsToCompany(plant, company);
-        Warehouse warehouse = request.warehouseId() == null
+        UUID demandWarehouseId = request.effectiveDemandWarehouseId();
+        if (request.warehouseId() != null && request.demandWarehouseId() != null
+                && !request.warehouseId().equals(request.demandWarehouseId())) {
+            throw ExceptionFactory.custom(ValidationErrorCode.INVALID_INPUT,
+                    "warehouseId and demandWarehouseId must match when both are supplied");
+        }
+        Warehouse warehouse = demandWarehouseId == null
                 ? null
-                : organizationLookupService.getActiveWarehouse(request.warehouseId());
+                : organizationLookupService.getActiveWarehouse(demandWarehouseId);
         if (warehouse != null) {
             ensureWarehouseBelongsToPlant(warehouse, plant);
         }
@@ -77,9 +114,14 @@ public class MrpRunService {
                 .warehouse(warehouse)
                 .horizonStartDate(request.horizonStartDate())
                 .horizonEndDate(request.horizonEndDate())
+                .idempotencyKey(normalizedKey)
+                .payloadHash(normalizedKey == null ? null : idempotency.payloadHash(request))
                 .build();
         run.start(Instant.now());
-        run = mrpRunRepository.save(run);
+        // saveAndFlush, not save: the INSERT has to hit the database now so the key is claimed
+        // before the calculation starts. With a deferred flush a concurrent duplicate would run the
+        // whole thing and only collide at commit, wasting the work it was sent to prevent.
+        run = mrpRunRepository.saveAndFlush(run);
         MrpRun persistedRun = run;
 
         mrpRunDemandRepository.saveAll(demands.stream()
@@ -238,6 +280,7 @@ public class MrpRunService {
                     .requirementStatus(draft.status())
                     .note(draft.note())
                     .settingSource(draft.settingSource())
+                    .warehouseResolutionSource(draft.warehouseResolutionSource())
                     .excludedLotCount(draft.excludedLotCount())
                     .build();
             saved.put(draft, requirementLineRepository.save(line));
@@ -258,6 +301,10 @@ public class MrpRunService {
                             .company(run.getCompany())
                             .plant(run.getPlant())
                             .warehouse(requirement.warehouse())
+                            .outputWarehouse(draft.suggestionType() == SupplySuggestionType.WORK_ORDER
+                                    ? requirement.warehouse() : null)
+                            .receivingWarehouse(draft.suggestionType() == SupplySuggestionType.PURCHASE_REQUISITION
+                                    ? requirement.warehouse() : null)
                             .item(requirement.item())
                             .suggestionType(draft.suggestionType())
                             .suggestedQuantity(requirement.netRequiredQuantity())
@@ -358,7 +405,8 @@ public class MrpRunService {
             }
             if (description == null) {
                 auditLogService.logEntity(
-                        RequestContext.capture(attrs.getRequest()), action, "MrpRun", run.getMrpRunId());
+                        RequestContext.capture(attrs.getRequest()), action, "MrpRun",
+                        run.getMrpRunId(), run.getCode());
             } else {
                 auditLogService.log(
                         RequestContext.capture(attrs.getRequest()), action, description);

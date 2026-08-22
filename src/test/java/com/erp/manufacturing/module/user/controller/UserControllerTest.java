@@ -91,7 +91,7 @@ class UserControllerTest {
     void create_validRequest_returns201WithoutPassword() throws Exception {
         when(userService.create(any(CreateUserRequest.class))).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/users")
+        mockMvc.perform(post("/users/v1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody("jdoe")))
                 .andExpect(status().isCreated())
@@ -110,7 +110,7 @@ class UserControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.USERNAME_ALREADY_EXISTS,
                         "Username already taken: jdoe"));
 
-        mockMvc.perform(post("/api/v1/users")
+        mockMvc.perform(post("/users/v1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody("jdoe")))
                 .andExpect(status().is(ValidationErrorCode.USERNAME_ALREADY_EXISTS.status().value()))
@@ -121,7 +121,7 @@ class UserControllerTest {
     @Test
     @DisplayName("create: username violating the character pattern returns 400 with the field name")
     void create_invalidUsername_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/users")
+        mockMvc.perform(post("/users/v1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(createBody("has spaces!")))
                 .andExpect(status().isBadRequest())
@@ -138,7 +138,7 @@ class UserControllerTest {
         when(userService.findById(USER_ID))
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND, "User not found: " + USER_ID));
 
-        mockMvc.perform(get("/api/v1/users/" + USER_ID))
+        mockMvc.perform(get("/users/v1/" + USER_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -149,7 +149,7 @@ class UserControllerTest {
         when(userService.findAll(any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/users"))
+        mockMvc.perform(get("/users/v1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].username").value("jdoe"))
@@ -168,7 +168,7 @@ class UserControllerTest {
         when(userService.findAll(any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/users").param("size", "0"))
+        mockMvc.perform(get("/users/v1").param("size", "0"))
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
@@ -180,7 +180,7 @@ class UserControllerTest {
     @Test
     @DisplayName("delete: returns 200 with a null result payload (§5.8 DELETE pattern)")
     void delete_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/users/" + USER_ID))
+        mockMvc.perform(delete("/users/v1/" + USER_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());

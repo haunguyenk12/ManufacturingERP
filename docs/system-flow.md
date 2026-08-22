@@ -380,21 +380,18 @@ Start from approved Work Order suggestion
 | **Reserve trước hay release trước?** | **Reserve trước** — `canReserve()` cho phép `DRAFT`/`PLANNED`/`BLOCKED`, chỉ chặn `COMPLETED`/`CANCELLED`. Trước `D9` reserve đòi `RELEASED` nên hai rule khoá nhau và WO từ MRP không release được (nợ #22) |
 | **Gate 1b – Over-issue** | Vượt định mức cần `PERM_MATERIAL_ISSUE_OVERRIDE` + `overrideReason`; lưu vết `material_issue_lines.over_issue` |
 | **Gate 1c – Receipt approval** | `post` → `DRAFT`; `submit` → `PENDING_APPROVAL` (cả hai **không** đụng kho); `approve` → `APPROVED` + RECEIVE movement; `reject` → `REJECTED` (reason bắt buộc) |
-| **QC disposition (F2 + D5)** | Chỉ trên receipt `APPROVED`, chỉ **một lần**, reason bắt buộc. Receipt **vẫn** `APPROVED` sau QC. Hai đường theo **cấp dòng** (`line.lot != null`), không theo cờ item:<br>• **có lot** → lot `HOLD` → `AVAILABLE`/`REJECTED` + `LOT_STATUS_CHANGE` movement + dòng `quality_dispositions`<br>• **không lot** (`D5`) → verdict chỉ trên `production_receipts`; `AVAILABLE` không sinh movement, `REJECTED` sinh **`ADJUST_OUT`** rút hàng khỏi kho |
+| **QC disposition (F2 + D5 + FE4-5B3)** | Chỉ trên receipt `APPROVED`, chỉ **một lần**, reason bắt buộc. Receipt **vẫn** `APPROVED` sau QC. Hai đường theo **cấp dòng**:<br>• **có lot** → lot `HOLD` → `AVAILABLE`/`REJECTED` + `LOT_STATUS_CHANGE` movement + dòng `quality_dispositions`<br>• **NON_TRACKED** → verdict trên `production_receipts`; approve tăng on-hand + `quality_hold_quantity`; `AVAILABLE` giải phóng hold, `REJECTED` giữ nguyên on-hand và hold; không sinh movement số lượng |
 | ISSUE movement | Append-only vào `stock_movements`, gắn `work_order_id` |
 | WIP transaction | Append-only, ghi scrap/rework/progress |
 | RECEIVE movement | Chỉ sinh khi **approve**; lot mới mở ở `HOLD`, chờ QC disposition chuyển sang `AVAILABLE`/`REJECTED` |
 | Variance | `Planned qty − Actual qty` per component |
 | Status flow | `DRAFT ⇄ BLOCKED → RELEASED → IN_PROGRESS → COMPLETED / CANCELLED` |
 
-> **Output không lot-tracked (`D5`, 2026-07-30 — nợ #17 đã trả):** item không lot-tracked không có chỗ
-> mang `HOLD`, nên output đó vào kho là **dùng được ngay từ lúc `approve`**. Trước `D5`,
+> **Output không lot-tracked (`D5` + `FE4-5B3`):** item không lot-tracked không có lot để mang
+> status, nên `stock_balances.quality_hold_quantity` là carrier HOLD authoritative. Trước `D5`,
 > `qc-disposition` trên receipt như vậy trả `STATE_CONFLICT` ⇒ đơn hàng của nó treo ở `IN_PROGRESS`
-> vĩnh viễn (fulfillment chỉ chạy từ QC `AVAILABLE`). Nay QC chạy được: `AVAILABLE` chỉ ghi verdict +
-> mở đường fulfillment (không đổi tồn kho — hàng đã available); `REJECTED` **phải** rút hàng bằng
-> `ADJUST_OUT` vì không có lot status nào để làm hàng hỏng thành không dùng được. Nếu hàng đã ra khỏi
-> kho trước khi QC kịp phán quyết thì `REJECTED` nổ `INSUFFICIENT_AVAILABLE_STOCK` (409) và rollback —
-> có chủ đích, cần người xử lý.
+> vĩnh viễn. Sau `FE4-5B3`, approve tăng on-hand nhưng available vẫn 0; `AVAILABLE` giải phóng hold và
+> fulfill trong cùng transaction; `REJECTED` giữ hàng lỗi trên on-hand/hold để truy vết và không fulfill.
 >
 > Ngược lại, receipt của item lot-tracked **bắt buộc** có `lotCode`/`lotId` ngay ở bước `post`
 > (`LOT_REQUIRED`). Lot đã tồn tại (trùng `lotCode`) giữ nguyên status hiện tại — chỉ lot **mới tạo**
@@ -594,9 +591,9 @@ DRAFT → PENDING_APPROVAL → APPROVED
 > Lot: HOLD → AVAILABLE   (QC pass — available tăng)
 >          ↘ REJECTED     (QC fail — on-hand giữ nguyên, available KHÔNG tăng)
 > ```
-> Với output **không lot** (`D5`) thì không có lot nào để chuyển trạng thái và **không** có dòng
-> `quality_dispositions` — verdict chỉ tồn tại trên receipt, và `REJECTED` rút hàng bằng `ADJUST_OUT`
-> nên chính `stock_balances.quantity` giảm.
+> Với output **không lot** thì không có lot nào để chuyển trạng thái và **không** có dòng
+> `quality_dispositions` — verdict chỉ tồn tại trên receipt. Pending QC được giữ trong
+> `stock_balances.quality_hold_quantity`; `AVAILABLE` giải phóng hold, `REJECTED` giữ nguyên hold.
 > Cần `PERM_QUALITY_DISPOSITION` (chỉ ADMIN/MANAGER).
 
 ### Material Issue

@@ -90,7 +90,7 @@ class ItemControllerTest {
     void create_validRequest_returns201Created() throws Exception {
         when(itemService.createItem(eq(COMPANY_ID), any(ItemCreateRequest.class))).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/items")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/items")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"MAT-001","name":"Steel Sheet","type":"RAW_MATERIAL",
@@ -107,7 +107,7 @@ class ItemControllerTest {
     @DisplayName("create: blank code returns 400 VALIDATION_ERROR and reports the field twice "
             + "(§5.1 — errors is an array, one field may violate several constraints)")
     void create_blankCode_returns400WithFieldErrors() throws Exception {
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/items")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/items")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"","name":"Steel Sheet","type":"RAW_MATERIAL",
@@ -131,7 +131,7 @@ class ItemControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot create item under inactive company: " + COMPANY_ID));
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/items")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/items")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"MAT-001","name":"Steel Sheet","type":"RAW_MATERIAL",
@@ -148,7 +148,7 @@ class ItemControllerTest {
         when(itemService.getItem(ITEM_ID))
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND, "Item not found: " + ITEM_ID));
 
-        mockMvc.perform(get("/api/v1/items/" + ITEM_ID))
+        mockMvc.perform(get("/v1/items/" + ITEM_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -159,7 +159,7 @@ class ItemControllerTest {
         when(itemService.listItems(eq(COMPANY_ID), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/companies/" + COMPANY_ID + "/items"))
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("MAT-001"))
@@ -178,7 +178,7 @@ class ItemControllerTest {
         when(itemService.listItems(eq(COMPANY_ID), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/companies/" + COMPANY_ID + "/items").param("size", "500"))
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items").param("size", "500"))
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
@@ -192,7 +192,7 @@ class ItemControllerTest {
     @Test
     @DisplayName("deactivate: returns 200 with a null result payload (§5.8 DELETE pattern)")
     void deactivate_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/items/" + ITEM_ID))
+        mockMvc.perform(delete("/v1/items/" + ITEM_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -205,7 +205,7 @@ class ItemControllerTest {
     void activate_returns200WithTheActivatedItem() throws Exception {
         when(itemService.activateItem(ITEM_ID)).thenReturn(sampleResponse());
 
-        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/activate"))
+        mockMvc.perform(post("/v1/items/" + ITEM_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.itemId").value(ITEM_ID.toString()))
@@ -222,7 +222,7 @@ class ItemControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot activate an item while its company is inactive: " + ITEM_ID));
 
-        mockMvc.perform(post("/api/v1/items/" + ITEM_ID + "/activate"))
+        mockMvc.perform(post("/v1/items/" + ITEM_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());

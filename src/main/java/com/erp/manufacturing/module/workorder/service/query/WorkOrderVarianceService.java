@@ -111,7 +111,9 @@ public class WorkOrderVarianceService {
         return new WorkOrderCostVarianceResponse(
                 standardMaterialCost, standardLaborCost, standardOverheadCost, standardTotalCost,
                 actualMaterialCost, actualLaborCost, actualOverheadCost, actualTotalCost,
-                actualTotalCost.subtract(standardTotalCost));
+                actualTotalCost.subtract(standardTotalCost),
+                false,
+                "DEFERRED_NON_AUTHORITATIVE");
     }
 
     /**
@@ -176,4 +178,3 @@ public class WorkOrderVarianceService {
         return VarianceStatus.MATCHED;
     }
 }
-

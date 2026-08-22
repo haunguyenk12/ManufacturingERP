@@ -11,7 +11,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +38,25 @@ public class ItemLookupService {
                     "Inactive item cannot be used: " + itemId);
         }
         return item;
+    }
+
+    /**
+     * Resolves many item codes at once, in a single query (rule C14).
+     *
+     * <p>Entry point for callers that hold a list of codes rather than identifiers — the spreadsheet
+     * importer being the first one. Codes absent from the company are simply missing from the map;
+     * this method never throws for an unknown code, because the caller has to report the miss against
+     * the row it came from rather than abort the whole file.
+     *
+     * @return code (exactly as stored) → item, empty when {@code codes} is empty
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Item> findItemsByCode(UUID companyId, Collection<String> codes) {
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+        return itemRepository.findByCompanyCompanyIdAndCodeIn(companyId, codes).stream()
+                .collect(Collectors.toMap(Item::getCode, Function.identity()));
     }
 
     @Transactional(readOnly = true)

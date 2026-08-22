@@ -45,6 +45,7 @@ public class SupplySuggestionService {
     public SupplySuggestionResponse approve(UUID suggestionId, SupplySuggestionDecisionRequest request) {
         SupplySuggestion suggestion = findSuggestion(suggestionId);
         ensureDraft(suggestion, "Only DRAFT supply suggestions can be approved");
+        ensureMakeDecision(suggestion);
         suggestion.approve(trimToNull(request == null ? null : request.decisionNote()));
         return mapper.toResponse(supplySuggestionRepository.save(suggestion));
     }
@@ -55,6 +56,7 @@ public class SupplySuggestionService {
     public SupplySuggestionResponse reject(UUID suggestionId, SupplySuggestionDecisionRequest request) {
         SupplySuggestion suggestion = findSuggestion(suggestionId);
         ensureDraft(suggestion, "Only DRAFT supply suggestions can be rejected");
+        ensureMakeDecision(suggestion);
         suggestion.reject(trimToNull(request == null ? null : request.decisionNote()));
         return mapper.toResponse(supplySuggestionRepository.save(suggestion));
     }
@@ -82,7 +84,9 @@ public class SupplySuggestionService {
 
         UUID outputWarehouseId = request != null && request.outputWarehouseId() != null
                 ? request.outputWarehouseId()
-                : suggestion.getWarehouse() == null ? null : suggestion.getWarehouse().getWarehouseId();
+                : suggestion.getOutputWarehouse() != null
+                    ? suggestion.getOutputWarehouse().getWarehouseId()
+                    : suggestion.getWarehouse() == null ? null : suggestion.getWarehouse().getWarehouseId();
         if (outputWarehouseId == null) {
             throw ExceptionFactory.custom(ValidationErrorCode.MISSING_REQUIRED_FIELD,
                     "Output warehouse is required when suggestion is not warehouse-specific");
@@ -168,7 +172,11 @@ public class SupplySuggestionService {
         List<String> messages = suggestion.messages();
         BusinessErrorCode errorCode = messages.contains(PlanningMessageCode.MISSING_BOM.name())
                 ? BusinessErrorCode.MISSING_BOM
-                : BusinessErrorCode.MISSING_ROUTING;
+                : messages.contains(PlanningMessageCode.MISSING_ROUTING.name())
+                    ? BusinessErrorCode.MISSING_ROUTING
+                    : messages.contains(PlanningMessageCode.AMBIGUOUS_WAREHOUSE_POLICY.name())
+                        ? BusinessErrorCode.AMBIGUOUS_WAREHOUSE_POLICY
+                        : BusinessErrorCode.MISSING_WAREHOUSE_POLICY;
         throw ExceptionFactory.businessRule(errorCode,
                 "Supply suggestion is BLOCKED: " + String.join(", ", messages));
     }
@@ -177,6 +185,13 @@ public class SupplySuggestionService {
     private void ensureDraft(SupplySuggestion suggestion, String message) {
         if (!suggestion.isDraft()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT, message);
+        }
+    }
+
+    private void ensureMakeDecision(SupplySuggestion suggestion) {
+        if (suggestion.getSuggestionType() == SupplySuggestionType.PURCHASE_REQUISITION) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "BUY suggestions are read-only; purchasing conversion and stock side effects are deferred");
         }
     }
 

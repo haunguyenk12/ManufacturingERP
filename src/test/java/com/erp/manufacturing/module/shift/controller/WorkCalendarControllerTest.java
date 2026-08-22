@@ -74,7 +74,7 @@ class WorkCalendarControllerTest {
         when(workCalendarService.create(eq(PLANT_ID), any(WorkCalendarCreateRequest.class)))
                 .thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"cal-01","name":"Default Calendar","effectiveFrom":"2026-01-01"}
@@ -90,7 +90,7 @@ class WorkCalendarControllerTest {
     @Test
     @DisplayName("create: blank name returns 400 VALIDATION_ERROR with the field name")
     void create_blankName_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"CAL-01","name":"","effectiveFrom":"2026-01-01"}
@@ -108,7 +108,7 @@ class WorkCalendarControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "Work calendar code already exists: CAL-01"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-calendars")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-calendars")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"CAL-01","name":"Default Calendar","effectiveFrom":"2026-01-01"}
@@ -125,7 +125,7 @@ class WorkCalendarControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Work calendar not found with id: " + CALENDAR_ID));
 
-        mockMvc.perform(get("/api/v1/work-calendars/" + CALENDAR_ID))
+        mockMvc.perform(get("/v1/work-calendars/" + CALENDAR_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -135,7 +135,7 @@ class WorkCalendarControllerTest {
     void update_validRequest_returns200() throws Exception {
         when(workCalendarService.update(eq(CALENDAR_ID), any())).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(patch("/api/v1/work-calendars/" + CALENDAR_ID)
+        mockMvc.perform(patch("/v1/work-calendars/" + CALENDAR_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Default Calendar (updated)"}
@@ -149,7 +149,7 @@ class WorkCalendarControllerTest {
     void activate_returns200Active() throws Exception {
         when(workCalendarService.activate(CALENDAR_ID)).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-calendars/" + CALENDAR_ID + "/activate"))
+        mockMvc.perform(post("/v1/work-calendars/" + CALENDAR_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"));
     }
@@ -159,7 +159,7 @@ class WorkCalendarControllerTest {
     void deactivate_returns200Inactive() throws Exception {
         when(workCalendarService.deactivate(CALENDAR_ID)).thenReturn(sampleResponse("INACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-calendars/" + CALENDAR_ID + "/deactivate"))
+        mockMvc.perform(post("/v1/work-calendars/" + CALENDAR_ID + "/deactivate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("INACTIVE"));
     }
@@ -167,7 +167,7 @@ class WorkCalendarControllerTest {
     @Test
     @DisplayName("delete: is the same command as POST .../deactivate — 200 with null result")
     void delete_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/work-calendars/" + CALENDAR_ID))
+        mockMvc.perform(delete("/v1/work-calendars/" + CALENDAR_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -181,7 +181,7 @@ class WorkCalendarControllerTest {
         when(workCalendarService.list(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-calendars"))
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-calendars"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("CAL-01"))

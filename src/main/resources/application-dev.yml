@@ -1,4 +1,7 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
+
   jpa:
     show-sql: true
     properties:
@@ -18,10 +21,6 @@ logging:
 
 app:
   jwt:
-    secret: dev-only-secret-key-not-for-production-32chars-at-least
     access-token-expiry-ms: 3600000   # 1 hour for easier dev
     refresh-token-expiry-ms: 604800000
     absolute-session-timeout-ms: 2592000000   # 30 days
-
-  rate-limit:
-    enabled: false   # disable rate limit in dev

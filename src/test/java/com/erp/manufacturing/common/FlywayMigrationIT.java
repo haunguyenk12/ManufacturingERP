@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Runs the real Flyway migration chain (V1..V55) against an empty Postgres
+ * Runs the real Flyway migration chain (V1..V60) against an empty Postgres
  * Testcontainer. Uses the Flyway API directly (no ApplicationContext) so this
  * doesn't need to boot Redis/JWT/filter-chain beans unrelated to migration
  * correctness (NEXT_PHASE_PLAN.md D4).
@@ -33,6 +33,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String IDEMPOTENCY_SCHEMA = "v37_idempotency_check";
     private static final String DOCUMENT_CODE_SCHEMA = "v40_document_code_check";
     private static final String SERIAL_TRACKING_SCHEMA = "v52_serial_tracking_check";
+    private static final String RUN_IDEMPOTENCY_SCHEMA = "v58_run_idempotency_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -45,7 +46,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("55");
+        assertThat(current.getVersion().getVersion()).isEqualTo("66");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -358,6 +359,66 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(grantedAuditPermissions("OPERATOR")).isEmpty();
     }
 
+    /**
+     * DEC-09 separation of duties. The whole point of the Over-BOM gate is that the person asking
+     * for extra material is not the person who releases it, so an OPERATOR holding the approval
+     * permission would make the two-step flow decorative. {@code PermissionCatalogTest} cannot see
+     * this: it proves the permission <em>row exists</em>, never who it is granted to (CLAUDE.md
+     * §0.25) — only a really-migrated database answers that.
+     */
+    @Test
+    void migrate_v66_grantsMaterialIssueApprovalToApproversOnly() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedPermission("ADMIN", "PERM_MATERIAL_ISSUE_APPROVE"))
+                .containsExactly("PERM_MATERIAL_ISSUE_APPROVE");
+        assertThat(grantedPermission("MANAGER", "PERM_MATERIAL_ISSUE_APPROVE"))
+                .containsExactly("PERM_MATERIAL_ISSUE_APPROVE");
+        assertThat(grantedPermission("OPERATOR", "PERM_MATERIAL_ISSUE_APPROVE")).isEmpty();
+    }
+
+    /**
+     * DEC-05: the trim-only normalization is enforced by the database, not just by the service.
+     * A pre-check alone loses the race between two concurrent approvals of the same lot code.
+     */
+    @Test
+    void migrate_v66_rejectsUntrimmedLotCodesAtTheDatabase() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT pg_get_constraintdef(oid) AS definition
+                     FROM pg_constraint
+                     WHERE conname = 'chk_inventory_lots_code_trimmed'
+                     """)) {
+            assertThat(rows.next())
+                    .as("V66 must add chk_inventory_lots_code_trimmed")
+                    .isTrue();
+            assertThat(rows.getString("definition")).contains("btrim");
+        }
+    }
+
+    private Set<String> grantedPermission(String roleCode, String permissionCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code = '%s'
+                     """.formatted(roleCode, permissionCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
     private Set<String> grantedAuditPermissions(String roleCode) throws Exception {
         Set<String> granted = new TreeSet<>();
         try (Connection connection = DriverManager.getConnection(
@@ -369,6 +430,133 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                      JOIN roles r ON r.role_id = rp.role_id
                      JOIN permissions p ON p.permission_id = rp.permission_id
                      WHERE r.code = '%s' AND p.code = 'PERM_AUDIT_READ'
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * FE-4 5C: Item Master has dedicated wire permissions. READ is needed by every operational
+     * role; MANAGE stays with ADMIN/MANAGER, matching the prior PERM_INVENTORY_* grants that V57
+     * copies for backward-compatible role configuration.
+     */
+    @Test
+    void migrate_v57_grantsItemPermissionsToTheDocumentedRoles() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedItemPermissions("ADMIN"))
+                .containsExactlyInAnyOrder("PERM_ITEM_READ", "PERM_ITEM_MANAGE");
+        assertThat(grantedItemPermissions("MANAGER"))
+                .containsExactlyInAnyOrder("PERM_ITEM_READ", "PERM_ITEM_MANAGE");
+        assertThat(grantedItemPermissions("OPERATOR")).containsExactly("PERM_ITEM_READ");
+    }
+
+
+    /**
+     * V58 makes {@code POST /planning-runs} replay-safe. Both halves matter and only the database
+     * can answer either: the constraint must reject a second run claiming the same key, and it must
+     * still let any number of key-less runs coexist — the header is optional and every run created
+     * before V58 has {@code NULL}, so a constraint that treated NULLs as equal would break them all.
+     */
+    @Test
+    void migrate_v58_rejectsADuplicateRunKeyButStillAllowsManyRunsWithoutOne() throws Exception {
+        Flyway flyway = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(RUN_IDEMPOTENCY_SCHEMA)
+                .load();
+        flyway.migrate();
+
+        String insertRun = """
+                INSERT INTO mrp_runs (mrp_run_id, code, company_id, plant_id,
+                                      horizon_start_date, horizon_end_date, status,
+                                      created_at, updated_at, idempotency_key)
+                VALUES ('%s', '%s', '55555555-5555-4555-8555-555555555555',
+                        '66666666-6666-4666-8666-666666666666',
+                        DATE '2026-08-01', DATE '2026-09-01', 'COMPLETED', now(), now(), %s)
+                """;
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + RUN_IDEMPOTENCY_SCHEMA);
+            statement.execute("""
+                    INSERT INTO companies (company_id, code, name)
+                    VALUES ('55555555-5555-4555-8555-555555555555', 'RUNIDEMP_CO', 'Run Idempotency Co')
+                    """);
+            statement.execute("""
+                    INSERT INTO plants (plant_id, company_id, code, name)
+                    VALUES ('66666666-6666-4666-8666-666666666666',
+                            '55555555-5555-4555-8555-555555555555', 'RUNIDEMP_PL', 'Run Idempotency Plant')
+                    """);
+
+            statement.execute(insertRun.formatted(
+                    "77777777-7777-4777-8777-777777777777", "RUN-77777777", "'SLIDE-SEED-1'"));
+
+            assertThatThrownBy(() -> statement.execute(insertRun.formatted(
+                    "88888888-8888-4888-8888-888888888888", "RUN-88888888", "'SLIDE-SEED-1'")))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("uk_mrp_runs_idempotency_key");
+
+            // Runs submitted without the header must keep working, any number of them.
+            statement.execute(insertRun.formatted(
+                    "99999999-9999-4999-8999-999999999999", "RUN-99999999", "NULL"));
+            statement.execute(insertRun.formatted(
+                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "RUN-AAAAAAAA", "NULL"));
+
+            try (ResultSet rows = statement.executeQuery(
+                    "SELECT count(*) AS total FROM mrp_runs WHERE idempotency_key IS NULL")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getInt("total")).isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
+    void migrate_v60_grantsDataImportPermissionsToAdminAndManagerOnly() throws Exception {
+        migratePublicSchema();
+
+        assertThat(grantedDataImportPermissions("ADMIN"))
+                .containsExactlyInAnyOrder("PERM_DATA_IMPORT_READ", "PERM_DATA_IMPORT_EXECUTE");
+        assertThat(grantedDataImportPermissions("MANAGER"))
+                .containsExactlyInAnyOrder("PERM_DATA_IMPORT_READ", "PERM_DATA_IMPORT_EXECUTE");
+        assertThat(grantedDataImportPermissions("OPERATOR")).isEmpty();
+    }
+
+    private Set<String> grantedDataImportPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s'
+                       AND p.code IN ('PERM_DATA_IMPORT_READ', 'PERM_DATA_IMPORT_EXECUTE')
+                     """.formatted(roleCode))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
+    }
+
+    private Set<String> grantedItemPermissions(String roleCode) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN ('PERM_ITEM_READ', 'PERM_ITEM_MANAGE')
                      """.formatted(roleCode))) {
             while (rows.next()) {
                 granted.add(rows.getString("code"));

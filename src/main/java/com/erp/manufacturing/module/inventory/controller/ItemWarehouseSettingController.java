@@ -22,14 +22,14 @@ public class ItemWarehouseSettingController {
 
     private final ItemWarehouseSettingService settingService;
 
-    @PutMapping("/api/v1/inventory/item-warehouse-settings")
+    @PutMapping("/v1/inventory/item-warehouse-settings")
     @Operation(summary = "Create or update item warehouse setting")
     public ResponseEntity<ApiResponse<ItemWarehouseSettingResponse>> upsert(
             @Valid @RequestBody ItemWarehouseSettingRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(settingService.upsert(request)));
     }
 
-    @GetMapping("/api/v1/inventory/item-warehouse-settings")
+    @GetMapping("/v1/inventory/item-warehouse-settings")
     @Operation(summary = "List item warehouse settings")
     public ResponseEntity<ApiResponse<PageResult<ItemWarehouseSettingResponse>>> list(
             @RequestParam(required = false) UUID warehouseId,
@@ -42,7 +42,7 @@ public class ItemWarehouseSettingController {
                 warehouseId, itemId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @DeleteMapping("/api/v1/inventory/item-warehouse-settings/{settingId}")
+    @DeleteMapping("/v1/inventory/item-warehouse-settings/{settingId}")
     @Operation(summary = "Deactivate item warehouse setting")
     public ResponseEntity<ApiResponse<Void>> deactivate(@PathVariable UUID settingId) {
         settingService.deactivate(settingId);

@@ -71,7 +71,27 @@ public class MaterialIssueLine extends BaseEntity {
     @Column(name = "override_reason", columnDefinition = "TEXT")
     private String overrideReason;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "stock_movement_id", nullable = false)
+    @Column(name = "requested_lot_code", length = 120)
+    private String requestedLotCode;
+
+    @Column(name = "requested_lot_id")
+    private UUID requestedLotId;
+
+    @Column(name = "requested_serial_id")
+    private UUID requestedSerialId;
+
+    @Column(name = "issue_reason", length = 1000)
+    private String issueReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason_code", length = 30)
+    private MaterialIssueReasonCode reasonCode;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_execution_id")
+    private ProductionExecution sourceExecution;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "stock_movement_id")
     private StockMovement stockMovement;
 }

@@ -83,7 +83,7 @@ class RoutingControllerTest {
         when(routingService.create(eq(COMPANY_ID), any(RoutingCreateRequest.class)))
                 .thenReturn(sampleResponse("DRAFT"));
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/routings")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/routings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"itemId":"%s","code":"RT-001","version":"1",
@@ -104,7 +104,7 @@ class RoutingControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only DRAFT routings can be activated"));
 
-        mockMvc.perform(post("/api/v1/routings/" + ROUTING_ID + "/activate"))
+        mockMvc.perform(post("/v1/routings/" + ROUTING_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -117,7 +117,7 @@ class RoutingControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot activate routing without operations"));
 
-        mockMvc.perform(post("/api/v1/routings/" + ROUTING_ID + "/activate"))
+        mockMvc.perform(post("/v1/routings/" + ROUTING_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()));
     }
@@ -125,7 +125,7 @@ class RoutingControllerTest {
     @Test
     @DisplayName("deactivate: returns 200 with a null result payload (§5.8 DELETE pattern)")
     void deactivate_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/routings/" + ROUTING_ID))
+        mockMvc.perform(delete("/v1/routings/" + ROUTING_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());

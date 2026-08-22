@@ -5,9 +5,13 @@ import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.dto.*;
+import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.organization.mapper.OrganizationMapper;
 import com.erp.manufacturing.module.organization.repository.*;
 import com.erp.manufacturing.module.user.repository.UserRepository;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -264,17 +268,32 @@ class AccessControlServiceTest {
         when(userRepository.existsById(userId)).thenReturn(true);
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(activeRole(roleId)));
         when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(activeScope(scopeId)));
+        when(accessScopeResourceRepository.findByScopeId(scopeId, Pageable.unpaged()))
+                .thenReturn(new PageImpl<>(List.of(AccessScopeResource.builder()
+                        .scopeId(scopeId)
+                        .resourceType(ScopeResourceType.COMPANY)
+                        .resourceId(UUID.randomUUID())
+                        .build())));
         when(assignmentRepository.findByUserIdAndRoleIdAndScopeIdAndStatus(
                 userId, roleId, scopeId, AssignmentStatus.ACTIVE)).thenReturn(Optional.empty());
         when(assignmentRepository.save(any(UserRoleAssignment.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
+        Instant expiresAt = Instant.now().plusSeconds(3600);
         UserRoleAssignmentResponse response = service.assignRole(
-                new UserRoleAssignmentRequest(userId, roleId, scopeId, Instant.now().plusSeconds(3600)));
+                new UserRoleAssignmentRequest(userId, roleId, scopeId, expiresAt));
 
         assertThat(response.userId()).isEqualTo(userId);
         assertThat(response.roleId()).isEqualTo(roleId);
         assertThat(response.scopeId()).isEqualTo(scopeId);
         assertThat(response.status()).isEqualTo("ACTIVE");
+
+        // The frontend reported a lost expiry on 2026-08-13 (root cause was JSON serialisation, not
+        // this layer — CLAUDE.md §0.42). This case already passed an expiry but asserted nothing
+        // about it, so a service or mapper that quietly dropped the field would have stayed green.
+        ArgumentCaptor<UserRoleAssignment> saved = ArgumentCaptor.forClass(UserRoleAssignment.class);
+        verify(assignmentRepository).save(saved.capture());
+        assertThat(saved.getValue().getExpiresAt()).isEqualTo(expiresAt);
+        assertThat(response.expiresAt()).isEqualTo(expiresAt);
     }
 
     @Test
@@ -285,6 +304,12 @@ class AccessControlServiceTest {
         when(userRepository.existsById(userId)).thenReturn(true);
         when(roleRepository.findById(roleId)).thenReturn(Optional.of(activeRole(roleId)));
         when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(activeScope(scopeId)));
+        when(accessScopeResourceRepository.findByScopeId(scopeId, Pageable.unpaged()))
+                .thenReturn(new PageImpl<>(List.of(AccessScopeResource.builder()
+                        .scopeId(scopeId)
+                        .resourceType(ScopeResourceType.COMPANY)
+                        .resourceId(UUID.randomUUID())
+                        .build())));
         when(assignmentRepository.findByUserIdAndRoleIdAndScopeIdAndStatus(
                 userId, roleId, scopeId, AssignmentStatus.ACTIVE))
                 .thenReturn(Optional.of(UserRoleAssignment.builder()
@@ -322,7 +347,7 @@ class AccessControlServiceTest {
         verify(assignmentRepository, never()).delete(any());
     }
 
-    // ── resolveMyScopes (GET /api/v1/auth/me) ───────────────────────────────
+    // ── resolveMyScopes (GET /api/auth/v1/me) ───────────────────────────────
 
     @Test
     @DisplayName("resolveMyScopes: two scopes granting different permissions on the same plant merge into one entry")
@@ -500,6 +525,92 @@ class AccessControlServiceTest {
                 .name(plantCode)
                 .status(OrganizationStatus.ACTIVE)
                 .build();
+    }
+
+    // ── role permission / scope resource membership reads (FE RBAC contract) ──
+
+    @Test
+    @DisplayName("listRolePermissions: returns the permissions actually granted to the role")
+    void listRolePermissions_returnsTheGrantedPermissions() {
+        UUID roleId = UUID.randomUUID();
+        UUID permissionId = UUID.randomUUID();
+        Permission granted = Permission.builder()
+                .permissionId(permissionId)
+                .code("PERM_INVENTORY_READ")
+                .resource("INVENTORY")
+                .action("READ")
+                .description("Read inventory")
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.of(activeRole(roleId)));
+        when(rolePermissionRepository.findPermissionsByRoleId(eq(roleId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(granted)));
+
+        PageResult<PermissionResponse> result =
+                service.listRolePermissions(roleId, PageRequest.of(0, 20));
+
+        assertThat(result.content()).singleElement().satisfies(permission -> {
+            assertThat(permission.permissionId()).isEqualTo(permissionId);
+            assertThat(permission.code()).isEqualTo("PERM_INVENTORY_READ");
+            assertThat(permission.resource()).isEqualTo("INVENTORY");
+            assertThat(permission.action()).isEqualTo("READ");
+            assertThat(permission.status()).isEqualTo("ACTIVE");
+        });
+        verify(rolePermissionRepository).findPermissionsByRoleId(eq(roleId), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("listRolePermissions: unknown role is 404, not an empty page")
+    void listRolePermissions_unknownRole_throwsBeforeQueryingMembership() {
+        UUID roleId = UUID.randomUUID();
+        when(roleRepository.findById(roleId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listRolePermissions(roleId, PageRequest.of(0, 20)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+
+        // An empty page would be indistinguishable from a real role holding no permissions.
+        verifyNoInteractions(rolePermissionRepository);
+    }
+
+    @Test
+    @DisplayName("listScopeResources: returns the resources the scope covers")
+    void listScopeResources_returnsTheScopeMembership() {
+        UUID scopeId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        UUID scopeResourceId = UUID.randomUUID();
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.of(activeScope(scopeId)));
+        when(accessScopeResourceRepository.findByScopeId(eq(scopeId), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(AccessScopeResource.builder()
+                        .scopeResourceId(scopeResourceId)
+                        .scopeId(scopeId)
+                        .resourceType(ScopeResourceType.PLANT)
+                        .resourceId(plantId)
+                        .build())));
+
+        PageResult<AccessScopeResourceResponse> result =
+                service.listScopeResources(scopeId, PageRequest.of(0, 20));
+
+        assertThat(result.content()).singleElement().satisfies(resource -> {
+            assertThat(resource.scopeResourceId()).isEqualTo(scopeResourceId);
+            assertThat(resource.resourceType()).isEqualTo("PLANT");
+            assertThat(resource.resourceId()).isEqualTo(plantId);
+        });
+    }
+
+    @Test
+    @DisplayName("listScopeResources: unknown scope is 404, not an empty page")
+    void listScopeResources_unknownScope_throwsBeforeQueryingMembership() {
+        UUID scopeId = UUID.randomUUID();
+        when(accessScopeRepository.findById(scopeId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listScopeResources(scopeId, PageRequest.of(0, 20)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+
+        verifyNoInteractions(accessScopeResourceRepository);
     }
 
     private Company company(UUID companyId, String code) {

@@ -23,14 +23,14 @@ public class SupplierController {
 
     private final SupplierService supplierService;
 
-    @PostMapping("/api/v1/suppliers")
+    @PostMapping("/v1/suppliers")
     @Operation(summary = "Create supplier")
     public ResponseEntity<ApiResponse<SupplierResponse>> create(@Valid @RequestBody SupplierCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(supplierService.create(request)));
     }
 
-    @GetMapping("/api/v1/suppliers")
+    @GetMapping("/v1/suppliers")
     @Operation(summary = "List suppliers")
     public ResponseEntity<ApiResponse<PageResult<SupplierResponse>>> list(
             @RequestParam UUID companyId,
@@ -44,13 +44,13 @@ public class SupplierController {
                 companyId, status, keyword, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/suppliers/{supplierId}")
+    @GetMapping("/v1/suppliers/{supplierId}")
     @Operation(summary = "Get supplier")
     public ResponseEntity<ApiResponse<SupplierResponse>> get(@PathVariable UUID supplierId) {
         return ResponseEntity.ok(ApiResponse.ok(supplierService.get(supplierId)));
     }
 
-    @PatchMapping("/api/v1/suppliers/{supplierId}")
+    @PatchMapping("/v1/suppliers/{supplierId}")
     @Operation(summary = "Update supplier")
     public ResponseEntity<ApiResponse<SupplierResponse>> update(
             @PathVariable UUID supplierId,
@@ -58,13 +58,13 @@ public class SupplierController {
         return ResponseEntity.ok(ApiResponse.ok(supplierService.update(supplierId, request)));
     }
 
-    @PatchMapping("/api/v1/suppliers/{supplierId}/deactivate")
+    @PatchMapping("/v1/suppliers/{supplierId}/deactivate")
     @Operation(summary = "Deactivate supplier")
     public ResponseEntity<ApiResponse<SupplierResponse>> deactivate(@PathVariable UUID supplierId) {
         return ResponseEntity.ok(ApiResponse.ok(supplierService.deactivate(supplierId)));
     }
 
-    @PostMapping("/api/v1/items/{itemId}/suppliers")
+    @PostMapping("/v1/items/{itemId}/suppliers")
     @Operation(summary = "Add supplier for item")
     public ResponseEntity<ApiResponse<ItemSupplierResponse>> addItemSupplier(
             @PathVariable UUID itemId,
@@ -73,7 +73,7 @@ public class SupplierController {
                 .body(ApiResponse.created(supplierService.addItemSupplier(itemId, request)));
     }
 
-    @GetMapping("/api/v1/items/{itemId}/suppliers")
+    @GetMapping("/v1/items/{itemId}/suppliers")
     @Operation(summary = "List suppliers for item")
     public ResponseEntity<ApiResponse<PageResult<ItemSupplierResponse>>> listItemSuppliers(
             @PathVariable UUID itemId,
@@ -85,7 +85,7 @@ public class SupplierController {
                 itemId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PatchMapping("/api/v1/items/{itemId}/suppliers/{itemSupplierId}")
+    @PatchMapping("/v1/items/{itemId}/suppliers/{itemSupplierId}")
     @Operation(summary = "Update item supplier")
     public ResponseEntity<ApiResponse<ItemSupplierResponse>> updateItemSupplier(
             @PathVariable UUID itemId,
@@ -95,7 +95,7 @@ public class SupplierController {
                 supplierService.updateItemSupplier(itemId, itemSupplierId, request)));
     }
 
-    @PatchMapping("/api/v1/items/{itemId}/suppliers/{itemSupplierId}/deactivate")
+    @PatchMapping("/v1/items/{itemId}/suppliers/{itemSupplierId}/deactivate")
     @Operation(summary = "Deactivate item supplier")
     public ResponseEntity<ApiResponse<ItemSupplierResponse>> deactivateItemSupplier(
             @PathVariable UUID itemId,

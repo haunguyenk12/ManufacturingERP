@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.inventory.dto;
 
 import java.time.Instant;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 public record ItemResponse(
         UUID itemId,
@@ -11,7 +12,7 @@ public record ItemResponse(
         String type,
         String unit,
         boolean lotTracked,
-        boolean serialTracked,
+        @Schema(hidden = true) boolean serialTracked,
         String status,
         Instant createdAt,
         Instant updatedAt

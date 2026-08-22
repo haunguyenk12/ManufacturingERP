@@ -1,5 +1,6 @@
 package com.erp.manufacturing.common.audit;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.audit.dto.AuditLogDetailResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogResponse;
 import com.erp.manufacturing.common.exception.AppException;
@@ -29,7 +30,7 @@ class AuditLogQueryServiceTest {
     private final AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
     private final AuditLogChangeRepository auditLogChangeRepository = mock(AuditLogChangeRepository.class);
     private final AuditLogQueryService service =
-            new AuditLogQueryService(auditLogRepository, auditLogChangeRepository);
+            new AuditLogQueryService(auditLogRepository, auditLogChangeRepository, new ObjectMapper());
 
     private static final UUID AUDIT_ID = UUID.randomUUID();
     private static final UUID USER_ID = UUID.randomUUID();
@@ -61,6 +62,7 @@ class AuditLogQueryServiceTest {
                 .userId(USER_ID)
                 .username("admin")
                 .action("LOGIN")
+                .entityName("Piece")
                 .status("SUCCESS")
                 .createdAt(Instant.parse("2026-08-06T10:00:00Z"))
                 .build();
@@ -74,6 +76,7 @@ class AuditLogQueryServiceTest {
         assertThat(response.auditId()).isEqualTo(AUDIT_ID);
         assertThat(response.userId()).isEqualTo(USER_ID);
         assertThat(response.action()).isEqualTo("LOGIN");
+        assertThat(response.entityName()).isEqualTo("Piece");
         assertThat(response.plantId()).isNull();
     }
 
@@ -99,6 +102,7 @@ class AuditLogQueryServiceTest {
         AuditLog auditLog = AuditLog.builder()
                 .auditId(AUDIT_ID)
                 .action("WORK_ORDER_UPDATED")
+                .entityName("WO-2026-001")
                 .status("SUCCESS")
                 .build();
         when(auditLogRepository.findById(AUDIT_ID)).thenReturn(Optional.of(auditLog));
@@ -116,7 +120,10 @@ class AuditLogQueryServiceTest {
         AuditLogDetailResponse response = service.get(AUDIT_ID);
 
         assertThat(response.changes()).hasSize(1);
+        assertThat(response.entityName()).isEqualTo("WO-2026-001");
         assertThat(response.changes().get(0).fieldName()).isEqualTo("status");
+        assertThat(response.changes().get(0).oldValue().asText()).isEqualTo("DRAFT");
+        assertThat(response.changes().get(0).newValue().asText()).isEqualTo("RELEASED");
     }
 
     @Test

@@ -136,7 +136,7 @@ class SecurityFilterChainTest {
         when(rateLimitProperties.enabled()).thenReturn(true);
         when(rateLimitProperties.rules()).thenReturn(List.of(IP_RULE));
 
-        mockMvc.perform(get("/api/v1/test/ping"))
+        mockMvc.perform(get("/v1/test/ping"))
                .andExpect(status().isUnauthorized()) // 401 proves USER rate-limit did NOT block
                // P0 auth fix: no credentials presented at all → AUTHENTICATION_REQUIRED, not
                // TOKEN_MALFORMED (that code is reserved for a *presented* bad token, caught inside
@@ -145,6 +145,19 @@ class SecurityFilterChainTest {
 
         verify(valueOps).increment(argThat(k -> k != null && k.contains("global-ip")));
         verify(valueOps, never()).increment(argThat(k -> k != null && k.contains("global-user")));
+    }
+
+    @Test
+    @DisplayName("Springdoc endpoints are public under the /api context path")
+    void springdocEndpoints_withoutAuthentication_areReachableUnderContextPath() throws Exception {
+        when(rateLimitProperties.enabled()).thenReturn(false);
+
+        mockMvc.perform(get("/api/swagger-ui/index.html").contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("swagger"));
+        mockMvc.perform(get("/api/v3/api-docs").contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("openapi"));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -168,7 +181,7 @@ class SecurityFilterChainTest {
 
         stubValidJwt("alice", "jti-alice", "valid.jwt.alice");
 
-        mockMvc.perform(get("/api/v1/test/ping")
+        mockMvc.perform(get("/v1/test/ping")
                         .header("Authorization", "Bearer valid.jwt.alice"))
                .andExpect(status().isOk());
 
@@ -207,7 +220,7 @@ class SecurityFilterChainTest {
 
         stubValidJwt("bob", "jti-bob", "valid.jwt.bob");
 
-        mockMvc.perform(get("/api/v1/test/ping")
+        mockMvc.perform(get("/v1/test/ping")
                         .header("Authorization", "Bearer valid.jwt.bob"))
                .andExpect(status().isTooManyRequests())         // 429
                .andExpect(header().exists("X-RateLimit-Limit"))
@@ -226,12 +239,16 @@ class SecurityFilterChainTest {
         Claims claims = mock(Claims.class);
         when(claims.getSubject()).thenReturn(username);
         when(claims.getId()).thenReturn(jti);
+        when(claims.get("ver", Number.class)).thenReturn(0L);
         when(jwtTokenProvider.validateAndExtractClaims(rawToken)).thenReturn(claims);
 
         // assertNotBlacklisted is void; default mock does nothing (token is not revoked)
         doNothing().when(tokenStoreService).assertNotBlacklisted(jti);
 
-        User userDetails = new User(username, "ignored", Collections.emptyList());
+        var domainUser = com.erp.manufacturing.module.user.domain.User.builder()
+                .userId(java.util.UUID.randomUUID()).username(username).email(username + "@example.test")
+                .password("ignored").build();
+        var userDetails = new com.erp.manufacturing.module.user.domain.UserPrincipal(domainUser);
         when(userDetailsService.loadUserByUsername(username)).thenReturn(userDetails);
     }
 }

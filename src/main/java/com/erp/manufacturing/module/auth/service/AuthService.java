@@ -64,9 +64,9 @@ public class AuthService {
 
     private static final int MAX_FAIL_ATTEMPTS = 5;
 
-    /** Bounded wait paid only when {@code acquireRefreshLock} loses the race — see {@code sleepBriefly}. */
     private static final long CONCURRENT_REFRESH_WAIT_MS = 150L;
 
+    /** Bounded wait paid only when {@code acquireRefreshLock} loses the race — see {@code sleepBriefly}. */
     private final UserDetailsServiceImpl userDetailsService;
     private final JwtTokenProvider       jwtTokenProvider;
     private final TokenStoreService      tokenStore;
@@ -115,6 +115,14 @@ public class AuthService {
         // Clear fail counter on success
         tokenStore.resetFailCount(request.username());
 
+        // A successful single-session login invalidates every access token from the prior session.
+        User loginUser = userRepository.findById(principal.getUserId()).orElse(null);
+        if (loginUser != null) {
+            loginUser.revokeAllSessions();
+            userRepository.save(loginUser);
+            principal = (UserPrincipal) userDetailsService.loadUserByUsername(request.username());
+        }
+
         // Clear all previous device sessions and refresh tokens to enforce single-session per user
         tokenStore.deleteAllUserTokens(principal.getUserId());
         tokenStore.deleteAllDeviceSessions(principal.getUserId());
@@ -130,7 +138,7 @@ public class AuthService {
         String refreshToken = jwtTokenProvider.generateRefreshToken();
         String tokenId      = UUID.randomUUID().toString();
 
-        tokenStore.saveRefreshToken(principal.getUserId(), tokenId, refreshToken);
+        tokenStore.saveRefreshToken(principal.getUserId(), tokenId, refreshToken, principal.getAuthVersion());
         // B81: the absolute timeout is measured from here and is never extended by a refresh.
         tokenStore.saveSessionStart(principal.getUserId(), tokenId, Instant.now());
 
@@ -166,6 +174,9 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED));
         UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(user.getUsername());
+        if (!principal.isEnabled()) {
+            throw ExceptionFactory.unauthorized(AuthErrorCode.ACCOUNT_INACTIVE);
+        }
 
         // Concurrent refresh race: if another request is mid-rotation for this exact tokenId right
         // now (client retry, double-fire, etc.), give it a brief head start to finish and publish
@@ -180,21 +191,11 @@ public class AuthService {
             // Concurrent refresh race: this tokenId may have just been rotated by a duplicate of
             // THIS SAME request rather than an attacker replaying a stolen token. Hand back the one
             // resulting pair instead of treating a legitimate caller as a thief.
-            String rotatedToTokenId = tokenStore.getRotationResult(request.tokenId());
-            if (rotatedToTokenId != null) {
-                String rotatedRefreshToken = tokenStore.getRefreshToken(principal.getUserId(), rotatedToTokenId);
-                if (rotatedRefreshToken != null) {
-                    log.debug("[AUTH] Concurrent refresh absorbed: user={} oldTokenId={} newTokenId={}",
-                            principal.getUsername(), request.tokenId(), rotatedToTokenId);
-                    return respondWithExistingPair(
-                            principal, rotatedToTokenId, rotatedRefreshToken, request, httpRequest, ip);
-                }
-            }
             // RTR (B80): the tokenId is gone from the store, but if we rotated it away moments ago
             // then someone is replaying a token they should no longer hold — treat it as stolen.
-            if (tokenStore.wasRefreshTokenUsed(request.tokenId())) {
-                tokenStore.deleteAllUserTokens(principal.getUserId());
-                tokenStore.deleteAllDeviceSessions(principal.getUserId());
+            if (tokenStore.wasRefreshTokenUsed(request.tokenId(), request.refreshToken(),
+                    principal.getAuthVersion())) {
+                revokeAllSessions(user);
                 auditLogService.logAuthFailure(principal.getUsername(), ip, traceId,
                         AuditAction.SUSPICIOUS_TOKEN_REUSE,
                         "Reused refresh tokenId=" + request.tokenId() + "; all sessions revoked");
@@ -204,7 +205,8 @@ public class AuthService {
             }
             throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
         }
-        if (!stored.equals(request.refreshToken())) {
+        if (!tokenStore.matchesRefreshToken(principal.getUserId(), request.tokenId(),
+                request.refreshToken(), principal.getAuthVersion())) {
             // Deliberately NOT an RTR case (B80): the tokenId still exists, so it was never rotated
             // away — this is a wrong/tampered token value, not a replay.
             throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
@@ -222,8 +224,7 @@ public class AuthService {
             sessionStart = Instant.now();
         } else if (Duration.between(sessionStart, Instant.now()).toMillis()
                 >= jwtProperties.absoluteSessionTimeoutMs()) {
-            tokenStore.deleteAllUserTokens(principal.getUserId());
-            tokenStore.deleteAllDeviceSessions(principal.getUserId());
+            revokeAllSessions(user);
             auditLogService.logAuthFailure(principal.getUsername(), ip, traceId,
                     AuditAction.SESSION_ABSOLUTE_TIMEOUT,
                     "Session started at " + sessionStart + " exceeded the absolute timeout; all sessions revoked");
@@ -239,17 +240,23 @@ public class AuthService {
         // Token rotation (B80): save new → mark old "used" → delete old. The "used" marker must
         // exist BEFORE the old key disappears, otherwise a concurrent replay landing in that gap
         // reads neither and gets diagnosed as an ordinary expiry instead of being detected.
-        tokenStore.saveRefreshToken(principal.getUserId(), newTokenId, newRefreshToken);
+        TokenStoreService.RotationResult rotation = tokenStore.rotateRefreshToken(
+                principal.getUserId(), request.tokenId(), request.refreshToken(),
+                newTokenId, newRefreshToken, sessionStart, principal.getAuthVersion());
+        if (rotation != TokenStoreService.RotationResult.ROTATED) {
+            if (tokenStore.wasRefreshTokenUsed(request.tokenId(), request.refreshToken(),
+                    principal.getAuthVersion())) {
+                revokeAllSessions(user);
+                throw ExceptionFactory.unauthorized(AuthErrorCode.TOKEN_REUSE_DETECTED);
+            }
+            throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
+        }
         // B81: carry the ORIGINAL session start over to the new tokenId. Stamping "now" here would
         // reset the absolute clock on every refresh and silently disable the timeout altogether —
         // with a byte-identical response, so nothing else would notice.
-        tokenStore.saveSessionStart(principal.getUserId(), newTokenId, sessionStart);
-        tokenStore.markRefreshTokenUsed(request.tokenId());
-        tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
         // Concurrent refresh race: publish the result so a duplicate request racing on this exact
         // old tokenId (see the stored == null branch above) can be handed this pair instead of
         // being misdiagnosed as a reuse attack.
-        tokenStore.saveRotationResult(request.tokenId(), newTokenId);
 
         // Extend device session TTL using the resolved deviceId
         String deviceId = resolveDeviceId(request.deviceId(), httpRequest, ip);
@@ -286,6 +293,10 @@ public class AuthService {
             }
         }
 
+        if (!tokenStore.matchesRefreshToken(principal.getUserId(), request.tokenId(),
+                request.refreshToken(), principal.getAuthVersion())) {
+            throw ExceptionFactory.unauthorized(AuthErrorCode.REFRESH_TOKEN_EXPIRED);
+        }
         tokenStore.deleteRefreshToken(principal.getUserId(), request.tokenId());
 
         auditLogService.logAuth(principal.getUserId(), principal.getUsername(), ip, traceId,
@@ -302,9 +313,9 @@ public class AuthService {
 
         UserPrincipal principal = (UserPrincipal) userDetailsService.loadUserByUsername(username);
 
-        // Delete all refresh tokens and all device sessions
-        tokenStore.deleteAllUserTokens(principal.getUserId());
-        tokenStore.deleteAllDeviceSessions(principal.getUserId());
+        User user = userRepository.findById(principal.getUserId())
+                .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.INVALID_CREDENTIALS));
+        revokeAllSessions(user);
 
         auditLogService.logAuth(principal.getUserId(), principal.getUsername(), ip, traceId,
                 AuditAction.LOGOUT_ALL, "Logout from all devices");
@@ -336,14 +347,14 @@ public class AuthService {
         String ip      = (String) httpRequest.getAttribute("clientIp");
         String traceId = (String) httpRequest.getAttribute("traceId");
 
-        UUID userId = passwordResetTokenService.resolveUserId(request.token())
+        UUID userId = passwordResetTokenService.consumeUserId(request.token())
                 .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.RESET_TOKEN_INVALID));
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.unauthorized(AuthErrorCode.RESET_TOKEN_INVALID));
 
         user.setPassword(passwordEncoder.encode(request.newPassword()));
+        user.revokeAllSessions();
         userRepository.save(user);
-        passwordResetTokenService.invalidate(request.token(), userId);
 
         tokenStore.deleteAllUserTokens(userId);
         tokenStore.deleteAllDeviceSessions(userId);
@@ -376,7 +387,7 @@ public class AuthService {
      * {@code roles} claim — so this always agrees with what the caller's own JWT already says.
      * {@code scopes}/{@code defaultPlantId} are the new part {@link AccessControlService} resolves.
      *
-     * <p>Reachable only with a valid, unexpired token: {@code /api/v1/auth/me} is carved out of the
+     * <p>Reachable only with a valid, unexpired token: {@code /api/auth/v1/me} is carved out of the
      * {@code permitAll} pattern in {@code SecurityConfig}, so {@code authenticatedUserId} is always
      * set by the time a request gets here — unlike {@link #refresh}, which is reached with an
      * <em>expired</em> token on purpose.
@@ -480,5 +491,12 @@ public class AuthService {
         tokenStore.incrementFailCount(username);
         auditLogService.logAuthFailure(username, ip, traceId,
                 AuditAction.LOGIN_FAILED, "Invalid credentials for user: " + username);
+    }
+
+    private void revokeAllSessions(User user) {
+        user.revokeAllSessions();
+        userRepository.save(user);
+        tokenStore.deleteAllUserTokens(user.getUserId());
+        tokenStore.deleteAllDeviceSessions(user.getUserId());
     }
 }

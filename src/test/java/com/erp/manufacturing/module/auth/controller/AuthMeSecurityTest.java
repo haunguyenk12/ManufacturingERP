@@ -42,12 +42,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Proves, against the real filter chain (unlike {@link AuthControllerTest}, which runs with
- * {@code addFilters = false}), that {@code /api/v1/auth/me} is the one auth endpoint that is NOT
+ * {@code addFilters = false}), that {@code /auth/v1/me} is the one auth endpoint that is NOT
  * permit-all — and that carving it out of the wildcard didn't accidentally tighten the other four.
  *
  * <p>Mirrors {@code SecurityFilterChainTest}'s approach (real {@link SecurityConfig} + filters,
  * infrastructure mocked), but targets {@link AuthController} itself instead of a fake test
- * controller, since the new matcher is specific to the {@code /api/v1/auth/**} path family.
+ * controller, since the new matcher is specific to the {@code /auth/v1/**} path family.
  */
 @WebMvcTest(controllers = AuthController.class)
 @Import({
@@ -59,7 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         JwtAuthEntryPoint.class,
         JwtAccessDeniedHandler.class,
 })
-@DisplayName("/api/v1/auth/me – requires authentication (unlike the rest of AuthController)")
+@DisplayName("/auth/v1/me – requires authentication (unlike the rest of AuthController)")
 class AuthMeSecurityTest {
 
     @Autowired MockMvc mockMvc;
@@ -77,7 +77,7 @@ class AuthMeSecurityTest {
     @Test
     @DisplayName("without a token → 401, request never reaches the controller")
     void me_withoutToken_returns401() throws Exception {
-        mockMvc.perform(get("/api/v1/auth/me"))
+        mockMvc.perform(get("/auth/v1/me"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -89,7 +89,7 @@ class AuthMeSecurityTest {
                 UUID.randomUUID(), "admin", "admin@erp.local", "ACTIVE",
                 Set.of("ADMIN"), Set.of(), List.of(), null));
 
-        mockMvc.perform(get("/api/v1/auth/me")
+        mockMvc.perform(get("/auth/v1/me")
                         .header("Authorization", "Bearer valid.jwt.admin"))
                 .andExpect(status().isOk());
     }
@@ -99,7 +99,7 @@ class AuthMeSecurityTest {
     void login_stillPermitAll_afterAddingMeMatcher() throws Exception {
         // An empty body is enough to prove the request reached the controller (400 from @Valid /
         // unreadable body, not 401) — the point here is that no token was required to get that far.
-        mockMvc.perform(post("/api/v1/auth/login"))
+        mockMvc.perform(post("/auth/v1/login"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -107,11 +107,15 @@ class AuthMeSecurityTest {
         Claims claims = mock(Claims.class);
         when(claims.getSubject()).thenReturn(username);
         when(claims.getId()).thenReturn(jti);
+        when(claims.get("ver", Number.class)).thenReturn(0L);
         when(jwtTokenProvider.validateAndExtractClaims(rawToken)).thenReturn(claims);
 
         doNothing().when(tokenStoreService).assertNotBlacklisted(jti);
 
-        User userDetails = new User(username, "ignored", Collections.emptyList());
+        var domainUser = com.erp.manufacturing.module.user.domain.User.builder()
+                .userId(UUID.randomUUID()).username(username).email(username + "@example.test")
+                .password("ignored").build();
+        var userDetails = new com.erp.manufacturing.module.user.domain.UserPrincipal(domainUser);
         when(userDetailsService.loadUserByUsername(username)).thenReturn(userDetails);
     }
 }

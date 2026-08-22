@@ -30,7 +30,7 @@ public class WorkOrderController {
     private final WorkOrderReadinessService readinessService;
     private final PlantContextResolver plantContextResolver;
 
-    @PostMapping("/api/v1/plants/{plantId}/work-orders")
+    @PostMapping("/v1/plants/{plantId}/work-orders")
     @Operation(summary = "Create work order under plant")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> create(
             @PathVariable UUID plantId,
@@ -39,7 +39,7 @@ public class WorkOrderController {
                 .body(ApiResponse.created(workOrderService.create(plantId, request)));
     }
 
-    @GetMapping("/api/v1/plants/{plantId}/work-orders")
+    @GetMapping("/v1/plants/{plantId}/work-orders")
     @Operation(summary = "List work orders by plant")
     public ResponseEntity<ApiResponse<PageResult<WorkOrderResponse>>> list(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
@@ -57,13 +57,13 @@ public class WorkOrderController {
                 plantId, status, productItemId, search, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/work-orders/{workOrderId}")
+    @GetMapping("/v1/work-orders/{workOrderId}")
     @Operation(summary = "Get work order")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> get(@PathVariable UUID workOrderId) {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.get(workOrderId)));
     }
 
-    @PatchMapping("/api/v1/work-orders/{workOrderId}")
+    @PatchMapping("/v1/work-orders/{workOrderId}")
     @Operation(summary = "Update draft work order")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> update(
             @PathVariable UUID workOrderId,
@@ -71,7 +71,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.update(workOrderId, request)));
     }
 
-    @GetMapping("/api/v1/work-orders/{workOrderId}/material-readiness")
+    @GetMapping("/v1/work-orders/{workOrderId}/material-readiness")
     @Operation(summary = "Get work order material readiness",
             description = "Shows reserved vs required quantity per component and the shortage that "
                     + "would block release. Not paginated: a work order has a small, bounded number "
@@ -81,7 +81,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(readinessService.getMaterialReadiness(workOrderId)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/plan")
+    @PostMapping("/v1/work-orders/{workOrderId}/plan")
     @Operation(summary = "Schedule draft work order",
             description = "Moves DRAFT to PLANNED. Nothing is reserved and no material moves — this "
                     + "only records that a planner has committed to the dates.")
@@ -89,7 +89,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.plan(workOrderId)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/release")
+    @PostMapping("/v1/work-orders/{workOrderId}/release")
     @Operation(summary = "Release work order",
             description = "Fails with 422 when material reservation does not fully cover the component "
                     + "requirements; the work order is then persisted as BLOCKED. Use "
@@ -98,7 +98,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.release(workOrderId)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/cancel")
+    @PostMapping("/v1/work-orders/{workOrderId}/cancel")
     @Operation(summary = "Cancel work order",
             description = "Spec §3.2 requires a reason; omitting it returns 400 APPROVAL_REASON_REQUIRED.")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> cancel(
@@ -107,7 +107,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.cancel(workOrderId, request)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/close")
+    @PostMapping("/v1/work-orders/{workOrderId}/close")
     @Operation(summary = "Close work order",
             description = "Reconciles and permanently locks a COMPLETED work order — releases any "
                     + "leftover ACTIVE reservation back to available stock, then locks it against "
@@ -117,7 +117,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.close(workOrderId)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/component-issues")
+    @PostMapping("/v1/work-orders/{workOrderId}/component-issues")
     @Operation(summary = "Issue work order component",
             description = "Convenience endpoint for a single component line. It does NOT support "
                     + "over-issue override: issuing beyond the remaining BOM requirement fails here. "
@@ -130,7 +130,7 @@ public class WorkOrderController {
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.issueComponent(workOrderId, request, idempotencyKey)));
     }
 
-    @PostMapping("/api/v1/work-orders/{workOrderId}/output-completions")
+    @PostMapping("/v1/work-orders/{workOrderId}/output-completions")
     @Operation(summary = "Submit work order output for approval",
             description = "Creates a PENDING_APPROVAL production receipt. The work order is not "
                     + "completed and no stock is created until the receipt is approved.")

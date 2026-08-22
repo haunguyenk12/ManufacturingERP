@@ -53,18 +53,27 @@ public class InventoryAvailabilityService {
                         StockAvailabilityProjection::getQuantity));
     }
 
+    /**
+     * On-hand / reserved / quality-hold / available per {@code (item, warehouse)}, in one query.
+     * Rows with no eligible stock are simply absent from the map — callers substitute
+     * {@link WarehouseStockQuantity#zero()}.
+     */
     @Transactional(readOnly = true)
-    public Map<ItemWarehouseAvailabilityKey, BigDecimal> getAvailableQuantitiesByWarehouse(
+    public Map<ItemWarehouseAvailabilityKey, WarehouseStockQuantity> getStockQuantitiesByWarehouse(
             Collection<UUID> itemIds, Collection<UUID> warehouseIds) {
         if (itemIds == null || itemIds.isEmpty() || warehouseIds == null || warehouseIds.isEmpty()) {
             return Map.of();
         }
 
-        return stockBalanceRepository.aggregateAvailableQuantitiesByWarehouse(itemIds, warehouseIds, LotStatus.AVAILABLE)
+        return stockBalanceRepository.aggregateStockQuantitiesByWarehouse(itemIds, warehouseIds, LotStatus.AVAILABLE)
                 .stream()
                 .collect(Collectors.toMap(
                         projection -> new ItemWarehouseAvailabilityKey(projection.getItemId(), projection.getWarehouseId()),
-                        StockAvailabilityByWarehouseProjection::getQuantity));
+                        projection -> new WarehouseStockQuantity(
+                                defaultZero(projection.getOnHandQuantity()),
+                                defaultZero(projection.getReservedQuantity()),
+                                defaultZero(projection.getQualityHoldQuantity()),
+                                defaultZero(projection.getAvailableQuantity()))));
     }
 
     @Transactional(readOnly = true)
@@ -115,6 +124,23 @@ public class InventoryAvailabilityService {
     }
 
     public record ItemWarehouseAvailabilityKey(UUID itemId, UUID warehouseId) {}
+
+    /**
+     * The four figures behind one {@code (item, warehouse)} availability number.
+     * {@code availableQuantity = onHandQuantity − reservedQuantity − qualityHoldQuantity}, where
+     * on-hand already excludes lots that are not {@code AVAILABLE} (B3).
+     */
+    public record WarehouseStockQuantity(
+            BigDecimal onHandQuantity,
+            BigDecimal reservedQuantity,
+            BigDecimal qualityHoldQuantity,
+            BigDecimal availableQuantity
+    ) {
+        public static WarehouseStockQuantity zero() {
+            return new WarehouseStockQuantity(
+                    BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+    }
 
     /**
      * @param hasItemWarehouseSetting whether an {@code ACTIVE} item-warehouse setting supplied the

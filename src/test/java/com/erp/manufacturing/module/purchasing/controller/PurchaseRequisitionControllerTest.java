@@ -87,7 +87,7 @@ class PurchaseRequisitionControllerTest {
                 eq(SUGGESTION_ID), any(PurchaseRequisitionFromSuggestionRequest.class)))
                 .thenReturn(sampleResponse("DRAFT"));
 
-        mockMvc.perform(post("/api/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-purchase-requisition")
+        mockMvc.perform(post("/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-purchase-requisition")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"requisitionNo":"PR-001"}
@@ -108,7 +108,7 @@ class PurchaseRequisitionControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only APPROVED supply suggestions can be converted"));
 
-        mockMvc.perform(post("/api/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-purchase-requisition")
+        mockMvc.perform(post("/v1/supply-suggestions/" + SUGGESTION_ID + "/convert-to-purchase-requisition")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"requisitionNo":"PR-001"}
@@ -125,7 +125,7 @@ class PurchaseRequisitionControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         "Approved quantity cannot exceed requested quantity"));
 
-        mockMvc.perform(post("/api/v1/purchase-requisitions/" + REQUISITION_ID + "/approve")
+        mockMvc.perform(post("/v1/purchase-requisitions/" + REQUISITION_ID + "/approve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"decisionNote":"ok","approvedLines":[]}
@@ -142,7 +142,7 @@ class PurchaseRequisitionControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only APPROVED purchase requisitions can be converted to purchase orders"));
 
-        mockMvc.perform(post("/api/v1/purchase-requisitions/" + REQUISITION_ID + "/convert-to-purchase-order")
+        mockMvc.perform(post("/v1/purchase-requisitions/" + REQUISITION_ID + "/convert-to-purchase-order")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"purchaseOrderNo":"PO-001","orderDate":"2026-07-01","expectedDate":"2026-07-15"}
@@ -157,7 +157,7 @@ class PurchaseRequisitionControllerTest {
         when(purchaseRequisitionService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("APPROVED")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/purchase-requisitions")
+        mockMvc.perform(get("/v1/purchase-requisitions")
                         .param("companyId", COMPANY_ID.toString())
                         .param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk())

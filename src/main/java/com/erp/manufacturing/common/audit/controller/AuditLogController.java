@@ -21,9 +21,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Audit Logs read API (C2-1, {@code BACKEND_CAPSTONE2_API_GAPS.md §3.3}) — đợt 1: reads the event
- * data {@code audit_logs} already has. {@code changes[]} on the detail endpoint is genuinely empty
- * today (field-level diff capture is đợt 2, out of scope here), not a stub.
+ * Audit Logs read API. The detail endpoint returns persisted field-level changes captured by the
+ * audit aspect for entity commands.
  *
  * <p>{@code PERM_AUDIT_READ} is ADMIN-only, checked as a global permission
  * ({@code @permissionGuard.hasPermission}, not {@code hasResourceAccess}) — audit trail is not owned
@@ -38,7 +37,7 @@ public class AuditLogController {
 
     private final AuditLogQueryService auditLogQueryService;
 
-    @GetMapping("/api/v1/audit-logs")
+    @GetMapping("/v1/audit-logs")
     @Operation(summary = "List audit log entries (ADMIN only)")
     public ResponseEntity<ApiResponse<PageResult<AuditLogResponse>>> list(
             @RequestParam(required = false) UUID actorUserId,
@@ -59,7 +58,7 @@ public class AuditLogController {
                 PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @GetMapping("/api/v1/audit-logs/{auditLogId}")
+    @GetMapping("/v1/audit-logs/{auditLogId}")
     @Operation(summary = "Get an audit log entry, including field-level changes if any (ADMIN only)")
     public ResponseEntity<ApiResponse<AuditLogDetailResponse>> get(@PathVariable UUID auditLogId) {
         return ResponseEntity.ok(ApiResponse.ok(auditLogQueryService.get(auditLogId)));

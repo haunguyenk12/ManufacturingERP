@@ -5,6 +5,7 @@ import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.module.organization.domain.Role;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserStatus;
@@ -37,6 +38,7 @@ public class UserService {
     private final RoleRepository  roleRepository;
     private final UserMapper      userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final TokenStoreService tokenStore;
 
     // ── Read ──────────────────────────────────────────────────────────────
 
@@ -105,6 +107,7 @@ public class UserService {
         }
         if (request.password() != null) {
             user.setPassword(passwordEncoder.encode(request.password()));
+            revokeSessions(user);
         }
 
         return userMapper.toResponse(userRepository.save(user));
@@ -120,6 +123,7 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
         user.setStatus(UserStatus.INACTIVE);
+        revokeSessions(user);
         userRepository.save(user);
         log.info("[USER] Deactivated user={}", userId);
     }
@@ -136,6 +140,7 @@ public class UserService {
         Role role = roleRepository.findByName(roleName)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", roleName));
         user.getRoles().add(role);
+        revokeSessions(user);
         return userMapper.toResponse(userRepository.save(user));
     }
 
@@ -147,6 +152,13 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
         user.getRoles().removeIf(r -> r.getName().equals(roleName));
+        revokeSessions(user);
         return userMapper.toResponse(userRepository.save(user));
+    }
+
+    private void revokeSessions(User user) {
+        user.revokeAllSessions();
+        tokenStore.deleteAllUserTokens(user.getUserId());
+        tokenStore.deleteAllDeviceSessions(user.getUserId());
     }
 }

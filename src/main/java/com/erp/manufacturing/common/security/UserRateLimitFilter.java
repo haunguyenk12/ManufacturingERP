@@ -72,7 +72,7 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String path = request.getRequestURI();
+        String path = request.getRequestURI().substring(request.getContextPath().length());
         Optional<RateLimitResult> block = evaluateUser(path, userId);
         if (block.isPresent()) {
             RateLimitResult r = block.get();

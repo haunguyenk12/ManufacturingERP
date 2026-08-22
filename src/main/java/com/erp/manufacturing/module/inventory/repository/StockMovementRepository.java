@@ -45,11 +45,34 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, UU
     Optional<StockMovement> findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(
             UUID lotId, MovementType movementType);
 
+    /**
+     * Warehouse-scoped variant used by lot detail so a caller cannot infer the source reference of
+     * the same lot in a warehouse outside its access scope.
+     */
+    Optional<StockMovement> findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+            UUID warehouseId, UUID lotId, MovementType movementType);
+
+    /**
+     * Newest ledger rows across a scope, for the inventory dashboard.
+     * <p>
+     * The fetch joins are load-bearing, not an optimisation: the dashboard renders item and warehouse
+     * labels for every row, and both associations are {@code LAZY}, so without them a page of N rows
+     * costs 2N extra selects. {@code lot} must stay a <b>left</b> join — an inner one would silently
+     * drop every movement of a non-lot-tracked item. All three are to-one, so fetching them alongside
+     * a {@code Pageable} is safe (rule C13 only bans collections).
+     * <p>
+     * {@code movementId desc} is the tiebreaker: {@code createdAt} alone leaves rows written in the
+     * same transaction (a receipt posting several lines) in an order Postgres is free to change
+     * between calls.
+     */
     @Query("""
             select m
             from StockMovement m
+            join fetch m.item
+            join fetch m.warehouse
+            left join fetch m.lot
             where m.warehouse.warehouseId in :warehouseIds
-            order by m.createdAt desc
+            order by m.createdAt desc, m.movementId desc
             """)
     List<StockMovement> findRecentByWarehouseIds(@Param("warehouseIds") Collection<UUID> warehouseIds, Pageable pageable);
 }

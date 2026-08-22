@@ -22,7 +22,7 @@ public class ItemStandardCostController {
 
     private final ItemStandardCostService itemStandardCostService;
 
-    @PutMapping("/api/v1/companies/{companyId}/items/{itemId}/standard-cost")
+    @PutMapping("/v1/companies/{companyId}/items/{itemId}/standard-cost")
     @Operation(summary = "Create or update an item's standard cost")
     public ResponseEntity<ApiResponse<ItemStandardCostResponse>> upsert(
             @PathVariable UUID companyId,
@@ -31,7 +31,7 @@ public class ItemStandardCostController {
         return ResponseEntity.ok(ApiResponse.ok(itemStandardCostService.upsert(companyId, itemId, request)));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}/items/{itemId}/standard-cost")
+    @GetMapping("/v1/companies/{companyId}/items/{itemId}/standard-cost")
     @Operation(summary = "Get an item's standard cost")
     public ResponseEntity<ApiResponse<ItemStandardCostResponse>> get(
             @PathVariable UUID companyId,
@@ -39,7 +39,7 @@ public class ItemStandardCostController {
         return ResponseEntity.ok(ApiResponse.ok(itemStandardCostService.get(companyId, itemId)));
     }
 
-    @GetMapping("/api/v1/companies/{companyId}/items/standard-costs")
+    @GetMapping("/v1/companies/{companyId}/items/standard-costs")
     @Operation(summary = "List item standard costs")
     public ResponseEntity<ApiResponse<PageResult<ItemStandardCostResponse>>> list(
             @PathVariable UUID companyId,

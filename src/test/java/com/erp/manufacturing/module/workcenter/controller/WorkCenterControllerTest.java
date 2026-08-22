@@ -75,7 +75,7 @@ class WorkCenterControllerTest {
         when(workCenterService.create(eq(PLANT_ID), any(WorkCenterCreateRequest.class)))
                 .thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-centers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"wc-01","name":"Line 1","description":"Main line",
@@ -92,7 +92,7 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("create: blank name returns 400 VALIDATION_ERROR with the field name")
     void create_blankName_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-centers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"WC-01","name":"","capacityUnitType":"LINE","capacityUnits":2}
@@ -110,7 +110,7 @@ class WorkCenterControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "Work center code already exists: WC-01"));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/work-centers")
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/work-centers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"WC-01","name":"Line 1","capacityUnitType":"LINE","capacityUnits":2}
@@ -127,7 +127,7 @@ class WorkCenterControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_NOT_FOUND,
                         "Work center not found with id: " + WORK_CENTER_ID));
 
-        mockMvc.perform(get("/api/v1/work-centers/" + WORK_CENTER_ID))
+        mockMvc.perform(get("/v1/work-centers/" + WORK_CENTER_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_NOT_FOUND.code()));
     }
@@ -137,7 +137,7 @@ class WorkCenterControllerTest {
     void update_validRequest_returns200() throws Exception {
         when(workCenterService.update(eq(WORK_CENTER_ID), any())).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(patch("/api/v1/work-centers/" + WORK_CENTER_ID)
+        mockMvc.perform(patch("/v1/work-centers/" + WORK_CENTER_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Line 1 (updated)"}
@@ -151,7 +151,7 @@ class WorkCenterControllerTest {
     void activate_returns200Active() throws Exception {
         when(workCenterService.activate(WORK_CENTER_ID)).thenReturn(sampleResponse("ACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-centers/" + WORK_CENTER_ID + "/activate"))
+        mockMvc.perform(post("/v1/work-centers/" + WORK_CENTER_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("ACTIVE"));
     }
@@ -161,7 +161,7 @@ class WorkCenterControllerTest {
     void deactivate_returns200Inactive() throws Exception {
         when(workCenterService.deactivate(WORK_CENTER_ID)).thenReturn(sampleResponse("INACTIVE"));
 
-        mockMvc.perform(post("/api/v1/work-centers/" + WORK_CENTER_ID + "/deactivate"))
+        mockMvc.perform(post("/v1/work-centers/" + WORK_CENTER_ID + "/deactivate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.status").value("INACTIVE"));
     }
@@ -169,7 +169,7 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("delete: is the same command as POST .../deactivate — 200 with null result")
     void delete_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/work-centers/" + WORK_CENTER_ID))
+        mockMvc.perform(delete("/v1/work-centers/" + WORK_CENTER_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -183,7 +183,7 @@ class WorkCenterControllerTest {
         when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-centers"))
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-centers"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("WC-01"))
@@ -203,7 +203,7 @@ class WorkCenterControllerTest {
         when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
-        mockMvc.perform(get("/api/v1/plants/" + PLANT_ID + "/work-centers").param("size", "500"))
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-centers").param("size", "500"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.size").value(100));
     }

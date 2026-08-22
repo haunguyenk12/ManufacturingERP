@@ -100,7 +100,7 @@ class OrganizationControllerTest {
     void createCompany_validRequest_returns201Created() throws Exception {
         when(organizationService.createCompany(any(CompanyCreateRequest.class))).thenReturn(sampleCompany());
 
-        mockMvc.perform(post("/api/v1/companies")
+        mockMvc.perform(post("/v1/companies")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"COMP-01","name":"Acme Manufacturing"}
@@ -115,7 +115,7 @@ class OrganizationControllerTest {
     @Test
     @DisplayName("createCompany: lowercase code violates the pattern and returns 400 with the field name")
     void createCompany_lowercaseCode_returns400WithFieldError() throws Exception {
-        mockMvc.perform(post("/api/v1/companies")
+        mockMvc.perform(post("/v1/companies")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"comp-01","name":"Acme Manufacturing"}
@@ -135,7 +135,7 @@ class OrganizationControllerTest {
                 .thenThrow(new AppException(ValidationErrorCode.RESOURCE_ALREADY_EXISTS,
                         "Company code already exists: COMP-01"));
 
-        mockMvc.perform(post("/api/v1/companies")
+        mockMvc.perform(post("/v1/companies")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"COMP-01","name":"Acme Manufacturing"}
@@ -152,7 +152,7 @@ class OrganizationControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot create plant under inactive company: " + COMPANY_ID));
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/plants")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/plants")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"PLANT-01","name":"Hanoi Plant","timezone":"Asia/Ho_Chi_Minh"}
@@ -168,7 +168,7 @@ class OrganizationControllerTest {
         when(organizationService.createPlant(eq(COMPANY_ID), any(PlantCreateRequest.class)))
                 .thenReturn(samplePlant());
 
-        mockMvc.perform(post("/api/v1/companies/" + COMPANY_ID + "/plants")
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/plants")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"code":"PLANT-01","name":"Hanoi Plant","timezone":"Asia/Ho_Chi_Minh"}
@@ -183,7 +183,7 @@ class OrganizationControllerTest {
     @DisplayName("getCompany: malformed UUID in the path returns 400 VALIDATION_ERROR, not 500 "
             + "(§5.4 MethodArgumentTypeMismatchException handler)")
     void getCompany_malformedUuid_returns400() throws Exception {
-        mockMvc.perform(get("/api/v1/companies/not-a-uuid"))
+        mockMvc.perform(get("/v1/companies/not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("companyId"));
@@ -198,7 +198,7 @@ class OrganizationControllerTest {
         when(organizationService.listCompanies(any()))
                 .thenReturn(new PageResult<>(List.of(sampleCompany()), 0, 20, 1L, 1, true, true));
 
-        mockMvc.perform(get("/api/v1/companies"))
+        mockMvc.perform(get("/v1/companies"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.content[0].code").value("COMP-01"))
@@ -213,7 +213,7 @@ class OrganizationControllerTest {
     @Test
     @DisplayName("deactivateCompany: returns 200 with a null result payload (§5.8 DELETE pattern)")
     void deactivateCompany_returns200NoContentEnvelope() throws Exception {
-        mockMvc.perform(delete("/api/v1/companies/" + COMPANY_ID))
+        mockMvc.perform(delete("/v1/companies/" + COMPANY_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -226,7 +226,7 @@ class OrganizationControllerTest {
     void activatePlant_returns200WithTheActivatedPlant() throws Exception {
         when(organizationService.activatePlant(PLANT_ID)).thenReturn(samplePlant());
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/activate"))
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.plantId").value(PLANT_ID.toString()))
@@ -242,7 +242,7 @@ class OrganizationControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot activate a plant while its company is inactive: " + PLANT_ID));
 
-        mockMvc.perform(post("/api/v1/plants/" + PLANT_ID + "/activate"))
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
@@ -253,7 +253,7 @@ class OrganizationControllerTest {
     void activateWarehouse_returns200WithTheActivatedWarehouse() throws Exception {
         when(organizationService.activateWarehouse(WAREHOUSE_ID)).thenReturn(sampleWarehouse());
 
-        mockMvc.perform(post("/api/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
+        mockMvc.perform(post("/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.warehouseId").value(WAREHOUSE_ID.toString()))
@@ -269,7 +269,7 @@ class OrganizationControllerTest {
                 .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                         "Cannot activate a warehouse while its plant is inactive: " + WAREHOUSE_ID));
 
-        mockMvc.perform(post("/api/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
+        mockMvc.perform(post("/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());

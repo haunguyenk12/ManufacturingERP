@@ -13,10 +13,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -146,6 +148,113 @@ class ItemWarehouseSettingServiceTest {
 
         assertThat(setting.getStatus()).isEqualTo(ItemWarehouseSettingStatus.INACTIVE);
         verify(settingRepository).save(setting);
+    }
+
+    // ── default supply/output roles (DEC-03) ──────────────────────────────
+
+    /**
+     * Moving a default must be one call, not "clear the old, then set the new". The two-call shape
+     * has no transaction spanning it: fail between them and the plant is left with <b>no</b> default,
+     * which makes MRP block every suggestion for the item with AMBIGUOUS_WAREHOUSE_POLICY. So the
+     * previous holder is released here, and released <b>before</b> the caller's row is written —
+     * the V66 trigger rejects two live claimants of the same role.
+     */
+    @Test
+    void upsert_claimingADefaultRole_movesItOffThePreviousWarehouseInTheSameCall() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse target = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        Warehouse incumbentWarehouse = Warehouse.builder()
+                .warehouseId(UUID.randomUUID())
+                .plant(target.getPlant())
+                .code("WH2").name("Warehouse 2")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        ItemWarehouseSetting incumbent = setting(item, incumbentWarehouse);
+        incumbent.setDefaultSupply(true);
+
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(target));
+        when(settingRepository.findByItemItemIdAndWarehouseWarehouseIdAndStatus(
+                itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(settingRepository.findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                itemId, target.getPlant().getPlantId(), ItemWarehouseSettingStatus.ACTIVE))
+                .thenReturn(List.of(incumbent));
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(new ItemWarehouseSettingRequest(itemId, warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false));
+
+        assertThat(incumbent.isDefaultSupply()).isFalse();
+        ArgumentCaptor<ItemWarehouseSetting> captor = ArgumentCaptor.forClass(ItemWarehouseSetting.class);
+        verify(settingRepository).save(captor.capture());
+        assertThat(captor.getValue().isDefaultSupply()).isTrue();
+        // The release has to reach the database before the claim does, or the trigger sees two.
+        InOrder inOrder = inOrder(settingRepository);
+        inOrder.verify(settingRepository).saveAllAndFlush(List.of(incumbent));
+        inOrder.verify(settingRepository).save(any(ItemWarehouseSetting.class));
+    }
+
+    /** Releasing SUPPLY must not quietly strip the OUTPUT role the same warehouse also holds. */
+    @Test
+    void upsert_claimingOneRole_leavesTheOtherRoleOfThePreviousWarehouseAlone() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse target = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        Warehouse incumbentWarehouse = Warehouse.builder()
+                .warehouseId(UUID.randomUUID())
+                .plant(target.getPlant())
+                .code("WH2").name("Warehouse 2")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        ItemWarehouseSetting incumbent = setting(item, incumbentWarehouse);
+        incumbent.setDefaultSupply(true);
+        incumbent.setDefaultOutput(true);
+
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(target));
+        when(settingRepository.findByItemItemIdAndWarehouseWarehouseIdAndStatus(
+                itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(settingRepository.findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                itemId, target.getPlant().getPlantId(), ItemWarehouseSettingStatus.ACTIVE))
+                .thenReturn(List.of(incumbent));
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(new ItemWarehouseSettingRequest(itemId, warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false));
+
+        assertThat(incumbent.isDefaultSupply()).isFalse();
+        assertThat(incumbent.isDefaultOutput()).isTrue();
+    }
+
+    /** A plain threshold edit must not go hunting for defaults to release. */
+    @Test
+    void upsert_claimingNoDefaultRole_neverTouchesTheOtherWarehouses() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(settingRepository.findByItemItemIdAndWarehouseWarehouseIdAndStatus(
+                itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(request(itemId, warehouseId, "10", "5", 7));
+
+        verify(settingRepository, never()).findByItemItemIdAndWarehousePlantPlantIdAndStatus(any(), any(), any());
+        verify(settingRepository, never()).saveAllAndFlush(any());
     }
 
     private ItemWarehouseSettingRequest request(UUID itemId, UUID warehouseId, String safety, String reorder, int leadTime) {

@@ -12,5 +12,12 @@ public record ItemWarehouseSettingRequest(
         @NotNull UUID warehouseId,
         @NotNull @PositiveOrZero BigDecimal safetyStock,
         @NotNull @PositiveOrZero BigDecimal reorderPoint,
-        @NotNull @Min(0) Integer leadTimeDays
-) {}
+        @NotNull @Min(0) Integer leadTimeDays,
+        boolean defaultSupply,
+        boolean defaultOutput
+) {
+    public ItemWarehouseSettingRequest(UUID itemId, UUID warehouseId, BigDecimal safetyStock,
+                                       BigDecimal reorderPoint, Integer leadTimeDays) {
+        this(itemId, warehouseId, safetyStock, reorderPoint, leadTimeDays, false, false);
+    }
+}

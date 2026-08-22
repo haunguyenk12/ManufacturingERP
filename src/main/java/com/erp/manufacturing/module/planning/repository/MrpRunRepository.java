@@ -17,6 +17,18 @@ public interface MrpRunRepository extends JpaRepository<MrpRun, UUID> {
     @EntityGraph(attributePaths = {"company", "plant", "warehouse"})
     Optional<MrpRun> findWithDetailsByMrpRunId(UUID mrpRunId);
 
+    /**
+     * Replay lookup for {@code POST /planning-runs} (V58). The scope here must stay in step with
+     * {@code uk_mrp_runs_idempotency_key}: whole-table, because one key identifies one run attempt —
+     * unlike {@code stock_movements}, where the same key legitimately means different documents in
+     * different operations and the constraint is therefore {@code (key, movement_type)} (B69).
+     * <p>
+     * Fetches the associations the response mapper reads, so replaying does not lazy-load three
+     * extra rows.
+     */
+    @EntityGraph(attributePaths = {"company", "plant", "warehouse"})
+    Optional<MrpRun> findByIdempotencyKey(String idempotencyKey);
+
     @EntityGraph(attributePaths = {"company", "plant", "warehouse"})
     @Query("""
             select r

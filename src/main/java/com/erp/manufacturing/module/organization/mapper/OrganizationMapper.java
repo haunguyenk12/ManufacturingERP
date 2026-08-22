@@ -68,7 +68,7 @@ public class OrganizationMapper {
                 scope.getScopeId(),
                 scope.getCode(),
                 scope.getName(),
-                scope.getScopeType().name(),
+                scope.getScopeType().toWireValue(),
                 scope.getDescription(),
                 scope.getStatus().name());
     }
