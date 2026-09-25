@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.organization.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ErrorCode;
 import com.erp.manufacturing.module.organization.domain.AccessScope;
 import com.erp.manufacturing.module.organization.domain.AccessScopeResource;
 import com.erp.manufacturing.module.organization.domain.AssignmentStatus;
@@ -89,7 +90,7 @@ class AccessScopeInvariantSecurityTest {
         UUID companyId = UUID.randomUUID();
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(company(companyId)));
 
-        assertOperationNotAllowed(() -> service.createRole(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.createRole(
                 new RoleCreateRequest(companyId, "ADMIN", "Local administrator", null)));
 
         verify(roleRepository, never()).save(any(Role.class));
@@ -100,7 +101,7 @@ class AccessScopeInvariantSecurityTest {
         UUID companyId = UUID.randomUUID();
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(company(companyId)));
 
-        assertOperationNotAllowed(() -> service.createRole(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.createRole(
                 new RoleCreateRequest(companyId, "ROLE_ADMIN", "Local administrator", null)));
 
         verify(roleRepository, never()).save(any(Role.class));
@@ -113,7 +114,7 @@ class AccessScopeInvariantSecurityTest {
         stubScope(scopeId, ScopeType.GLOBAL);
         when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant(plantId, UUID.randomUUID())));
 
-        assertOperationNotAllowed(() -> service.addScopeResource(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.addScopeResource(
                 scopeId, new AccessScopeResourceRequest(ScopeResourceType.PLANT, plantId)));
 
         verify(accessScopeResourceRepository, never()).save(any(AccessScopeResource.class));
@@ -126,7 +127,7 @@ class AccessScopeInvariantSecurityTest {
         stubScope(scopeId, ScopeType.COMPANY);
         when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant(plantId, UUID.randomUUID())));
 
-        assertOperationNotAllowed(() -> service.addScopeResource(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.addScopeResource(
                 scopeId, new AccessScopeResourceRequest(ScopeResourceType.PLANT, plantId)));
 
         verify(accessScopeResourceRepository, never()).save(any(AccessScopeResource.class));
@@ -140,7 +141,7 @@ class AccessScopeInvariantSecurityTest {
         when(warehouseRepository.findById(warehouseId))
                 .thenReturn(Optional.of(warehouse(warehouseId, UUID.randomUUID(), UUID.randomUUID())));
 
-        assertOperationNotAllowed(() -> service.addScopeResource(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.addScopeResource(
                 scopeId, new AccessScopeResourceRequest(ScopeResourceType.WAREHOUSE, warehouseId)));
 
         verify(accessScopeResourceRepository, never()).save(any(AccessScopeResource.class));
@@ -153,7 +154,7 @@ class AccessScopeInvariantSecurityTest {
         stubScope(scopeId, ScopeType.WAREHOUSE_GROUP);
         when(companyRepository.findById(companyId)).thenReturn(Optional.of(company(companyId)));
 
-        assertOperationNotAllowed(() -> service.addScopeResource(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.addScopeResource(
                 scopeId, new AccessScopeResourceRequest(ScopeResourceType.COMPANY, companyId)));
 
         verify(accessScopeResourceRepository, never()).save(any(AccessScopeResource.class));
@@ -182,7 +183,7 @@ class AccessScopeInvariantSecurityTest {
         UUID scopeId = UUID.randomUUID();
         stubAssignmentBase(userId, role(roleId, companyId), scope(scopeId, ScopeType.GLOBAL));
 
-        assertOperationNotAllowed(() -> service.assignRole(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.assignRole(
                 new UserRoleAssignmentRequest(userId, roleId, scopeId, null)));
 
         verify(assignmentRepository, never()).save(any());
@@ -208,7 +209,7 @@ class AccessScopeInvariantSecurityTest {
                 .thenReturn(new PageImpl<>(List.of(resource(scopeId, ScopeResourceType.PLANT, plantId))));
         when(plantRepository.findAllById(any())).thenReturn(List.of(plant(plantId, companyId)));
 
-        assertOperationNotAllowed(() -> service.assignRole(
+        assertRejectedWith(BusinessErrorCode.OPERATION_NOT_ALLOWED, () -> service.assignRole(
                 new UserRoleAssignmentRequest(userId, roleId, scopeId, null)));
 
         verify(assignmentRepository, never()).save(any());
@@ -223,7 +224,7 @@ class AccessScopeInvariantSecurityTest {
         when(accessScopeResourceRepository.findByScopeId(eq(scopeId), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
 
-        assertOperationNotAllowed(() -> service.assignRole(
+        assertRejectedWith(BusinessErrorCode.DOCUMENT_HAS_NO_LINES, () -> service.assignRole(
                 new UserRoleAssignmentRequest(userId, roleId, scopeId, null)));
 
         verify(assignmentRepository, never()).save(any());
@@ -240,7 +241,7 @@ class AccessScopeInvariantSecurityTest {
         when(accessScopeResourceRepository.findByScopeId(eq(scopeId), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(resource(scopeId, ScopeResourceType.COMPANY, otherCompanyId))));
 
-        assertOperationNotAllowed(() -> service.assignRole(
+        assertRejectedWith(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH, () -> service.assignRole(
                 new UserRoleAssignmentRequest(userId, roleId, scopeId, null)));
 
         verify(assignmentRepository, never()).save(any());
@@ -310,11 +311,18 @@ class AccessScopeInvariantSecurityTest {
                 });
     }
 
-    private void assertOperationNotAllowed(ThrowableAssert.ThrowingCallable operation) {
+    /**
+     * EH-2 split {@code OPERATION_NOT_ALLOWED} into three, and these invariants no longer all land on
+     * the same one — "the scope has no resources yet" and "the role belongs to another company" are
+     * now distinct codes. The expected code is therefore passed in per call site rather than baked
+     * into the helper: a shared helper asserting one code would have quietly stopped distinguishing
+     * the invariants it exists to protect.
+     */
+    private void assertRejectedWith(ErrorCode expected, ThrowableAssert.ThrowingCallable operation) {
         assertThatThrownBy(operation)
                 .isInstanceOf(AppException.class)
                 .satisfies(error -> assertThat(((AppException) error).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(expected));
     }
 
     private void stubScope(UUID scopeId, ScopeType scopeType) {

@@ -69,6 +69,12 @@ public class SecurityConfig {
                         .requestMatchers("/auth/v1/me", "/auth/v1/logout",
                                 "/auth/v1/logout-all").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        // Container-level error dispatches land on /error (EH-1). Spring Boot
+                        // registers the security chain for the ERROR dispatcher type as well, so
+                        // without this entry an unauthenticated request whose real failure was a 500
+                        // would be re-answered as 401 and the actual status lost. ApiErrorController
+                        // echoes nothing about the failure, so exposing it costs nothing.
+                        .requestMatchers("/error").permitAll()
                         // Springdoc is disabled by default and forced off in prod. When explicitly
                         // enabled in dev/acceptance, its bootstrap HTML and JSON must be reachable
                         // before Swagger UI has any opportunity to attach a Bearer token.

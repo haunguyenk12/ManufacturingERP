@@ -56,7 +56,8 @@ public class WorkCalendarService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_WORK_CALENDAR_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.WORK_CALENDAR_CREATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()")
+    @Auditable(action = AuditAction.WORK_CALENDAR_CREATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCalendarResponse create(UUID plantId, WorkCalendarCreateRequest request) {
         Plant plant = organizationLookupService.getActivePlant(plantId);
 
@@ -103,7 +104,8 @@ public class WorkCalendarService {
 
     @Transactional
     @PreAuthorize("@workCalendarPermissionGuard.hasWorkCalendarAccess(authentication, 'PERM_WORK_CALENDAR_MANAGE', #workCalendarId)")
-    @Auditable(action = AuditAction.WORK_CALENDAR_UPDATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()")
+    @Auditable(action = AuditAction.WORK_CALENDAR_UPDATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCalendarResponse update(UUID workCalendarId, WorkCalendarUpdateRequest request) {
         WorkCalendar calendar = findCalendarWithDetails(workCalendarId);
         if (request.name() != null) {
@@ -136,7 +138,8 @@ public class WorkCalendarService {
 
     @Transactional
     @PreAuthorize("@workCalendarPermissionGuard.hasWorkCalendarAccess(authentication, 'PERM_WORK_CALENDAR_MANAGE', #workCalendarId)")
-    @Auditable(action = AuditAction.WORK_CALENDAR_ACTIVATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()")
+    @Auditable(action = AuditAction.WORK_CALENDAR_ACTIVATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCalendarResponse activate(UUID workCalendarId) {
         WorkCalendar calendar = findCalendar(workCalendarId);
         calendar.activate();
@@ -150,7 +153,8 @@ public class WorkCalendarService {
      */
     @Transactional
     @PreAuthorize("@workCalendarPermissionGuard.hasWorkCalendarAccess(authentication, 'PERM_WORK_CALENDAR_MANAGE', #workCalendarId)")
-    @Auditable(action = AuditAction.WORK_CALENDAR_DEACTIVATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()")
+    @Auditable(action = AuditAction.WORK_CALENDAR_DEACTIVATED, entityType = "WorkCalendar", entityIdExpression = "workCalendarId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCalendarResponse deactivate(UUID workCalendarId) {
         WorkCalendar calendar = findCalendar(workCalendarId);
         calendar.deactivate();
@@ -194,7 +198,7 @@ public class WorkCalendarService {
                 throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Shift", shiftId);
             }
             if (!shift.getPlant().getPlantId().equals(plant.getPlantId())) {
-                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                         "Shift " + shiftId + " does not belong to plant " + plant.getPlantId());
             }
         }

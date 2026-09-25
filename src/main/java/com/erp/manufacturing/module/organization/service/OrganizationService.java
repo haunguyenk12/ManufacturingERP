@@ -45,7 +45,8 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ORG_MANAGE')")
-    @Auditable(action = AuditAction.COMPANY_CREATED, entityType = "Company", entityIdExpression = "companyId.toString()")
+    @Auditable(action = AuditAction.COMPANY_CREATED, entityType = "Company", entityIdExpression = "companyId.toString()",
+               companyId = "#result?.companyId()")
     public CompanyResponse createCompany(CompanyCreateRequest request) {
         String code = normalizeCode(request.code());
         if (companyRepository.existsByCode(code)) {
@@ -62,7 +63,8 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'COMPANY', #companyId)")
-    @Auditable(action = AuditAction.COMPANY_UPDATED, entityType = "Company", entityIdExpression = "companyId.toString()")
+    @Auditable(action = AuditAction.COMPANY_UPDATED, entityType = "Company", entityIdExpression = "companyId.toString()",
+               companyId = "#result?.companyId()")
     public CompanyResponse updateCompany(UUID companyId, CompanyUpdateRequest request) {
         Company company = findCompany(companyId);
         company.setName(request.name().trim());
@@ -71,7 +73,8 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'COMPANY', #companyId)")
-    @Auditable(action = AuditAction.COMPANY_DEACTIVATED, entityType = "Company", entityIdExpression = "companyId.toString()")
+    @Auditable(action = AuditAction.COMPANY_DEACTIVATED, entityType = "Company", entityIdExpression = "companyId.toString()",
+               companyId = "#result?.companyId()")
     public CompanyResponse deactivateCompany(UUID companyId) {
         Company company = findCompany(companyId);
         company.deactivate();
@@ -93,11 +96,13 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'COMPANY', #companyId)")
-    @Auditable(action = AuditAction.PLANT_CREATED, entityType = "Plant", entityIdExpression = "plantId.toString()")
+    @Auditable(action = AuditAction.PLANT_CREATED, entityType = "Plant", entityIdExpression = "plantId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public PlantResponse createPlant(UUID companyId, PlantCreateRequest request) {
         Company company = findCompany(companyId);
         if (!company.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot create plant under inactive company: " + companyId);
         }
 
@@ -118,7 +123,9 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.PLANT_UPDATED, entityType = "Plant", entityIdExpression = "plantId.toString()")
+    @Auditable(action = AuditAction.PLANT_UPDATED, entityType = "Plant", entityIdExpression = "plantId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public PlantResponse updatePlant(UUID plantId, PlantUpdateRequest request) {
         Plant plant = findPlant(plantId);
         plant.setName(request.name().trim());
@@ -128,7 +135,9 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.PLANT_DEACTIVATED, entityType = "Plant", entityIdExpression = "plantId.toString()")
+    @Auditable(action = AuditAction.PLANT_DEACTIVATED, entityType = "Plant", entityIdExpression = "plantId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public PlantResponse deactivatePlant(UUID plantId) {
         Plant plant = findPlant(plantId);
         plant.deactivate();
@@ -137,11 +146,13 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.PLANT_ACTIVATED, entityType = "Plant", entityIdExpression = "plantId.toString()")
+    @Auditable(action = AuditAction.PLANT_ACTIVATED, entityType = "Plant", entityIdExpression = "plantId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public PlantResponse activatePlant(UUID plantId) {
         Plant plant = findPlant(plantId);
         if (!plant.getCompany().isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot activate a plant while its company is inactive: " + plantId);
         }
         plant.activate();
@@ -163,11 +174,13 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.WAREHOUSE_CREATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()")
+    @Auditable(action = AuditAction.WAREHOUSE_CREATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public WarehouseResponse createWarehouse(UUID plantId, WarehouseCreateRequest request) {
         Plant plant = findPlant(plantId);
         if (!plant.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot create warehouse under inactive plant: " + plantId);
         }
 
@@ -188,7 +201,9 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'WAREHOUSE', #warehouseId)")
-    @Auditable(action = AuditAction.WAREHOUSE_UPDATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()")
+    @Auditable(action = AuditAction.WAREHOUSE_UPDATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public WarehouseResponse updateWarehouse(UUID warehouseId, WarehouseUpdateRequest request) {
         Warehouse warehouse = findWarehouse(warehouseId);
         warehouse.setName(request.name().trim());
@@ -198,7 +213,9 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'WAREHOUSE', #warehouseId)")
-    @Auditable(action = AuditAction.WAREHOUSE_DEACTIVATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()")
+    @Auditable(action = AuditAction.WAREHOUSE_DEACTIVATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public WarehouseResponse deactivateWarehouse(UUID warehouseId) {
         Warehouse warehouse = findWarehouse(warehouseId);
         warehouse.deactivate();
@@ -207,11 +224,13 @@ public class OrganizationService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_MANAGE', 'WAREHOUSE', #warehouseId)")
-    @Auditable(action = AuditAction.WAREHOUSE_ACTIVATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()")
+    @Auditable(action = AuditAction.WAREHOUSE_ACTIVATED, entityType = "Warehouse", entityIdExpression = "warehouseId.toString()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public WarehouseResponse activateWarehouse(UUID warehouseId) {
         Warehouse warehouse = findWarehouse(warehouseId);
         if (!warehouse.getPlant().isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot activate a warehouse while its plant is inactive: " + warehouseId);
         }
         warehouse.activate();

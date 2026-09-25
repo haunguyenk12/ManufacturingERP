@@ -34,6 +34,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String DOCUMENT_CODE_SCHEMA = "v40_document_code_check";
     private static final String SERIAL_TRACKING_SCHEMA = "v52_serial_tracking_check";
     private static final String RUN_IDEMPOTENCY_SCHEMA = "v58_run_idempotency_check";
+    private static final String AUDIT_PIPELINE_SCHEMA = "v67_audit_pipeline_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -46,7 +47,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        assertThat(current.getVersion().getVersion()).isEqualTo("66");
+        // V67 (audit outbox + richer audit_logs) and V68 (append-only triggers) are the audit refactor.
+        assertThat(current.getVersion().getVersion()).isEqualTo("68");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -919,6 +921,112 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                     """.formatted(DOCUMENT_CODE_SCHEMA))) {
                 assertThat(rows.next()).isTrue();
                 assertThat(rows.getString("is_nullable")).isEqualTo("YES");
+            }
+        }
+    }
+
+    /**
+     * {@code V67}: the widened {@code trace_id} column and the {@code event_id} unique index.
+     *
+     * <p>Both are load-bearing and neither is visible to a mocked repository. The column was 32 while
+     * {@code TraceIdFilter} accepts 64, so a legitimate upstream trace id made the audit INSERT fail
+     * <em>after</em> the business transaction had committed. The unique index is what turns a
+     * dispatcher retry after a crash into a no-op instead of a duplicate row.
+     */
+    @Test
+    void migrate_v67_widensTraceIdAndMakesEventIdUnique() throws Exception {
+        Flyway flyway = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(AUDIT_PIPELINE_SCHEMA)
+                .load();
+        flyway.migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + AUDIT_PIPELINE_SCHEMA);
+
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT character_maximum_length FROM information_schema.columns
+                    WHERE table_schema = '""" + AUDIT_PIPELINE_SCHEMA + """
+                    ' AND table_name = 'audit_logs' AND column_name = 'trace_id'
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(64);
+            }
+
+            UUID eventId = UUID.randomUUID();
+            String insert = """
+                    INSERT INTO audit_logs (audit_id, action, status, event_id, created_at)
+                    VALUES ('%s', 'LOGIN', 'SUCCESS', '%s', now())
+                    """;
+            statement.execute(String.format(insert, UUID.randomUUID(), eventId));
+
+            assertThatThrownBy(() -> statement.execute(
+                    String.format(insert, UUID.randomUUID(), eventId)))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("uk_audit_logs_event_id");
+
+            // NULL event_id is the historical case and must stay unconstrained: every row written
+            // before V67 has one, and the partial index exists precisely so they do not collide.
+            String insertWithoutEvent = """
+                    INSERT INTO audit_logs (audit_id, action, status, created_at)
+                    VALUES ('%s', 'LOGIN', 'SUCCESS', now())
+                    """;
+            statement.execute(String.format(insertWithoutEvent, UUID.randomUUID()));
+            statement.execute(String.format(insertWithoutEvent, UUID.randomUUID()));
+        }
+    }
+
+    /**
+     * {@code V68}: the audit tables reject UPDATE and DELETE for every role, including the superuser
+     * Testcontainers connects as.
+     *
+     * <p>That role choice is the point. A grant-based control would be bypassed by a superuser and the
+     * test would pass without proving anything; a trigger applies to everyone, which is why it is the
+     * primary control and the REVOKE is documented as defence in depth.
+     */
+    @Test
+    void migrate_v68_makesAuditRowsUnwritableExceptOnTheMaintenancePath() throws Exception {
+        Flyway flyway = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(AUDIT_PIPELINE_SCHEMA)
+                .load();
+        flyway.migrate();
+
+        UUID auditId = UUID.randomUUID();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + AUDIT_PIPELINE_SCHEMA);
+            statement.execute("""
+                    INSERT INTO audit_logs (audit_id, action, status, created_at)
+                    VALUES ('%s', 'LOGIN', 'SUCCESS', now())
+                    """.formatted(auditId));
+
+            assertThatThrownBy(() -> statement.execute(
+                    "UPDATE audit_logs SET username = 'rewritten' WHERE audit_id = '" + auditId + "'"))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("append-only");
+
+            assertThatThrownBy(() -> statement.execute(
+                    "DELETE FROM audit_logs WHERE audit_id = '" + auditId + "'"))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("append-only");
+
+            // The single documented escape hatch, used only by AuditRetentionService.
+            connection.setAutoCommit(false);
+            statement.execute("SET LOCAL audit.maintenance = 'on'");
+            statement.execute("DELETE FROM audit_logs WHERE audit_id = '" + auditId + "'");
+            connection.commit();
+            connection.setAutoCommit(true);
+
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT count(*) FROM audit_logs WHERE audit_id = '" + auditId + "'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
             }
         }
     }

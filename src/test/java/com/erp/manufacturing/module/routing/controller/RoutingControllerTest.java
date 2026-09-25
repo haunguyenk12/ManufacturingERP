@@ -112,14 +112,14 @@ class RoutingControllerTest {
     @Test
     @DisplayName("activate: routing without operations stays 422 OPERATION_NOT_ALLOWED (§5.3 — "
             + "incomplete content is not a status conflict)")
-    void activate_routingWithoutOperations_returns422OperationNotAllowed() throws Exception {
+    void activate_routingWithoutOperations_returns422DocumentHasNoLines() throws Exception {
         when(routingService.activate(ROUTING_ID))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                         "Cannot activate routing without operations"));
 
         mockMvc.perform(post("/v1/routings/" + ROUTING_ID + "/activate"))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()));
+                .andExpect(status().is(BusinessErrorCode.DOCUMENT_HAS_NO_LINES.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.DOCUMENT_HAS_NO_LINES.code()));
     }
 
     @Test

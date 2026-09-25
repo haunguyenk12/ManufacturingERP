@@ -34,7 +34,7 @@ public class ItemLookupService {
     public Item getActiveItem(UUID itemId) {
         Item item = getItem(itemId);
         if (!item.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive item cannot be used: " + itemId);
         }
         return item;
@@ -65,7 +65,7 @@ public class ItemLookupService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Inventory lot", lotId));
         if (!lot.getItem().getItemId().equals(item.getItemId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Lot does not belong to item: " + item.getItemId());
         }
         return lot;

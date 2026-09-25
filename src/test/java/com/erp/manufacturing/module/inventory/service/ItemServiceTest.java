@@ -114,7 +114,7 @@ class ItemServiceTest {
                 "RM-001", "Steel Coil", ItemType.RAW_MATERIAL, "KG", true, false)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
     }
 
     @Test
@@ -185,7 +185,7 @@ class ItemServiceTest {
         assertThatThrownBy(() -> service.activateItem(itemId))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(itemRepository, never()).save(any());
     }

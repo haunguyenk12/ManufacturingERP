@@ -40,7 +40,8 @@ public class MaterialReservationService {
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_RESERVATION_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.MATERIAL_RESERVED, entityType = "MaterialReservation", entityIdExpression = "reservationId.toString()")
+    @Auditable(action = AuditAction.MATERIAL_RESERVED, entityType = "MaterialReservation", entityIdExpression = "reservationId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public MaterialReservationResponse reserve(UUID workOrderId, MaterialReservationCreateRequest request) {
         WorkOrder workOrder = support.findWorkOrder(workOrderId);
         support.ensureReservable(workOrder);
@@ -132,7 +133,8 @@ public class MaterialReservationService {
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_RESERVATION_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.MATERIAL_RESERVATION_RELEASED, entityType = "MaterialReservation", entityIdExpression = "reservationId.toString()")
+    @Auditable(action = AuditAction.MATERIAL_RESERVATION_RELEASED, entityType = "MaterialReservation", entityIdExpression = "reservationId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public MaterialReservationResponse release(UUID workOrderId, UUID reservationId) {
         MaterialReservation reservation = findReservationForWorkOrder(workOrderId, reservationId);
         if (reservation.getStatus() != MaterialReservationStatus.ACTIVE) {

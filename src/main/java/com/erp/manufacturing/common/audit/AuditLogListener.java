@@ -13,15 +13,28 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import java.util.List;
 
 /**
- * Listens for {@link AuditLogEvent} and persists to DB asynchronously.
- * <p>
- * Uses {@code @TransactionalEventListener(AFTER_COMMIT)} to ensure:
- * <ul>
- *   <li>Audit is only written if the business transaction succeeded</li>
- *   <li>Rollbacks do NOT produce audit entries</li>
- * </ul>
- * Uses dedicated "auditExecutor" thread pool with MDC propagation.
+ * <strong>Legacy path, disabled by default</strong> — superseded by the transactional outbox
+ * ({@code AuditRecorder} → {@code AuditOutboxWriter} → {@code AuditOutboxDispatcher}). Kept only as
+ * the rollback lever described in AuditRefactorPlan §8.2, behind
+ * {@code app.audit.outbox.legacy-listener-enabled}, and scheduled for removal once the new pipeline
+ * has been stable for a release (AR-10).
+ *
+ * <p>Its two structural defects are the reason the outbox exists, and are worth stating so nobody
+ * re-enables it casually:
+ *
+ * <ol>
+ *   <li>{@code @TransactionalEventListener(AFTER_COMMIT)} delivers <em>only</em> when the publisher
+ *       is inside a transaction. {@code AuthService} has none, so every auth event was silently
+ *       discarded — no log line, no metric, nothing.</li>
+ *   <li>Between the business COMMIT and this INSERT there is a window with no durability guarantee at
+ *       all: a crash, an executor rejection or a failing INSERT loses the event while the business
+ *       change survives.</li>
+ * </ol>
+ *
+ * Uses the dedicated "auditExecutor" thread pool with MDC propagation.
  */
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.audit.outbox.legacy-listener-enabled", havingValue = "true")
 @Component
 @RequiredArgsConstructor
 @Slf4j

@@ -169,11 +169,54 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("DataIntegrityViolationException returns 409 RESOURCE_ALREADY_EXISTS")
-    void dataIntegrityViolation_returns409ResourceAlreadyExists() throws Exception {
+    @DisplayName("a unique-constraint violation returns 409 RESOURCE_ALREADY_EXISTS")
+    void uniqueConstraintViolation_returns409ResourceAlreadyExists() throws Exception {
         mockMvc.perform(get("/v1/test/exceptions/data-integrity"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.RESOURCE_ALREADY_EXISTS.code()));
+    }
+
+    /**
+     * EH-3. Until the constraint name was consulted, <em>every</em> integrity violation answered
+     * "409 RESOURCE_ALREADY_EXISTS" — including check and foreign-key failures, where nothing already
+     * exists and the client's only real option is to fix the payload. Those are 422 now.
+     */
+    @Test
+    @DisplayName("a check-constraint violation returns 422 BUSINESS_RULE_VIOLATION, not a 409 duplicate")
+    void checkConstraintViolation_returns422BusinessRuleViolation() throws Exception {
+        mockMvc.perform(get("/v1/test/exceptions/data-integrity")
+                        .param("detail", "ERROR: new row for relation \"items\" violates check "
+                                + "constraint \"chk_items_tracking_exclusive\""))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.BUSINESS_RULE_VIOLATION.code()));
+    }
+
+    /**
+     * The constraint name is diagnosis-grade schema detail. It belongs in the log, not in the body —
+     * same reasoning as the catch-all refusing to echo exception text.
+     */
+    @Test
+    @DisplayName("the failing constraint name is never echoed back to the caller")
+    void constraintName_isNeverEchoedToTheCaller() throws Exception {
+        String body = mockMvc.perform(get("/v1/test/exceptions/data-integrity"))
+                .andExpect(status().isConflict())
+                .andReturn().getResponse().getContentAsString();
+
+        org.assertj.core.api.Assertions.assertThat(body).doesNotContain("uk_companies_code");
+    }
+
+    /**
+     * A constraint {@code KNOWN} names keeps its own code and message, which is what makes the map
+     * worth having over the prefix rule alone.
+     */
+    @Test
+    @DisplayName("a mapped constraint keeps its specific error code")
+    void mappedConstraint_keepsItsSpecificErrorCode() throws Exception {
+        mockMvc.perform(get("/v1/test/exceptions/data-integrity")
+                        .param("detail", "ERROR: duplicate key value violates unique "
+                                + "constraint \"uk_inventory_lots_item_code\""))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.code()));
     }
 
     /**

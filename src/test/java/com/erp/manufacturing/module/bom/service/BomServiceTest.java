@@ -96,7 +96,7 @@ class BomServiceTest {
         assertThatThrownBy(() -> service.addLine(bomId, lineCreate(componentId, 10)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
     }
 
     @Test
@@ -199,6 +199,31 @@ class BomServiceTest {
         assertThat(candidate.getStatus()).isEqualTo(BomStatus.ACTIVE);
         verify(bomHeaderRepository).saveAndFlush(oldActive);
         verify(bomHeaderRepository).save(candidate);
+    }
+
+    /**
+     * EH-2: this branch had no test pinning its {@code code} — the split gave it one.
+     *
+     * <p>🔴 It is <b>422 {@code DOCUMENT_HAS_NO_LINES}</b>, not 409 {@code STATE_CONFLICT}. The BOM's
+     * status is perfectly fine (it is {@code DRAFT}, which is the only status that may be activated);
+     * what is missing is its <em>content</em>. {@code error-handling.md} §5.3 calls this the boundary
+     * people most often get wrong, and {@code ensureDraft} right above it is the 409 case it must not
+     * be merged with.
+     */
+    @Test
+    void activateBom_withoutComponentLines_failsAsAnEmptyDocumentNotAStateConflict() {
+        UUID companyId = UUID.randomUUID();
+        UUID candidateId = UUID.randomUUID();
+        Item parent = item(UUID.randomUUID(), companyId, "FG-100", ItemType.FINISHED_GOOD, ItemStatus.ACTIVE);
+        BomHeader candidate = draftBom(candidateId, parent);   // no lines added on purpose
+        when(bomHeaderRepository.findWithLinesByBomId(candidateId)).thenReturn(Optional.of(candidate));
+
+        assertThatThrownBy(() -> service.activateBom(candidateId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.DOCUMENT_HAS_NO_LINES));
+
+        verify(bomHeaderRepository, never()).save(any());
     }
 
     @Test

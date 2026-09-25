@@ -160,10 +160,10 @@ class SupplierControllerTest {
     }
 
     @Test
-    @DisplayName("addItemSupplier: inactive supplier stays 422 OPERATION_NOT_ALLOWED (§5.3 master data)")
-    void addItemSupplier_inactiveSupplier_returns422OperationNotAllowed() throws Exception {
+    @DisplayName("addItemSupplier: inactive supplier stays 422 RESOURCE_INACTIVE (§5.3 master data)")
+    void addItemSupplier_inactiveSupplier_returns422ResourceInactive() throws Exception {
         when(supplierService.addItemSupplier(eq(ITEM_ID), any(ItemSupplierRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Inactive supplier cannot be used: " + SUPPLIER_ID));
 
         mockMvc.perform(post("/v1/items/" + ITEM_ID + "/suppliers")
@@ -171,8 +171,8 @@ class SupplierControllerTest {
                         .content("""
                                 {"supplierId":"%s","currencyCode":"USD"}
                                 """.formatted(SUPPLIER_ID)))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()));
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()));
     }
 
     @Test

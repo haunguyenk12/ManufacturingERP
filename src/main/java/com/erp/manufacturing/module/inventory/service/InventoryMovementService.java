@@ -373,7 +373,7 @@ public class InventoryMovementService {
         Item item = itemRepository.findById(itemId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Item", itemId));
         if (!item.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive item cannot be used in stock movement: " + itemId);
         }
         return item;
@@ -383,7 +383,7 @@ public class InventoryMovementService {
         Warehouse warehouse = warehouseRepository.findById(warehouseId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (!warehouse.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive warehouse cannot be used in stock movement: " + warehouseId);
         }
         return warehouse;
@@ -393,7 +393,7 @@ public class InventoryMovementService {
         UUID itemCompanyId = item.getCompany().getCompanyId();
         UUID warehouseCompanyId = warehouse.getPlant().getCompany().getCompanyId();
         if (!itemCompanyId.equals(warehouseCompanyId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item and warehouse must belong to the same company");
         }
     }
@@ -457,7 +457,7 @@ public class InventoryMovementService {
         InventoryLot lot = lotRepository.findById(lotId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Inventory lot", lotId));
         if (!lot.getItem().getItemId().equals(item.getItemId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Lot does not belong to item: " + item.getItemId());
         }
         return lot;
@@ -517,7 +517,7 @@ public class InventoryMovementService {
         SerialNumber serial = serialNumberRepository.findById(serialId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Serial number", serialId));
         if (!serial.getItem().getItemId().equals(item.getItemId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Serial does not belong to item: " + item.getItemId());
         }
         return serial;

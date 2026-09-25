@@ -47,7 +47,8 @@ public class ImportProfileService {
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_DATA_IMPORT_EXECUTE', 'COMPANY', #request.companyId())")
     @Auditable(action = AuditAction.IMPORT_PROFILE_CREATED, entityType = "ImportProfile",
-            entityIdExpression = "profileId.toString()")
+            entityIdExpression = "profileId.toString()",
+               companyId = "#result?.companyId()")
     public ImportProfileResponse create(ImportProfileCreateRequest request) {
         String code = request.code().trim().toUpperCase(Locale.ROOT);
         if (profileRepository.existsByCode(code)) {
@@ -90,7 +91,8 @@ public class ImportProfileService {
     @Transactional
     @PreAuthorize("@dataImportPermissionGuard.hasProfileAccess(authentication, 'PERM_DATA_IMPORT_EXECUTE', #profileId)")
     @Auditable(action = AuditAction.IMPORT_PROFILE_UPDATED, entityType = "ImportProfile",
-            entityIdExpression = "profileId.toString()")
+            entityIdExpression = "profileId.toString()",
+               companyId = "#result?.companyId()")
     public ImportProfileResponse update(UUID profileId, ImportProfileUpdateRequest request) {
         ImportProfile profile = findProfile(profileId);
         int headerRow = request.headerRowIndex() == null ? 0 : request.headerRowIndex();

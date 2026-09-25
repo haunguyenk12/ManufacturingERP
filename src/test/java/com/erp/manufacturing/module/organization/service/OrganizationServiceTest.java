@@ -82,7 +82,7 @@ class OrganizationServiceTest {
                 companyId, new PlantCreateRequest("P1", "Plant 1", null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
     }
 
     @Test
@@ -115,7 +115,7 @@ class OrganizationServiceTest {
                 plantId, new WarehouseCreateRequest("RM", "Raw", WarehouseType.RAW_MATERIAL)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
     }
 
     @Test
@@ -212,7 +212,7 @@ class OrganizationServiceTest {
         assertThatThrownBy(() -> service.activatePlant(plantId))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(plantRepository, never()).save(any());
     }
@@ -280,7 +280,7 @@ class OrganizationServiceTest {
         assertThatThrownBy(() -> service.activateWarehouse(warehouseId))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(warehouseRepository, never()).save(any());
     }

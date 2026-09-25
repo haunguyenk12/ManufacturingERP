@@ -247,7 +247,7 @@ class SalesOrderServiceTest {
                         ORDER_DATE.plusDays(30))))))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(salesOrderRepository).flush();
         verify(salesOrderRepository, never()).saveAndFlush(any());

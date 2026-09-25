@@ -87,54 +87,61 @@
 { "code": "IDEMPOTENCY_CONFLICT", "result": null, "message": "Idempotency-Key was already used with a different payload" }
 ```
 
-## 5.2 Phân Cấp Exception
+## 5.2 Phân Cấp Exception *(viết lại 2026-08-23, `EH-6` — bản cũ mô tả một hệ thống không tồn tại)*
+
+> 🔴 **Trước `EH-6` mục này vẽ một cây 12 lớp** (`ResourceNotFoundException`, `BusinessRuleException`,
+> `TokenExpiredException`, `SessionConflictException`…). **Không lớp nào trong số đó tồn tại trong
+> `src/main`.** Ai đọc tài liệu trước code sẽ đi tìm nhầm class, và tệ hơn là tưởng phải *thêm* một
+> lớp exception mới mỗi khi thêm một loại lỗi. Thiết kế thật **đơn giản hơn** bản vẽ đó, không phải
+> phức tạp hơn.
+
+Repo chỉ có **hai** lớp exception, cộng một `interface` mang dữ liệu lỗi:
 
 ```
 RuntimeException
-└── BaseBusinessException (abstract – chứa ErrorCode + HttpStatus)
-    ├── ResourceNotFoundException       → 404
-    ├── ResourceAlreadyExistsException  → 409
-    ├── BusinessRuleException           → 422
-    ├── AuthException (abstract)
-    │   ├── TokenExpiredException       → 401
-    │   ├── TokenRevokedException       → 401
-    │   ├── TokenMalformedException     → 401
-    │   ├── RefreshTokenExpiredException→ 401
-    │   ├── InvalidCredentialsException → 401
-    │   └── AccountLockedException      → 403
-    ├── AccessDeniedException           → 403
-    ├── SessionConflictException        → 409
-    ├── SessionAbsoluteTimeoutException → 401
-    ├── TokenReuseDetectedException     → 401
-    ├── ResetTokenInvalidException      → 401
-    ├── ValidationException             → 400
-    ├── ExternalServiceException        → 502
-    └── RateLimitExceededException      → 429
+└── AppException                 – mang ErrorCode + HttpStatus + message (ghi đè được)
+    └── MultiErrorException      – thêm field errors (Map field→message) hoặc list message
 ```
+
+```
+interface ErrorCode { String code(); String message(); HttpStatus status(); }
+├── AuthErrorCode        (enum)  – credentials, token, session, recovery, authorization
+├── BusinessErrorCode    (enum)  – vi phạm quy tắc nghiệp vụ + hạ tầng (rate limit, internal)
+├── ValidationErrorCode  (enum)  – input sai, resource not found / already exists
+└── ImportErrorCode      (enum, module/dataimport) – lỗi cấp DÒNG của file import, KHÔNG phải
+                                  lỗi HTTP; nó không đi qua GlobalExceptionHandler
+```
+
+**Hệ quả cần nhớ:**
+
+1. **Loại lỗi mới ⇒ thêm một hằng vào enum, KHÔNG thêm class.** Status và message mặc định nằm trên
+   chính hằng đó, nên `AppException` không cần biết gì về domain.
+2. **`ExceptionFactory` là đường tạo exception duy nhất** (`notFound`, `alreadyExists`,
+   `unauthorized`, `forbidden`, `businessRule`, `custom`, `withErrors`). Mọi factory method đều trả về
+   cùng một `AppException`; **tên method không quyết định HTTP status** — status luôn lấy từ
+   `ErrorCode`. Vì vậy `businessRule(STATE_CONFLICT, …)` trả **409**, không phải 422 (xem `EH-7`).
+3. **Interface `ErrorCode` là điểm mở rộng.** Một domain có vốn từ lỗi riêng khai enum của chính nó
+   thay vì nhồi thêm hằng vào `BusinessErrorCode` — `ImportErrorCode` là tiền lệ.
+4. `AppException` có một constructor nhận `HttpStatus` tường minh để ghi đè status của `ErrorCode`;
+   hiện **không call site nào dùng** — đừng đọc nó như cơ chế đang chạy.
+
 
 ## 5.3 ErrorCode Enum
 
-```
-SUCCESS,
-// Auth – Token
-TOKEN_EXPIRED, TOKEN_REVOKED, TOKEN_MALFORMED,
-REFRESH_TOKEN_EXPIRED, TOKEN_REUSE_DETECTED,
-// Auth – Credentials & Session
-INVALID_CREDENTIALS, ACCOUNT_LOCKED, SESSION_CONFLICT,
-SESSION_ABSOLUTE_TIMEOUT, SESSION_TERMINATED, AUTHENTICATION_REQUIRED,
-// Auth – Recovery
-RESET_TOKEN_INVALID, RESET_TOKEN_EXPIRED,
-// Resource
-RESOURCE_NOT_FOUND, RESOURCE_ALREADY_EXISTS,
-// Business
-BUSINESS_RULE_VIOLATION, INSUFFICIENT_STOCK, BOM_CIRCULAR_REFERENCE, MRP_CALCULATION_ERROR,
-// System
-VALIDATION_FAILED, RATE_LIMIT_EXCEEDED, EXTERNAL_SERVICE_ERROR,
-INTERNAL_SERVER_ERROR, ACCESS_DENIED
-```
+> 🔴 **Không có "danh sách mã lỗi" trong tài liệu này nữa** *(sửa 2026-08-23, `EH-6`)*. Bản cũ chép
+> một danh sách "thiết kế gốc" rồi tự ghi chú là nó không khớp code — một danh sách vừa lỗi thời vừa
+> tự nhận là lỗi thời thì không ai dùng được. **Nguồn duy nhất là ba enum**:
+> `AuthErrorCode`, `BusinessErrorCode`, `ValidationErrorCode` (`common/exception/`). Đọc thẳng ở đó.
+>
+> `EH-5` (2026-08-23) đã **xoá 4 hằng chưa từng có throw site** — `MRP_CALCULATION_ERROR`,
+> `EXTERNAL_SERVICE_ERROR`, `PASSWORD_TOO_WEAK`, `SESSION_CONFLICT` — nên bản danh sách cũ ở đây còn
+> hứa những mã không tồn tại. **5 hằng chưa dùng khác cố ý giữ lại**, mỗi cái kèm javadoc nêu lý do:
+> `ITEM_ALREADY_ISSUED` / `PRODUCTION_ORDER_CLOSED` (đã hứa với FE ở `docs/api-guide-for-frontend.md`)
+> và `LOT_WAREHOUSE_CONFLICT` / `RECEIPT_STATE_CONFLICT` / `BOM_REQUIREMENT_EXCEEDED` (nằm trong hợp
+> đồng lỗi của phase BE-2/BE-4, `BE_SYSTEM_ISSUES_RESOLUTION_PLAN_2026-08-19.md`). Đừng xoá chúng vì
+> "grep ra 0 kết quả" — đó chính là câu hỏi `EH-5` đã trả lời.
 
-> ⚠️ **Danh sách trên là thiết kế gốc, KHÔNG khớp 1-1 với code.** Tên constant trong code và chuỗi
-> `code()` trả về wire lệch nhau ở vài chỗ vì lý do lịch sử. Bảng ánh xạ thực tế sau `F1`:
+**Tên constant ≠ chuỗi `code()` trả ra wire** ở vài chỗ, vì lý do lịch sử. Bảng ánh xạ thực tế sau `F1`:
 
 | Enum constant (dùng trong code/test) | `code()` trả ra wire | HTTP |
 |---|---|---|
@@ -168,7 +175,7 @@ Bất biến `B81`.
 **Constant thêm ở `D8c`:** `AuthErrorCode.RESET_TOKEN_INVALID` (401) trên `POST /auth/reset-password`
 — **chỉ một** mã cho cả "token chưa từng tồn tại" lẫn "token đã hết hạn/đã dùng" (Redis TTL không
 phân biệt được hai trường hợp, đúng cách `REFRESH_TOKEN_EXPIRED` đã xử lý cho refresh token). Danh
-sách gốc ở §5.3 phía trên liệt kê cả `RESET_TOKEN_INVALID` **và** `RESET_TOKEN_EXPIRED` — chỉ vế đầu
+sách thiết kế gốc (bỏ ở `EH-6`) từng liệt kê cả `RESET_TOKEN_INVALID` **và** `RESET_TOKEN_EXPIRED` — chỉ vế đầu
 được implement; `RESET_TOKEN_EXPIRED` **cố ý không thêm** vì không có nhánh nào thật sự ném nó
 (`coding-rules.md §11.5`). Bất biến `B101`.
 
@@ -209,7 +216,18 @@ dù spec §8.1 coi hai lỗi cùng loại (nợ #14).
 > |---|---|---|
 > | Đọc **status** của chứng từ (`isDraft()`, `isApproved()`, `canReceive()`, `status != X`) | `STATE_CONFLICT` | 409 |
 > | Số lượng vượt **trần của chứng từ** (nhận vượt số đặt, duyệt vượt số xin, good vượt plan) | `PLANNED_QUANTITY_EXCEEDED` | 409 |
-> | Master data (`INACTIVE`, sai `ItemType`, khác company/plant), **nội dung chứng từ thiếu** (BOM/routing không có line), dữ liệu đầu vào sai (nhiều supplier trong 1 PR, sai `SupplySuggestionType`, `dueDate` < `orderDate`) | `OPERATION_NOT_ALLOWED` | **422** |
+> | Master data đang **`INACTIVE`** (công ty/nhà máy/kho/vật tư/nhà cung cấp/role/scope/work center/work calendar), **hoặc** kích hoạt con khi cha `INACTIVE` | **`RESOURCE_INACTIVE`** | **422** |
+> | Hai bản ghi **khác chủ sở hữu** — "must belong to" / "does not belong to" (item khác company, warehouse khác plant, lot/serial khác item, routing operation trỏ work center khác plant) | **`RESOURCE_SCOPE_MISMATCH`** | **422** |
+> | Chứng từ **chưa có dòng con nào** (BOM/routing chưa có line, import run không có dòng hợp lệ, scope non-global chưa có resource) | **`DOCUMENT_HAS_NO_LINES`** | **422** |
+> | Còn lại: dữ liệu đầu vào sai (sai `ItemType`, lot/serial tracking không khớp, sai `SupplySuggestionType`, `dueDate` < `orderDate`, nhiều supplier trong 1 PR…) | `OPERATION_NOT_ALLOWED` | **422** |
+>
+> **[`EH-2`, 2026-08-23] Ba hàng đầu của bảng 422 tách ra từ `OPERATION_NOT_ALLOWED`.** Trước đó **96
+> throw site** dùng chung một mã duy nhất, nên FE muốn phân biệt "công ty cha đang ngừng hoạt động" với
+> "bạn chọn nhầm kho" chỉ còn cách parse `message` tiếng Anh — vi phạm chính `A7`. Khảo sát đầy đủ 96 site
+> và lý do chỉ tách ba nhóm (không tách 1-1): `ExceptionHandlerRefactorPlan.md §8`.
+>
+> 🔴 **`OPERATION_NOT_ALLOWED` vẫn là câu trả lời đúng cho 37 site còn lại** — nó không bị "thay thế",
+> chỉ thu hẹp lại đúng vai catch-all. Đừng tiện tay đổi nốt.
 >
 > Ranh giới hay bị nhầm nhất: **"chứng từ chưa có dòng nào" là 422, không phải 409.** Tiền lệ gốc là
 > `RoutingService.activate` (`F4`) — nó đã tách đúng hai nhánh này từ trước `D7`.
@@ -244,7 +262,7 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 | `NoResourceFoundException` / `NoHandlerFoundException` (không có endpoint ở path đó) | 404 | `ENTITY_NOT_FOUND` | — |
 | `AccessDeniedException` (Spring) | 403 | `PERMISSION_DENIED` | — |
 | `ObjectOptimisticLockingFailureException` (`@Version`) | 409 | `CONCURRENT_MODIFICATION` | — |
-| `DataIntegrityViolationException` | 409 | `RESOURCE_ALREADY_EXISTS` | — |
+| `DataIntegrityViolationException` | **409 hoặc 422 — tuỳ constraint** | `RESOURCE_ALREADY_EXISTS` · `BUSINESS_RULE_VIOLATION` · `LOT_CODE_ALREADY_EXISTS` | — |
 | `Exception` (catch-all) | 500 | `INTERNAL_SERVER_ERROR` | — |
 
 > 5 handler ở giữa bảng được thêm ở `F1`. Trước đó chúng **không** được handle nên rơi xuống
@@ -273,6 +291,44 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 > tiên thì **đó** mới là lúc thêm, cùng test.
 
 > **Catch-all không bao giờ expose stack trace ra client.** Log đầy đủ phía server.
+
+### 5.4.1 Phân loại `DataIntegrityViolationException` *(`EH-3`, 2026-08-23)*
+
+Trước `EH-3`, handler này đọc message driver bằng một chuỗi `detail.contains(...)` hardcode cho **một**
+constraint của lot, và trả `RESOURCE_ALREADY_EXISTS` (409) cho **mọi** vi phạm còn lại. Sai ngữ nghĩa
+với phần lớn: FK / `NOT NULL` / `CHECK` **không** phải "đã tồn tại", và client nhận 409 không có cách
+nào phân biệt trùng khoá thật với payload sai — tức bị bảo hãy thử lại một việc không bao giờ thành công.
+
+`DataIntegrityErrorMapper` phân loại theo **tên constraint** đọc từ message (`... constraint "tên"`):
+
+| Thứ tự | Quy tắc | Kết quả |
+|---|---|---|
+| 1 | Có trong bảng `KNOWN` | mã + message riêng của nó |
+| 2 | Tên bắt đầu `uk_` (quy ước duy nhất của schema này cho unique constraint/index) | `RESOURCE_ALREADY_EXISTS` (409) |
+| 3 | Còn lại (`chk_`, `fk_`, `NOT NULL` không có tên) | `BUSINESS_RULE_VIOLATION` (**422**) |
+| 4 | Không có tên constraint nhưng message chứa `duplicate key` | `RESOURCE_ALREADY_EXISTS` (409) |
+
+🔴 **Tên constraint KHÔNG bao giờ trả ra response** — nó là chi tiết schema, chỉ ghi log (cùng lý do
+catch-all không echo message exception). Thêm entry vào `KNOWN` khi một constraint **thật sự** từng làm
+ai đó mất công chẩn đoán, không phải vì nó tồn tại: ~170 constraint mà mỗi cái một mã thì client không
+phân biệt nổi (`coding-rules.md §11.5`).
+
+### 5.4.2 Lỗi thoát khỏi filter chain *(`EH-1`, 2026-08-23)*
+
+`@RestControllerAdvice` **chỉ** phủ exception phát sinh trong `DispatcherServlet`. Filter chạy **trước**
+nó, nên một `RuntimeException` trong `JwtAuthenticationFilter` / `RateLimitFilter` / `UserRateLimitFilter`
+(thực tế hay gặp nhất: Redis không kết nối được) thoát khỏi chain, **không** tới `GlobalExceptionHandler`,
+và rơi vào trang `/error` mặc định của Spring Boot — body `{timestamp,status,error,path}`, một hình dạng
+FE chưa từng được dạy đọc. Ba lớp bảo vệ nay:
+
+1. **Mỗi filter tự bắt `RuntimeException`**, log `ERROR` kèm stack trace, trả envelope
+   `INTERNAL_SERVER_ERROR`. **Không** echo `ex.getMessage()` — khác nhánh `AppException`, exception ở
+   đây chưa được kiểm duyệt cho client đọc.
+2. **`ApiErrorController`** (`common/exception/`) implement `ErrorController`, thay
+   `BasicErrorController` của Boot, để **mọi** error dispatch cấp container cũng ra envelope chuẩn.
+3. **`/error` là `permitAll`** trong `SecurityConfig`: Boot đăng ký security chain cho cả dispatcher
+   type `ERROR`, nên thiếu dòng này một request chưa auth mà lỗi thật là 500 sẽ bị trả lời lại thành
+   401 và mất status thật. `ApiErrorController` không tiết lộ gì về sự cố nên mở nó không tốn gì.
 
 ## 5.5 Auth Entry Points (Spring Security Layer)
 

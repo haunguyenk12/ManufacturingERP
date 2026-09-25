@@ -44,7 +44,8 @@ public class WorkCenterService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_WORK_CENTER_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.WORK_CENTER_CREATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()")
+    @Auditable(action = AuditAction.WORK_CENTER_CREATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCenterResponse create(UUID plantId, WorkCenterCreateRequest request) {
         Plant plant = organizationLookupService.getActivePlant(plantId);
 
@@ -84,7 +85,8 @@ public class WorkCenterService {
 
     @Transactional
     @PreAuthorize("@workCenterPermissionGuard.hasWorkCenterAccess(authentication, 'PERM_WORK_CENTER_MANAGE', #workCenterId)")
-    @Auditable(action = AuditAction.WORK_CENTER_UPDATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()")
+    @Auditable(action = AuditAction.WORK_CENTER_UPDATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCenterResponse update(UUID workCenterId, WorkCenterUpdateRequest request) {
         WorkCenter workCenter = findWorkCenter(workCenterId);
         if (request.name() != null) {
@@ -108,7 +110,8 @@ public class WorkCenterService {
 
     @Transactional
     @PreAuthorize("@workCenterPermissionGuard.hasWorkCenterAccess(authentication, 'PERM_WORK_CENTER_MANAGE', #workCenterId)")
-    @Auditable(action = AuditAction.WORK_CENTER_ACTIVATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()")
+    @Auditable(action = AuditAction.WORK_CENTER_ACTIVATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCenterResponse activate(UUID workCenterId) {
         WorkCenter workCenter = findWorkCenter(workCenterId);
         workCenter.activate();
@@ -127,7 +130,8 @@ public class WorkCenterService {
      */
     @Transactional
     @PreAuthorize("@workCenterPermissionGuard.hasWorkCenterAccess(authentication, 'PERM_WORK_CENTER_MANAGE', #workCenterId)")
-    @Auditable(action = AuditAction.WORK_CENTER_DEACTIVATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()")
+    @Auditable(action = AuditAction.WORK_CENTER_DEACTIVATED, entityType = "WorkCenter", entityIdExpression = "workCenterId.toString()",
+               plantId = "#result?.plantId()")
     public WorkCenterResponse deactivate(UUID workCenterId) {
         WorkCenter workCenter = findWorkCenter(workCenterId);
         workCenter.deactivate();
@@ -142,7 +146,7 @@ public class WorkCenterService {
     private WorkCalendar resolveWorkCalendarInPlant(UUID workCalendarId, UUID plantId) {
         WorkCalendar workCalendar = workCalendarLookupService.getActiveWorkCalendar(workCalendarId);
         if (!workCalendar.getPlant().getPlantId().equals(plantId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Work calendar " + workCalendarId + " does not belong to plant " + plantId);
         }
         return workCalendar;

@@ -1,8 +1,30 @@
 # Hướng dẫn tích hợp: Audit Logs (C2-1) & Inventory Lots (C2-2)
 
+> 🔴 **CẬP NHẬT LỚN 2026-09-02 (track `AR-*`, refactor hạ tầng audit).** Response của
+> `GET /audit-logs` và `GET /audit-logs/{id}` **thêm 11 field** và endpoint list **thêm 6 filter**.
+> **Thuần additive — không field nào bị xoá hay đổi tên**, FE hiện tại không hỏng. Ba thay đổi FE
+> **cần biết ngay**:
+>
+> 1. **`entityId` quay lại response.** Trước đó nó chỉ là query param, nên UI thấy được *loại* đối
+>    tượng nhưng không có khoá ổn định nào để link sang hay lọc theo. Nay có ở cả list và detail.
+> 2. **`plantId` bắt đầu có giá trị thật.** Cảnh báo cũ ở §1.4 ("filter plant luôn trả rỗng") **đã
+>    hết đúng** cho audit sinh ra từ 2026-09-02 trở đi. Dòng lịch sử vẫn `null` — backend **không**
+>    backfill, vì suy plant của một dòng cũ từ dữ liệu hôm nay là làm giả bản ghi lịch sử.
+> 3. **`entities[]` (chỉ ở detail)** — mọi đối tượng mà một sự kiện chạm tới, không chỉ đối tượng nó
+>    được đặt tên theo. Ví dụ `PERMISSION_GRANTED` trước đây chỉ ghi role và **bỏ mất permission**;
+>    nay có đủ cả hai.
+>
+> Chi tiết ở §1.5.
+
 > **Cập nhật 2026-08-17:** Audit field-level diff đã được triển khai. Với audit sinh ra sau bản cập
 > nhật này, `changes[]` chứa `fieldName`, `oldValue`, `newValue`, `changeType`; các ghi chú cũ bên
 > dưới nói mảng này "luôn rỗng" chỉ mô tả trạng thái trước ngày 2026-08-17.
+>
+> 🔴 **Sửa 2026-08-25 (`BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md`):** `oldValue`/`newValue`
+> **luôn** là `string` hoặc `null`. Bản 2026-08-17 trả kiểu JSON gốc, nên một snapshot có cấu trúc
+> (ví dụ `componentLines` của `WORK_ORDER_CREATED`) ra tới FE dưới dạng object và làm sập màn hình
+> chi tiết. Nay: object/array → chuỗi JSON compact, số/boolean → chuỗi, chữ → không kèm dấu nháy,
+> `null` → `null`.
 
 > Ngày viết: 2026-08-06 · Đối tượng: FE team
 > Phạm vi: đúng 2 tính năng vừa hoàn thành, backend đang chờ FE tích hợp — **không** phải bản tổng
@@ -102,15 +124,51 @@ Trả về đúng các field ở trên **cộng thêm** `changes[]`:
 `entityName` là snapshot tên/mã/số chứng từ tại thời điểm thao tác; audit lịch sử trước migration
 `V65` trả `null` vì backend không suy diễn tên hiện tại thành dữ liệu lịch sử.
 
-### 1.4 Hai điều bắt buộc biết trước khi code UI
+### 1.4 Hai cảnh báo cũ — cả hai nay đã HẾT ĐÚNG
 
-1. **`changes[]` luôn là mảng rỗng hôm nay — đây không phải bug.** Bảng lưu field-level diff
-   (`audit_log_changes`) đã tồn tại trong schema từ lâu nhưng chưa có dòng code nào ghi dữ liệu vào
-   đó (đợt 2 của tính năng này, chưa xếp lịch). Đây chính là điều FE đã xác nhận **dùng được** với
-   `changes[]` rỗng — nên UI cứ hiển thị "Không có chi tiết thay đổi" khi mảng rỗng, không cần chờ.
-2. **`plantId` trên MỌI dòng — kể cả dòng audit sinh ra hôm nay — đều là `null`.** Cột `plant_id`
-   được thêm vào schema nhưng chưa có code nào populate nó lúc ghi audit log. Nếu UI có bộ lọc theo
-   plant, tạm thời nó sẽ **luôn** trả về danh sách rỗng khi filter — không phải bug phía FE.
+> Giữ lại nguyên văn để đối chiếu, vì UI có thể vẫn đang code theo chúng.
+
+1. ~~**`changes[]` luôn là mảng rỗng.**~~ Hết đúng từ **2026-08-17**: field-level diff đã được ghi
+   thật. Audit trước ngày đó vẫn rỗng.
+2. ~~**`plantId` trên mọi dòng đều là `null`.**~~ Hết đúng từ **2026-09-02**: `plantId` (và
+   `companyId`, `warehouseId`) được điền từ chính lệnh nghiệp vụ. **Audit lịch sử vẫn `null`** — nếu
+   UI lọc theo plant, kết quả sẽ chỉ gồm sự kiện từ 2026-09-02 trở đi, và đó là hành vi đúng chứ
+   không phải mất dữ liệu.
+
+### 1.5 Field và filter mới (2026-09-02, thuần additive)
+
+**Field mới trên cả list và detail:**
+
+| Field | Kiểu | Ý nghĩa |
+|---|---|---|
+| `entityId` | string \| null | **Khôi phục.** Khoá ổn định của đối tượng chính — thứ để link sang màn hình chi tiết |
+| `outcome` | `"SUCCESS"` \| `"FAILURE"` | Dạng chính tắc của `status`. **`status` vẫn còn**, giá trị y hệt |
+| `reasonCode` | string \| null | Lý do máy đọc được. Với sự kiện thất bại, đây là `code` trong error envelope (ví dụ `INSUFFICIENT_AVAILABLE_STOCK`) — **đừng parse `description`** |
+| `source` | `HTTP` \| `AUTH` \| `SCHEDULED_JOB` \| `MESSAGE` \| `BATCH` \| `SYSTEM` | Nguồn sự kiện. `null` với audit lịch sử |
+| `httpMethod`, `requestPath` | string \| null | Request đã tạo ra sự kiện |
+| `companyId`, `warehouseId` | UUID \| null | Phạm vi, cùng cách `plantId` |
+| `occurredAt` | ISO instant | **Lúc hành động xảy ra.** `createdAt` là lúc dòng được ghi xuống. Hai mốc lệch nhau vài trăm mili-giây là bình thường (pipeline bất đồng bộ). Với audit lịch sử, `occurredAt` = `createdAt` |
+
+**Chỉ ở detail:**
+
+| Field | Kiểu | Ý nghĩa |
+|---|---|---|
+| `entities[]` | `{relation, entityType, entityId, entityName}[]` | Đúng **1** phần tử `relation = "PRIMARY"` (trùng với `entityType`/`entityId`/`entityName` phẳng) + n phần tử `"RELATED"`. Rỗng với audit lịch sử |
+| `metadata` | string \| null | JSON đã lọc do chính lệnh cung cấp. Hiện dùng cho **`{"noOp":true}`** — lệnh chạy thành công nhưng **không đổi gì** (ví dụ cấp một quyền mà role đã có). UI nên hiện khác với một thay đổi thật |
+
+**Filter mới trên `GET /audit-logs`:** `outcome`, `source`, `companyId`, `warehouseId`,
+`relatedEntityType`, `relatedEntityId`.
+
+`relatedEntityType`/`relatedEntityId` trả lời câu **"mọi sự kiện đã chạm tới đối tượng này"**, kể cả
+sự kiện được đặt tên theo thứ khác — ví dụ lọc `relatedEntityType=Permission&relatedEntityId=<id>` để
+xem toàn bộ lịch sử cấp/thu hồi của một quyền. Cột phẳng cũ **không** trả lời được câu này.
+
+**Hai thay đổi hành vi nhỏ:**
+
+- **`sortBy` nay có allowlist:** `occurredAt` (mặc định), `createdAt`, `action`, `username`,
+  `outcome`. Giá trị khác trả **400 `VALIDATION_ERROR`** thay vì 500 như trước.
+- **`from > to` trả 400** thay vì im lặng trả trang rỗng — trang rỗng là câu trả lời dễ gây hiểu nhầm
+  nhất mà endpoint này có thể đưa ra.
 
 ---
 

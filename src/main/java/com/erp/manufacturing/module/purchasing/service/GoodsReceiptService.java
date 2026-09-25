@@ -43,7 +43,8 @@ public class GoodsReceiptService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasOrderAccess(authentication, 'PERM_GOODS_RECEIPT_POST', #purchaseOrderId)")
-    @Auditable(action = AuditAction.GOODS_RECEIPT_POSTED, entityType = "GoodsReceipt", entityIdExpression = "goodsReceiptId.toString()")
+    @Auditable(action = AuditAction.GOODS_RECEIPT_POSTED, entityType = "GoodsReceipt", entityIdExpression = "goodsReceiptId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public GoodsReceiptResponse post(UUID purchaseOrderId, GoodsReceiptPostRequest request, String idempotencyKey) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         Optional<GoodsReceipt> existing = goodsReceiptRepository
@@ -142,7 +143,8 @@ public class GoodsReceiptService {
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #goodsReceiptId)")
     @Auditable(action = AuditAction.GOODS_RECEIPT_CANCELLED, entityType = "GoodsReceipt",
-            entityIdExpression = "#goodsReceiptId.toString()")
+            entityIdExpression = "#goodsReceiptId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public GoodsReceiptResponse cancel(UUID goodsReceiptId, GoodsReceiptCancelRequest request) {
         GoodsReceipt receipt = goodsReceiptRepository.findWithDetailsByGoodsReceiptId(goodsReceiptId)
                 .orElseThrow(() -> ExceptionFactory.notFound(

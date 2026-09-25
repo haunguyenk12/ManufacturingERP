@@ -41,7 +41,10 @@ public class SupplySuggestionService {
 
     @Transactional
     @PreAuthorize("@mrpPlanningPermissionGuard.hasSuggestionAccess(authentication, 'PERM_SUPPLY_SUGGESTION_MANAGE', #suggestionId)")
-    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_APPROVED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()")
+    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_APPROVED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public SupplySuggestionResponse approve(UUID suggestionId, SupplySuggestionDecisionRequest request) {
         SupplySuggestion suggestion = findSuggestion(suggestionId);
         ensureDraft(suggestion, "Only DRAFT supply suggestions can be approved");
@@ -52,7 +55,10 @@ public class SupplySuggestionService {
 
     @Transactional
     @PreAuthorize("@mrpPlanningPermissionGuard.hasSuggestionAccess(authentication, 'PERM_SUPPLY_SUGGESTION_MANAGE', #suggestionId)")
-    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_REJECTED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()")
+    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_REJECTED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public SupplySuggestionResponse reject(UUID suggestionId, SupplySuggestionDecisionRequest request) {
         SupplySuggestion suggestion = findSuggestion(suggestionId);
         ensureDraft(suggestion, "Only DRAFT supply suggestions can be rejected");
@@ -63,7 +69,10 @@ public class SupplySuggestionService {
 
     @Transactional
     @PreAuthorize("@mrpPlanningPermissionGuard.hasSuggestionAccess(authentication, 'PERM_SUPPLY_SUGGESTION_MANAGE', #suggestionId)")
-    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_CONVERTED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()")
+    @Auditable(action = AuditAction.SUPPLY_SUGGESTION_CONVERTED, entityType = "SupplySuggestion", entityIdExpression = "supplySuggestionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public SupplySuggestionResponse convertToWorkOrder(UUID suggestionId,
                                                        SupplySuggestionConvertWorkOrderRequest request) {
         SupplySuggestion suggestion = findSuggestion(suggestionId);

@@ -126,14 +126,14 @@ class ItemWarehouseSettingControllerTest {
             + "(§5.3 — cross-company master data, not a state conflict)")
     void upsert_itemAndWarehouseInDifferentCompanies_returns422() throws Exception {
         when(settingService.upsert(any(ItemWarehouseSettingRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                         "Item and warehouse must belong to the same company"));
 
         mockMvc.perform(put("/v1/inventory/item-warehouse-settings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(upsertBody()))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 

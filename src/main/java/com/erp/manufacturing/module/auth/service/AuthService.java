@@ -366,7 +366,11 @@ public class AuthService {
 
     /** Admin-only manual unlock: clears the Redis fail-counter and reactivates the account. */
     @PreAuthorize("hasRole('ADMIN')")
-    @Auditable(action = AuditAction.ACCOUNT_UNLOCKED, entityType = "User", entityIdExpression = "userId.toString()")
+    // entityId (not entityIdExpression): this method returns void, so the legacy expression was
+    // evaluated against a null result and every unlock was recorded with no user id at all.
+    @Auditable(action = AuditAction.ACCOUNT_UNLOCKED, entityType = "User",
+               entityId = "#userId",
+               operation = com.erp.manufacturing.common.audit.model.AuditOperation.UPDATE)
     public void adminUnlockAccount(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));

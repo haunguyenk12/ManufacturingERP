@@ -148,6 +148,35 @@ app:
     allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
     max-age-seconds: ${CORS_MAX_AGE_SECONDS:3600}
 
+  # Audit trail pipeline (AuditRefactorPlan AR-2/AR-8)
+  audit:
+    outbox:
+      # Rollout levers, §8.1. producer-enabled and legacy-listener-enabled are mutually exclusive:
+      # only the outbox path assigns the event_id that could deduplicate a dual write, and the
+      # properties record refuses to start with both on.
+      producer-enabled: ${AUDIT_OUTBOX_PRODUCER_ENABLED:true}
+      dispatcher-enabled: ${AUDIT_OUTBOX_DISPATCHER_ENABLED:true}
+      legacy-listener-enabled: ${AUDIT_LEGACY_LISTENER_ENABLED:false}
+      poll-interval-ms: ${AUDIT_OUTBOX_POLL_INTERVAL_MS:1000}
+      batch-size: ${AUDIT_OUTBOX_BATCH_SIZE:100}
+      max-attempts: ${AUDIT_OUTBOX_MAX_ATTEMPTS:8}
+      initial-backoff: ${AUDIT_OUTBOX_INITIAL_BACKOFF:2s}
+      max-backoff: ${AUDIT_OUTBOX_MAX_BACKOFF:5m}
+      # A row claimed by a worker that then died is reclaimed after this; without it a crash strands
+      # the event in PROCESSING for good.
+      lease-timeout: ${AUDIT_OUTBOX_LEASE_TIMEOUT:2m}
+      # Alert threshold for the oldest un-materialised event, not for queue depth: a large fast queue
+      # is healthy, one row stuck for an hour is not, and only age distinguishes them.
+      pending-age-slo: ${AUDIT_OUTBOX_PENDING_AGE_SLO:60s}
+      processed-retention: ${AUDIT_OUTBOX_PROCESSED_RETENTION:3d}
+    retention:
+      # OFF by default on purpose: how long the trail must stay online is a legal decision with a
+      # named approver (AuditRefactorPlan §11.2), not a default this file gets to invent.
+      enabled: ${AUDIT_RETENTION_ENABLED:false}
+      retention-months: ${AUDIT_RETENTION_MONTHS:84}
+      batch-size: ${AUDIT_RETENTION_BATCH_SIZE:1000}
+      archive-required: ${AUDIT_RETENTION_ARCHIVE_REQUIRED:true}
+
   # Spreadsheet import row limit (synchronous apply path)
   data-import:
     max-rows: ${DATA_IMPORT_MAX_ROWS:5000}

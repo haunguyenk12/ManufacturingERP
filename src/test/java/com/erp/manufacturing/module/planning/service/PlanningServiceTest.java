@@ -178,7 +178,7 @@ class PlanningServiceTest {
         assertThatThrownBy(() -> service.estimateProduction(request))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verifyNoInteractions(bomLookupService, inventoryAvailabilityService);
     }

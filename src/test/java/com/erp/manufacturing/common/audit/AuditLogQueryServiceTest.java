@@ -18,6 +18,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -29,29 +30,40 @@ class AuditLogQueryServiceTest {
 
     private final AuditLogRepository auditLogRepository = mock(AuditLogRepository.class);
     private final AuditLogChangeRepository auditLogChangeRepository = mock(AuditLogChangeRepository.class);
-    private final AuditLogQueryService service =
-            new AuditLogQueryService(auditLogRepository, auditLogChangeRepository, new ObjectMapper());
+    private final AuditLogEntityRowRepository auditLogEntityRowRepository =
+            mock(AuditLogEntityRowRepository.class);
+    private final AuditLogQueryService service = new AuditLogQueryService(
+            auditLogRepository, auditLogChangeRepository, auditLogEntityRowRepository, new ObjectMapper());
 
     private static final UUID AUDIT_ID = UUID.randomUUID();
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID PLANT_ID = UUID.randomUUID();
+    private static final UUID COMPANY_ID = UUID.randomUUID();
+    private static final UUID WAREHOUSE_ID = UUID.randomUUID();
 
     @Test
     @DisplayName("list: threads every filter through to the repository unchanged")
     void list_threadsEveryFilterThroughToTheRepository() {
         Instant from = Instant.parse("2026-08-01T00:00:00Z");
         Instant to = Instant.parse("2026-08-06T00:00:00Z");
-        when(auditLogRepository.search(
-                eq(USER_ID), eq("WorkOrder"), eq("wo-1"), eq("WORK_ORDER_CREATED"),
-                eq(PLANT_ID), eq("trace-1"), eq(from), eq(to), any()))
+        when(auditLogRepository.searchAdvanced(
+                eq(USER_ID), eq("WorkOrder"), eq("wo-1"), eq("WORK_ORDER_CREATED"), eq("SUCCESS"),
+                eq("HTTP"), eq(COMPANY_ID), eq(PLANT_ID), eq(WAREHOUSE_ID), eq("trace-1"),
+                eq(from), eq(to), eq("Permission"), eq("perm-1"), any()))
                 .thenReturn(Page.empty());
 
-        service.list(USER_ID, "WorkOrder", "wo-1", "WORK_ORDER_CREATED", PLANT_ID, "trace-1",
-                from, to, PageRequest.of(0, 20));
+        service.list(AuditLogSearchCriteria.builder()
+                .actorUserId(USER_ID).entityType("WorkOrder").entityId("wo-1")
+                .action("WORK_ORDER_CREATED").outcome("SUCCESS").source("HTTP")
+                .companyId(COMPANY_ID).plantId(PLANT_ID).warehouseId(WAREHOUSE_ID)
+                .traceId("trace-1").from(from).to(to)
+                .relatedEntityType("Permission").relatedEntityId("perm-1")
+                .build(), PageRequest.of(0, 20));
 
-        verify(auditLogRepository).search(
-                eq(USER_ID), eq("WorkOrder"), eq("wo-1"), eq("WORK_ORDER_CREATED"),
-                eq(PLANT_ID), eq("trace-1"), eq(from), eq(to), any());
+        verify(auditLogRepository).searchAdvanced(
+                eq(USER_ID), eq("WorkOrder"), eq("wo-1"), eq("WORK_ORDER_CREATED"), eq("SUCCESS"),
+                eq("HTTP"), eq(COMPANY_ID), eq(PLANT_ID), eq(WAREHOUSE_ID), eq("trace-1"),
+                eq(from), eq(to), eq("Permission"), eq("perm-1"), any());
     }
 
     @Test
@@ -66,10 +78,11 @@ class AuditLogQueryServiceTest {
                 .status("SUCCESS")
                 .createdAt(Instant.parse("2026-08-06T10:00:00Z"))
                 .build();
-        when(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(auditLogRepository.searchAdvanced(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(auditLog)));
 
-        var result = service.list(null, null, null, null, null, null, null, null, PageRequest.of(0, 20));
+        var result = service.list(AuditLogSearchCriteria.builder().build(), PageRequest.of(0, 20));
 
         assertThat(result.content()).hasSize(1);
         AuditLogResponse response = result.content().get(0);
@@ -122,8 +135,80 @@ class AuditLogQueryServiceTest {
         assertThat(response.changes()).hasSize(1);
         assertThat(response.entityName()).isEqualTo("WO-2026-001");
         assertThat(response.changes().get(0).fieldName()).isEqualTo("status");
-        assertThat(response.changes().get(0).oldValue().asText()).isEqualTo("DRAFT");
-        assertThat(response.changes().get(0).newValue().asText()).isEqualTo("RELEASED");
+        assertThat(response.changes().get(0).oldValue()).isEqualTo("DRAFT");
+        assertThat(response.changes().get(0).newValue()).isEqualTo("RELEASED");
+    }
+
+    /**
+     * Contract guard for {@code BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md}: the storage column is
+     * {@code jsonb}, so a snapshot can be any JSON shape, but the wire type must stay {@code String} or
+     * {@code null} for every one of them. The object row is the exact case that crashed the frontend
+     * audit drawer — it used to reach the client as a JSON object.
+     */
+    @Test
+    @DisplayName("get: every jsonb shape (text, number, boolean, object, array, json null) is rendered as a String or null")
+    void get_everyStoredJsonShape_isRenderedAsStringOrNull() {
+        AuditLog auditLog = AuditLog.builder()
+                .auditId(AUDIT_ID)
+                .action("WORK_ORDER_CREATED")
+                .status("SUCCESS")
+                .build();
+        when(auditLogRepository.findById(AUDIT_ID)).thenReturn(Optional.of(auditLog));
+        when(auditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc(AUDIT_ID)).thenReturn(List.of(
+                storedChange("componentItemCode", "\"D26-RM-CHAINRING\""),
+                storedChange("requiredQuantity", "10"),
+                storedChange("lotTracked", "true"),
+                storedChange("componentRequirements",
+                        "{\"uom\":\"EA\",\"lineNo\":1,\"requiredQuantity\":10}"),
+                storedChange("messages", "[\"MATERIAL_SHORTAGE\"]"),
+                storedChange("cancelReason", "null"),
+                storedChange("legacyFreeText", "not json at all")));
+
+        AuditLogDetailResponse response = service.get(AUDIT_ID);
+
+        assertThat(response.changes()).extracting("fieldName", "newValue").containsExactly(
+                tuple("componentItemCode", "D26-RM-CHAINRING"),
+                tuple("requiredQuantity", "10"),
+                tuple("lotTracked", "true"),
+                tuple("componentRequirements", "{\"uom\":\"EA\",\"lineNo\":1,\"requiredQuantity\":10}"),
+                tuple("messages", "[\"MATERIAL_SHORTAGE\"]"),
+                tuple("cancelReason", null),
+                tuple("legacyFreeText", "not json at all"));
+    }
+
+    @Test
+    @DisplayName("get: a SQL NULL snapshot stays null, it is never turned into the text \"null\"")
+    void get_sqlNullSnapshot_staysNull() {
+        AuditLog auditLog = AuditLog.builder()
+                .auditId(AUDIT_ID)
+                .action("WORK_ORDER_CREATED")
+                .status("SUCCESS")
+                .build();
+        when(auditLogRepository.findById(AUDIT_ID)).thenReturn(Optional.of(auditLog));
+        when(auditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc(AUDIT_ID)).thenReturn(List.of(
+                AuditLogChange.builder()
+                        .changeId(UUID.randomUUID())
+                        .auditId(AUDIT_ID)
+                        .fieldName("workOrderNo")
+                        .oldValue(null)
+                        .newValue("\"WO-2026-001\"")
+                        .changeType(AuditLogChangeType.CREATE)
+                        .build()));
+
+        AuditLogDetailResponse response = service.get(AUDIT_ID);
+
+        assertThat(response.changes().get(0).oldValue()).isNull();
+        assertThat(response.changes().get(0).newValue()).isEqualTo("WO-2026-001");
+    }
+
+    private AuditLogChange storedChange(String fieldName, String storedJson) {
+        return AuditLogChange.builder()
+                .changeId(UUID.randomUUID())
+                .auditId(AUDIT_ID)
+                .fieldName(fieldName)
+                .newValue(storedJson)
+                .changeType(AuditLogChangeType.CREATE)
+                .build();
     }
 
     @Test

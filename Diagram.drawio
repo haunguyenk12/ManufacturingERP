@@ -1,0 +1,382 @@
+<mxfile host="app.diagrams.net" agent="Claude Code" pages="3">
+  <diagram id="architecture" name="1 - Architecture Overview">
+    <mxGraphModel dx="1878" dy="1209" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1090" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="a_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1A1A1A;" value="MANUFACTURING ERP - SYSTEM ARCHITECTURE" vertex="1">
+          <mxGeometry height="34" width="1520" x="40" y="18" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontColor=#1A3A5C;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="1 - CLIENT" vertex="1">
+          <mxGeometry height="110" width="1520" x="40" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c11" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontColor=#1A3A5C;strokeWidth=2;fontSize=13;" value="Web Frontend (SPA)" vertex="1">
+          <mxGeometry height="58" width="400" x="360" y="128" as="geometry" />
+        </mxCell>
+        <mxCell id="c12" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontColor=#1A3A5C;strokeWidth=2;fontSize=13;" value="API Documentation&lt;br&gt;(Swagger / OpenAPI)" vertex="1">
+          <mxGeometry height="58" width="400" x="840" y="128" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="2 - SECURITY" vertex="1">
+          <mxGeometry height="110" width="1520" x="40" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="c21" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;strokeWidth=2;fontSize=13;" value="CORS policy" vertex="1">
+          <mxGeometry height="58" width="340" x="60" y="278" as="geometry" />
+        </mxCell>
+        <mxCell id="c22" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;strokeWidth=2;fontSize=13;" value="Request tracing" vertex="1">
+          <mxGeometry height="58" width="340" x="440" y="278" as="geometry" />
+        </mxCell>
+        <mxCell id="c23" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;strokeWidth=2;fontSize=13;" value="Rate limiting" vertex="1">
+          <mxGeometry height="58" width="340" x="820" y="278" as="geometry" />
+        </mxCell>
+        <mxCell id="c24" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;strokeWidth=2;fontSize=13;" value="JWT authentication" vertex="1">
+          <mxGeometry height="58" width="340" x="1200" y="278" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontColor=#6B4E00;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="3 - API LAYER (REST controllers)" vertex="1">
+          <mxGeometry height="110" width="1520" x="40" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="c31" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontColor=#6B4E00;strokeWidth=2;fontSize=13;" value="Auth &amp;amp; Users" vertex="1">
+          <mxGeometry height="58" width="340" x="60" y="428" as="geometry" />
+        </mxCell>
+        <mxCell id="c32" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontColor=#6B4E00;strokeWidth=2;fontSize=13;" value="Master data" vertex="1">
+          <mxGeometry height="58" width="340" x="440" y="428" as="geometry" />
+        </mxCell>
+        <mxCell id="c33" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontColor=#6B4E00;strokeWidth=2;fontSize=13;" value="Operations" vertex="1">
+          <mxGeometry height="58" width="340" x="820" y="428" as="geometry" />
+        </mxCell>
+        <mxCell id="c34" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontColor=#6B4E00;strokeWidth=2;fontSize=13;" value="Reports &amp;amp; Audit" vertex="1">
+          <mxGeometry height="58" width="340" x="1200" y="428" as="geometry" />
+        </mxCell>
+        <mxCell id="b4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="4 - BUSINESS LAYER (business rules, transactions, permissions)" vertex="1">
+          <mxGeometry height="150" width="1520" x="40" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="c41" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Sales" vertex="1">
+          <mxGeometry height="70" width="190" x="60" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c42" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Planning&lt;br&gt;(MRP)" vertex="1">
+          <mxGeometry height="70" width="190" x="275" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c43" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Production&lt;br&gt;(Work Order)" vertex="1">
+          <mxGeometry height="70" width="190" x="490" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c44" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Inventory" vertex="1">
+          <mxGeometry height="70" width="190" x="705" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c45" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Purchasing" vertex="1">
+          <mxGeometry height="70" width="190" x="920" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c46" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Master data&lt;br&gt;(BOM / Routing / Items)" vertex="1">
+          <mxGeometry height="70" width="190" x="1135" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="c47" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Access control&lt;br&gt;(roles &amp;amp; scopes)" vertex="1">
+          <mxGeometry height="70" width="190" x="1350" y="586" as="geometry" />
+        </mxCell>
+        <mxCell id="b5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontColor=#3F2A4D;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="5 - DOMAIN &amp;amp; PERSISTENCE" vertex="1">
+          <mxGeometry height="110" width="1520" x="40" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="c51" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="Domain entities&lt;br&gt;(business invariants)" vertex="1">
+          <mxGeometry height="58" width="470" x="275" y="768" as="geometry" />
+        </mxCell>
+        <mxCell id="c52" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="JPA repositories" vertex="1">
+          <mxGeometry height="58" width="470" x="855" y="768" as="geometry" />
+        </mxCell>
+        <mxCell id="b6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontColor=#333333;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;fontSize=15;fontStyle=1;opacity=60;" value="6 - INFRASTRUCTURE" vertex="1">
+          <mxGeometry height="120" width="1520" x="40" y="880" as="geometry" />
+        </mxCell>
+        <mxCell id="c61" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontColor=#333333;strokeWidth=2;fontSize=13;" value="PostgreSQL&lt;br&gt;business data" vertex="1">
+          <mxGeometry height="62" width="470" x="275" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="c62" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontColor=#333333;strokeWidth=2;fontSize=13;" value="Redis&lt;br&gt;tokens / sessions / rate limits" vertex="1">
+          <mxGeometry height="62" width="470" x="855" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="b7" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;verticalAlign=top;align=center;spacingTop=8;fontSize=15;fontStyle=1;opacity=40;" value="CROSS-CUTTING" vertex="1">
+          <mxGeometry height="910" width="270" x="1590" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c71" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;strokeWidth=2;fontSize=13;" value="Audit logging&lt;br&gt;(who did what, when)" vertex="1">
+          <mxGeometry height="80" width="230" x="1610" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c72" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;strokeWidth=2;fontSize=13;" value="Unified response&lt;br&gt;&amp;amp; error handling" vertex="1">
+          <mxGeometry height="80" width="230" x="1610" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="c73" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;strokeWidth=2;fontSize=13;" value="Traceability&lt;br&gt;(trace id on every request)" vertex="1">
+          <mxGeometry height="80" width="230" x="1610" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="c74" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;strokeWidth=2;fontSize=13;" value="Idempotency&lt;br&gt;(safe retry of writes)" vertex="1">
+          <mxGeometry height="80" width="230" x="1610" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="c75" parent="1" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontColor=#7A4100;strokeWidth=2;fontSize=13;" value="Role-based access control" vertex="1">
+          <mxGeometry height="80" width="230" x="1610" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="b1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=12;fontColor=#444444;labelBackgroundColor=#FFFFFF;" target="b2" value="HTTPS request">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="b2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=12;fontColor=#444444;labelBackgroundColor=#FFFFFF;" target="b3" value="authenticated request">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="b3" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=12;fontColor=#444444;labelBackgroundColor=#FFFFFF;" target="b4" value="calls business logic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="b4" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=12;fontColor=#444444;labelBackgroundColor=#FFFFFF;" target="b5" value="reads / writes entities">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="b5" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=12;fontColor=#444444;labelBackgroundColor=#FFFFFF;" target="b6" value="SQL">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="activity" name="2 - Main Business Flow">
+    <mxGraphModel dx="2209" dy="1422" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1880" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1A1A1A;" value="MANUFACTURING ERP - MAIN BUSINESS FLOW" vertex="1">
+          <mxGeometry height="34" width="1690" x="40" y="14" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_admin" parent="1" style="swimlane;html=1;horizontal=1;startSize=42;fillColor=#9673A6;swimlaneFillColor=#F5F0F8;strokeColor=#9673A6;fontColor=#FFFFFF;fontSize=15;fontStyle=1;collapsible=0;" value="ADMIN - system setup" vertex="1">
+          <mxGeometry height="1700" width="360" x="40" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="n_start" parent="lane_admin" style="ellipse;html=1;fillColor=#3F2A4D;strokeColor=#3F2A4D;" value="" vertex="1">
+          <mxGeometry height="36" width="36" x="162" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" parent="lane_admin" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#D3BBDD;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="Set up the organization&lt;br&gt;(company, plants, warehouses)" vertex="1">
+          <mxGeometry height="54" width="310" x="25" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" parent="lane_admin" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#D3BBDD;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="Define master data&lt;br&gt;(items, BOM, routing, work centers)" vertex="1">
+          <mxGeometry height="54" width="310" x="25" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" parent="lane_admin" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#D3BBDD;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="Create users and grant&lt;br&gt;roles and permissions" vertex="1">
+          <mxGeometry height="54" width="310" x="25" y="240" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" parent="lane_admin" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#D3BBDD;strokeColor=#9673A6;fontColor=#3F2A4D;strokeWidth=2;fontSize=13;" value="Load opening stock balances" vertex="1">
+          <mxGeometry height="50" width="310" x="25" y="310" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_mgr" parent="1" style="swimlane;html=1;horizontal=1;startSize=42;fillColor=#6C8EBF;swimlaneFillColor=#EEF4FC;strokeColor=#6C8EBF;fontColor=#FFFFFF;fontSize=15;fontStyle=1;collapsible=0;" value="MANAGER - planning &amp;amp; approval" vertex="1">
+          <mxGeometry height="1700" width="420" x="410" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="m2" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Create and confirm a Sales Order" vertex="1">
+          <mxGeometry height="52" width="350" x="35" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="m3" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Run material planning (MRP)" vertex="1">
+          <mxGeometry height="52" width="350" x="35" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="d1" parent="lane_mgr" style="rhombus;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;fontStyle=1;" value="Make or Buy?" vertex="1">
+          <mxGeometry height="80" width="180" x="120" y="738" as="geometry" />
+        </mxCell>
+        <mxCell id="m4" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Buy: purchase order&lt;br&gt;and goods receipt" vertex="1">
+          <mxGeometry height="58" width="195" x="10" y="848" as="geometry" />
+        </mxCell>
+        <mxCell id="m5" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Make: approve and&lt;br&gt;create a Work Order" vertex="1">
+          <mxGeometry height="58" width="195" x="215" y="848" as="geometry" />
+        </mxCell>
+        <mxCell id="m6" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Reserve materials and release the Work Order" vertex="1">
+          <mxGeometry height="54" width="350" x="35" y="1026" as="geometry" />
+        </mxCell>
+        <mxCell id="blk" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontColor=#5E1A18;strokeWidth=2;fontSize=13;dashed=1;" value="Not enough material: order is blocked,&lt;br&gt;replenish and reserve again" vertex="1">
+          <mxGeometry height="60" width="350" x="35" y="1194" as="geometry" />
+        </mxCell>
+        <mxCell id="m7" parent="lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=13;" value="Approve the receipt and record the quality decision" vertex="1">
+          <mxGeometry height="54" width="350" x="35" y="1450" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_sys" parent="1" style="swimlane;html=1;horizontal=1;startSize=42;fillColor=#616161;swimlaneFillColor=#F5F5F5;strokeColor=#616161;fontColor=#FFFFFF;fontSize=15;fontStyle=1;collapsible=0;" value="SYSTEM - backend" vertex="1">
+          <mxGeometry height="1700" width="500" x="840" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=13;" value="Turn each order line into a demand for planning" vertex="1">
+          <mxGeometry height="52" width="450" x="25" y="478" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=13;" value="Explode the multi-level BOM, compare demand with&lt;br&gt;available stock, and propose what is still missing" vertex="1">
+          <mxGeometry height="66" width="450" x="25" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=13;" value="Create the Work Order with a frozen copy&lt;br&gt;of the BOM and routing used at that moment" vertex="1">
+          <mxGeometry height="60" width="450" x="25" y="936" as="geometry" />
+        </mxCell>
+        <mxCell id="s4" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=13;" value="Check material coverage before production starts" vertex="1">
+          <mxGeometry height="58" width="450" x="25" y="1110" as="geometry" />
+        </mxCell>
+        <mxCell id="s_note" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#616161;fontColor=#333333;strokeWidth=2;fontSize=13;dashed=1;fontStyle=2;" value="Every material movement is written to an append-only&lt;br&gt;stock ledger, and stock balances are always derived from it" vertex="1">
+          <mxGeometry height="70" width="450" x="25" y="1288" as="geometry" />
+        </mxCell>
+        <mxCell id="s5" parent="lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=13;" value="Release the approved goods into available stock&lt;br&gt;and fulfil the Sales Order" vertex="1">
+          <mxGeometry height="62" width="450" x="25" y="1534" as="geometry" />
+        </mxCell>
+        <mxCell id="n_end" parent="lane_sys" style="ellipse;html=1;fillColor=#FFFFFF;strokeColor=#222222;strokeWidth=4;" value="" vertex="1">
+          <mxGeometry height="36" width="36" x="232" y="1624" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_op" parent="1" style="swimlane;html=1;horizontal=1;startSize=42;fillColor=#82B366;swimlaneFillColor=#F1F8EF;strokeColor=#82B366;fontColor=#FFFFFF;fontSize=15;fontStyle=1;collapsible=0;" value="OPERATOR - shop floor" vertex="1">
+          <mxGeometry height="1700" width="380" x="1350" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="o1" parent="lane_op" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#C6E0B4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Issue materials to the shop floor" vertex="1">
+          <mxGeometry height="52" width="340" x="20" y="1194" as="geometry" />
+        </mxCell>
+        <mxCell id="o2" parent="lane_op" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#C6E0B4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Report actual production output" vertex="1">
+          <mxGeometry height="52" width="340" x="20" y="1278" as="geometry" />
+        </mxCell>
+        <mxCell id="o3" parent="lane_op" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#C6E0B4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=13;" value="Declare finished goods&lt;br&gt;(on hold until quality check)" vertex="1">
+          <mxGeometry height="58" width="340" x="20" y="1362" as="geometry" />
+        </mxCell>
+        <mxCell id="f0" edge="1" parent="1" source="n_start" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3F2A4D;strokeWidth=2;endArrow=block;endFill=1;" target="a1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f0b" edge="1" parent="1" source="a1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3F2A4D;strokeWidth=2;endArrow=block;endFill=1;" target="a2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f0c" edge="1" parent="1" source="a2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3F2A4D;strokeWidth=2;endArrow=block;endFill=1;" target="a3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f0d" edge="1" parent="1" source="a3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3F2A4D;strokeWidth=2;endArrow=block;endFill=1;" target="a4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f1" edge="1" parent="1" source="a4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3F2A4D;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="m2" value="setup complete">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f3" edge="1" parent="1" source="m2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f4" edge="1" parent="1" source="s1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" target="m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f5" edge="1" parent="1" source="m3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f6" edge="1" parent="1" source="s2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" target="d1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f7" edge="1" parent="1" source="d1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;" target="m4" value="Buy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f8" edge="1" parent="1" source="d1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;" target="m5" value="Make">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f9" edge="1" parent="1" source="m4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=2;endArrow=block;endFill=1;dashed=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=1;entryX=0.25;entryY=0;" target="m6" value="materials received">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f10" edge="1" parent="1" source="m5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f11" edge="1" parent="1" source="s3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" target="m6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f12" edge="1" parent="1" source="m6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f13" edge="1" parent="1" source="s4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#B85450;strokeWidth=2;endArrow=block;endFill=1;dashed=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" target="blk" value="shortage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f14" edge="1" parent="1" source="blk" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#B85450;strokeWidth=2;endArrow=block;endFill=1;dashed=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" target="m6" value="retry">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="430" y="1309" />
+              <mxPoint x="430" y="1138" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="f15" edge="1" parent="1" source="s4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="o1" value="released">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f16" edge="1" parent="1" source="o1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1E4620;strokeWidth=2;endArrow=block;endFill=1;" target="o2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f17" edge="1" parent="1" source="o2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1E4620;strokeWidth=2;endArrow=block;endFill=1;" target="o3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f18" edge="1" parent="1" source="o3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" target="m7" value="submit for approval">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f19" edge="1" parent="1" source="m7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=2;endArrow=block;endFill=1;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="s5" value="quality passed">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="f20" edge="1" parent="1" source="s5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#222222;strokeWidth=2;endArrow=block;endFill=1;" target="n_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="flow-condensed" name="3 - Business Flow (condensed)">
+    <mxGraphModel dx="1466" dy="1194" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1560" pageHeight="940" math="0" shadow="0">
+      <root>
+        <mxCell id="r0" />
+        <mxCell id="r1" parent="r0" />
+        <mxCell id="q_lane_mgr" parent="r1" style="swimlane;html=1;horizontal=0;startSize=34;fillColor=#6C8EBF;swimlaneFillColor=#EEF4FC;strokeColor=#6C8EBF;fontColor=#FFFFFF;fontSize=17;fontStyle=1;collapsible=0;" value="MANAGER" vertex="1">
+          <mxGeometry height="300" width="1470" x="40" y="96" as="geometry" />
+        </mxCell>
+        <mxCell id="q_start" parent="q_lane_mgr" style="ellipse;html=1;fillColor=#12365C;strokeColor=#12365C;" value="" vertex="1">
+          <mxGeometry height="40" width="40" x="40" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n1" parent="q_lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="1. Confirm the Sales Order" vertex="1">
+          <mxGeometry height="80" width="200" x="110" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n3" parent="q_lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="3. Run material planning (MRP)" vertex="1">
+          <mxGeometry height="80" width="200" x="360" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="q_d1" parent="q_lane_mgr" style="rhombus;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="Make or Buy?" vertex="1">
+          <mxGeometry height="90" width="175" x="610" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n5" parent="q_lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="5. Buy: order &amp;amp; receive goods&lt;div&gt;&lt;font style=&quot;font-size: 13px;&quot;&gt;*not yet completed&lt;/font&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="225" x="835" y="25" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n6" parent="q_lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="6. Make: create &amp;amp; release the Work Order" vertex="1">
+          <mxGeometry height="95" width="225" x="835" y="145" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n8" parent="q_lane_mgr" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#B7D2F6;strokeColor=#6C8EBF;fontColor=#12365C;strokeWidth=2;fontSize=17;fontStyle=1;" value="8. Approve the receipt &amp;amp;&lt;br&gt;record the quality decision" vertex="1">
+          <mxGeometry height="80" width="225" x="1150" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="q_lane_sys" parent="r1" style="swimlane;html=1;horizontal=0;startSize=34;fillColor=#616161;swimlaneFillColor=#F5F5F5;strokeColor=#616161;fontColor=#FFFFFF;fontSize=17;fontStyle=1;collapsible=0;" value="SYSTEM" vertex="1">
+          <mxGeometry height="240" width="1470" x="40" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n2" parent="q_lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=17;fontStyle=1;" value="2. Create the planning demand" vertex="1">
+          <mxGeometry height="90" width="200" x="110" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n4" parent="q_lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=17;fontStyle=1;" value="4. Explode the BOM, net off stock&lt;br&gt;→ supply proposals" vertex="1">
+          <mxGeometry height="90" width="200" x="360" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n9" parent="q_lane_sys" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#DDDDDD;strokeColor=#616161;fontColor=#222222;strokeWidth=2;fontSize=17;fontStyle=1;" value="9. Release into available stock" vertex="1">
+          <mxGeometry height="90" width="225" x="1150" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="q_end" parent="q_lane_sys" style="ellipse;html=1;fillColor=#FFFFFF;strokeColor=#222222;strokeWidth=5;" value="" vertex="1">
+          <mxGeometry height="42" width="42" x="1410" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="q_lane_op" parent="r1" style="swimlane;html=1;horizontal=0;startSize=34;fillColor=#82B366;swimlaneFillColor=#F1F8EF;strokeColor=#82B366;fontColor=#FFFFFF;fontSize=17;fontStyle=1;collapsible=0;" value="OPERATOR" vertex="1">
+          <mxGeometry height="220" width="1470" x="40" y="636" as="geometry" />
+        </mxCell>
+        <mxCell id="q_n7" parent="q_lane_op" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#C6E0B4;strokeColor=#82B366;fontColor=#1E4620;strokeWidth=2;fontSize=17;fontStyle=1;" value="7. Issue materials · report output" vertex="1">
+          <mxGeometry height="100" width="225" x="835" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e0" edge="1" parent="r1" source="q_start" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="q_n1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e1" edge="1" parent="r1" source="q_n1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="q_n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e2" edge="1" parent="r1" source="q_n2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="q_n3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e3" edge="1" parent="r1" source="q_n3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="q_n4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e4" edge="1" parent="r1" source="q_n4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="q_d1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e5" edge="1" parent="r1" source="q_d1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=3;endArrow=block;endFill=1;exitX=0.5;exitY=0;entryX=0;entryY=0.5;fontSize=15;fontStyle=1;fontColor=#12365C;labelBackgroundColor=#FFFFFF;" target="q_n5" value="Buy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e6" edge="1" parent="r1" source="q_d1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;fontSize=15;fontStyle=1;fontColor=#12365C;labelBackgroundColor=#FFFFFF;" target="q_n6" value="Make">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e7" edge="1" parent="r1" source="q_n5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#12365C;strokeWidth=2;endArrow=block;endFill=1;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=13;labelBackgroundColor=#FFFFFF;" target="q_n6" value="materials received">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e8" edge="1" parent="r1" source="q_n6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="q_n7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e9" edge="1" parent="r1" source="q_n7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="q_n8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e10" edge="1" parent="r1" source="q_n8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#444444;strokeWidth=3;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="q_n9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="q_e11" edge="1" parent="r1" source="q_n9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#222222;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="q_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

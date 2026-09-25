@@ -79,7 +79,8 @@ public class InventoryLotService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
-    @Auditable(action = AuditAction.INVENTORY_LOT_STATUS_CHANGED, entityType = "InventoryLot", entityIdExpression = "lotId.toString()")
+    @Auditable(action = AuditAction.INVENTORY_LOT_STATUS_CHANGED, entityType = "InventoryLot", entityIdExpression = "lotId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public InventoryLotResponse changeStatus(UUID lotId, InventoryLotStatusChangeRequest request,
                                              String idempotencyKey) {
         if (!ALLOWED_TARGET_STATUSES.contains(request.newStatus())) {

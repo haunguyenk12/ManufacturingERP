@@ -45,7 +45,8 @@ public class ShiftService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SHIFT_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.SHIFT_CREATED, entityType = "Shift", entityIdExpression = "shiftId.toString()")
+    @Auditable(action = AuditAction.SHIFT_CREATED, entityType = "Shift", entityIdExpression = "shiftId.toString()",
+               plantId = "#result?.plantId()")
     public ShiftResponse create(UUID plantId, ShiftCreateRequest request) {
         Plant plant = organizationLookupService.getActivePlant(plantId);
 
@@ -85,7 +86,8 @@ public class ShiftService {
 
     @Transactional
     @PreAuthorize("@shiftPermissionGuard.hasShiftAccess(authentication, 'PERM_SHIFT_MANAGE', #shiftId)")
-    @Auditable(action = AuditAction.SHIFT_UPDATED, entityType = "Shift", entityIdExpression = "shiftId.toString()")
+    @Auditable(action = AuditAction.SHIFT_UPDATED, entityType = "Shift", entityIdExpression = "shiftId.toString()",
+               plantId = "#result?.plantId()")
     public ShiftResponse update(UUID shiftId, ShiftUpdateRequest request) {
         Shift shift = findShift(shiftId);
         if (request.name() != null) {
@@ -112,7 +114,8 @@ public class ShiftService {
 
     @Transactional
     @PreAuthorize("@shiftPermissionGuard.hasShiftAccess(authentication, 'PERM_SHIFT_MANAGE', #shiftId)")
-    @Auditable(action = AuditAction.SHIFT_ACTIVATED, entityType = "Shift", entityIdExpression = "shiftId.toString()")
+    @Auditable(action = AuditAction.SHIFT_ACTIVATED, entityType = "Shift", entityIdExpression = "shiftId.toString()",
+               plantId = "#result?.plantId()")
     public ShiftResponse activate(UUID shiftId) {
         Shift shift = findShift(shiftId);
         shift.activate();
@@ -126,7 +129,8 @@ public class ShiftService {
      */
     @Transactional
     @PreAuthorize("@shiftPermissionGuard.hasShiftAccess(authentication, 'PERM_SHIFT_MANAGE', #shiftId)")
-    @Auditable(action = AuditAction.SHIFT_DEACTIVATED, entityType = "Shift", entityIdExpression = "shiftId.toString()")
+    @Auditable(action = AuditAction.SHIFT_DEACTIVATED, entityType = "Shift", entityIdExpression = "shiftId.toString()",
+               plantId = "#result?.plantId()")
     public ShiftResponse deactivate(UUID shiftId) {
         Shift shift = findShift(shiftId);
         shift.deactivate();

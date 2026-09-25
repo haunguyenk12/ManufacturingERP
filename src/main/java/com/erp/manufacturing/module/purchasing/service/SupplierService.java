@@ -37,7 +37,8 @@ public class SupplierService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SUPPLIER_MANAGE', 'COMPANY', #request.companyId())")
-    @Auditable(action = AuditAction.SUPPLIER_CREATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()")
+    @Auditable(action = AuditAction.SUPPLIER_CREATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
+               companyId = "#result?.companyId()")
     public SupplierResponse create(SupplierCreateRequest request) {
         Company company = organizationLookupService.getActiveCompany(request.companyId());
         String code = normalizeCode(request.code(), "Supplier code");
@@ -72,7 +73,8 @@ public class SupplierService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasSupplierAccess(authentication, 'PERM_SUPPLIER_MANAGE', #supplierId)")
-    @Auditable(action = AuditAction.SUPPLIER_UPDATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()")
+    @Auditable(action = AuditAction.SUPPLIER_UPDATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
+               companyId = "#result?.companyId()")
     public SupplierResponse update(UUID supplierId, SupplierUpdateRequest request) {
         Supplier supplier = findSupplier(supplierId);
         if (request.name() != null) {
@@ -95,7 +97,8 @@ public class SupplierService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasSupplierAccess(authentication, 'PERM_SUPPLIER_MANAGE', #supplierId)")
-    @Auditable(action = AuditAction.SUPPLIER_DEACTIVATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()")
+    @Auditable(action = AuditAction.SUPPLIER_DEACTIVATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
+               companyId = "#result?.companyId()")
     public SupplierResponse deactivate(UUID supplierId) {
         Supplier supplier = findSupplier(supplierId);
         supplier.deactivate();
@@ -179,7 +182,7 @@ public class SupplierService {
     public Supplier findActiveSupplier(UUID supplierId) {
         Supplier supplier = findSupplier(supplierId);
         if (!supplier.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive supplier cannot be used: " + supplierId);
         }
         return supplier;
@@ -192,7 +195,7 @@ public class SupplierService {
                 .map(ItemSupplier::getSupplier)
                 .orElse(null);
         if (supplier != null && !supplier.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Preferred supplier is inactive for item: " + itemId);
         }
         return supplier;
@@ -209,7 +212,7 @@ public class SupplierService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Item supplier", itemSupplierId));
         if (!itemSupplier.getItem().getItemId().equals(itemId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item supplier does not belong to item");
         }
         return itemSupplier;
@@ -217,7 +220,7 @@ public class SupplierService {
 
     private void ensureSameCompany(Item item, Supplier supplier) {
         if (!item.getCompany().getCompanyId().equals(supplier.getCompany().getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item and supplier must belong to the same company");
         }
     }

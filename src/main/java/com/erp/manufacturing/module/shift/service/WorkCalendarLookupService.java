@@ -40,7 +40,7 @@ public class WorkCalendarLookupService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Work calendar", workCalendarId));
         if (!calendar.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive work calendar cannot be used: " + workCalendarId);
         }
         return calendar;

@@ -43,6 +43,7 @@ class AuditLogMethodSecurityTest {
     @Autowired AuditLogQueryService auditLogQueryService;
     @Autowired PermissionGuard permissionGuard;
     @Autowired AuditLogRepository auditLogRepository;
+    @Autowired AuditLogEntityRowRepository auditLogEntityRowRepository;
     @Autowired AuditLogChangeRepository auditLogChangeRepository;
 
     private static final UUID AUDIT_ID = UUID.randomUUID();
@@ -64,7 +65,7 @@ class AuditLogMethodSecurityTest {
         when(permissionGuard.hasPermission(any(), eq("PERM_AUDIT_READ"))).thenReturn(false);
 
         assertThatThrownBy(() -> auditLogQueryService.list(
-                null, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
+                AuditLogSearchCriteria.builder().build(), PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(auditLogRepository);
@@ -85,11 +86,12 @@ class AuditLogMethodSecurityTest {
     @Test
     void list_allowedWhenAuditReadPresent() {
         when(permissionGuard.hasPermission(any(), eq("PERM_AUDIT_READ"))).thenReturn(true);
-        when(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(auditLogRepository.searchAdvanced(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
 
         assertThatCode(() -> auditLogQueryService.list(
-                null, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
+                AuditLogSearchCriteria.builder().build(), PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -103,6 +105,8 @@ class AuditLogMethodSecurityTest {
                 .build();
         when(auditLogRepository.findById(AUDIT_ID)).thenReturn(Optional.of(auditLog));
         when(auditLogChangeRepository.findByAuditIdOrderByCreatedAtAsc(AUDIT_ID)).thenReturn(List.of());
+        when(auditLogEntityRowRepository.findByAuditIdOrderByRelationAscEntityTypeAsc(AUDIT_ID))
+                .thenReturn(List.of());
 
         assertThatCode(() -> auditLogQueryService.get(AUDIT_ID)).doesNotThrowAnyException();
     }
@@ -114,8 +118,10 @@ class AuditLogMethodSecurityTest {
         @Bean
         AuditLogQueryService auditLogQueryService(AuditLogRepository auditLogRepository,
                                                    AuditLogChangeRepository auditLogChangeRepository,
+                                                   AuditLogEntityRowRepository auditLogEntityRowRepository,
                                                    ObjectMapper objectMapper) {
-            return new AuditLogQueryService(auditLogRepository, auditLogChangeRepository, objectMapper);
+            return new AuditLogQueryService(auditLogRepository, auditLogChangeRepository,
+                    auditLogEntityRowRepository, objectMapper);
         }
 
         @Bean ObjectMapper objectMapper() { return new ObjectMapper(); }
@@ -126,5 +132,9 @@ class AuditLogMethodSecurityTest {
         @Bean AuditLogRepository auditLogRepository() { return mock(AuditLogRepository.class); }
 
         @Bean AuditLogChangeRepository auditLogChangeRepository() { return mock(AuditLogChangeRepository.class); }
+
+        @Bean AuditLogEntityRowRepository auditLogEntityRowRepository() {
+            return mock(AuditLogEntityRowRepository.class);
+        }
     }
 }

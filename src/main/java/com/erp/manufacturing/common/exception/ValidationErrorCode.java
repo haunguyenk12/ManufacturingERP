@@ -18,7 +18,6 @@ public enum ValidationErrorCode implements ErrorCode {
     // ── User ───────────────────────────────────────────────────────────────
     USERNAME_ALREADY_EXISTS  ("USERNAME_ALREADY_EXISTS",   "Username is already taken",                     HttpStatus.CONFLICT),
     EMAIL_ALREADY_EXISTS     ("EMAIL_ALREADY_EXISTS",      "Email address is already registered",           HttpStatus.CONFLICT),
-    PASSWORD_TOO_WEAK        ("PASSWORD_TOO_WEAK",         "Password does not meet complexity requirements", HttpStatus.BAD_REQUEST),
 
     // ── Manufacturing input ────────────────────────────────────────────────
     LOT_REQUIRED             ("LOT_REQUIRED",              "Lot number is required for a lot-tracked item", HttpStatus.BAD_REQUEST),

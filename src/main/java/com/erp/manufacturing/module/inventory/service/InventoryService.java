@@ -32,7 +32,8 @@ public class InventoryService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
-    @Auditable(action = AuditAction.INVENTORY_RECEIVED, entityType = "StockMovement", entityIdExpression = "movementId.toString()")
+    @Auditable(action = AuditAction.INVENTORY_RECEIVED, entityType = "StockMovement", entityIdExpression = "movementId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public StockMovementResponse receive(StockReceiveRequest request, String idempotencyKey) {
         StockMovement movement = movementService.receive(new InventoryReceiveCommand(
                 request.itemId(),
@@ -48,7 +49,8 @@ public class InventoryService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
-    @Auditable(action = AuditAction.INVENTORY_ISSUED, entityType = "StockMovement", entityIdExpression = "movementId.toString()")
+    @Auditable(action = AuditAction.INVENTORY_ISSUED, entityType = "StockMovement", entityIdExpression = "movementId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public StockMovementResponse issue(StockIssueRequest request, String idempotencyKey) {
         StockMovement movement = movementService.issue(new InventoryIssueCommand(
                 request.itemId(),
@@ -64,7 +66,8 @@ public class InventoryService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
-    @Auditable(action = AuditAction.INVENTORY_ADJUSTED, entityType = "StockMovement", entityIdExpression = "movementId.toString()")
+    @Auditable(action = AuditAction.INVENTORY_ADJUSTED, entityType = "StockMovement", entityIdExpression = "movementId.toString()",
+               warehouseId = "#result?.warehouseId()")
     public StockMovementResponse adjust(StockAdjustRequest request, String idempotencyKey) {
         StockMovement movement = movementService.adjust(new InventoryAdjustCommand(
                 request.itemId(),

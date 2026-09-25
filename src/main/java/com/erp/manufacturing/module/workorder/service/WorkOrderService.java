@@ -79,7 +79,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_WORK_ORDER_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.WORK_ORDER_CREATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_CREATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse create(UUID plantId, WorkOrderCreateRequest request) {
         return toResponse(createInternal(plantId, request, false));
     }
@@ -101,7 +103,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SUPPLY_SUGGESTION_MANAGE', 'PLANT', #plantId)")
-    @Auditable(action = AuditAction.WORK_ORDER_CREATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_CREATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse createFromMrp(UUID plantId,
                                            WorkOrderCreateRequest request,
                                            UUID salesOrderLineId,
@@ -194,7 +198,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse update(UUID workOrderId, WorkOrderUpdateRequest request) {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         ensureDraft(workOrder);
@@ -228,7 +234,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse plan(UUID workOrderId) {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         if (!workOrder.canPlan()) {
@@ -241,7 +249,9 @@ public class WorkOrderService {
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_RELEASED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_RELEASED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse release(UUID workOrderId) {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         ensureReleasable(workOrder);
@@ -298,7 +308,9 @@ public class WorkOrderService {
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_CANCELLED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_CANCELLED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse cancel(UUID workOrderId, WorkOrderCancelRequest request) {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         // Fail before any state check (C9): a caller who forgot the reason should be told that,
@@ -332,7 +344,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_CLOSED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_CLOSED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse close(UUID workOrderId) {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         if (!workOrder.canClose()) {
@@ -346,7 +360,9 @@ public class WorkOrderService {
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_EXECUTE', #workOrderId)")
-    @Auditable(action = AuditAction.WORK_ORDER_COMPONENT_ISSUED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.WORK_ORDER_COMPONENT_ISSUED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse issueComponent(UUID workOrderId,
                                             WorkOrderComponentIssueRequest request,
                                             String idempotencyKey) {
@@ -370,7 +386,9 @@ public class WorkOrderService {
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_EXECUTE', #workOrderId)")
-    @Auditable(action = AuditAction.PRODUCTION_RECEIPT_SUBMITTED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()")
+    @Auditable(action = AuditAction.PRODUCTION_RECEIPT_SUBMITTED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public WorkOrderResponse completeOutput(UUID workOrderId,
                                             WorkOrderOutputCompletionRequest request,
                                             String idempotencyKey) {
@@ -431,7 +449,7 @@ public class WorkOrderService {
 
     private void ensureProductBelongsToPlantCompany(Item product, Plant plant) {
         if (!product.getCompany().getCompanyId().equals(plant.getCompany().getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Product item must belong to the plant company");
         }
     }

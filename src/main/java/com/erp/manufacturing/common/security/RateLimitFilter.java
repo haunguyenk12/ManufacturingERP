@@ -78,6 +78,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
+        try {
+            if (isRefused(request, response)) {
+                return;
+            }
+        } catch (RuntimeException ex) {
+            // EH-1 safety net - see JwtAuthenticationFilter for the full rationale. Every call below
+            // touches Redis; if it is unreachable the exception escapes the filter chain, never
+            // reaches GlobalExceptionHandler, and the caller gets Spring Boot's default /error body
+            // instead of the {code,result,message} envelope. The message is not echoed to the client.
+            writeInternalError(response, request, ex);
+            return;
+        }
+
+        // USER-scope rules are handled by UserRateLimitFilter (runs after JwtAuthenticationFilter).
+        chain.doFilter(request, response);
+    }
+
+    /** @return {@code true} when this filter has already written a refusal onto the response. */
+    private boolean isRefused(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String clientIp = ipExtractor.extract(request);
         String path     = request.getRequestURI().substring(request.getContextPath().length());
 
@@ -85,7 +104,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String blacklistReason = redisTemplate.opsForValue().get("rate:blacklist:ip:" + clientIp);
         if (blacklistReason != null) {
             writeError(response, 403, AuthErrorCode.ACCESS_DENIED, "IP blocked: " + blacklistReason);
-            return;
+            return true;
         }
 
         // ── IP-scope rules ──────────────────────────────────────────────
@@ -94,11 +113,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
             addRateLimitHeaders(response, ipBlock.get());
             writeError(response, 429, BusinessErrorCode.RATE_LIMIT_EXCEEDED,
                     "Too many requests. Retry after " + ipBlock.get().retryAfterSeconds() + "s.");
-            return;
+            return true;
         }
 
-        // USER-scope rules are handled by UserRateLimitFilter (runs after JwtAuthenticationFilter).
-        chain.doFilter(request, response);
+        return false;
     }
 
     // ── Core evaluation ─────────────────────────────────────────────────────
@@ -170,6 +188,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(), ApiResponse.error(code, message));
+    }
+
+    /** Same envelope the catch-all of {@code GlobalExceptionHandler} would have produced. */
+    private void writeInternalError(HttpServletResponse response, HttpServletRequest request,
+                                    RuntimeException ex) throws IOException {
+        log.error("[{}] Unhandled exception in RateLimitFilter at {}: {}",
+                BusinessErrorCode.INTERNAL_SERVER_ERROR.code(), request.getRequestURI(),
+                ex.getMessage(), ex);
+        writeError(response, BusinessErrorCode.INTERNAL_SERVER_ERROR.status().value(),
+                BusinessErrorCode.INTERNAL_SERVER_ERROR,
+                BusinessErrorCode.INTERNAL_SERVER_ERROR.message());
     }
 
     // ── Result record ─────────────────────────────────────────────────────

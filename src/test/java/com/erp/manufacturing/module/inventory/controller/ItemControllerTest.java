@@ -126,9 +126,9 @@ class ItemControllerTest {
     @Test
     @DisplayName("create: inactive company stays 422 OPERATION_NOT_ALLOWED (§5.3 — master data, "
             + "not a document state conflict)")
-    void create_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+    void create_inactiveCompany_returns422ResourceInactive() throws Exception {
         when(itemService.createItem(eq(COMPANY_ID), any(ItemCreateRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Cannot create item under inactive company: " + COMPANY_ID));
 
         mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/items")
@@ -137,8 +137,8 @@ class ItemControllerTest {
                                 {"code":"MAT-001","name":"Steel Sheet","type":"RAW_MATERIAL",
                                  "unit":"KG","lotTracked":false}
                                 """))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 
@@ -217,14 +217,14 @@ class ItemControllerTest {
     @Test
     @DisplayName("activate: inactive parent company stays 422 OPERATION_NOT_ALLOWED (§5.3 — master data, "
             + "not a document state conflict)")
-    void activate_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+    void activate_inactiveCompany_returns422ResourceInactive() throws Exception {
         when(itemService.activateItem(ITEM_ID))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Cannot activate an item while its company is inactive: " + ITEM_ID));
 
         mockMvc.perform(post("/v1/items/" + ITEM_ID + "/activate"))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 }

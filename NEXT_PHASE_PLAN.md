@@ -1,6 +1,42 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Cập nhật ad-hoc mới nhất: **Trả lời `live-data-audit.md` của FE** hoàn thành 2026-08-14 — bản ghi
+> Cập nhật ad-hoc mới nhất: **Track `AR-*` — refactor toàn bộ hạ tầng Audit** hoàn thành
+> **2026-09-02** — bản ghi đầy đủ `CLAUDE.md §0.49`, kế hoạch + log triển khai + danh sách "cố ý chưa
+> làm" ở `AuditRefactorPlan.md §13`, chi tiết kỹ thuật `common/audit/CLAUDE.md` (viết lại hoàn toàn).
+> Migration **`V67`** (outbox + `audit_log_entities` + 10 cột mới, thuần additive, **không backfill**)
+> + **`V68`** (trigger append-only). **Không permission mới, không breaking change wire.**
+> Phạm vi và failure policy (**`FAIL_OPEN` toàn hệ thống**) do user chốt qua `AskUserQuestion`.
+> 🔴 **Ba defect gốc, cả ba im lặng — không log, không lỗi, không test nào đỏ:** mọi event auth bị
+> vứt bỏ (`AuthService` không có `@Transactional`, mà `AFTER_COMMIT` listener cần một transaction để
+> giao event) · event `FAILURE` mất khi rollback · một `X-Trace-Id` dài làm hỏng insert **sau khi**
+> business đã commit, tức client tự tắt được audit trail của chính mình. Sửa bằng transactional
+> outbox (`B119`–`B123`). **1225 case unit / 158 class + 154 case IT / 22 class IT · failures = 0,
+> errors = 0** (`mvn -o clean verify` thật với Docker); `AuditPipelineIT` (class IT thứ 22) chứng
+> minh commit/rollback/idempotency/append-only trên Postgres thật.
+>
+> Trước đó: **Sửa contract giá trị của Audit Log** hoàn thành **2026-08-25** — bản ghi
+> đầy đủ `CLAUDE.md §0.48`, trả lời FE `FE_SingleTask_Response.md`, nguồn
+> `BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md`. **Không migration, không permission mới, không
+> endpoint mới.** `changes[].oldValue`/`newValue` của `GET /v1/audit-logs/{id}` trở lại **`string` |
+> `null`** đúng như OpenAPI công bố — hồi quy từ commit `caps2 done` (đổi DTO sang `JsonNode` cùng
+> lượt bật field-level diff) khiến một snapshot có cấu trúc lọt ra dạng object và làm sập màn hình
+> Audit của FE. Bất biến **`B118`** (`common/audit`). **Breaking change wire: có, hẹp** — là khôi phục
+> contract cũ. **1184 case unit / 152 class + 142 case IT / 21 class IT · failures = 0, errors = 0**
+> (`mvn -o clean verify` thật với Docker) · nghiệm thu mutation 3/3 đụng `src/main` · smoke test A/B
+> qua HTTP thật trên cùng một bản ghi audit.
+>
+> Trước đó: **Track `EH-*` — refactor hạ tầng xử lý lỗi** hoàn thành **6/8 hạng mục**
+> 2026-08-23 — bản ghi đầy đủ `CLAUDE.md §0.47`, kế hoạch + khảo sát + breaking changes
+> `ExceptionHandlerRefactorPlan.md`. **Không migration, không permission mới, không endpoint mới.**
+> `EH-1` (lưới an toàn filter chain + `ApiErrorController`) · `EH-2` (tách `OPERATION_NOT_ALLOWED`
+> thành 3 mã trên 59/96 throw site — **breaking change wire**, đổi `code`, giữ nguyên HTTP 422) ·
+> `EH-3` (`DataIntegrityErrorMapper`, FK/`CHECK`/`NOT NULL` 409 → **422**) · `EH-4`
+> (`MrpRunStateRecorder`, `REQUIRES_NEW` + sanitize `errorMessage`) · `EH-5` (xoá 4 mã chỉ khai báo,
+> giữ 5 kèm lý do) · `EH-6` (tài liệu). `EH-7`/`EH-8` **hoãn có chủ đích**, lý do ở §4 của plan.
+> **1181 case unit / 152 class + 142 case IT / 21 class IT · failures = 0, errors = 0**
+> (`mvn -o clean verify` thật với Docker) · nghiệm thu mutation 5/5 đụng `src/main`.
+>
+> Trước đó: **Trả lời `live-data-audit.md` của FE** hoàn thành 2026-08-14 — bản ghi
 > đầy đủ `CLAUDE.md §0.44`, hướng dẫn FE `FE_SingleTask_Response.md`. Migration **`V58`**
 > (`mrp_runs` + idempotency). Hai thay đổi: available của lot `HOLD`/`REJECTED` nay là `0` trên
 > `/inventory/balances` + `/inventory/lots*` (`B116`), và `POST /planning-runs` nhận

@@ -117,8 +117,11 @@ public class UserService {
 
     @Transactional
     @PreAuthorize("hasRole('ADMIN')")
+    // entityId (not entityIdExpression): the method returns void, so "toString()" was evaluated
+    // against nothing and the deleted user was never named in its own deletion record.
     @Auditable(action = AuditAction.USER_DELETED, entityType = "User",
-               entityIdExpression = "toString()")
+               entityId = "#userId",
+               operation = com.erp.manufacturing.common.audit.model.AuditOperation.DELETE)
     public void delete(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));

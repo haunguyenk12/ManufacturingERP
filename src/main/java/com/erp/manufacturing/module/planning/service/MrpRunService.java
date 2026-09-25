@@ -4,6 +4,7 @@ import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.context.RequestContext;
+import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -23,6 +24,7 @@ import com.erp.manufacturing.module.planning.dto.SupplySuggestionResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -42,7 +44,11 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MrpRunService {
+
+    /** Shown to the client when the underlying failure was never meant for one to read. */
+    static final String GENERIC_FAILURE_MESSAGE = "MRP calculation failed - see server logs";
 
     private final MrpRunRepository mrpRunRepository;
     private final PlanningDemandRepository planningDemandRepository;
@@ -54,6 +60,7 @@ public class MrpRunService {
     private final MrpPlanningMapper mapper;
     private final AuditLogService auditLogService;
     private final IdempotencySupport idempotency;
+    private final MrpRunStateRecorder runStateRecorder;
 
     /**
      * Runs MRP synchronously.
@@ -74,7 +81,10 @@ public class MrpRunService {
      */
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MRP_RUN', 'PLANT', #request.plantId())")
-    @Auditable(action = AuditAction.MRP_RUN_CREATED, entityType = "MrpRun", entityIdExpression = "mrpRunId.toString()")
+    @Auditable(action = AuditAction.MRP_RUN_CREATED, entityType = "MrpRun", entityIdExpression = "mrpRunId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public MrpRunResponse run(MrpRunCreateRequest request, String idempotencyKey) {
         String normalizedKey = StringUtils.hasText(idempotencyKey)
                 ? idempotency.normalizeKey(idempotencyKey)
@@ -117,12 +127,13 @@ public class MrpRunService {
                 .idempotencyKey(normalizedKey)
                 .payloadHash(normalizedKey == null ? null : idempotency.payloadHash(request))
                 .build();
-        run.start(Instant.now());
-        // saveAndFlush, not save: the INSERT has to hit the database now so the key is claimed
-        // before the calculation starts. With a deferred flush a concurrent duplicate would run the
-        // whole thing and only collide at commit, wasting the work it was sent to prevent.
-        run = mrpRunRepository.saveAndFlush(run);
-        MrpRun persistedRun = run;
+        // Committed in a transaction of its own (EH-4). Flushing inside this transaction was not
+        // enough on two counts: an uncommitted row is invisible to the failure recorder below, and it
+        // makes a concurrent duplicate key block on the index rather than fail fast.
+        UUID mrpRunId = runStateRecorder.start(run);
+        MrpRun persistedRun = mrpRunRepository.findById(mrpRunId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "MRP run", mrpRunId));
 
         mrpRunDemandRepository.saveAll(demands.stream()
                 .map(demand -> snapshotDemand(persistedRun, demand))
@@ -146,8 +157,11 @@ public class MrpRunService {
                     countBlockedProposals(result));
             auditRunOutcome(AuditAction.MRP_RUN_COMPLETED, persistedRun, null);
         } catch (RuntimeException e) {
-            persistedRun.fail(Instant.now(), e.getMessage());
-            auditRunOutcome(AuditAction.MRP_RUN_FAILED, persistedRun, e.getMessage());
+            String recorded = clientSafeFailureMessage(e);
+            log.error("MRP run {} failed: {}", persistedRun.getCode(), e.getMessage(), e);
+            MrpRunResponse failed = runStateRecorder.recordFailure(mrpRunId, recorded);
+            auditRunOutcome(AuditAction.MRP_RUN_FAILED, persistedRun, recorded);
+            return failed;
         }
 
         return mapper.toResponse(mrpRunRepository.save(persistedRun));
@@ -396,6 +410,20 @@ public class MrpRunService {
             throw ExceptionFactory.custom(ValidationErrorCode.INVALID_INPUT,
                     "Warehouse must belong to the selected plant");
         }
+    }
+
+    /**
+     * What {@code MrpRunResponse.errorMessage} is allowed to say.
+     *
+     * <p>An {@link AppException} was raised on purpose by this system and its message was written for
+     * whoever made the request, so it is passed through — that is how a planner learns their run hit
+     * {@code AMBIGUOUS_WAREHOUSE_POLICY} rather than just "it failed". Anything else is an
+     * unanticipated failure whose message can be a driver or Hibernate string; those went straight
+     * onto the response before EH-4, the one place in this codebase that leaked internals to a client.
+     * The full exception is logged either way, so nothing is lost for diagnosis.
+     */
+    private String clientSafeFailureMessage(RuntimeException e) {
+        return e instanceof AppException ? e.getMessage() : GENERIC_FAILURE_MESSAGE;
     }
 
     private void auditRunOutcome(AuditAction action, MrpRun run, String description) {

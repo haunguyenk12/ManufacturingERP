@@ -34,7 +34,8 @@ public class ItemService {
 
     @Transactional
     @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_MANAGE', #companyId)")
-    @Auditable(action = AuditAction.ITEM_CREATED, entityType = "Item", entityIdExpression = "itemId.toString()")
+    @Auditable(action = AuditAction.ITEM_CREATED, entityType = "Item", entityIdExpression = "itemId.toString()",
+               companyId = "#result?.companyId()")
     public ItemResponse createItem(UUID companyId, ItemCreateRequest request) {
         Company company = findCompany(companyId);
         if (request.serialTracked()) {
@@ -42,7 +43,7 @@ public class ItemService {
                     "Serial Tracking is deferred; use NON_TRACKED or LOT_TRACKED");
         }
         if (!company.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot create item under inactive company: " + companyId);
         }
 
@@ -95,7 +96,8 @@ public class ItemService {
 
     @Transactional
     @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
-    @Auditable(action = AuditAction.ITEM_UPDATED, entityType = "Item", entityIdExpression = "itemId.toString()")
+    @Auditable(action = AuditAction.ITEM_UPDATED, entityType = "Item", entityIdExpression = "itemId.toString()",
+               companyId = "#result?.companyId()")
     public ItemResponse updateItem(UUID itemId, ItemUpdateRequest request) {
         Item item = findItem(itemId);
         ensureActiveItem(item);
@@ -106,7 +108,8 @@ public class ItemService {
 
     @Transactional
     @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
-    @Auditable(action = AuditAction.ITEM_DEACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()")
+    @Auditable(action = AuditAction.ITEM_DEACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()",
+               companyId = "#result?.companyId()")
     public ItemResponse deactivateItem(UUID itemId) {
         Item item = findItem(itemId);
         item.deactivate();
@@ -115,11 +118,12 @@ public class ItemService {
 
     @Transactional
     @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
-    @Auditable(action = AuditAction.ITEM_ACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()")
+    @Auditable(action = AuditAction.ITEM_ACTIVATED, entityType = "Item", entityIdExpression = "itemId.toString()",
+               companyId = "#result?.companyId()")
     public ItemResponse activateItem(UUID itemId) {
         Item item = findItem(itemId);
         if (!item.getCompany().isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot activate an item while its company is inactive: " + itemId);
         }
         item.activate();
@@ -144,7 +148,7 @@ public class ItemService {
 
     private void ensureActiveItem(Item item) {
         if (!item.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot update inactive item: " + item.getItemId());
         }
     }

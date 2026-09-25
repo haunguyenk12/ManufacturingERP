@@ -34,7 +34,8 @@ public class ItemStandardCostService {
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_COSTING_MANAGE', 'COMPANY', #companyId)")
     @Auditable(action = AuditAction.ITEM_STANDARD_COST_UPSERTED, entityType = "ItemStandardCost",
-            entityIdExpression = "itemStandardCostId.toString()")
+            entityIdExpression = "itemStandardCostId.toString()",
+               companyId = "#result?.companyId()")
     public ItemStandardCostResponse upsert(UUID companyId, UUID itemId, ItemStandardCostRequest request) {
         Item item = itemLookupService.getActiveItem(itemId);
         ensureItemBelongsToCompany(item, companyId);
@@ -76,7 +77,7 @@ public class ItemStandardCostService {
 
     private void ensureItemBelongsToCompany(Item item, UUID companyId) {
         if (!item.getCompany().getCompanyId().equals(companyId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to the given company");
         }
     }

@@ -49,7 +49,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', 'PLANT', #request.plantId())")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CREATED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CREATED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse create(PurchaseRequisitionCreateRequest request) {
         PurchaseRequisition requisition = buildRequisition(
                 request.companyId(),
@@ -67,7 +70,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@mrpPlanningPermissionGuard.hasSuggestionAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', #suggestionId)")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CREATED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CREATED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse convertFromSuggestion(UUID suggestionId,
                                                              PurchaseRequisitionFromSuggestionRequest request) {
         SupplySuggestion suggestion = supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestionId)
@@ -144,7 +150,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasRequisitionAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', #requisitionId)")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_APPROVED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_APPROVED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse approve(UUID requisitionId, PurchaseDecisionRequest request) {
         PurchaseRequisition requisition = findRequisition(requisitionId);
         ensureDraft(requisition);
@@ -166,7 +175,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasRequisitionAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', #requisitionId)")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_REJECTED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_REJECTED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse reject(UUID requisitionId, PurchaseDecisionRequest request) {
         PurchaseRequisition requisition = findRequisition(requisitionId);
         ensureDraft(requisition);
@@ -176,7 +188,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasRequisitionAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', #requisitionId)")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CANCELLED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CANCELLED, entityType = "PurchaseRequisition", entityIdExpression = "purchaseRequisitionId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse cancel(UUID requisitionId, PurchaseDecisionRequest request) {
         PurchaseRequisition requisition = findRequisition(requisitionId);
         ensureDraft(requisition);
@@ -186,7 +201,10 @@ public class PurchaseRequisitionService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasRequisitionAccess(authentication, 'PERM_PURCHASE_REQUISITION_MANAGE', #requisitionId)")
-    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CONVERTED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_REQUISITION_CONVERTED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseOrderResponse convertToPurchaseOrder(UUID requisitionId,
                                                         PurchaseRequisitionConvertToOrderRequest request) {
         PurchaseRequisition requisition = findRequisition(requisitionId);
@@ -292,28 +310,28 @@ public class PurchaseRequisitionService {
 
     private void ensurePlantBelongsToCompany(Plant plant, Company company) {
         if (!plant.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Plant must belong to company");
         }
     }
 
     private void ensureWarehouseBelongsToPlant(Warehouse warehouse, Plant plant) {
         if (!warehouse.getPlant().getPlantId().equals(plant.getPlantId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Warehouse must belong to plant");
         }
     }
 
     private void ensureItemBelongsToCompany(Item item, Company company) {
         if (!item.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to company");
         }
     }
 
     private void ensureSupplierBelongsToCompany(Supplier supplier, Company company) {
         if (!supplier.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Supplier must belong to company");
         }
     }

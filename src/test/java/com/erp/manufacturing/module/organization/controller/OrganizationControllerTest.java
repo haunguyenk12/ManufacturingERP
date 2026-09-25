@@ -147,9 +147,9 @@ class OrganizationControllerTest {
     @Test
     @DisplayName("createPlant: inactive parent company stays 422 OPERATION_NOT_ALLOWED "
             + "(§5.3 — master data, not a document state conflict)")
-    void createPlant_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+    void createPlant_inactiveCompany_returns422ResourceInactive() throws Exception {
         when(organizationService.createPlant(eq(COMPANY_ID), any(PlantCreateRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Cannot create plant under inactive company: " + COMPANY_ID));
 
         mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/plants")
@@ -157,8 +157,8 @@ class OrganizationControllerTest {
                         .content("""
                                 {"code":"PLANT-01","name":"Hanoi Plant","timezone":"Asia/Ho_Chi_Minh"}
                                 """))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 
@@ -236,15 +236,15 @@ class OrganizationControllerTest {
     }
 
     @Test
-    @DisplayName("activatePlant: inactive parent company returns 422 OPERATION_NOT_ALLOWED")
-    void activatePlant_inactiveCompany_returns422OperationNotAllowed() throws Exception {
+    @DisplayName("activatePlant: inactive parent company returns 422 RESOURCE_INACTIVE")
+    void activatePlant_inactiveCompany_returns422ResourceInactive() throws Exception {
         when(organizationService.activatePlant(PLANT_ID))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Cannot activate a plant while its company is inactive: " + PLANT_ID));
 
         mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/activate"))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 
@@ -263,15 +263,15 @@ class OrganizationControllerTest {
     }
 
     @Test
-    @DisplayName("activateWarehouse: inactive parent plant returns 422 OPERATION_NOT_ALLOWED")
-    void activateWarehouse_inactivePlant_returns422OperationNotAllowed() throws Exception {
+    @DisplayName("activateWarehouse: inactive parent plant returns 422 RESOURCE_INACTIVE")
+    void activateWarehouse_inactivePlant_returns422ResourceInactive() throws Exception {
         when(organizationService.activateWarehouse(WAREHOUSE_ID))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Cannot activate a warehouse while its plant is inactive: " + WAREHOUSE_ID));
 
         mockMvc.perform(post("/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 }

@@ -31,7 +31,6 @@ public enum AuthErrorCode implements ErrorCode {
     TOKEN_REUSE_DETECTED    ("TOKEN_REUSE_DETECTED",   "Suspicious activity detected. Please login again.", HttpStatus.UNAUTHORIZED),
 
     // ── Session ────────────────────────────────────────────────────────────
-    SESSION_CONFLICT        ("SESSION_CONFLICT",       "Session conflict detected",                 HttpStatus.CONFLICT),
     /**
      * B81 (D8b): the session behind this refresh token has been alive longer than the absolute
      * timeout, so it is retired regardless of how recently it was used. Shares HTTP 401 with

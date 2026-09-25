@@ -62,7 +62,9 @@ public class SalesOrderService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_MANAGE', 'PLANT', #request.plantId())")
-    @Auditable(action = AuditAction.SALES_ORDER_CREATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()")
+    @Auditable(action = AuditAction.SALES_ORDER_CREATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public SalesOrderResponse create(SalesOrderCreateRequest request) {
         Company company = organizationLookupService.getActiveCompany(request.companyId());
         Plant plant = organizationLookupService.getActivePlant(request.plantId());
@@ -102,7 +104,9 @@ public class SalesOrderService {
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
-    @Auditable(action = AuditAction.SALES_ORDER_UPDATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()")
+    @Auditable(action = AuditAction.SALES_ORDER_UPDATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public SalesOrderResponse update(UUID salesOrderId, SalesOrderUpdateRequest request) {
         SalesOrder order = findOrder(salesOrderId);
         if (!order.isDraft()) {
@@ -144,7 +148,9 @@ public class SalesOrderService {
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
-    @Auditable(action = AuditAction.SALES_ORDER_CONFIRMED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()")
+    @Auditable(action = AuditAction.SALES_ORDER_CONFIRMED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public SalesOrderResponse confirm(UUID salesOrderId) {
         SalesOrder order = findOrder(salesOrderId);
         if (!order.isDraft()) {
@@ -173,7 +179,9 @@ public class SalesOrderService {
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
-    @Auditable(action = AuditAction.SALES_ORDER_CANCELLED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()")
+    @Auditable(action = AuditAction.SALES_ORDER_CANCELLED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
     public SalesOrderResponse cancel(UUID salesOrderId) {
         SalesOrder order = findOrder(salesOrderId);
         if (!order.isDraft() && !order.isConfirmed()) {
@@ -319,14 +327,14 @@ public class SalesOrderService {
 
     private void ensurePlantBelongsToCompany(Plant plant, Company company) {
         if (!plant.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Plant must belong to the selected company");
         }
     }
 
     private void ensureItemBelongsToCompany(Item item, Company company) {
         if (!item.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to the selected company");
         }
     }

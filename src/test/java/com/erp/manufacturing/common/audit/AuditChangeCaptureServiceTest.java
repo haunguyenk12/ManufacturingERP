@@ -12,8 +12,12 @@ import static org.mockito.Mockito.mock;
 class AuditChangeCaptureServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    // Real sanitizer, not a mock: it owns the sensitive-field policy this test asserts, so mocking it
+    // would delete the very rule under test (rule R3).
+    private final AuditInputSanitizer sanitizer = new AuditInputSanitizer(
+            objectMapper, new AuditMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     private final AuditChangeCaptureService service = new AuditChangeCaptureService(
-            mock(jakarta.persistence.EntityManager.class), objectMapper);
+            mock(jakarta.persistence.EntityManager.class), objectMapper, sanitizer);
 
     @Test
     void calculateChanges_update_returnsOnlyChangedBusinessFieldsWithBeforeAndAfterValues() {

@@ -24,6 +24,9 @@ import java.util.UUID;
 @RequestMapping("/v1/test/exceptions")
 class ExceptionTestController {
 
+    static final String DEFAULT_DUPLICATE_DETAIL =
+            "ERROR: duplicate key value violates unique constraint \"uk_companies_code\"";
+
     @GetMapping("/app")
     String app() {
         throw new AppException(BusinessErrorCode.INSUFFICIENT_STOCK);
@@ -55,9 +58,15 @@ class ExceptionTestController {
         return warehouseId.toString();
     }
 
+    /**
+     * EH-3: the answer now depends on <em>which</em> constraint failed, so the test drives the driver
+     * message. The default is a real PostgreSQL unique-violation string rather than the placeholder
+     * {@code "dup"} that used to be here, because "409 duplicate" is only a meaningful assertion when
+     * the input actually describes a duplicate.
+     */
     @GetMapping("/data-integrity")
-    String dataIntegrity() {
-        throw new DataIntegrityViolationException("dup");
+    String dataIntegrity(@RequestParam(defaultValue = DEFAULT_DUPLICATE_DETAIL) String detail) {
+        throw new DataIntegrityViolationException(detail);
     }
 
     /**

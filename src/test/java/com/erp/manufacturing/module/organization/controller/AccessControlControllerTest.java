@@ -173,32 +173,32 @@ class AccessControlControllerTest {
     }
 
     @Test
-    @DisplayName("assignRole: inactive role stays 422 OPERATION_NOT_ALLOWED (§5.3 master data)")
-    void assignRole_inactiveRole_returns422OperationNotAllowed() throws Exception {
+    @DisplayName("assignRole: inactive role stays 422 RESOURCE_INACTIVE (§5.3 master data)")
+    void assignRole_inactiveRole_returns422ResourceInactive() throws Exception {
         when(accessControlService.assignRole(any(UserRoleAssignmentRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Role is inactive: " + ROLE_ID));
 
         mockMvc.perform(post("/access/v1/assignments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(assignBody()))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 
     @Test
-    @DisplayName("assignRole: inactive access scope stays 422 OPERATION_NOT_ALLOWED (§5.3 master data)")
-    void assignRole_inactiveScope_returns422OperationNotAllowed() throws Exception {
+    @DisplayName("assignRole: inactive access scope stays 422 RESOURCE_INACTIVE (§5.3 master data)")
+    void assignRole_inactiveScope_returns422ResourceInactive() throws Exception {
         when(accessControlService.assignRole(any(UserRoleAssignmentRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE,
                         "Access scope is inactive: " + SCOPE_ID));
 
         mockMvc.perform(post("/access/v1/assignments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(assignBody()))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()));
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()));
     }
 
     @Test

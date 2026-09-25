@@ -1,10 +1,16 @@
 # Manufacturing Gap Roadmap – Kế Hoạch Bù Đắp Khoảng Trống So Với Lý Thuyết
 
 > **Bối cảnh:** File này tổng hợp các phần **còn thiếu** của hệ thống khi đối chiếu với:
-> 1. Tài liệu lý thuyết *"Phân tích chuyên sâu Manufacturing ERP vs Commercial ERP"*
+> 1. Tài liệu lý thuyết **`TÀI LIỆU PHÂN TÍCH CHUYÊN SÂU (1).pdf`** — *"Sự khác biệt giữa ERP Sản xuất
+>    và ERP Quản lý Doanh nghiệp Thương mại"* (10 trang, ở thư mục gốc repo)
 > 2. Sơ đồ nghiệp vụ mục tiêu `business_flow.jpg`
 >
 > Sau đó chia thành các **phase độc lập, kiểm soát được**, sắp theo dependency + giá trị.
+>
+> 🔴 **Đối chiếu gần nhất: 2026-09-25** — đọc lại toàn bộ PDF rồi kiểm từng yêu cầu **trực tiếp trên
+> code/schema**, không suy từ tài liệu cũ. Kết quả đầy đủ ở **§2.0**; 5 phase mới (`P7`–`P11`) sinh ra
+> từ đúng lượt đối chiếu đó. Hiện trạng đo được: **16 module**, **64 bảng**, **66 migration** (mới nhất
+> `V68`).
 >
 > **Ràng buộc nền tảng:** Hệ thống **CHƯA có tầng OT** (không kết nối trực tiếp máy móc / PLC /
 > sensor). Vì vậy roadmap này **chỉ gồm các hạng mục làm được thuần ở tầng ERP**. Các hạng mục
@@ -19,26 +25,142 @@
   Material Issue/Receipt, Variance service, dynamic RBAC permission) thay vì phát minh mới.
 - **Mỗi phase phải build + test PASS độc lập**, không để hệ thống ở trạng thái nửa vời.
 - **Không đụng OT:** mọi dữ liệu real-time từ máy móc đều nằm ngoài phạm vi.
-- Migration Flyway tiếp nối số hiện tại (mới nhất là `V24` – do `P1` tạo), phase mới bắt đầu từ `V25`.
+- Migration Flyway tiếp nối số hiện tại — **mới nhất là `V68`** (track `AR-*`, audit append-only,
+  2026-09-02), phase mới bắt đầu từ `V69`. *(Dòng này từng ghi `V24` suốt từ `P1` — đã lệch 44
+  migration; sửa 2026-09-25.)*
 
 ---
 
-## 2. Bảng Tổng Quan Các Phase
+## 2. Đối Chiếu Tài Liệu & Bảng Tổng Quan Các Phase
+
+### 2.0 Ma Trận Đối Chiếu Với PDF Lý Thuyết  *(kiểm chứng trên code 2026-09-25)*
+
+> **Cách đọc:** ✅ = có đủ · 🟡 = có một phần, khoảng trống ghi rõ ở cột cuối · ❌ = chưa có ·
+> ⛔ = chờ tầng OT (xem [Deferred](#phase-deferred--phụ-thuộc-ot-chưa-làm)).
+>
+> 🔴 **Mọi ô trong bảng này được kiểm bằng cách đọc entity/migration thật, không phải bằng cách đọc
+> `CLAUDE.md`.** Đó là lý do nó tìm ra khoảng trống mà các bản roadmap trước đã tick `[x]` — xem
+> "Ba khoảng trống lớn nhất" ngay dưới bảng.
+
+#### §3 + §5 — So sánh theo module
+
+| Yêu cầu của PDF | | Bằng chứng trong code | Khoảng trống chính xác |
+|---|---|---|---|
+| **BOM đa cấp + Version control** (§3.1, §5) | ✅ | `bom_headers`/`bom_lines`; `UNIQUE (company, parent_item, revision)` giữ **mọi** revision cũ, đúng một `ACTIVE`; `MrpCalculationService.expandChildren` bung đệ quy; WO chụp ảnh BOM lúc create (`B12`) | Không có **date-effectivity** (`effectiveFrom`/`To`). Không phải lỗ hổng: snapshot trên WO đã trả lời "lệnh này dùng BOM nào" — xem §4 |
+| **Routing** (§3.1) | ✅ | `routings`/`routing_operations`, 1 `ACTIVE`/`(company,item)`, snapshot bất biến lên `work_order_operations` (`B49`/`B56`) | — |
+| **Work Order** (§3.1, §5) | ✅ | `work_orders`, 8 trạng thái `DRAFT→PLANNED→RELEASED→IN_PROGRESS→COMPLETED→CLOSED` (+ `BLOCKED`/`CANCELLED`) | — |
+| **MRP I** (§3.1, §3.4) | ✅ | `mrp_runs`/`mrp_requirement_lines`/`supply_suggestions`; netting `gross + max(safety, reorder) − (available + openWO + openPO)` | — |
+| **MRP II / CRP** (§3.1, §3.4, §5) | 🟡 | `CapacityBoardService` + `ScheduleAdjustmentService` (`C2-8`): load/capacity/utilization theo `(work_center, ngày)`, cờ `overload` | **CRP là một read RIÊNG, không đóng vòng vào MRP run.** Lượt chạy MRP không bao giờ đánh dấu một đề xuất là bất khả thi về năng lực ⇒ chưa phải MRP II closed-loop. **→ `P10`** |
+| **Capacity Planning** (§3.1) | 🟡 | Như trên; lịch operation sinh ở `release()`, **infinite-capacity** (không biết WO khác đang chiếm cùng work center) | Cùng khoảng trống với hàng trên. **→ `P10`** |
+| **Shop Floor Control** (§3.1) | 🟡 | `production_executions`: good/scrap/rework theo **từng operation**, `actualStartedAt`/`EndedAt`, `operatorUserId`; `wip_transactions` có `work_order_operation_id` | `WorkOrderOperation` **không có cột `status`** — không có `PENDING/IN_PROGRESS/DONE`, không endpoint start/complete ⇒ không trả lời được "công đoạn 20 đang chạy, công đoạn 30 chưa bắt đầu". **→ `P8`** |
+| **WIP Inventory** (§3.2) | 🟡 | `wip_transactions` (6 loại: `START`, `MATERIAL_ISSUED`, `OUTPUT_COMPLETED`, `OUTPUT_RECEIPTED`, `SCRAP_REPORTED`, `REWORK_REPORTED`); `WarehouseType.WIP` | Ledger **chỉ có `quantity`, không có cột giá trị** — xem hàng "giá trị WIP" ở §10.6 bên dưới. **→ `P7`** |
+| **Kho theo lệnh sản xuất** (§3.2, §4) | ✅ | `material_issues`/`material_issue_lines` (Raw→WIP), `production_receipts`/`production_receipt_lines` (WIP→FG); `WarehouseType` = `RAW_MATERIAL`/`WIP`/`FINISHED_GOODS`/`QUALITY`/`SCRAP`/`GENERAL` | — |
+| **Batch/Lot tracking** (§3.2, §3.5) | ✅ | `inventory_lots` + `Item.lotTracked`, FEFO, `LotStatus` `AVAILABLE`/`HOLD`/`REJECTED`/`EXPIRED` | — |
+| **Serial tracking** (§3.2, §3.5) | 🟡 | `serial_numbers` + `Item.serialTracked` (loại trừ `lotTracked`), nối vào issue/receipt/adjust (`P5`) | **Goods Receipt chưa nối serial** — nhận NVL serial-tracked qua PO nổ `SERIAL_REQUIRED`. Nợ có chủ đích từ `P5`. **→ `P9`** |
+| **Standard Costing** (§3.3, §5) | ✅ | `item_standard_costs` (material + labor + overhead), `CostingService` roll-up BOM đệ quy | Không có history theo thời gian (quyết định `P3`, xem §4) |
+| **Job Costing** (§3.3) | ✅ | `work_order_cost_accumulators` — cộng dồn actual material/labor/overhead **theo từng WO** | — |
+| **Process Costing** (§3.3) | ❌ | — | Không có equivalent-unit / giá thành theo kỳ-công đoạn. **Cố ý không làm** — xem §4 |
+| **Variance Analysis** (§3.3, §5) | 🟡 | `WorkOrderVarianceService`: quantity variance + Material **Usage** Variance (`usageVarianceCost`) + `costVariance` (standard vs actual) | **Không có bảng `ProductionVariance`** — variance tính live mỗi lần gọi, không chốt lúc WO `CLOSED` ⇒ sửa standard cost hôm nay làm đổi variance của lệnh đã đóng năm ngoái. PDF §10.6.7 liệt kê bảng này. **→ `P7`** |
+| **Traceability toàn chuỗi** (§3.5, §5, Rule 4) | 🟡 | Lot/serial được ghi ở **mọi** mắt xích: `material_issue_lines.lot_id`, `production_receipt_lines.lot_id`, `stock_movements.lot_id`, `serial_numbers` | **Không có truy vấn phả hệ nào.** Dữ liệu nối được qua `work_order_id` nhưng **không service/endpoint nào làm việc đó**: không truy ngược (lô thành phẩm → lô NVL đã tiêu) và không truy xuôi (lô NVL lỗi → những lô thành phẩm nào dính). Grep `genealogy`/`traceability` chỉ ra `traceId` của request, **không liên quan**. **→ `P9`** |
+
+#### §10.6 — Quy trình nhập/xuất kho theo BOM
+
+| Bước / yêu cầu | | Bằng chứng | Khoảng trống |
+|---|---|---|---|
+| §10.6.2-1 Tạo WO từ **MRP**/MPS | 🟡 | `SupplySuggestionService.convertToWorkOrder` | **Không có MPS** (Master Production Schedule). MRP chạy từ `planning_demands` (Sales Order + `MANUAL`/`FORECAST` nhập tay) — `FORECAST` mới chỉ là **một giá trị enum**, chưa có engine dự báo hay kế hoạch sản xuất chủ đạo theo kỳ. **→ `P11`** |
+| §10.6.2-2 BOM Explosion | ✅ | `WorkOrderService.snapshotComponentLines` + `MrpCalculationService` | — |
+| §10.6.2-3 Material Reservation | ✅ | `material_reservations`, FEFO, gate release phủ 100% (`P1` gate 1a) | — |
+| §10.6.2-4 Material Issue (Raw→WIP) | ✅ | `MaterialIssueService` + `WipTransactionType.MATERIAL_ISSUED` | — |
+| §10.6.3 Theo dõi hao hụt so với BOM | ✅ | `material_issue_lines.over_issue`/`override_reason`; `WorkOrderVarianceService` so `issued` vs `required` | — |
+| §10.6.4-1 Báo cáo hoàn thành | ✅ | `ProductionExecutionService.report` (good/scrap/rework) | Nguồn là nhập tay; "từ MES" ⛔ chờ OT |
+| §10.6.4-2 Tạo Production Receipt | ✅ | `ProductionReceiptService`, vòng đời `DRAFT→PENDING_APPROVAL→APPROVED` | — |
+| §10.6.4-3 **Chuyển GIÁ TRỊ từ WIP → Finished Goods** | ❌ | — | Chỉ **số lượng** dịch chuyển. Không có bút toán giải phóng WIP, không có giá trị gắn lên lô thành phẩm. **→ `P7`** |
+| §10.6.4-4 Cập nhật tồn kho thành phẩm | ✅ | `stock_movements` `RECEIVE` + `stock_balances` | — |
+| §10.6.5 WIP — NVL đã xuất cho lệnh nào | ✅ | `material_issues.work_order_id` | — |
+| §10.6.5 WIP — đang ở **công đoạn** nào | 🟡 | Suy được từ `production_executions.operation_id` / `wip_transactions.work_order_operation_id` | Chỉ biết công đoạn **đã có báo cáo**, không biết **trạng thái** công đoạn. **→ `P8`** |
+| §10.6.5 WIP — hoàn thành / scrap / rework | ✅ | `work_orders.actual_good/scrap/rework_quantity` | — |
+| §10.6.5 WIP — **giá trị WIP theo từng giai đoạn** | ❌ | `work_order_cost_accumulators` có `UNIQUE (work_order_id)` ⇒ **một dòng tổng/WO**, không tách theo công đoạn; `wip_transactions` không có cột tiền | Không trả lời được "đang nằm bao nhiêu tiền ở công đoạn Hàn". **→ `P7`** |
+| §10.6.6 **Rule 1** — không xuất vượt tồn khả dụng ⇒ Reject | ✅ | `INSUFFICIENT_AVAILABLE_STOCK` (409) | — |
+| §10.6.6 **Rule 2** — xuất vượt BOM ⇒ Warning + phê duyệt | ✅ | `PERM_MATERIAL_ISSUE_OVERRIDE` + bắt buộc **cả** `reasonCode` lẫn `overrideReason`, cờ `over_issue` lưu trên dòng | Là **phê duyệt trước bằng quyền**, không phải workflow 2 bước `PENDING_APPROVAL`. Quyết định có chủ đích của `P1` ("phương án nhẹ") |
+| §10.6.6 **Rule 3** — không nhập vượt WO ⇒ Reject | ✅ | Trần `B16` + `PLANNED_QUANTITY_EXCEEDED` (409) | — |
+| §10.6.6 **Rule 4** — bắt buộc Lot/Batch/Serial + traceability | 🟡 | Lot/serial ghi đủ ở mọi mắt xích | Thiếu truy vấn phả hệ + Goods Receipt chưa nối serial. **→ `P9`** |
+
+#### §10.6.7 — "Cấu trúc Database cần bổ sung"
+
+| Bảng PDF yêu cầu | | Bảng thật trong repo |
+|---|---|---|
+| `BOM_Header` & `BOM_Detail` | ✅ | `bom_headers`, `bom_lines` |
+| `WorkOrder` | ✅ | `work_orders` (+ `work_order_component_lines`, `work_order_operations`) |
+| `MaterialIssue` & `Detail` | ✅ | `material_issues`, `material_issue_lines` |
+| `ProductionReceipt` & `Detail` | ✅ | `production_receipts`, `production_receipt_lines` |
+| `WIP_Transaction` | ✅ | `wip_transactions` |
+| `LotTracking` / `BatchTracking` | ✅ | `inventory_lots` (+ `serial_numbers`) |
+| **`ProductionVariance`** | ❌ | **Không có** — tính live trong `WorkOrderVarianceService`. **→ `P7`** |
+
+#### §6 — Tích hợp MES / ISA-95 / OEE
+
+⛔ **Toàn bộ chờ tầng OT**, đã nằm đúng chỗ ở [Deferred](#phase-deferred--phụ-thuộc-ot-chưa-làm).
+Kiểm lại 2026-09-25: grep `MesTransaction`/`Isa95`/`OEE`/`Downtime` trong `src/main` ra **0** kết quả
+nghiệp vụ (chỉ một dòng javadoc nhắc tên OEE). Không có gì bị làm dở dang — đúng như kế hoạch.
+
+#### §8 — Khuyến nghị triển khai của PDF
+
+| Khuyến nghị | | Ghi chú |
+|---|---|---|
+| 1. Xác định loại hình khách hàng | ✅ | Không phải hạng mục code |
+| 2. GĐ1 — kho mở rộng được (`IsManufacturing = true`) | ✅ **vượt yêu cầu** | Repo dùng `WarehouseType` **6 giá trị** thay vì một cờ boolean — phân biệt được kho NVL / WIP / thành phẩm / QC / phế liệu |
+| 3. GĐ2 — BOM + Work Order + MRP | ✅ | `P1`–`P6` |
+| 4. GĐ3 — Tích hợp MES (ISA-95) | ⛔ | Deferred |
+| 5. Làm ngay sau Purchase Receipt: Material Issue + Production Receipt | ✅ | Cả hai xong từ trước `P1` |
+
+### 2.0.1 Ba Khoảng Trống Lớn Nhất Còn Lại
+
+> Xếp theo khoảng cách so với lý thuyết, không theo effort.
+
+1. 🔴 **Dòng chảy GIÁ TRỊ dừng ở Work Order, không đi qua WIP** (`P7`). Repo trả lời được *"lệnh này
+   tốn bao nhiêu"* nhưng **không** trả lời được *"đang có bao nhiêu tiền nằm trong xưởng, ở công đoạn
+   nào"* — đúng hai câu PDF nhấn ở §10.6.4-3 và §10.6.5. Nguyên nhân cụ thể đã kiểm:
+   `work_order_cost_accumulators` có `UNIQUE (work_order_id)` ⇒ **một dòng tổng cho mỗi WO**, và
+   `wip_transactions` **không có cột tiền nào**. Đây là khoảng trống lý thuyết lớn nhất còn lại sau
+   khi `P3` đóng.
+2. 🔴 **Traceability có dữ liệu nhưng không có đường đọc** (`P9`). Lot/serial được ghi ở mọi mắt
+   xích, nhưng không truy vấn nào nối chúng lại. Hệ quả nghiệp vụ thật: khi một lô NVL bị phát hiện
+   lỗi, **không có cách nào liệt kê những lô thành phẩm đã dùng nó** ⇒ không thu hồi có mục tiêu
+   được, đúng thứ Rule 4 tồn tại để phục vụ.
+3. 🔴 **Công đoạn không có trạng thái** (`P8`). Thiết kế gốc của `P4` trong chính file này ghi rõ
+   *"mỗi dòng status `PENDING/IN_PROGRESS/DONE`"* nhưng phần đó **chưa bao giờ được implement**, mà
+   `P4` vẫn được tick `[x]`. Đây là lần thứ tư repo mắc lỗi "tuyên bố đóng rộng hơn phạm vi đã rà"
+   (ba lần trước: `CLAUDE.md §0.20`) ⇒ khi tick một phase, ghi rõ **đã làm tới đâu**, đừng ghi "xong".
+
+---
+
+### 2.A Bảng Tổng Quan Các Phase
 
 | ✔ | Phase | Tên | Nhóm giá trị | Phụ thuộc | Effort | Cần OT? |
 |---|---|---|---|---|---|---|
 | **[x]** | **P1** | Approval Workflow & Business Gates | Khớp `business_flow` (4 chốt duyệt) | — | Trung bình | Không |
 | **[x]** | **P2** | Quality Control (QC) Module | Khớp `business_flow` (QC + HOLD) | P1 ✅ | Trung bình | Không |
-| **[x]** | **P3** | Costing Engine | Khoảng trống lý thuyết lớn nhất | — | Cao | Không |
+| **[x]** | **P3** | Costing Engine | Giá thành chuẩn + Job Costing + Usage Variance | — | Cao | Không |
 | **[x]** | **P4** | Routing + Work Center + CRP tĩnh + Labor Time | Master Data + Capacity Check | — | Cao | Không |
 | **[x]** | **P5** | Serial Number Tracking | Traceability cấp đơn vị | — | Trung bình–Cao | Không |
 | **[x]** | **P6** | Sales Order & Fulfillment + WO Close | Đóng vòng end-to-end | P2 ✅ | Cao | Không |
+| **[ ]** | **P7** | **WIP Valuation, Cost Flow & Variance Snapshot** | Đóng khoảng trống lý thuyết lớn nhất còn lại | P3 ✅, P4 ✅ | Cao | Không |
+| **[ ]** | **P8** | **Shop Floor Control cấp công đoạn** | Trả lời "đang ở công đoạn nào" | P4 ✅ | Trung bình | Không |
+| **[ ]** | **P9** | **Traceability toàn chuỗi (Genealogy)** | Rule 4 — thu hồi có mục tiêu | P5 ✅ | Trung bình | Không |
+| **[ ]** | **P10** | **CRP đóng vòng vào MRP run (MRP II)** | MRP II closed-loop | P4 ✅ | Trung bình | Không |
+| **[ ]** | **P11** | **MPS (Master Production Schedule)** | Nguồn thứ hai cho MRP | — | Cao | Không |
+| **[ ]** | **P-Deferred** | MES/ISA-95, OEE, WIP real-time, CRP động | Industry 4.0 | Tầng OT | — | **Có** |
+
 > `P6`: Sales Order (`F3`) + Fulfillment allocation (`F6`) ✅ **xong 2026-07-28**. **WO Close/reconcile**
 > (status `CLOSED`, khoá hoàn toàn, do manager qua `POST /work-orders/{id}/close`) ✅ **xong
 > 2026-08-06** — bất biến `B100`, migration `V53`. Bản ghi đầy đủ: `CLAUDE.md §0.34`.
-| **[ ]** | **P-Deferred** | MES/ISA-95, OEE, WIP real-time, CRP động | Industry 4.0 | Tầng OT | — | **Có** |
+>
+> 🔴 **`P7`–`P11` thêm 2026-09-25**, sinh ra từ lượt đối chiếu PDF ở §2.0 — **không** phải ý tưởng mới,
+> mà là những yêu cầu PDF nêu tường minh nhưng code chưa có. Ba cái đầu là ba khoảng trống ở §2.0.1;
+> `P10`/`P11` là hai mức tinh chỉnh của vòng hoạch định. Trước khi bắt tay `P7`, đọc lại §2.0 để biết
+> **chính xác** ô nào của PDF đang trống — đừng làm theo trí nhớ về "costing đã xong ở `P3`".
 
-### 2.1 Bảng Theo Dõi Tiến Độ  *(cập nhật: 2026-07-28)*
+### 2.1 Bảng Theo Dõi Tiến Độ  *(cập nhật: 2026-09-25)*
 
 > **Quy tắc cập nhật:** phase chỉ được tick `[x]` khi **toàn bộ** Definition of Done của phase đó
 > đã đạt và `mvn -o test` PASS. Khi tick xong một phase ⇒ ghi prompt của phase kế tiếp vào
@@ -119,6 +241,25 @@
   - [x] Migration `V28__create_sales_order.sql`, `V29__seed_sales_permissions.sql`
   - [x] Docs: `CLAUDE.md §0.7`, `module/sales/CLAUDE.md` (B43-B47), `roles-and-permissions.md`, `system-flow.md`
   - [ ] **Nửa sau (`F6`)**: fulfillment allocation (`fulfilledQuantity` tăng khi QC `AVAILABLE`), WO Close
+- [ ] **P7 – WIP Valuation, Cost Flow & Variance Snapshot** — *thêm 2026-09-25 từ đối chiếu PDF §10.6.4-3,
+      §10.6.5, §10.6.7*
+  - [ ] Giá trị WIP **theo công đoạn**: hiện `work_order_cost_accumulators` là `UNIQUE (work_order_id)` ⇒
+        một dòng tổng/WO; `wip_transactions` không có cột tiền
+  - [ ] Giải phóng WIP → Finished Goods khi `approve` receipt (hiện chỉ số lượng chuyển, giá trị không)
+  - [ ] Bảng `production_variances` — chốt variance lúc WO `CLOSED` (PDF §10.6.7 liệt kê; hiện tính live)
+- [ ] **P8 – Shop Floor Control cấp công đoạn** — *thêm 2026-09-25 từ PDF §3.1, §10.6.5*
+  - [ ] `work_order_operations.status` (`PENDING`/`IN_PROGRESS`/`COMPLETED`) + endpoint start/complete
+  - [ ] 🔴 Chính thiết kế gốc của `P4` (§3 file này) đã ghi mục này nhưng **chưa bao giờ implement**
+- [ ] **P9 – Traceability toàn chuỗi (Genealogy)** — *thêm 2026-09-25 từ PDF §3.5, Rule 4*
+  - [ ] Truy ngược: lô/serial thành phẩm → WO → `material_issue_lines` → lô/serial NVL đã tiêu
+  - [ ] Truy xuôi (thu hồi): lô NVL → những WO đã dùng → những lô thành phẩm dính
+  - [ ] Nối serial vào Goods Receipt — nợ có chủ đích còn lại của `P5`
+- [ ] **P10 – CRP đóng vòng vào MRP run** — *thêm 2026-09-25 từ PDF §3.1, §3.4, §5*
+  - [ ] MRP run đánh giá năng lực và gắn `exceptionState`/message cho đề xuất bất khả thi
+  - [ ] Hiện `CapacityBoardService` là một read **riêng**, không đụng MRP
+- [ ] **P11 – MPS (Master Production Schedule)** — *thêm 2026-09-25 từ PDF §10.6.2-1*
+  - [ ] Kế hoạch sản xuất chủ đạo theo kỳ cho thành phẩm, làm nguồn demand thứ hai cho MRP
+  - [ ] Hiện `PlanningDemandType.FORECAST` mới chỉ là **một giá trị enum**, không có engine nào đứng sau
 - [ ] **P-Deferred** — chờ tầng OT, không lên lịch
 
 **Track kiểm thử (`T*` – chi tiết ở `TEST_IMPROVEMENT_PLAN.md`):**
@@ -141,11 +282,25 @@
 ### Sơ đồ phụ thuộc
 
 ```text
+── Đã xong ─────────────────────────────────────────────────────────────
 P1 (Gates/Approval) ──► P2 (QC) ──► P6 (Sales Order & Close)
 P3 (Costing)        ── độc lập
 P4 (Routing/CRP)    ── độc lập  (unlock: stage_code có nghĩa, Labor cost cho P3)
 P5 (Serial)         ── độc lập
+
+── Còn lại (thêm 2026-09-25) ───────────────────────────────────────────
+P3 ✅ ─┬─► P7 (WIP Valuation + Variance snapshot)
+P4 ✅ ─┘      ▲
+              └── P8 (Operation status) làm P7 chia được giá trị theo công đoạn
+P4 ✅ ────► P8 (Shop Floor Control cấp công đoạn)
+P4 ✅ ────► P10 (CRP đóng vòng vào MRP run)
+P5 ✅ ────► P9 (Genealogy + serial cho Goods Receipt)
+            P11 (MPS) ── độc lập
 ```
+
+> **`P8` không chặn `P7`, nhưng làm `P7` tốt hơn hẳn.** Không có trạng thái công đoạn thì `P7` chỉ
+> chia được giá trị WIP theo *công đoạn đã có báo cáo*, không theo *công đoạn đang chạy*. Làm `P8`
+> trước là rẻ hơn làm `P7` hai lần.
 
 ---
 
@@ -205,7 +360,7 @@ chỉ thiếu workflow điều khiển transition.
 
 ---
 
-### P3 — Costing Engine ⭐ (khoảng trống lý thuyết lớn nhất)
+### P3 — Costing Engine ⭐ (khoảng trống lý thuyết lớn nhất **tại thời điểm 2026-07**)
 
 > ✅ **Đã xong (2026-08-05).** Phần dưới đây là **thiết kế phác thảo gốc**, giữ lại làm lịch sử —
 > triển khai thật lệch vài chỗ, đã chốt với user trước khi viết kế hoạch chi tiết:
@@ -350,11 +505,196 @@ fulfillment → WO close khi reconcile đủ; test luồng; build + test PASS.
 
 ---
 
+### P7 — WIP Valuation, Cost Flow & Variance Snapshot ⭐ *(khoảng trống lý thuyết lớn nhất còn lại)*
+
+> Thêm 2026-09-25 từ đối chiếu PDF §10.6.4-3, §10.6.5, §10.6.7. **Không** trùng `P3`: `P3` trả lời
+> *"lệnh này tốn bao nhiêu"*, `P7` trả lời *"đang có bao nhiêu tiền nằm trong xưởng, ở đâu"*.
+
+**Hiện trạng đã kiểm trên schema (không phải suy từ tài liệu):**
+
+| Sự thật đo được | Hệ quả |
+|---|---|
+| `work_order_cost_accumulators` có `CONSTRAINT uk_work_order_cost_accumulators_work_order UNIQUE (work_order_id)` | **Đúng một dòng tổng cho mỗi WO** — không có chiều công đoạn để chia giá trị |
+| `wip_transactions` chỉ có `quantity`, **không cột tiền nào** (grep `cost` và `value` trên 3 bảng issue/receipt/wip ⇒ 0 kết quả) | Ledger WIP là ledger **số lượng**, không phải ledger giá trị |
+| `ProductionReceiptService.approve` sinh `RECEIVE` movement + lot, **không** có bút toán nào giảm WIP | Giá trị vào WIP rồi **ở lại đó vĩnh viễn** — accumulator chỉ tăng, không bao giờ được giải phóng |
+| Không có bảng `production_variances` | Variance tính live ⇒ sửa standard cost hôm nay làm **đổi variance của lệnh đã đóng năm ngoái** |
+
+**Mục tiêu:** hoàn tất dòng chảy giá trị `Raw Material → WIP → Finished Goods` mà PDF mô tả, và chốt
+được con số variance tại thời điểm đóng lệnh.
+
+**Thay đổi chính:**
+1. **Giá trị lên ledger WIP** — thêm cột tiền vào `wip_transactions` (material/labor/overhead, hoặc
+   một `amount` + `cost_component`), ghi cùng lúc với `quantity` ở 2 hook đã có
+   (`MaterialIssueService.postNew`, `ProductionExecutionService.reportNew`).
+2. **Chia theo công đoạn** — `work_order_operation_id` **đã có sẵn** trên `wip_transactions`; chỉ cần
+   dùng nó làm chiều gom nhóm. ⚠️ Ý nghĩa của con số phụ thuộc `P8`: không có trạng thái công đoạn thì
+   chỉ gom được theo *công đoạn đã có báo cáo*.
+3. **Giải phóng WIP khi nhập kho** — `ProductionReceiptService.approve` ghi một `wip_transactions` âm
+   (tái dùng `OUTPUT_RECEIPTED` đã có) mang giá trị tương ứng; đó chính là bước 3 của PDF §10.6.4.
+   🔴 Phải chốt phương pháp định giá đơn vị thành phẩm (standard cost × số lượng, **hay** actual WIP
+   chia đều) — hai lựa chọn cho hai con số khác nhau, và nó quyết định phần dư còn lại trong WIP là
+   variance hay là lỗi.
+4. **`production_variances`** — snapshot lúc WO `CLOSED`: quantity variance + usage variance + cost
+   variance, đóng băng bằng standard cost **tại thời điểm đó**. Đọc lịch sử thì đọc bảng; WO chưa đóng
+   thì vẫn tính live như hiện nay.
+5. **Read API** — `GET /work-orders/{id}/wip-valuation` và/hoặc report WIP theo plant/work center.
+
+**Bẫy đã biết trước khi bắt đầu:**
+- 🔴 **Không sửa `work_order_cost_accumulators` thành nhiều dòng/WO.** Nó là nguồn của
+  `costVariance.actual*` trong `WorkOrderVarianceService` (`B94`) và ràng buộc `UNIQUE` chính là thứ
+  giữ cho `upsert` đúng. Thêm chiều công đoạn ở **ledger** (`wip_transactions`), không ở accumulator.
+- 🔴 **`WipTransactionType.OUTPUT_COMPLETED` ≠ `OUTPUT_RECEIPTED`** — cái đầu là "xưởng làm ra", cái
+  sau là "đã nhập kho" (`CLAUDE.md §0.5`). Giải phóng giá trị phải bám cái **sau**.
+- Giá component lấy qua `ItemStandardCostLookupService.findStandardUnitCost` (**fully-loaded**, đã
+  roll-up), không phải field `materialCost` thô — xem `CLAUDE.md §0.31` hệ quả #2.
+
+**Definition of Done:** tồn giá trị WIP đọc được theo WO **và** theo công đoạn; nhập kho thành phẩm
+làm giảm đúng giá trị WIP; WO `CLOSED` có dòng `production_variances` bất biến; test số nghiệp vụ
+thật (rule `R6`) + `*IT` cho ledger giá trị; `mvn -o clean verify` PASS.
+
+**Effort:** Cao. **OT:** Không. **Phụ thuộc:** `P3` ✅, `P4` ✅ (nên làm sau `P8`).
+
+---
+
+### P8 — Shop Floor Control Cấp Công Đoạn
+
+> Thêm 2026-09-25 từ PDF §3.1 ("Shop Floor Control") và §10.6.5 ("sản phẩm đang nằm ở công đoạn nào").
+
+🔴 **Đây là phần `P4` đã thiết kế nhưng không làm.** Mục "Thay đổi chính" của `P4` ở trên ghi nguyên
+văn *"mỗi dòng status `PENDING/IN_PROGRESS/DONE`"* — `work_order_operations` thật **không có cột
+`status`** (đã kiểm entity 2026-09-25), mà `P4` vẫn được tick `[x]`.
+
+**Hiện trạng:** `production_executions` đã ghi good/scrap/rework **theo từng operation**, kèm
+`actualStartedAt`/`actualEndedAt`/`operatorUserId`; `work_order_operations` có `plannedStartAt`/
+`plannedEndAt` (từ `C2-8`). Nghĩa là dữ liệu *"đã xảy ra gì"* có đủ — thiếu *"đang ở trạng thái gì"*.
+
+**Thay đổi chính:**
+- `work_order_operations.status` + CHECK constraint (theo checklist `coding-rules.md §11.3`).
+- Endpoint start/complete operation, hoặc suy trạng thái tự động từ execution đầu tiên/cuối cùng —
+  **chốt một trong hai**, đừng làm cả hai (hai nguồn sự thật cho cùng một trạng thái).
+- `GET /work-orders/{id}` trả trạng thái từng công đoạn; đây là thứ màn hình xưởng cần.
+
+**Bẫy:** thêm giá trị enum là breaking change ngầm — chạy đủ checklist `coding-rules.md §11.3`.
+
+**Definition of Done:** trả lời được "WO này đang ở công đoạn nào"; state machine có test cả nhánh
+vào lẫn nhánh ra; `mvn -o clean verify` PASS.
+
+**Effort:** Trung bình. **OT:** Không. **Phụ thuộc:** `P4` ✅.
+
+---
+
+### P9 — Traceability Toàn Chuỗi (Genealogy)
+
+> Thêm 2026-09-25 từ PDF §3.5 và Rule 4 ("Traceability toàn chuỗi").
+
+🔴 **Dữ liệu đã đủ, đường đọc thì không có.** Lot/serial được ghi ở **mọi** mắt xích
+(`material_issue_lines.lot_id`/`serial_id`, `production_receipt_lines.lot_id`, `stock_movements.lot_id`),
+và `work_order_id` nối hai đầu lại — nhưng **không service/endpoint nào đi theo đường đó**. Grep
+`genealogy`/`traceability` trong `src/main` chỉ ra `traceId` (id correlate log của request), **hoàn
+toàn không liên quan** — đừng đọc nhầm nó thành traceability nghiệp vụ.
+
+**Hệ quả nghiệp vụ thật:** khi một lô NVL bị phát hiện lỗi, hệ thống **không liệt kê được** những lô
+thành phẩm đã dùng nó ⇒ không thu hồi có mục tiêu được. Đó đúng là việc Rule 4 sinh ra để phục vụ.
+
+**Thay đổi chính:**
+1. **Truy ngược** — `GET /inventory/lots/{lotId}/genealogy`: lô thành phẩm → `production_receipt_lines`
+   → `work_order` → `material_issue_lines` → lô/serial NVL đã tiêu (đệ quy lên nếu NVL cũng do sản
+   xuất ra).
+2. **Truy xuôi (thu hồi)** — `GET /inventory/lots/{lotId}/where-used`: lô NVL → những WO đã tiêu nó →
+   những lô thành phẩm sinh ra.
+3. **Nối serial vào Goods Receipt** — nợ có chủ đích còn lại của `P5`: nhận NVL serial-tracked qua PO
+   hiện nổ `SERIAL_REQUIRED`. Không đóng nó thì chuỗi truy vết đứt ngay ở đầu vào.
+
+**Bẫy:** đây là **1 aggregate query mỗi cấp**, không loop theo dòng (`coding-rules.md C14`). Đệ quy
+phải có cycle guard như `CostingService` đã làm. Cross-module đi qua lookup service (`C7`) —
+`inventory → workorder` đã có tiền lệ `LotQcOriginLookupService` (`C2-2`).
+
+**Definition of Done:** từ một lô thành phẩm liệt kê đủ lô NVL cấp 1 và cấp sâu hơn; từ một lô NVL
+liệt kê đủ lô thành phẩm dính; Goods Receipt nhận được item serial-tracked; `*IT` trên Postgres thật
+(JPQL nhiều cấp — rule `R7`); `mvn -o clean verify` PASS.
+
+**Effort:** Trung bình. **OT:** Không. **Phụ thuộc:** `P5` ✅.
+
+---
+
+### P10 — CRP Đóng Vòng Vào MRP Run (MRP II Closed-Loop)
+
+> Thêm 2026-09-25 từ PDF §3.1 ("MRP I/II", "Capacity Planning") và §3.4 ("MRP + CRP").
+
+**Hiện trạng:** CRP tĩnh **có** (`CapacityBoardService` + `ScheduleAdjustmentService`, `C2-8`) nhưng
+là một **read riêng biệt** — `CLAUDE.md §0.30` ghi rõ: *"đánh dấu `OVER_CAPACITY` ở MRP → cờ
+`overload` trên Capacity Board (một read độc lập, **không phải nhánh của MRP run**)"*. Lịch operation
+sinh ở `release()` là **infinite-capacity**. Vì vậy một lượt MRP **không bao giờ** nói cho người lập
+kế hoạch biết rằng kế hoạch nó vừa đề xuất là bất khả thi về năng lực.
+
+**Thay đổi chính:** `MrpRunService` gọi đánh giá năng lực sau khi có đề xuất, gắn
+`exceptionState`/`messages[]` (cơ chế **đã có sẵn** từ `F5-B`: `READY`/`WARNING`/`BLOCKED`) cho đề
+xuất vượt năng lực work center trong kỳ. Tái dùng `CapacityBoardService.dayCapacityMinutes`/
+`utilizationPercent` — **không** viết công thức thứ hai (hai endpoint phải báo cùng một con số quá
+tải, đúng lý do `C2-8` để mấy method đó `public`).
+
+**Quyết định cần chốt trước khi code:** vượt năng lực là `WARNING` (vẫn convert được) hay `BLOCKED`
+(chặn convert)? `BLOCKED` hiện đang dành cho "thiếu BOM/routing" — thiếu dữ liệu, khác hẳn "đủ dữ
+liệu nhưng xưởng không kham nổi". Khuyến nghị `WARNING`.
+
+**Definition of Done:** lượt MRP trên dữ liệu vượt năng lực trả đề xuất có cảnh báo; con số khớp
+Capacity Board; `mvn -o clean verify` PASS.
+
+**Effort:** Trung bình. **OT:** Không (vẫn là CRP **tĩnh**; CRP động ⛔ Deferred).
+
+---
+
+### P11 — MPS (Master Production Schedule)
+
+> Thêm 2026-09-25 từ PDF §10.6.2-1 ("Tạo Work Order từ MRP/**MPS**").
+
+**Hiện trạng:** MRP chạy từ `planning_demands` — nguồn là Sales Order đã confirm, hoặc demand nhập
+tay. `PlanningDemandType.FORECAST` **tồn tại nhưng chỉ là một giá trị enum**: không engine dự báo,
+không kế hoạch sản xuất chủ đạo theo kỳ đứng sau nó.
+
+**Vì sao xếp cuối:** nhu cầu nhập tay (`MANUAL`) đã phủ phần lớn tác dụng thực tế của MPS trong một
+hệ sản xuất theo đơn hàng, nên đây là **tinh chỉnh**, không phải lỗ hổng chặn nghiệp vụ. Làm khi
+khách hàng thật sự sản xuất theo kế hoạch tồn kho (make-to-stock) chứ không theo đơn.
+
+**Thay đổi chính:** entity kế hoạch theo kỳ cho thành phẩm (item × kỳ × số lượng), sinh
+`PlanningDemand` type `FORECAST`; quy tắc khử trùng với nhu cầu Sales Order thật trong cùng kỳ
+(*demand consumption* — nếu không, nhu cầu bị **đếm hai lần** và MRP đề xuất gấp đôi).
+
+🔴 **`PlanningDemandStatus.CONSUMED` đã khai báo trong enum nhưng chưa dòng code nào set** (ghi nhận ở
+`CLAUDE.md §0.45`) — rất có thể nó được thêm cho đúng cơ chế này. Kiểm trước khi thiết kế lại.
+
+**Definition of Done:** MPS sinh demand; MRP nhận; nhu cầu SO thật tiêu trừ forecast cùng kỳ thay vì
+cộng dồn; `mvn -o clean verify` PASS.
+
+**Effort:** Cao. **OT:** Không.
+
+---
+
 ## 4. Ghi Chú: Hạng Mục KHÔNG Khuyến Nghị
 
 - **Ép Lot/Serial "bắt buộc toàn hệ thống":** cơ chế lot đã có sẵn ở mức "tùy chọn theo Item"
   (`Item.lotTracked`). Ép `true` toàn bộ chỉ đổi 1 nhánh validation, nhưng **không nên làm** — thiết
   kế tùy chọn phản ánh đúng thực tế hơn (không ai lot-track từng con ốc vít). Giữ nguyên.
+
+> Bốn mục dưới đây thêm 2026-09-25 sau lượt đối chiếu §2.0 — chúng **xuất hiện trong PDF** nhưng vẫn
+> không nên làm. Ghi ra để lần đối chiếu sau không mở lại chúng như "khoảng trống mới phát hiện".
+
+- **Process Costing** (PDF §3.3 liệt kê cạnh Job/Standard): **không làm.** Process costing (chi phí
+  theo kỳ-công đoạn, equivalent units) dành cho sản xuất liên tục — hoá chất, thực phẩm dạng dòng
+  chảy. Repo này là discrete/assembly: mọi thứ neo vào `WorkOrder`, và Job Costing
+  (`work_order_cost_accumulators`) là mô hình **đúng** cho hình thái đó. Thêm process costing là dựng
+  một mô hình chi phí thứ hai không ai dùng.
+- **Material Price Variance:** đã quyết định loại ở `P3` và lý do vẫn đúng — `stock_movements` không
+  có cột giá, và giá duy nhất trong hệ thống (`PurchaseOrderLine.unitPrice`) tách rời khỏi ledger
+  xuất kho. Làm được nó đòi một tầng actual-costing (FIFO/bình quân gia quyền) chưa tồn tại. `P7`
+  **không** mở lại mục này.
+- **BOM date-effectivity** (`effectiveFrom`/`effectiveTo`): PDF chỉ yêu cầu "Version control", và
+  repo **đã có**: `UNIQUE (company, parent_item, revision)` giữ mọi revision cũ, đúng một `ACTIVE`,
+  cộng snapshot bất biến lên WO lúc create (`B12`). Câu "lệnh này dùng BOM nào" đã trả lời được bằng
+  snapshot — chính xác hơn effectivity dating. Chỉ thêm khi có yêu cầu nghiệp vụ thật.
+- **`Customer` master data:** thiết kế gốc của `P6` (§3 file này) có liệt kê, nhưng bản triển khai
+  dùng `sales_orders.customer_name` (text tự do) và **chưa ai cần** danh mục khách hàng. Không phải
+  yêu cầu của PDF. Ghi lại để không bị đọc nhầm thành hạng mục bị bỏ quên.
 
 ---
 
@@ -375,11 +715,21 @@ fulfillment → WO close khi reconcile đủ; test luồng; build + test PASS.
 
 ## 5. Tóm Tắt Ưu Tiên
 
-> Trạng thái hiện tại: **P1 xong** → đang chèn `T0+T1` (test hardening) trước khi mở `P2`.
-> Xem bảng theo dõi ở §2.1.
+> **Trạng thái 2026-09-25:** `P1`–`P6` ✅ xong hết. `P7`–`P11` mới mở từ lượt đối chiếu PDF (§2.0).
+> Xem bảng theo dõi ở §2.1. *(Đoạn cũ ở đây dừng lại ở "P1 xong, đang chèn T0+T1" — lệch 6 phase;
+> sửa cùng lượt này.)*
 
-1. ~~**Làm ngay (rẻ, khớp `business_flow` mới nhất):** P1 → P2.~~ → P1 ✅, P2 chờ `T1` xong.
-2. **Giá trị lý thuyết cao nhất, standalone:** P3 (Costing) — cân nhắc kéo lên làm sớm nếu ưu tiên báo cáo giá thành.
-3. **Mở rộng năng lực sản xuất:** P4 (Routing/CRP tĩnh), P5 (Serial).
-4. **Đóng vòng end-to-end:** P6 (Sales Order + Close).
-5. **Chờ OT:** toàn bộ Phase Deferred.
+**Đã xong:** `P1` (Gates) · `P2` (QC) · `P3` (Costing) · `P4` (Routing/Work Center/CRP tĩnh) ·
+`P5` (Serial) · `P6` (Sales Order + WO Close).
+
+**Thứ tự khuyến nghị cho phần còn lại:**
+
+1. **`P8` (Shop Floor Control cấp công đoạn)** — rẻ nhất, và làm `P7` tốt hơn hẳn. Cũng là mục `P4`
+   thiết kế mà chưa làm, nên đóng nó là trả nợ chứ không phải mở phạm vi mới.
+2. **`P7` (WIP Valuation + Variance snapshot)** — khoảng trống lý thuyết **lớn nhất còn lại**; đây là
+   thứ phân biệt Manufacturing ERP với Commercial ERP rõ nhất sau BOM/WO. Làm sau `P8`.
+3. **`P9` (Genealogy)** — giá trị nghiệp vụ cao (thu hồi có mục tiêu), effort trung bình, dữ liệu đã
+   sẵn. Có thể làm song song `P7` vì không đụng nhau.
+4. **`P10` (CRP đóng vòng)** — tinh chỉnh vòng hoạch định, tái dùng gần hết `C2-8`.
+5. **`P11` (MPS)** — chỉ làm khi khách hàng sản xuất make-to-stock.
+6. **Chờ OT:** toàn bộ Phase Deferred.

@@ -1,8 +1,20 @@
 # API Guide cho Frontend — Manufacturing ERP
 
+> **Audit update ngày 2026-09-02 (track `AR-*`):** response audit thêm 11 field và endpoint list thêm
+> 6 filter — **thuần additive, không xoá/đổi tên field nào**. Đáng chú ý: `entityId` **quay lại**
+> response, `plantId`/`companyId`/`warehouseId` bắt đầu có giá trị thật (audit lịch sử vẫn `null`, cố
+> ý không backfill), và detail có thêm `entities[]` + `metadata`. Bảng đầy đủ:
+> `docs/fe-guide-audit-logs-and-inventory-lots.md §1.5`.
+>
 > **Audit update ngày 2026-08-17:** `GET /audit-logs/{auditLogId}` nay trả field-level diff thật trong
-> `changes[]` cho các audit mới (`oldValue`/`newValue` giữ đúng kiểu JSON). Các đoạn lịch sử nói mảng
-> này luôn rỗng đã được thay thế bởi hành vi mới này.
+> `changes[]` cho các audit mới. Các đoạn lịch sử nói mảng này luôn rỗng đã được thay thế bởi hành vi mới này.
+>
+> 🔴 **Sửa ngày 2026-08-25:** `changes[].oldValue`/`newValue` là **`string` hoặc `null`, luôn luôn** —
+> đúng như OpenAPI công bố. Từ 2026-08-17 tới 2026-08-25 hai field này mang kiểu JSON gốc (object /
+> array / number / boolean tuỳ dòng), khiến một snapshot có cấu trúc lọt ra dưới dạng object và làm
+> sập màn hình Audit của FE. Object/array nay được serialize thành **chuỗi JSON compact** (một
+> `JSON.parse` là lấy lại cấu trúc); số/boolean thành dạng chuỗi (`"10"`, `"true"`); chuỗi giữ nguyên
+> **không kèm dấu nháy JSON**; `null` vẫn là `null`.
 
 > **Thông báo thay đổi URL ngày 2026-08-17:** `/api` hiện là context path toàn ứng dụng và `/v1`
 > nằm ở method mapping. Năm nhóm `auth`, `admin/users`, `users`, `access`, `sales-orders` đã đổi vị trí
@@ -1119,8 +1131,8 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 
 | Việc | Endpoint |
 |---|---|
-| Danh sách audit trail | `GET /audit-logs?actorUserId=&entityType=&entityId=&action=&plantId=&traceId=&from=&to=&page=&size=&sortBy=&sortDir=` (mọi filter tuỳ chọn, default sort `createdAt,desc`) |
-| Chi tiết một audit log, kèm `changes[]` | `GET /audit-logs/{auditLogId}` |
+| Danh sách audit trail | `GET /audit-logs?actorUserId=&entityType=&entityId=&action=&outcome=&source=&companyId=&plantId=&warehouseId=&traceId=&relatedEntityType=&relatedEntityId=&from=&to=&page=&size=&sortBy=&sortDir=` (mọi filter tuỳ chọn, default sort `occurredAt,desc`). 🔴 **[2026-09-02]** `sortBy` có allowlist (`occurredAt`/`createdAt`/`action`/`username`/`outcome`) — giá trị khác trả **400** thay vì 500; `from > to` trả **400** thay vì trang rỗng |
+| Chi tiết một audit log, kèm `changes[]` **và `entities[]`** | `GET /audit-logs/{auditLogId}` |
 
 > 🔴 **`PERM_AUDIT_READ` — ADMIN only**, không cấp cho MANAGER/OPERATOR (chốt với user). Gác bằng
 > `hasPermission` (kiểm tra global), không `hasResourceAccess` — audit trail không thuộc về một
@@ -1130,6 +1142,13 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > Response audit trả `entityName` thay cho `entityId`; `entityId` vẫn được giữ làm query parameter.
 > `entityName` là snapshot tên/mã/số chứng từ tại thời điểm thao tác và có thể `null` với dữ liệu lịch
 > sử trước migration `V65`. Response chi tiết trả field-level diff thật trong `changes[]` cho audit mới.
+>
+> 🔴 **`changes[].oldValue`/`newValue` luôn là `string` hoặc `null`** *(chốt 2026-08-25)*. Cột lưu là
+> `jsonb` nên một snapshot có thể là chữ, số, boolean, object hay array — nhưng ra tới wire thì mọi
+> hình dạng đó đều đã thành chuỗi: object/array là **JSON compact** (dùng `JSON.parse` nếu cần cấu
+> trúc), số/boolean là dạng chuỗi, chữ **không** kèm dấu nháy JSON, `null` giữ nguyên `null`. Đừng
+> render thẳng giá trị vào React mà không kiểm kiểu nếu client còn phải chạy với backend cũ hơn
+> 2026-08-25.
 >
 > **`plantId` trên mọi dòng — kể cả dòng mới tạo hôm nay — vẫn là `null`.** Cột thêm ở `V54` nhưng chỉ
 > dừng ở mức schema; chưa có code nào populate nó lúc ghi audit log (việc đó chạm `RequestContext`/
@@ -1333,13 +1352,18 @@ overIssue, overrideReason`
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |
 | `RESOURCE_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `EMAIL_ALREADY_EXISTS` | Trùng khoá |
-| `ITEM_ALREADY_ISSUED`, `PRODUCTION_ORDER_CLOSED` | |
+| `LOT_CODE_ALREADY_EXISTS` | Mã lô đã tồn tại cho vật tư đó |
+| `ITEM_ALREADY_ISSUED`, `PRODUCTION_ORDER_CLOSED` | **Đã đặt chỗ, backend chưa từng trả** — đừng viết nhánh xử lý cho tới khi có thông báo |
 
 ### 422 — dữ liệu hợp lệ nhưng vi phạm nghiệp vụ
 | `code` | Khi nào |
 |---|---|
-| `OPERATION_NOT_ALLOWED` | Master data sai (item `INACTIVE`, sai `ItemType`, khác company/plant), hoặc chứng từ **chưa có dòng nào** |
-| `BUSINESS_RULE_VIOLATION`, `NEGATIVE_QUANTITY`, `BOM_CIRCULAR_REFERENCE` | |
+| **`RESOURCE_INACTIVE`** 🆕 | Một bản ghi được tham chiếu đang `INACTIVE` (công ty/nhà máy/kho/vật tư/nhà cung cấp/role/scope/work center/work calendar), hoặc kích hoạt bản ghi con khi cha còn `INACTIVE`. **Cách xử lý khác hẳn**: kích hoạt lại bản ghi đó, không phải sửa form |
+| **`RESOURCE_SCOPE_MISMATCH`** 🆕 | Hai bản ghi trong request thuộc hai chủ khác nhau — vật tư khác công ty, kho khác nhà máy, lô/sê-ri khác vật tư. Cách xử lý: đổi lựa chọn trên form |
+| **`DOCUMENT_HAS_NO_LINES`** 🆕 | Chứng từ chưa có dòng con nào (BOM/quy trình chưa có dòng, import run không có dòng hợp lệ, scope chưa có resource) |
+| `OPERATION_NOT_ALLOWED` | **[2026-08-23] Đã thu hẹp**: nay chỉ còn là catch-all cho dữ liệu đầu vào sai (sai `ItemType`, lot/serial không khớp, `dueDate` < `orderDate`, nhiều nhà cung cấp trong 1 PR…). Ba tình huống ở trên **trước đây cũng trả mã này** — nếu bạn đang rẽ nhánh theo nó, xem lại |
+| `BUSINESS_RULE_VIOLATION` | Vi phạm quy tắc nghiệp vụ chung — **[2026-08-23] nay còn gồm ràng buộc CSDL không phải trùng khoá** (khoá ngoại, `CHECK`, `NOT NULL`). Trước đó những lỗi này bị trả nhầm là `RESOURCE_ALREADY_EXISTS` (409), khiến client tưởng là trùng dữ liệu và thử lại vô ích |
+| `NEGATIVE_QUANTITY`, `BOM_CIRCULAR_REFERENCE` | |
 
 > 🔴 **Ranh giới 409 vs 422**: 409 = "đúng dữ liệu, sai **trạng thái**" (thử lại sau có thể được);
 > 422 = "**dữ liệu** sai" (phải sửa input/master data). Đừng gộp hai nhóm này vào một thông báo.

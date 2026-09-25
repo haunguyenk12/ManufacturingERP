@@ -72,6 +72,25 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
+        try {
+            if (isRefused(request, response, userId)) {
+                return;
+            }
+        } catch (RuntimeException ex) {
+            // EH-1 safety net - see JwtAuthenticationFilter for the full rationale. The rule
+            // evaluation below talks to Redis, and an exception escaping a filter never reaches
+            // GlobalExceptionHandler: the caller would get Spring Boot's default /error body instead
+            // of the {code,result,message} envelope. The message is not echoed to the client.
+            writeInternalError(response, request, ex);
+            return;
+        }
+
+        chain.doFilter(request, response);
+    }
+
+    /** @return {@code true} when this filter has already written a refusal onto the response. */
+    private boolean isRefused(HttpServletRequest request, HttpServletResponse response, String userId)
+            throws IOException {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         Optional<RateLimitResult> block = evaluateUser(path, userId);
         if (block.isPresent()) {
@@ -79,10 +98,9 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
             addRateLimitHeaders(response, r);
             writeError(response, 429, BusinessErrorCode.RATE_LIMIT_EXCEEDED,
                     "User rate limit exceeded. Retry after " + r.retryAfterSeconds() + "s.");
-            return;
+            return true;
         }
-
-        chain.doFilter(request, response);
+        return false;
     }
 
     // ── Core evaluation ──────────────────────────────────────────────────────
@@ -145,6 +163,17 @@ public class UserRateLimitFilter extends OncePerRequestFilter {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(), ApiResponse.error(code, message));
+    }
+
+    /** Same envelope the catch-all of {@code GlobalExceptionHandler} would have produced. */
+    private void writeInternalError(HttpServletResponse response, HttpServletRequest request,
+                                    RuntimeException ex) throws IOException {
+        log.error("[{}] Unhandled exception in UserRateLimitFilter at {}: {}",
+                BusinessErrorCode.INTERNAL_SERVER_ERROR.code(), request.getRequestURI(),
+                ex.getMessage(), ex);
+        writeError(response, BusinessErrorCode.INTERNAL_SERVER_ERROR.status().value(),
+                BusinessErrorCode.INTERNAL_SERVER_ERROR,
+                BusinessErrorCode.INTERNAL_SERVER_ERROR.message());
     }
 
     // ── Result record (shared shape with RateLimitFilter.RateLimitResult) ──

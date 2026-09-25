@@ -1,5 +1,6 @@
 package com.erp.manufacturing.common.audit;
 
+import com.erp.manufacturing.common.audit.model.AuditOperation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
@@ -20,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -37,11 +37,10 @@ public class AuditChangeCaptureService {
 
     private static final Set<String> TECHNICAL_FIELDS = Set.of(
             "createdAt", "updatedAt", "createdBy", "updatedBy", "version");
-    private static final List<String> SENSITIVE_FRAGMENTS = List.of(
-            "password", "token", "secret", "credential", "authorization", "hash");
 
     private final EntityManager entityManager;
     private final ObjectMapper objectMapper;
+    private final AuditInputSanitizer sanitizer;
 
     /**
      * Uses an independent read transaction so the snapshot always represents the last committed
@@ -50,7 +49,14 @@ public class AuditChangeCaptureService {
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public Map<String, JsonNode> captureBefore(String entityType, Object[] arguments,
                                                AuditAction action) {
-        if (entityType == null || entityType.isBlank() || isCreate(action)) {
+        return captureBefore(entityType, arguments, action, AuditOperation.INFERRED);
+    }
+
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public Map<String, JsonNode> captureBefore(String entityType, Object[] arguments,
+                                               AuditAction action, AuditOperation operation) {
+        if (entityType == null || entityType.isBlank()
+                || resolveChangeType(action, operation) == AuditLogChangeType.CREATE) {
             return Map.of();
         }
 
@@ -77,8 +83,18 @@ public class AuditChangeCaptureService {
     public List<AuditFieldChange> calculateChanges(AuditAction action,
                                                    Map<String, JsonNode> before,
                                                    Object result) {
+        return calculateChanges(action, AuditOperation.INFERRED, before, result);
+    }
+
+    public List<AuditFieldChange> calculateChanges(AuditAction action,
+                                                   AuditOperation operation,
+                                                   Map<String, JsonNode> before,
+                                                   Object result) {
+        AuditLogChangeType changeType = resolveChangeType(action, operation);
+        if (changeType == null) {
+            return List.of();
+        }
         Map<String, JsonNode> after = snapshotResult(result);
-        AuditLogChangeType changeType = changeType(action);
 
         if (changeType == AuditLogChangeType.CREATE) {
             return after.entrySet().stream()
@@ -245,12 +261,23 @@ public class AuditChangeCaptureService {
         return value != null && idType.isAssignableFrom(value.getClass());
     }
 
+    /**
+     * Fields that never enter a snapshot: bookkeeping columns that say nothing about the business
+     * change, and anything the sanitizer judges sensitive.
+     *
+     * <p>Sensitivity is decided by {@link AuditInputSanitizer}, the single boundary for that policy,
+     * rather than by a private copy of a fragment list that would drift from it. A drop is counted so
+     * "we are silently discarding fields" is visible in metrics instead of being invisible by design.
+     */
     private boolean excluded(String fieldName) {
         if (TECHNICAL_FIELDS.contains(fieldName)) {
             return true;
         }
-        String normalized = fieldName.toLowerCase(Locale.ROOT);
-        return SENSITIVE_FRAGMENTS.stream().anyMatch(normalized::contains);
+        if (sanitizer.isSensitiveFieldName(fieldName)) {
+            sanitizer.countSensitiveDrop();
+            return true;
+        }
+        return false;
     }
 
     private boolean meaningful(JsonNode value) {
@@ -261,17 +288,30 @@ public class AuditChangeCaptureService {
         return value == null || value.isNull() ? null : value.toString();
     }
 
-    private AuditLogChangeType changeType(AuditAction action) {
-        if (isCreate(action)) {
+    /**
+     * Explicit {@link AuditOperation} wins; {@link AuditOperation#INFERRED} falls back to the legacy
+     * action-suffix heuristic.
+     *
+     * <p>That heuristic is kept only so unmigrated call sites keep behaving as before. It is wrong for
+     * every action that does not end in {@code _CREATED} or {@code _DELETED} — {@code BOM_ACTIVATED},
+     * {@code PERMISSION_REVOKED}, {@code WORK_ORDER_RELEASED} all get labelled UPDATE — which is why
+     * declaring the operation is the direction of travel.
+     *
+     * @return {@code null} when the command has no field-level diff to record
+     */
+    private AuditLogChangeType resolveChangeType(AuditAction action, AuditOperation operation) {
+        if (operation == AuditOperation.NONE) {
+            return null;
+        }
+        if (operation != null && operation != AuditOperation.INFERRED) {
+            return operation.toChangeType();
+        }
+        if (action.name().endsWith("_CREATED")) {
             return AuditLogChangeType.CREATE;
         }
         if (action.name().endsWith("_DELETED")) {
             return AuditLogChangeType.DELETE;
         }
         return AuditLogChangeType.UPDATE;
-    }
-
-    private boolean isCreate(AuditAction action) {
-        return action.name().endsWith("_CREATED");
     }
 }

@@ -52,7 +52,10 @@ public class PlanningDemandService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_PLANNING_DEMAND_MANAGE', 'PLANT', #request.plantId())")
-    @Auditable(action = AuditAction.PLANNING_DEMAND_CREATED, entityType = "PlanningDemand", entityIdExpression = "planningDemandId.toString()")
+    @Auditable(action = AuditAction.PLANNING_DEMAND_CREATED, entityType = "PlanningDemand", entityIdExpression = "planningDemandId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PlanningDemandResponse create(PlanningDemandCreateRequest request) {
         Company company = organizationLookupService.getActiveCompany(request.companyId());
         Plant plant = organizationLookupService.getActivePlant(request.plantId());
@@ -108,7 +111,10 @@ public class PlanningDemandService {
 
     @Transactional
     @PreAuthorize("@mrpPlanningPermissionGuard.hasDemandAccess(authentication, 'PERM_PLANNING_DEMAND_MANAGE', #demandId)")
-    @Auditable(action = AuditAction.PLANNING_DEMAND_CANCELLED, entityType = "PlanningDemand", entityIdExpression = "demandId.toString()")
+    @Auditable(action = AuditAction.PLANNING_DEMAND_CANCELLED, entityType = "PlanningDemand", entityIdExpression = "demandId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PlanningDemandResponse cancel(UUID demandId) {
         PlanningDemand demand = findDemand(demandId);
         if (!demand.isOpen()) {
@@ -210,21 +216,21 @@ public class PlanningDemandService {
 
     private void ensurePlantBelongsToCompany(Plant plant, Company company) {
         if (!plant.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Plant must belong to the selected company");
         }
     }
 
     private void ensureItemBelongsToCompany(Item item, Company company) {
         if (!item.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to the selected company");
         }
     }
 
     private void ensureWarehouseBelongsToPlant(Warehouse warehouse, Plant plant) {
         if (!warehouse.getPlant().getPlantId().equals(plant.getPlantId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Warehouse must belong to the selected plant");
         }
     }

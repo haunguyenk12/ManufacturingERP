@@ -41,7 +41,8 @@ import java.util.stream.Collectors;
  *   <li>{@link NoResourceFoundException}               – no endpoint at this path</li>
  *   <li>{@link AccessDeniedException}                  – Spring Security 403</li>
  *   <li>{@link ObjectOptimisticLockingFailureException}– @Version conflict</li>
- *   <li>{@link DataIntegrityViolationException}        – DB unique/FK constraint</li>
+ *   <li>{@link DataIntegrityViolationException}        – DB constraint; 409 or 422 depending on
+ *       which constraint failed (see {@link DataIntegrityErrorMapper})</li>
  *   <li>{@link Exception}                              – catch-all (never exposes stack traces)</li>
  * </ol>
  */
@@ -231,18 +232,15 @@ public class GlobalExceptionHandler {
             DataIntegrityViolationException ex, HttpServletRequest request) {
 
         String detail = ex.getMostSpecificCause().getMessage();
-        if (detail != null && (detail.contains("uk_inventory_lots_item_code")
-                || detail.contains("chk_inventory_lots_code_trimmed"))) {
-            log.warn("[{}] Lot identity conflict at {}", BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.code(),
-                    request.getRequestURI());
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(ApiResponse.error(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS));
-        }
-        log.error("[{}] Data integrity violation at {}: {}",
-                ValidationErrorCode.RESOURCE_ALREADY_EXISTS.code(),
-                request.getRequestURI(), detail);
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ApiResponse.error(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Data constraint violation"));
+        DataIntegrityErrorMapper.Mapping mapping = DataIntegrityErrorMapper.resolve(detail);
+
+        // The constraint name is logged, never returned: it is schema detail, and the client can act
+        // on the code alone. The full driver message is logged too, so diagnosis loses nothing.
+        log.error("[{}] Data integrity violation at {} (constraint={}): {}",
+                mapping.code().code(), request.getRequestURI(),
+                DataIntegrityErrorMapper.constraintNameIn(detail), detail);
+        return ResponseEntity.status(mapping.code().status())
+                .body(ApiResponse.error(mapping.code(), mapping.message()));
     }
 
     // ── 12. Catch-all – never expose internal details ──────────────────────

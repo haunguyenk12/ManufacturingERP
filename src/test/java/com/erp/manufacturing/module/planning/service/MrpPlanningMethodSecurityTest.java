@@ -117,7 +117,8 @@ class MrpPlanningMethodSecurityTest {
                                     MrpCalculationService calculationService,
                                     MrpPlanningMapper mapper,
                                     AuditLogService auditLogService,
-                                    IdempotencySupport idempotency) {
+                                    IdempotencySupport idempotency,
+                                    MrpRunStateRecorder runStateRecorder) {
             return new MrpRunService(
                     mrpRunRepository,
                     planningDemandRepository,
@@ -128,7 +129,8 @@ class MrpPlanningMethodSecurityTest {
                     calculationService,
                     mapper,
                     auditLogService,
-                    idempotency);
+                    idempotency,
+                    runStateRecorder);
         }
 
         @Bean
@@ -184,6 +186,11 @@ class MrpPlanningMethodSecurityTest {
         @Bean
         AuditLogService auditLogService() {
             return mock(AuditLogService.class);
+        }
+
+        @Bean
+        MrpRunStateRecorder mrpRunStateRecorder() {
+            return mock(MrpRunStateRecorder.class);
         }
     }
 }

@@ -4,6 +4,7 @@ import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.module.organization.domain.*;
@@ -27,6 +28,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -47,6 +50,7 @@ class MrpRunServiceTest {
     @Mock OrganizationLookupService organizationLookupService;
     @Mock MrpCalculationService calculationService;
     @Mock AuditLogService auditLogService;
+    @Mock MrpRunStateRecorder runStateRecorder;
 
     MrpRunService service;
 
@@ -62,7 +66,8 @@ class MrpRunServiceTest {
                 calculationService,
                 new MrpPlanningMapper(),
                 auditLogService,
-                new IdempotencySupport(new ObjectMapper().findAndRegisterModules()));
+                new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
+                runStateRecorder);
     }
 
     @Test
@@ -95,13 +100,7 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
         when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
-        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
-            MrpRun run = invocation.getArgument(0);
-            if (run.getMrpRunId() == null) {
-                run.setMrpRunId(UUID.randomUUID());
-            }
-            return run;
-        });
+        stubRunCreation();
         when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(planningDemandRepository.findOpenDemandsForRun(
                 company.getCompanyId(),
@@ -181,13 +180,7 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
         when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
-        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
-            MrpRun run = invocation.getArgument(0);
-            if (run.getMrpRunId() == null) {
-                run.setMrpRunId(UUID.randomUUID());
-            }
-            return run;
-        });
+        stubRunCreation();
         when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(planningDemandRepository.findOpenDemandsForRun(
                 company.getCompanyId(),
@@ -249,13 +242,7 @@ class MrpRunServiceTest {
         when(organizationLookupService.getActiveWarehouse(warehouse.getWarehouseId())).thenReturn(warehouse);
         when(planningDemandRepository.findSelectedDemandsForRun(List.of(selected.getPlanningDemandId())))
                 .thenReturn(List.of(selected));
-        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
-            MrpRun run = invocation.getArgument(0);
-            if (run.getMrpRunId() == null) {
-                run.setMrpRunId(UUID.randomUUID());
-            }
-            return run;
-        });
+        stubRunCreation();
         when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(calculationService.calculate(any(MrpRun.class), eq(List.of(selected)), anyCollection()))
                 .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
@@ -426,7 +413,7 @@ class MrpRunServiceTest {
         assertThat(response.code()).isEqualTo(existing.getCode());
         // The whole point: no second calculation, no second run row, no demand snapshot.
         verifyNoInteractions(calculationService, mrpRunDemandRepository, planningDemandRepository);
-        verify(mrpRunRepository, never()).saveAndFlush(any(MrpRun.class));
+        verify(runStateRecorder, never()).start(any(MrpRun.class));
         verify(mrpRunRepository, never()).save(any(MrpRun.class));
     }
 
@@ -451,7 +438,7 @@ class MrpRunServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.IDEMPOTENCY_CONFLICT));
 
-        verify(mrpRunRepository, never()).saveAndFlush(any(MrpRun.class));
+        verify(runStateRecorder, never()).start(any(MrpRun.class));
         verifyNoInteractions(calculationService, mrpRunDemandRepository);
     }
 
@@ -470,11 +457,7 @@ class MrpRunServiceTest {
                         ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
         when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
                 .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
-        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
-            MrpRun run = invocation.getArgument(0);
-            run.setMrpRunId(UUID.randomUUID());
-            return run;
-        });
+        stubRunCreation();
         when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.run(new MrpRunCreateRequest(
@@ -482,7 +465,7 @@ class MrpRunServiceTest {
                 LocalDate.now(), LocalDate.now().plusDays(30), null), "  run-key-2  ");
 
         ArgumentCaptor<MrpRun> saved = ArgumentCaptor.forClass(MrpRun.class);
-        verify(mrpRunRepository).saveAndFlush(saved.capture());
+        verify(runStateRecorder).start(saved.capture());
         // Trimmed by normalizeKey — the stored key must be what a replay will look up.
         assertThat(saved.getValue().getIdempotencyKey()).isEqualTo("run-key-2");
         assertThat(saved.getValue().getPayloadHash()).isNotBlank();
@@ -502,11 +485,7 @@ class MrpRunServiceTest {
                         ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
         when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
                 .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(), List.of()));
-        when(mrpRunRepository.saveAndFlush(any(MrpRun.class))).thenAnswer(invocation -> {
-            MrpRun run = invocation.getArgument(0);
-            run.setMrpRunId(UUID.randomUUID());
-            return run;
-        });
+        stubRunCreation();
         when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.run(new MrpRunCreateRequest(
@@ -515,9 +494,97 @@ class MrpRunServiceTest {
 
         verify(mrpRunRepository, never()).findByIdempotencyKey(any());
         ArgumentCaptor<MrpRun> saved = ArgumentCaptor.forClass(MrpRun.class);
-        verify(mrpRunRepository).saveAndFlush(saved.capture());
+        verify(runStateRecorder).start(saved.capture());
         assertThat(saved.getValue().getIdempotencyKey()).isNull();
         assertThat(saved.getValue().getPayloadHash()).isNull();
+    }
+
+    /**
+     * EH-4. {@code MrpRunResponse.errorMessage} goes straight to the client, and before this it
+     * carried {@code e.getMessage()} of whatever blew up — a Hibernate or driver string naming
+     * tables, columns and constraints. That was the one place in this codebase where an internal
+     * failure message reached a caller verbatim.
+     */
+    @Test
+    @DisplayName("run: an unexpected failure is recorded with a fixed message, never the raw cause")
+    void run_unexpectedFailure_recordsAFixedMessageInsteadOfTheRawCause() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        when(planningDemandRepository.findOpenDemandsForRun(any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        when(organizationLookupService.resolveScope(eq(ScopeResourceType.PLANT), eq(plant.getPlantId())))
+                .thenReturn(new OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
+        stubRunCreation();
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
+                .thenThrow(new IllegalStateException(
+                        "could not execute statement [ERROR: relation \"mrp_requirement_lines\" ...]"));
+
+        service.run(new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null), null);
+
+        ArgumentCaptor<String> recorded = ArgumentCaptor.forClass(String.class);
+        verify(runStateRecorder).recordFailure(any(UUID.class), recorded.capture());
+        assertThat(recorded.getValue())
+                .isEqualTo(MrpRunService.GENERIC_FAILURE_MESSAGE)
+                .doesNotContain("mrp_requirement_lines");
+        // The doomed transaction is not asked to write the FAILED row itself — that is the recorder's
+        // job precisely because this one may already be unusable.
+        verify(mrpRunRepository, never()).save(any(MrpRun.class));
+    }
+
+    /**
+     * The other half of the same rule: an {@link AppException} was raised deliberately and its message
+     * was written for the planner who asked for the run. Blanking that one out would turn a useful
+     * "no warehouse policy resolves this requirement" into "see server logs".
+     */
+    @Test
+    @DisplayName("run: a deliberate business failure keeps its own message")
+    void run_businessFailure_keepsItsOwnMessage() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        when(planningDemandRepository.findOpenDemandsForRun(any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        when(organizationLookupService.resolveScope(eq(ScopeResourceType.PLANT), eq(plant.getPlantId())))
+                .thenReturn(new OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), List.of()));
+        stubRunCreation();
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection()))
+                .thenThrow(ExceptionFactory.custom(BusinessErrorCode.AMBIGUOUS_WAREHOUSE_POLICY,
+                        "Multiple warehouses match item RM-01 without a default"));
+
+        service.run(new MrpRunCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), null,
+                LocalDate.now(), LocalDate.now().plusDays(30), null), null);
+
+        ArgumentCaptor<String> recorded = ArgumentCaptor.forClass(String.class);
+        verify(runStateRecorder).recordFailure(any(UUID.class), recorded.capture());
+        assertThat(recorded.getValue()).isEqualTo("Multiple warehouses match item RM-01 without a default");
+    }
+
+    /**
+     * EH-4: the run row is now committed by {@link MrpRunStateRecorder#start} in a transaction of its
+     * own, and the service re-loads it. The recorder is mocked, so the test has to play both halves —
+     * hand back an id and make {@code findById} answer with the very entity the service built, which
+     * is what a real re-load would return.
+     */
+    private void stubRunCreation() {
+        Map<UUID, MrpRun> started = new HashMap<>();
+        when(runStateRecorder.start(any(MrpRun.class))).thenAnswer(invocation -> {
+            MrpRun run = invocation.getArgument(0);
+            if (run.getMrpRunId() == null) {
+                run.setMrpRunId(UUID.randomUUID());
+            }
+            started.put(run.getMrpRunId(), run);
+            return run.getMrpRunId();
+        });
+        when(mrpRunRepository.findById(any(UUID.class)))
+                .thenAnswer(invocation -> Optional.ofNullable(started.get(invocation.getArgument(0))));
     }
 
     private MrpRun existingRun(Company company, Plant plant, MrpRunCreateRequest request) {

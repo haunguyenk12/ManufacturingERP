@@ -147,7 +147,7 @@ class RoutingServiceTest {
 
     @Test
     @DisplayName("create: operations referencing work centers of two different plants throw 422 (B_wc2)")
-    void create_operationsAcrossTwoPlants_throwsOperationNotAllowed() {
+    void create_operationsAcrossTwoPlants_throwsResourceScopeMismatch() {
         UUID companyId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
         Company company = company(companyId);
@@ -167,7 +167,7 @@ class RoutingServiceTest {
                         new RoutingOperationRequest(20, "Paint", wcOtherPlantId, BigDecimal.ZERO, BigDecimal.ONE)))))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(routingHeaderRepository, never()).save(any());
     }
@@ -184,12 +184,12 @@ class RoutingServiceTest {
                 .thenReturn(false);
         when(workCenterLookupService.getActiveWorkCenter(WC_01_ID))
                 .thenThrow(ExceptionFactory.businessRule(
-                        BusinessErrorCode.OPERATION_NOT_ALLOWED, "Inactive work center cannot be used: " + WC_01_ID));
+                        BusinessErrorCode.RESOURCE_INACTIVE, "Inactive work center cannot be used: " + WC_01_ID));
 
         assertThatThrownBy(() -> service.create(companyId, createRequest(itemId)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(routingHeaderRepository, never()).save(any());
     }
@@ -219,7 +219,7 @@ class RoutingServiceTest {
         assertThatThrownBy(() -> service.create(companyId, createRequest(itemId)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(routingHeaderRepository, never()).save(any());
     }
@@ -297,7 +297,7 @@ class RoutingServiceTest {
         assertThatThrownBy(() -> service.activate(candidate.getRoutingId()))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.DOCUMENT_HAS_NO_LINES));
 
         verify(routingHeaderRepository, never()).save(any());
     }

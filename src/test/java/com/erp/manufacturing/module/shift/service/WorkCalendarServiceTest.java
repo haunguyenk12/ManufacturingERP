@@ -128,7 +128,7 @@ class WorkCalendarServiceTest {
     }
 
     @Test
-    @DisplayName("create: a shift belonging to a different plant throws OPERATION_NOT_ALLOWED before any save")
+    @DisplayName("create: a shift belonging to a different plant throws RESOURCE_SCOPE_MISMATCH before any save")
     void create_shiftOfDifferentPlant_throws() {
         UUID otherPlantId = UUID.randomUUID();
         when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
@@ -140,7 +140,7 @@ class WorkCalendarServiceTest {
                 List.of(new WorkCalendarWeeklyShiftRequest(Weekday.MONDAY, SHIFT_ID)), null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(repository, never()).save(any());
     }

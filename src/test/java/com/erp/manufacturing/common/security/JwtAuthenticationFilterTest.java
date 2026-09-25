@@ -1,6 +1,7 @@
 package com.erp.manufacturing.common.security;
 
 import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
@@ -20,6 +21,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -210,6 +212,35 @@ class JwtAuthenticationFilterTest {
         verify(chain, never()).doFilter(any(), any());
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentAsString()).contains(AuthErrorCode.TOKEN_MALFORMED.code());
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    /**
+     * EH-1 safety net. Everything past this filter is wrapped by {@code GlobalExceptionHandler}, but a
+     * filter runs ahead of the {@code DispatcherServlet}: before this branch existed, Redis being
+     * unreachable inside {@code assertNotBlacklisted} escaped the chain and the caller got Spring
+     * Boot's default {@code /error} page instead of the {@code {code,result,message}} envelope.
+     * The raw failure must not be echoed either — unlike an {@code AppException}, nothing vetted this
+     * message for client consumption.
+     */
+    @Test
+    @DisplayName("infrastructure failure inside the filter still answers the standard error envelope")
+    void unexpectedRuntimeException_answersTheStandardEnvelopeWithoutLeakingTheCause() throws Exception {
+        MockHttpServletRequest request = requestWithBearer("/v1/uoms", "valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+        when(jwtTokenProvider.validateAndExtractClaims("valid-token")).thenReturn(claims("alice", "jti-1", 0L));
+        doThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis down at 10.0.0.7:6379"))
+                .when(tokenStoreService).assertNotBlacklisted("jti-1");
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(500);
+        assertThat(response.getContentAsString())
+                .contains(BusinessErrorCode.INTERNAL_SERVER_ERROR.code())
+                .doesNotContain("redis down at 10.0.0.7:6379")
+                .doesNotContain("RedisConnectionFailureException");
+        verify(chain, never()).doFilter(any(), any());
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 

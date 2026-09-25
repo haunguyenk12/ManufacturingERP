@@ -3,6 +3,7 @@ package com.erp.manufacturing.common.security;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -98,6 +99,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Write error response directly – filter runs before Spring Security dispatcher
             writeAuthError(response, ex);
             return;
+        } catch (RuntimeException ex) {
+            // EH-1 safety net. Everything below this filter is covered by GlobalExceptionHandler, but
+            // a filter runs before the DispatcherServlet, so anything unexpected thrown here escapes
+            // the chain entirely and lands on Spring Boot's default /error page – a
+            // {timestamp,status,error,path} body the frontend has never been taught to read. Redis
+            // being unreachable inside assertNotBlacklisted is the realistic way to get here.
+            // The message is deliberately NOT echoed: unlike the AppException branch above, this
+            // exception was never vetted for client consumption.
+            writeInternalError(response, request, ex);
+            return;
         }
 
         filterChain.doFilter(request, response);
@@ -161,5 +172,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(),
                 ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
+    }
+
+    /** Same envelope the catch-all of {@code GlobalExceptionHandler} would have produced. */
+    private void writeInternalError(HttpServletResponse response, HttpServletRequest request,
+                                    RuntimeException ex) throws IOException {
+        log.error("[{}] Unhandled exception in JwtAuthenticationFilter at {}: {}",
+                BusinessErrorCode.INTERNAL_SERVER_ERROR.code(), request.getRequestURI(),
+                ex.getMessage(), ex);
+        response.setStatus(BusinessErrorCode.INTERNAL_SERVER_ERROR.status().value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getOutputStream(),
+                ApiResponse.error(BusinessErrorCode.INTERNAL_SERVER_ERROR));
     }
 }

@@ -58,7 +58,8 @@ public class AccessControlService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.ROLE_CREATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    @Auditable(action = AuditAction.ROLE_CREATED, entityType = "Role", entityIdExpression = "roleId.toString()",
+               companyId = "#result?.companyId()")
     public RoleResponse createRole(RoleCreateRequest request) {
         UUID companyId = request.companyId();
         if (companyId != null) {
@@ -97,7 +98,8 @@ public class AccessControlService {
     /** {@code name}/{@code description} only — {@code code} and {@code is_system} are immutable. */
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.ROLE_UPDATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    @Auditable(action = AuditAction.ROLE_UPDATED, entityType = "Role", entityIdExpression = "roleId.toString()",
+               companyId = "#result?.companyId()")
     public RoleResponse updateRole(UUID roleId, RoleUpdateRequest request) {
         Role role = findRoleById(roleId);
         if (request.name() != null) {
@@ -111,7 +113,8 @@ public class AccessControlService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.ROLE_ACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    @Auditable(action = AuditAction.ROLE_ACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()",
+               companyId = "#result?.companyId()")
     public RoleResponse activateRole(UUID roleId) {
         Role role = findRoleById(roleId);
         role.setStatus(RoleStatus.ACTIVE);
@@ -126,7 +129,8 @@ public class AccessControlService {
      */
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.ROLE_DEACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()")
+    @Auditable(action = AuditAction.ROLE_DEACTIVATED, entityType = "Role", entityIdExpression = "roleId.toString()",
+               companyId = "#result?.companyId()")
     public RoleResponse deactivateRole(UUID roleId) {
         Role role = findRoleById(roleId);
         if (role.isSystem()) {
@@ -218,7 +222,11 @@ public class AccessControlService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.PERMISSION_GRANTED, entityType = "Role")
+    // RbacAuditDescriptorProvider records the role AND the permission, plus metadata.noOp when the
+    // role already held it — the event used to name neither participant.
+    @Auditable(action = AuditAction.PERMISSION_GRANTED, entityType = "Role",
+               entityId = "#roleId",
+               changeMode = com.erp.manufacturing.common.audit.model.AuditChangeMode.NONE)
     public void grantPermission(UUID roleId, UUID permissionId) {
         Role role = findActiveRole(roleId);
         Permission permission = findActivePermission(permissionId);
@@ -234,7 +242,9 @@ public class AccessControlService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
-    @Auditable(action = AuditAction.PERMISSION_REVOKED, entityType = "Role")
+    @Auditable(action = AuditAction.PERMISSION_REVOKED, entityType = "Role",
+               entityId = "#roleId",
+               changeMode = com.erp.manufacturing.common.audit.model.AuditChangeMode.NONE)
     public void revokePermission(UUID roleId, UUID permissionId) {
         rolePermissionRepository.deleteByRoleIdAndPermissionId(roleId, permissionId);
     }
@@ -472,7 +482,7 @@ public class AccessControlService {
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", roleId));
         if (!role.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Role is inactive: " + roleId);
         }
         return role;
@@ -483,7 +493,7 @@ public class AccessControlService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Permission", permissionId));
         if (!permission.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Permission is inactive: " + permissionId);
         }
         return permission;
@@ -494,7 +504,7 @@ public class AccessControlService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Access scope", scopeId));
         if (!scope.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Access scope is inactive: " + scopeId);
         }
         return scope;
@@ -550,7 +560,7 @@ public class AccessControlService {
             return;
         }
         if (resources.isEmpty()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                     "A non-global scope must contain at least one resource before assignment");
         }
 
@@ -565,7 +575,7 @@ public class AccessControlService {
         if (role.getCompanyId() != null
                 && (owningCompanyIds.isEmpty()
                 || owningCompanyIds.stream().anyMatch(id -> !role.getCompanyId().equals(id)))) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "The role and access scope must belong to the same company");
         }
     }
@@ -582,7 +592,7 @@ public class AccessControlService {
                 .collect(Collectors.toSet());
         List<Plant> plants = plantRepository.findAllById(plantIds);
         if (plants.size() != plantIds.size() || plants.stream().anyMatch(plant -> !plant.isActive())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Scope contains an unavailable plant");
         }
         plants.forEach(plant -> companyIds.add(plant.getCompany().getCompanyId()));
@@ -594,7 +604,7 @@ public class AccessControlService {
         List<Warehouse> warehouses = warehouseRepository.findAllById(warehouseIds);
         if (warehouses.size() != warehouseIds.size()
                 || warehouses.stream().anyMatch(warehouse -> !warehouse.isActive())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Scope contains an unavailable warehouse");
         }
         warehouses.forEach(warehouse -> companyIds.add(

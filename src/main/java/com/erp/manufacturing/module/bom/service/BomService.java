@@ -39,7 +39,8 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_BOM_MANAGE', 'COMPANY', #companyId)")
-    @Auditable(action = AuditAction.BOM_CREATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()")
+    @Auditable(action = AuditAction.BOM_CREATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()",
+               companyId = "#result?.companyId()")
     public BomResponse createBom(UUID companyId, BomCreateRequest request) {
         Item parentItem = itemLookupService.getActiveItem(request.parentItemId());
         ensureParentItemAllowed(parentItem);
@@ -87,7 +88,8 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomAccess(authentication, 'PERM_BOM_MANAGE', #bomId)")
-    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()")
+    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()",
+               companyId = "#result?.companyId()")
     public BomResponse updateBom(UUID bomId, BomUpdateRequest request) {
         BomHeader bom = findBomWithLines(bomId);
         ensureDraft(bom);
@@ -106,7 +108,8 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomAccess(authentication, 'PERM_BOM_MANAGE', #bomId)")
-    @Auditable(action = AuditAction.BOM_DELETED, entityType = "BomHeader", entityIdExpression = "bomId.toString()")
+    @Auditable(action = AuditAction.BOM_DELETED, entityType = "BomHeader", entityIdExpression = "bomId.toString()",
+               companyId = "#result?.companyId()")
     public BomResponse deactivateBom(UUID bomId) {
         BomHeader bom = findBomWithLines(bomId);
         bom.deactivate();
@@ -115,7 +118,12 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomAccess(authentication, 'PERM_BOM_MANAGE', #bomId)")
-    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()")
+    // CUSTOM: the header's own scalar fields do not move when a line is added, so the generic differ
+    // would report zero changes for a command that changed the BOM materially.
+    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()",
+               changeMode = com.erp.manufacturing.common.audit.model.AuditChangeMode.CUSTOM,
+               operation = com.erp.manufacturing.common.audit.model.AuditOperation.UPDATE,
+               companyId = "#result?.companyId()")
     public BomResponse addLine(UUID bomId, BomLineCreateRequest request) {
         BomHeader bom = findBomWithLines(bomId);
         ensureDraft(bom);
@@ -145,7 +153,13 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomLineAccess(authentication, 'PERM_BOM_MANAGE', #lineId)")
-    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomLine", entityIdExpression = "bomId.toString()")
+    // Was entityIdExpression = "bomId.toString()" on a BomResponse: it recorded the HEADER id under
+    // entityType "BomLine", pointing an investigator confidently at the wrong row.
+    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomLine",
+               entityId = "#lineId",
+               changeMode = com.erp.manufacturing.common.audit.model.AuditChangeMode.CUSTOM,
+               operation = com.erp.manufacturing.common.audit.model.AuditOperation.UPDATE,
+               companyId = "#result?.companyId()")
     public BomResponse updateLine(UUID lineId, BomLineUpdateRequest request) {
         BomLine line = findLine(lineId);
         BomHeader bom = line.getBom();
@@ -172,7 +186,12 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomLineAccess(authentication, 'PERM_BOM_MANAGE', #lineId)")
-    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomLine")
+    // BomLineAuditProvider supplies both targets (header as primary, line as related) and the real
+    // line diff; CUSTOM keeps the generic differ from claiming "no changes" for a removed line.
+    @Auditable(action = AuditAction.BOM_UPDATED, entityType = "BomLine",
+               entityId = "#lineId",
+               changeMode = com.erp.manufacturing.common.audit.model.AuditChangeMode.CUSTOM,
+               operation = com.erp.manufacturing.common.audit.model.AuditOperation.DELETE)
     public void deleteLine(UUID lineId) {
         BomLine line = findLine(lineId);
         ensureDraft(line.getBom());
@@ -181,12 +200,13 @@ public class BomService {
 
     @Transactional
     @PreAuthorize("@bomPermissionGuard.hasBomAccess(authentication, 'PERM_BOM_MANAGE', #bomId)")
-    @Auditable(action = AuditAction.BOM_ACTIVATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()")
+    @Auditable(action = AuditAction.BOM_ACTIVATED, entityType = "BomHeader", entityIdExpression = "bomId.toString()",
+               companyId = "#result?.companyId()")
     public BomResponse activateBom(UUID bomId) {
         BomHeader candidate = findBomWithLines(bomId);
         ensureDraft(candidate);
         if (candidate.getLines().isEmpty()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                     "Cannot activate BOM without component lines");
         }
         ensureNoCircularReference(candidate);
@@ -270,14 +290,14 @@ public class BomService {
 
     private void ensureItemBelongsToCompany(Item item, UUID companyId) {
         if (!item.getCompany().getCompanyId().equals(companyId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to the BOM company");
         }
     }
 
     private void ensureCompanyActive(Item item) {
         if (!item.getCompany().isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Cannot create BOM under inactive company: " + item.getCompany().getCompanyId());
         }
     }

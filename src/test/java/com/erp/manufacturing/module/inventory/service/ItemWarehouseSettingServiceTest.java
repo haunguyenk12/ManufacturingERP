@@ -101,7 +101,7 @@ class ItemWarehouseSettingServiceTest {
         assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(settingRepository, never()).save(any());
     }
@@ -118,7 +118,7 @@ class ItemWarehouseSettingServiceTest {
         assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
     }
 
     @Test

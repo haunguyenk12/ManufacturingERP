@@ -79,7 +79,7 @@ public class ItemWarehouseSettingService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (!warehouse.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive warehouse cannot be used for item warehouse setting: " + warehouseId);
         }
         return warehouse;
@@ -89,7 +89,7 @@ public class ItemWarehouseSettingService {
         UUID itemCompanyId = item.getCompany().getCompanyId();
         UUID warehouseCompanyId = warehouse.getPlant().getCompany().getCompanyId();
         if (!itemCompanyId.equals(warehouseCompanyId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item and warehouse must belong to the same company");
         }
     }

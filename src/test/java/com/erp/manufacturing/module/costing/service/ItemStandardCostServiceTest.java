@@ -106,7 +106,7 @@ class ItemStandardCostServiceTest {
     }
 
     @Test
-    @DisplayName("upsert: item belonging to a different company throws OPERATION_NOT_ALLOWED before any save")
+    @DisplayName("upsert: item belonging to a different company throws RESOURCE_SCOPE_MISMATCH before any save")
     void upsert_itemOfDifferentCompany_throwsBeforeSaving() {
         UUID otherCompanyId = UUID.randomUUID();
         when(itemLookupService.getActiveItem(ITEM_ID)).thenReturn(activeItem(ITEM_ID, otherCompanyId));
@@ -115,7 +115,7 @@ class ItemStandardCostServiceTest {
                 new ItemStandardCostRequest(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verify(repository, never()).save(any());
     }
@@ -124,13 +124,13 @@ class ItemStandardCostServiceTest {
     @DisplayName("upsert: inactive item propagates the rejection from ItemLookupService")
     void upsert_inactiveItem_propagatesRejection() {
         when(itemLookupService.getActiveItem(ITEM_ID)).thenThrow(
-                new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED, "Inactive item cannot be used: " + ITEM_ID));
+                new AppException(BusinessErrorCode.RESOURCE_INACTIVE, "Inactive item cannot be used: " + ITEM_ID));
 
         assertThatThrownBy(() -> service.upsert(COMPANY_ID, ITEM_ID,
                 new ItemStandardCostRequest(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(repository, never()).save(any());
     }

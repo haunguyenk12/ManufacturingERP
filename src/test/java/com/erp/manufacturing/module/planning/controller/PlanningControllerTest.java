@@ -125,14 +125,14 @@ class PlanningControllerTest {
             + "(§5.3 — cross-company master data)")
     void estimateProduction_productOutsideScopeCompany_returns422() throws Exception {
         when(planningService.estimateProduction(any(ProductionEstimateRequest.class)))
-                .thenThrow(new AppException(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                         "Product item must belong to the requested planning scope company"));
 
         mockMvc.perform(post("/v1/planning/production-estimates")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(estimateBody()))
-                .andExpect(status().is(BusinessErrorCode.OPERATION_NOT_ALLOWED.status().value()))
-                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPERATION_NOT_ALLOWED.code()))
+                .andExpect(status().is(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH.status().value()))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 

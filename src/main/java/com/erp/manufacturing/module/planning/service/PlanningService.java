@@ -154,7 +154,7 @@ public class PlanningService {
 
     private void ensureProductBelongsToScopeCompany(Item product, OrganizationScopeResolution scope) {
         if (!product.getCompany().getCompanyId().equals(scope.companyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Product item must belong to the requested planning scope company");
         }
     }

@@ -622,7 +622,7 @@ class InventoryMovementServiceTest {
                 itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-4"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verifyNoInteractions(balanceRepository);
     }
@@ -860,7 +860,7 @@ class InventoryMovementServiceTest {
                 itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, serialId, null), "KEY-SN-7"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
-                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+                        .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
 
         verifyNoInteractions(balanceRepository);
     }

@@ -45,7 +45,8 @@ public class RoutingService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ROUTING_MANAGE', 'COMPANY', #companyId)")
-    @Auditable(action = AuditAction.ROUTING_CREATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()")
+    @Auditable(action = AuditAction.ROUTING_CREATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()",
+               companyId = "#result?.companyId()")
     public RoutingResponse create(UUID companyId, RoutingCreateRequest request) {
         Item item = itemLookupService.getActiveItem(request.itemId());
         ensureManufacturableItem(item);
@@ -96,7 +97,8 @@ public class RoutingService {
      */
     @Transactional
     @PreAuthorize("@routingPermissionGuard.hasRoutingAccess(authentication, 'PERM_ROUTING_MANAGE', #routingId)")
-    @Auditable(action = AuditAction.ROUTING_ACTIVATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()")
+    @Auditable(action = AuditAction.ROUTING_ACTIVATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()",
+               companyId = "#result?.companyId()")
     public RoutingResponse activate(UUID routingId) {
         RoutingHeader candidate = findRouting(routingId);
         if (!candidate.isDraft()) {
@@ -104,7 +106,7 @@ public class RoutingService {
                     "Only DRAFT routings can be activated");
         }
         if (candidate.getOperations().isEmpty()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                     "Cannot activate routing without operations");
         }
 
@@ -124,7 +126,8 @@ public class RoutingService {
 
     @Transactional
     @PreAuthorize("@routingPermissionGuard.hasRoutingAccess(authentication, 'PERM_ROUTING_MANAGE', #routingId)")
-    @Auditable(action = AuditAction.ROUTING_DEACTIVATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()")
+    @Auditable(action = AuditAction.ROUTING_DEACTIVATED, entityType = "RoutingHeader", entityIdExpression = "routingId.toString()",
+               companyId = "#result?.companyId()")
     public RoutingResponse deactivate(UUID routingId) {
         RoutingHeader routing = findRouting(routingId);
         routing.deactivate();
@@ -167,7 +170,7 @@ public class RoutingService {
                 .distinct()
                 .count();
         if (distinctPlants > 1) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "All routing operations must reference work centers of the same plant");
         }
     }
@@ -187,7 +190,7 @@ public class RoutingService {
 
     private void ensureItemBelongsToCompany(Item item, UUID companyId) {
         if (!item.getCompany().getCompanyId().equals(companyId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to the routing company");
         }
     }

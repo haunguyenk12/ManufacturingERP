@@ -83,7 +83,10 @@ public class ImportRunService {
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_DATA_IMPORT_EXECUTE', 'COMPANY', #companyId)")
     @Auditable(action = AuditAction.IMPORT_RUN_CREATED, entityType = "ImportRun",
-            entityIdExpression = "importRunId.toString()")
+            entityIdExpression = "importRunId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public ImportRunResponse upload(MultipartFile file, ImportTargetType targetType, UUID profileId,
                                     UUID companyId, UUID plantId, UUID warehouseId) {
         validateFile(file);
@@ -135,7 +138,10 @@ public class ImportRunService {
     @Transactional
     @PreAuthorize("@dataImportPermissionGuard.hasRunAccess(authentication, 'PERM_DATA_IMPORT_EXECUTE', #runId)")
     @Auditable(action = AuditAction.IMPORT_RUN_VALIDATED, entityType = "ImportRun",
-            entityIdExpression = "importRunId.toString()")
+            entityIdExpression = "importRunId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public ImportRunResponse validate(UUID runId, UUID profileId) {
         ImportRun run = findRun(runId);
         if (!run.canValidate()) {
@@ -231,7 +237,7 @@ public class ImportRunService {
                 .findByImportRunImportRunIdAndStatusOrderByRowNumberAsc(runId, ImportRowStatus.VALID)
                 .stream().map(ImportRow::getImportRowId).toList();
         if (validRowIds.isEmpty()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                     "Import run has no valid rows to apply");
         }
         run.setIdempotencyKey(normalizedKey);
@@ -310,7 +316,7 @@ public class ImportRunService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Import profile", profileId));
         if (!profile.isActive()) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Import profile is inactive: " + profileId);
         }
         if (profile.getTargetType() != targetType) {

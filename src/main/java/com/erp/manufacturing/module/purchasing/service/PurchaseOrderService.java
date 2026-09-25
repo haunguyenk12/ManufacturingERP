@@ -41,7 +41,10 @@ public class PurchaseOrderService {
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', 'PLANT', #request.plantId())")
-    @Auditable(action = AuditAction.PURCHASE_ORDER_CREATED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_ORDER_CREATED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseOrderResponse create(PurchaseOrderCreateRequest request) {
         PurchaseOrder order = buildOrder(
                 request.companyId(),
@@ -85,7 +88,10 @@ public class PurchaseOrderService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasOrderAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #purchaseOrderId)")
-    @Auditable(action = AuditAction.PURCHASE_ORDER_SENT, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_ORDER_SENT, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseOrderResponse send(UUID purchaseOrderId) {
         PurchaseOrder order = findOrder(purchaseOrderId);
         ensureDraft(order, "Only DRAFT purchase orders can be sent");
@@ -95,7 +101,10 @@ public class PurchaseOrderService {
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasOrderAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #purchaseOrderId)")
-    @Auditable(action = AuditAction.PURCHASE_ORDER_CANCELLED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()")
+    @Auditable(action = AuditAction.PURCHASE_ORDER_CANCELLED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
     public PurchaseOrderResponse cancel(UUID purchaseOrderId) {
         PurchaseOrder order = findOrder(purchaseOrderId);
         ensureDraft(order, "Only DRAFT purchase orders can be cancelled");
@@ -203,28 +212,28 @@ public class PurchaseOrderService {
 
     private void ensurePlantBelongsToCompany(Plant plant, Company company) {
         if (!plant.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Plant must belong to company");
         }
     }
 
     private void ensureWarehouseBelongsToPlant(Warehouse warehouse, Plant plant) {
         if (!warehouse.getPlant().getPlantId().equals(plant.getPlantId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Warehouse must belong to plant");
         }
     }
 
     private void ensureSupplierBelongsToCompany(Supplier supplier, Company company) {
         if (!supplier.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Supplier must belong to company");
         }
     }
 
     private void ensureItemBelongsToCompany(Item item, Company company) {
         if (!item.getCompany().getCompanyId().equals(company.getCompanyId())) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Item must belong to company");
         }
     }

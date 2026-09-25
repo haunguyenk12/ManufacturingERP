@@ -64,9 +64,12 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | *(không có — bộ dữ liệu demo Capstone 2 dựng xong 2026-08-22, xem `§0.46`)* |
-| **Việc mới nhất** | **Bộ dữ liệu demo SẠCH cho Capstone 2 (namespace `D26-`)** ✅ **HOÀN THÀNH** (2026-08-22). Nguồn: `BE_CLEAN_DEMO_DATA_GUIDE_2026-08-22.docx`. Xoá sạch DB rồi seed lại **qua REST API thật** một bộ dữ liệu trình diễn cho **khách hàng/hội đồng**: 1 công ty, 1 nhà máy, 5 kho, 10 vật tư, 3 BOM 2 cấp, 3 quy trình, 4 tổ sản xuất, tồn kho đầu kỳ. **Không** tạo Sales Order (đổi lại theo yêu cầu của user sau lượt bàn giao đầu tiên — người vận hành tự tạo đơn hàng của mình, seed lại phần còn lại được nhiều lần). 🔴 Khác hẳn seeder `VIETBIKE` (`§0.45`): bộ này **không** có bản ghi lỗi/`INACTIVE`/`BLOCKED` nào, và **cố ý dừng trước MRP** để người trình bày chạy Planning trực tiếp. Nghiệm thu bằng `verify.sh` trên DB dùng-một-lần: **PF-01→PF-15 và smoke test 9 bước §12 đều PASS** (blockedProposals=0, reservedPercent=100, lô HOLD→AVAILABLE, đơn hàng FULFILLED). **Không sửa một dòng `src/main` nào**, không migration. Bản ghi: **§0.46**, hướng dẫn: `docs/demo-capstone2-guide.md` |
-| **Việc trước** | **Bộ dữ liệu demo `VIETBIKE` + sửa lỗi P0 `MultipleBagFetchException`** ✅ **HOÀN THÀNH** (2026-08-14). Dựng `scripts/demo/` (1 orchestrator + 2 lib + 15 stage) seed lại **toàn bộ** dữ liệu demo từ DB trắng **qua REST API thật**, chủ đề nhà máy xe đạp, tên tiếng Việt có dấu, phủ **mọi** trạng thái của mọi vòng đời chứng từ. 🔴 **Lỗi P0 do chính bộ dữ liệu này phát hiện:** `WorkCalendarRepository` join-fetch **hai** bag (`weeklyShifts` + `Shift.breaks` — bag thứ hai nằm xa hơn một association) ⇒ **mọi** `POST /work-orders/{id}/release` qua lịch làm việc có ca **kèm giờ nghỉ** trả **500**; đây là **lần thứ ba** repo dính bẫy này (sau `§0.27`, `§0.29`). Sửa + `WorkCalendarLookupServiceIT` (class IT thứ **18**), nghiệm thu mutation 4/4 đỏ. Không migration, không permission mới, **không breaking change wire**. Bản ghi: **§0.45**, hướng dẫn demo: `docs/demo-dataset-guide.md` |
+| **Phase đang chạy** | *(không có — track `EH-*` (nợ kỹ thuật hạ tầng xử lý lỗi) đóng 6/8 hạng mục 2026-08-23, xem `§0.47`)* |
+| **Việc mới nhất** | **Refactor toàn bộ hạ tầng Audit — track `AR-*`** ✅ **HOÀN THÀNH** (2026-09-02). Nguồn: `AuditRefactorPlan.md` (AR-0 → AR-10, phạm vi do user chốt; failure policy **`FAIL_OPEN` toàn hệ thống**, §11.1). Migration **`V67`** (outbox + 10 cột mới trên `audit_logs` + bảng `audit_log_entities`) + **`V68`** (trigger append-only). 🔴 **Ba defect gốc, cả ba đều IM LẶNG — không log, không lỗi, không test nào đỏ:** (1) `@TransactionalEventListener(AFTER_COMMIT)` chỉ giao event khi thread publish đang trong transaction, mà **`AuthService` không có `@Transactional` ở bất kỳ đâu** ⇒ **mọi** event auth (`LOGIN`, `LOGIN_FAILED`, `ACCOUNT_LOCKED`, `SUSPICIOUS_TOKEN_REUSE`, `SESSION_ABSOLUTE_TIMEOUT`, `PASSWORD_RESET`) bị **vứt bỏ hoàn toàn** — nửa quan trọng nhất về bảo mật của audit trail **chưa bao giờ tồn tại**; (2) khoảng giữa business `COMMIT` và `INSERT` của listener không có bảo đảm nào, và event `FAILURE` trong transaction rollback **không bao giờ** được ghi (rollback mang theo luôn bằng chứng); (3) `X-Trace-Id` (filter nhận tới 64 ký tự) đổ vào cột `VARCHAR(32)` ⇒ **client tự tắt được audit trail của chính mình bằng một header**, insert chết **sau khi** business đã commit. Sửa bằng **transactional outbox**: outbox row nằm **trong** transaction nghiệp vụ (`B119`), failure ghi ở `REQUIRES_NEW` qua **bean riêng** (`B120`), `eventId` do producer sinh + unique index làm retry idempotent (`B121`), trigger `V68` chặn UPDATE/DELETE cho **mọi** role kể cả superuser (`B122`), sanitize ở **một** boundary (`B123`). Cộng: model sự kiện đa-entity (`audit_log_entities` — `PERMISSION_GRANTED` trước đây ghi role mà **bỏ mất permission**), `@Auditable` v2 thấy được argument (mọi method `void` trước đây ghi entity id `null`), `plantId` **lần đầu tiên được nạp thật** (cột có từ `V54`, `NULL` trên mọi dòng vì chưa từng có writer nào set), Read API v2 (**khôi phục `entityId`**), metrics + health, retention **mặc định TẮT**. **Breaking change wire: KHÔNG** (thuần additive). Bản ghi: **§0.49**, chi tiết kỹ thuật: `common/audit/CLAUDE.md` (viết lại hoàn toàn), log triển khai: `AuditRefactorPlan.md §13` |
+| **Việc trước** *(2026-08-25)* | **Sửa contract giá trị của Audit Log — `changes[].oldValue`/`newValue` về `string`** ✅ **HOÀN THÀNH** (2026-08-25). Nguồn: `BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md` (FE báo: màn hình chi tiết Audit **sập** vì một object lọt vào cây render React). 🔴 **Hồi quy do chính commit `caps2 done` gây ra, chưa ai ghi nhận:** `AuditLogChangeResponse` đổi `String` → `JsonNode` cùng lượt bật field-level diff (2026-08-17) ⇒ kiểu runtime của **cùng một field** đổi theo từng dòng (chuỗi / số / boolean / object / array), trong khi cột lưu là `jsonb` nên đủ mọi hình dạng. Đo A/B thật trên **cùng một** audit `WORK_ORDER_CREATED`: trước sửa `['int','list','str']`, sau sửa `['str']` + `null`. `AuditLogQueryService.textValue` chuẩn hoá: object/array → **JSON compact**, số/boolean → dạng chuỗi, chuỗi → **bỏ dấu nháy JSON**, JSON `null`/SQL `NULL` → `null`, chuỗi không parse được → giữ nguyên. **Không migration, không permission mới, không endpoint mới.** Bất biến **`B118`** (`common/audit`). **Breaking change wire: CÓ, hẹp** — nhưng là **khôi phục** contract mà OpenAPI vẫn công bố (`type: string`), tức trả về đúng hình dạng của `C2-1`. Bản ghi: **§0.48**, trả lời FE: `FE_SingleTask_Response.md` |
+| **Việc trước** *(2026-08-23)* | **Refactor hạ tầng xử lý lỗi — track `EH-*`** ✅ **6/8 HẠNG MỤC XONG** (2026-08-23). Nguồn: `ExceptionHandlerRefactorPlan.md`. **Không migration, không permission mới.** `EH-1` lưới an toàn cho lỗi thoát khỏi filter chain (Redis chết ⇒ trước đây rơi vào `/error` mặc định của Boot, một hình dạng JSON FE chưa từng đọc được) + `ApiErrorController`. `EH-2` 🔴 **việc lớn nhất**: tách `OPERATION_NOT_ALLOWED` — **96 throw site dùng chung một mã** ⇒ FE chỉ còn cách parse `message` tiếng Anh. Khảo sát phân loại rồi tách **3 mã mới** trên **59** site (`RESOURCE_INACTIVE` 23, `RESOURCE_SCOPE_MISMATCH` 32, `DOCUMENT_HAS_NO_LINES` 4); **37 site còn lại cố ý giữ nguyên** làm catch-all. Phạm vi do user chốt qua `AskUserQuestion`. `EH-3` `DataIntegrityErrorMapper` — khoá ngoại/`CHECK`/`NOT NULL` không còn bị trả nhầm là "đã tồn tại" (409 → **422**). `EH-4` `MrpRunService` không còn ghi message nội bộ ra response, và bản ghi `FAILED` nay sống sót qua transaction đang hỏng (`MrpRunStateRecorder`, `REQUIRES_NEW`, đúng khuôn `WorkOrderBlockRecorder`). `EH-5` xoá 4 mã chưa từng ném, **giữ 5** kèm lý do. `EH-6` viết lại `error-handling.md §5.2` (cây exception 12 lớp trong tài liệu **chưa bao giờ tồn tại** trong code). **Breaking change wire: CÓ** (đổi `code`, **không** đổi HTTP status) — bảng đầy đủ ở `§0.47`. `EH-7`/`EH-8` hoãn có chủ đích. Bản ghi: **§0.47** |
+| **Việc trước** *(2026-08-22)* | **Bộ dữ liệu demo SẠCH cho Capstone 2 (namespace `D26-`)** ✅ **HOÀN THÀNH** (2026-08-22). Nguồn: `BE_CLEAN_DEMO_DATA_GUIDE_2026-08-22.docx`. Xoá sạch DB rồi seed lại **qua REST API thật** một bộ dữ liệu trình diễn cho **khách hàng/hội đồng**: 1 công ty, 1 nhà máy, 5 kho, 10 vật tư, 3 BOM 2 cấp, 3 quy trình, 4 tổ sản xuất, tồn kho đầu kỳ. **Không** tạo Sales Order (đổi lại theo yêu cầu của user sau lượt bàn giao đầu tiên — người vận hành tự tạo đơn hàng của mình, seed lại phần còn lại được nhiều lần). 🔴 Khác hẳn seeder `VIETBIKE` (`§0.45`): bộ này **không** có bản ghi lỗi/`INACTIVE`/`BLOCKED` nào, và **cố ý dừng trước MRP** để người trình bày chạy Planning trực tiếp. Nghiệm thu bằng `verify.sh` trên DB dùng-một-lần: **PF-01→PF-15 và smoke test 9 bước §12 đều PASS** (blockedProposals=0, reservedPercent=100, lô HOLD→AVAILABLE, đơn hàng FULFILLED). **Không sửa một dòng `src/main` nào**, không migration. Bản ghi: **§0.46**, hướng dẫn: `docs/demo-capstone2-guide.md`. **[2026-08-23] mở rộng**: 40 vật tư / 3 dòng sản phẩm / 9 BOM / 9 routing / 8 tổ sản xuất, thêm nhà cung cấp + giá thành chuẩn + mua hàng + bán hàng + 3 lượt MRP + 8 lệnh sản xuất phủ 6 trạng thái, để mọi màn hình có dữ liệu chụp hình làm slide. **[2026-08-25] tách hai công ty**: `seed.sh` nhận `PROFILE` — `sample` dựng `D26-OMNIPLANT` (đi hết luồng, để chụp hình), `demo` dựng `DEMO-OMNIPLANT` (dừng ở tồn kho đầu kỳ, để diễn trực tiếp); cộng lấp mọi trường ngày/giờ API cho ghi (xem §0.46) |
+| **Việc trước** *(2026-08-14)* | **Bộ dữ liệu demo `VIETBIKE` + sửa lỗi P0 `MultipleBagFetchException`** ✅ **HOÀN THÀNH** (2026-08-14). Dựng `scripts/demo/` (1 orchestrator + 2 lib + 15 stage) seed lại **toàn bộ** dữ liệu demo từ DB trắng **qua REST API thật**, chủ đề nhà máy xe đạp, tên tiếng Việt có dấu, phủ **mọi** trạng thái của mọi vòng đời chứng từ. 🔴 **Lỗi P0 do chính bộ dữ liệu này phát hiện:** `WorkCalendarRepository` join-fetch **hai** bag (`weeklyShifts` + `Shift.breaks` — bag thứ hai nằm xa hơn một association) ⇒ **mọi** `POST /work-orders/{id}/release` qua lịch làm việc có ca **kèm giờ nghỉ** trả **500**; đây là **lần thứ ba** repo dính bẫy này (sau `§0.27`, `§0.29`). Sửa + `WorkCalendarLookupServiceIT` (class IT thứ **18**), nghiệm thu mutation 4/4 đỏ. Không migration, không permission mới, **không breaking change wire**. Bản ghi: **§0.45**, hướng dẫn demo: `docs/demo-dataset-guide.md` |
 | **Việc trước đó** | **Trả lời `live-data-audit.md`: available theo lot status + idempotency cho planning run** ✅ **HOÀN THÀNH** (2026-08-14). FE báo 3 mục; kết cục **khác nhau**: (1) 🔴 **bug thật** — `/inventory/balances` + `/inventory/lots*` báo `available > 0` cho lot `HOLD`/`REJECTED` vì `StockBalance.availableQuantity()` không đọc `lot.status`, trong khi aggregate của MRP/dashboard **có** lọc ⇒ một hệ thống hai con số; sửa ở `InventoryMapper.issuableQuantity` (**không** đụng domain method — 3 gate ghi tồn kho dựa vào nó). (2) 🟡 **gap thật** — `POST /planning-runs` bỏ qua `Idempotency-Key` (FE gửi 1 key 3 lần ⇒ 3 run); implement đầy đủ theo khuôn `stock_movements`, migration **`V58`**, header **tuỳ chọn**. (3) ✅ **báo nhầm** — "convert suggestion không atomic" **không có defect**, WO của họ sinh từ suggestion của **run khác** (đã `CONVERTED` đúng), suggestion họ nhắc chết vì trùng `workOrderNo` rồi rollback sạch; gốc rễ chính là (2). Bất biến **`B116`** (`module/inventory`), **`B117`** (`module/planning`). **Breaking change wire: có, hẹp** — `availableQuantity` của lot bị giữ nay là `0`. Bản ghi: **§0.44**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Việc trước nữa** | **FE handoff: Inventory Dashboard API** ✅ **HOÀN THÀNH** (2026-08-14). Nguồn: `BACKEND_HANDOFF_DASHBOARD_API_REQUIREMENTS.md`. FE chuyển `/dashboard` từ mock sang API thật, cần `GET /reports/inventory-dashboard` trả đủ nhãn để **một** request là đủ (không N+1 sang Item/Warehouse/User). Thêm: `generatedAt`; `uomCode`/`onHandQuantity`/`reservedQuantity`/`qualityHoldQuantity`/`shortageQuantity` trên alert line; DTO mới `DashboardRecentMovementResponse` (item/warehouse label + `actorUsername` batch-resolve); `lowStockLimit`/`movementLimit` (mặc định 10, kẹp `[1,20]`); thứ tự `REORDER_NEEDED` → shortage desc → `itemCode` → `warehouseCode`, ledger tie-break `movementId desc`. 🔴 `shortageQuantity` dùng **`max(safetyStock, reorderPoint)`**, không phải reorder point một mình như FE đề xuất — repo cấu hình `safetyStock ≥ reorderPoint` nên công thức FE đề xuất báo `0` cho **mọi** dòng `LOW_STOCK` (đã giải thích cho FE). Không migration, không permission mới. **Breaking change wire: nhẹ** — `recentMovements[]` đổi sang DTO riêng, mất `idempotencyKey` (FE chưa dùng, còn ở mock). Bất biến **`B114`**, **`B115`** (`module/inventory`). Bản ghi: **§0.43**, hướng dẫn FE: `FE_SingleTask_Response.md` |
 | **Bugfix mới nhất** | **Nợ #27: wire format ngày/giờ về ISO** ✅ **HOÀN THÀNH** (2026-08-12). FE yêu cầu tường minh (`ADMIN_RBAC_BACKEND_RESPONSE_REVIEW_2026-08-12.md §4`) **và** xác nhận adapter của họ nhận cả hai định dạng ⇒ điều kiện còn thiếu từ `§0.40` nay đã có. Xoá `@Bean ObjectMapper` trong `RedisConfig` — bean đó chỉ định dùng cho Redis nhưng làm `JacksonAutoConfiguration` của Boot nhường chỗ ⇒ **mọi** dòng `spring.jackson.*` chết lặng ⇒ `LocalDate` ra `[2026,8,8]`, `Instant` ra số epoch, ở **mọi** endpoint. 🔴 **Ghi đè `default-property-inclusion` `non_null` → `always`** (quyết định của user): để `non_null` có hiệu lực cùng lúc là xoá mọi field null khỏi mọi response — thay đổi payload toàn hệ thống không ai yêu cầu. Hệ quả phụ đã báo FE: field lạ trong request body nay bị bỏ qua thay vì 400. **Breaking change wire: CÓ** (nhưng là sửa sai — tài liệu hứa ISO từ đầu). Không migration, không permission mới. Bản ghi: **§0.42**, hướng dẫn FE: `FE_SingleTask_Response.md` |
@@ -79,11 +82,11 @@ do not delete 47 lines above
 | **Phase `D8c`** | **`D8c` – Forgot-password / Account Recovery** ✅ **HOÀN THÀNH** (2026-08-06). Trả nốt 3/3 nợ #6. Không migration. Bất biến `B101`. Bản ghi: **§0.35** |
 | **Phase `D8b`** | **`D8b` – Absolute Session Timeout** ✅ **HOÀN THÀNH** (2026-08-03). `SESSION_ABSOLUTE_TIMEOUT` (401) sau 30 ngày kể từ **login** + force logout mọi phiên; `sessionCreatedAt` lưu ở **companion key** `auth:refresh:{userId}:{tokenId}:meta`, **carry-forward** qua mỗi lần rotate. **Không migration** (thuần Redis), wire **additive**. Bất biến **`B81`**. Trả **2/3** nợ #6 — **`D8c` vẫn mở**. Bản ghi: §0.23 |
 | **Phase `D8a`** | **`D8a` – Refresh Token Reuse Detection (RTR)** ✅ HOÀN THÀNH (2026-08-03). `TOKEN_REUSE_DETECTED` (401) + force logout **cả** refresh token **lẫn** device session; thứ tự rotate lưu-mới→mark-used→xoá-cũ. Không migration, wire additive. Bất biến **`B80`**. Giới hạn "race double-submit" mà phase này chấp nhận **đã đóng**, xem §0.32. Bản ghi: §0.22 |
-| **Phase kế tiếp** | *(chưa chốt)* — track `C2-*`, `P*`, `D8` đều đã đóng hết. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
-| **Migration mới nhất** | **`V58__add_idempotency_to_mrp_runs.sql`** (2026-08-14). `mrp_runs` + `idempotency_key`/`payload_hash` + `UNIQUE`, nullable không backfill — làm `POST /planning-runs` replay-safe (`B117`). Trước đó: `V57__separate_item_master_permissions.sql` (FE-4 5C) |
-| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → `C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có, **không** thêm class IT mới) → bugfix P0 auth (2026-08-06): 942 case unit + 105 case IT / 14 class IT, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+17` unit: `JwtAuthenticationFilterTest` +13 (mới), `JwtAuthEntryPointTest` +1 (mới), `TokenStoreServiceTest` +3, `AuthServiceTest` +2 ròng (thêm 2 case mới, 1 case đổi tên/viết lại — không xoá), `JwtTokenProviderTest` −2 (xoá 2 case `extractClaimsFromExpired`, method đã orphan); `+0` IT — không đụng repository/JPQL nào) → **FE contract fix: Sales Order version + activate API (2026-08-08): 964 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 (`+22` unit: `OrganizationServiceTest` +6, `OrganizationMethodSecurityTest` +4, `OrganizationControllerTest` +4, `ItemServiceTest` +3, `ItemMethodSecurityTest` +2 (mới), `ItemControllerTest` +2, `SalesOrderServiceTest` +1 (`update_persistsThroughSaveAndFlush_...`, pin đúng `saveAndFlush`); `+0` IT — không migration, không JPQL mới) → FE-4 5C Item Master permission (`V57`): 977 case unit → **bugfix Sales Order full-replacement PATCH (2026-08-10): 979 case unit + 110 case IT / 15 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+2` unit: `SalesOrderServiceTest` +2 (`update_replacingLines_flushesTheOrphanDeletesBeforeBuildingTheReplacements` dùng `InOrder`, `update_replacementLineFromAnotherCompany_flushesTheDeletesButNeverCommits`); `+4` IT từ `SalesOrderUpdateLinesIT` (**class IT thứ 15**, mới) — 🔴 đây là loại bug mà **chỉ** `*IT` bắt được, xem `§0.40`) → **fix contract Admin RBAC (2026-08-12): 994 case unit**, failures = 0, errors = 0 — đo bằng `mvn -o test` (`+15` unit: `AccessControlServiceTest` +4, `AccessControlMethodSecurityTest` +4, `AccessControlControllerTest` +5, `GlobalExceptionHandlerTest` +2). Phần IT của lần đó lúc nghiệm thu **chưa đo được** (Docker Desktop tắt giữa chừng, mọi class IT lỗi như nhau) — ✅ **đã đo bù cùng ngày**, xem mốc kế tiếp → **trả nợ #27 wire format ISO (2026-08-12): 997 case unit + 114 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+3` unit: `JsonWireFormatTest` +3 (mới); `+4` IT là của `RolePermissionRepositoryIT` (**class IT thứ 16**) từ lượt trước, nay mới chạy được thật — bản thân lượt này không thêm case IT nào, không đụng repository/JPQL) → **FE báo Assignment `expiresAt` mất (2026-08-13): 998 case unit + 115 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. 🔴 **Không sửa `src/main`** — chẩn đoán ra là cùng lỗi `§0.42`, môi trường FE test chưa chạy bản sửa (`+1` unit: `AccessControlControllerTest`; `+1` IT: `UserRoleAssignmentRepositoryIT`; `AccessControlServiceTest.assignRole_success` **sửa tại chỗ** theo `R10` — trước đó truyền `expiresAt` mà không assert gì về nó, xem `§0.42a`) → **FE handoff Dashboard API (2026-08-14): 1009 case unit + 119 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+11` unit: `InventoryAlertServiceTest` +7, `InventoryReportControllerTest` +3, `InventoryAvailabilityServiceTest` +1 ròng — 1 case cũ **sửa tại chỗ** theo `R10` khi `getAvailableQuantitiesByWarehouse` đổi thành `getStockQuantitiesByWarehouse`; `+4` IT: `StockMovementRepositoryIT` (**class IT thứ 17**, mới) 3 case + `StockBalanceRepositoryIT` +1) → **trả lời `live-data-audit.md` (2026-08-14): 1025 case unit + 120 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+16` unit: `InventoryMapperTest` +9 (mới), `InventoryLotServiceTest` +1, `MrpRunServiceTest` +4, `PlanningRunControllerTest` +2; `+1` IT: `FlywayMigrationIT.migrate_v58_*`, **không** thêm class IT mới. ⚠️ Lần chạy đầu **mọi** class IT lỗi vì Docker Desktop tắt giữa chừng — bẫy `§0.41`, phải bật lại rồi đo lại) → **bộ dữ liệu demo + sửa lỗi `MultipleBagFetchException` (2026-08-14): 1025 case unit / 127 class + 124 case IT / 18 class IT**, failures = 0, errors = 0 (`+0` unit — lượt này **không** thêm case unit nào, có chủ đích: lỗi nằm trong `@EntityGraph` nên unit test dùng mock repository không bao giờ dựng được câu query để bắt, xem `§0.45` hệ quả #2; `+4` IT từ `WorkCalendarLookupServiceIT`, **class IT thứ 18**, mới) |
+| **Phase kế tiếp** | *(chưa chốt)* — track `C2-*` và `D8` đã đóng hết. 🔴 **`P*` thì KHÔNG**: lượt đối chiếu lại `TÀI LIỆU PHÂN TÍCH CHUYÊN SÂU (1).pdf` ngày **2026-09-25** mở thêm **`P7`–`P11`** — WIP Valuation + Variance snapshot (`P7`), Shop Floor Control cấp công đoạn (`P8`), Traceability toàn chuỗi/genealogy (`P9`), CRP đóng vòng vào MRP run (`P10`), MPS (`P11`). Ma trận đối chiếu từng yêu cầu PDF ↔ code: **`MANUFACTURING_GAP_ROADMAP.md §2.0`**; ba khoảng trống lớn nhất: **§2.0.1**. Dòng này trước đó ghi "`P*` đã đóng hết" — sai, vì chưa ai đối chiếu lại PDF kể từ `P6`. Xem `NEXT_PHASE_PLAN.md` để biết còn gì chưa làm. |
+| **Migration mới nhất** | **`V67__create_audit_outbox_and_extend_audit_logs.sql`** + **`V68__enforce_audit_append_only.sql`** (2026-09-02, track `AR-*`). `V67` thuần additive: bảng `audit_outbox`, bảng `audit_log_entities`, 10 cột mới trên `audit_logs` (`event_id` + unique index, `company_id`, `warehouse_id`, `source`, `reason_code`, `http_method`, `request_path`, `occurred_at`, `metadata`, `payload_hash`), `trace_id` nới 32→64, 4 index mới. **Không backfill dòng lịch sử** — suy `plant_id` của một dòng cũ từ dữ liệu hôm nay là làm giả snapshot. `V68` cài trigger `audit_reject_mutation()` chặn UPDATE/DELETE trên 3 bảng audit, đường thoát duy nhất là GUC `audit.maintenance`. Trước đó: `V58__add_idempotency_to_mrp_runs.sql` (2026-08-14). `mrp_runs` + `idempotency_key`/`payload_hash` + `UNIQUE`, nullable không backfill — làm `POST /planning-runs` replay-safe (`B117`). Trước đó: `V57__separate_item_master_permissions.sql` (FE-4 5C) |
+| **Baseline test** | 180 case / 44 class → T0+T1: 218 → T3: 257 → T2/T4/T5: 281 case / 57 class → F1: 289 → F2: 303 → F3: 320 → F4: 347 → F5-A: 356 → F5-B: 365 → F6: 391 → D1: 396 → D9+D10: 402 → D4: 408 → D5: 412 → D6: 416 → D7: 450 → D7b: 510 → D11: 516 → F7: 521 → F8: 545 → F9: 549 → F10: 556 case unit + 59 case IT / 10 class IT → `GET /auth/me` (2026-08-01): 571 case unit + 66 case IT → `D8a` (2026-08-03): 577 case unit → `D8b` (2026-08-03): 586 case unit + 66 case IT / 10 class IT → bugfix `lower(bytea)` + missing-param 500 (2026-08-04): 587 case unit + 70 case IT / 11 class IT → `C2-5` (2026-08-04): 593 case unit + 73 case IT / 11 class IT → `C2-3` (2026-08-04): 617 case unit + 78 case IT / 12 class IT → `C2-4` (2026-08-05): 661 case unit + 78 case IT / 12 class IT → `C2-6` (2026-08-05): 690 case unit + 79 case IT / 12 class IT → `C2-7` (2026-08-05): 759 case unit + 80 case IT / 12 class IT → `C2-8` (2026-08-05): 791 case unit + 87 case IT / 13 class IT → `P3` (2026-08-05): 821 case unit + 88 case IT / 13 class IT → concurrent refresh-token race (2026-08-05): 831 case unit + 88 case IT / 13 class IT → `P5` (2026-08-06): 850 case unit + 89 case IT / 13 class IT → `P6` (2026-08-06): 864 case unit + 89 case IT / 13 class IT → `D8c` (2026-08-06): 885 case unit + 89 case IT / 13 class IT (`+21` unit: `PasswordResetTokenServiceTest` +6 (mới), `AuthServiceTest` +5, `AuthMethodSecurityTest` +2 (mới), `AuthControllerTest` +5, `AdminControllerTest` +1 (mới), `SensitiveRequestToStringTest` +2; `+0` IT — không migration, không JPQL mới) → `C2-1` (2026-08-06): 898 case unit + 98 case IT / 14 class IT (`+13` unit: `AuditLogQueryServiceTest` +5 (mới), `AuditLogMethodSecurityTest` +4 (mới), `AuditLogControllerTest` +4 (mới); `+9` IT từ `AuditLogRepositoryIT` (mới, **class IT thứ 14**) + `+1` case `FlywayMigrationIT.migrate_v55_grantsAuditReadToAdminOnly`) → `C2-2` (2026-08-06): 925 case unit + 105 case IT / 14 class IT (`+27` unit: `InventoryLotServiceTest` +9 (mới), `LotQcOriginLookupServiceTest` +3 (mới), `InventoryLotMethodSecurityTest` +6 (mới), `InventoryLotControllerTest` +7 (mới), `InventoryPermissionGuardTest` +2; `+7` IT trong `StockBalanceRepositoryIT` đã có, **không** thêm class IT mới) → bugfix P0 auth (2026-08-06): 942 case unit + 105 case IT / 14 class IT, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+17` unit: `JwtAuthenticationFilterTest` +13 (mới), `JwtAuthEntryPointTest` +1 (mới), `TokenStoreServiceTest` +3, `AuthServiceTest` +2 ròng (thêm 2 case mới, 1 case đổi tên/viết lại — không xoá), `JwtTokenProviderTest` −2 (xoá 2 case `extractClaimsFromExpired`, method đã orphan); `+0` IT — không đụng repository/JPQL nào) → **FE contract fix: Sales Order version + activate API (2026-08-08): 964 case unit + 105 case IT / 14 class IT**, failures = 0, errors = 0 (`+22` unit: `OrganizationServiceTest` +6, `OrganizationMethodSecurityTest` +4, `OrganizationControllerTest` +4, `ItemServiceTest` +3, `ItemMethodSecurityTest` +2 (mới), `ItemControllerTest` +2, `SalesOrderServiceTest` +1 (`update_persistsThroughSaveAndFlush_...`, pin đúng `saveAndFlush`); `+0` IT — không migration, không JPQL mới) → FE-4 5C Item Master permission (`V57`): 977 case unit → **bugfix Sales Order full-replacement PATCH (2026-08-10): 979 case unit + 110 case IT / 15 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+2` unit: `SalesOrderServiceTest` +2 (`update_replacingLines_flushesTheOrphanDeletesBeforeBuildingTheReplacements` dùng `InOrder`, `update_replacementLineFromAnotherCompany_flushesTheDeletesButNeverCommits`); `+4` IT từ `SalesOrderUpdateLinesIT` (**class IT thứ 15**, mới) — 🔴 đây là loại bug mà **chỉ** `*IT` bắt được, xem `§0.40`) → **fix contract Admin RBAC (2026-08-12): 994 case unit**, failures = 0, errors = 0 — đo bằng `mvn -o test` (`+15` unit: `AccessControlServiceTest` +4, `AccessControlMethodSecurityTest` +4, `AccessControlControllerTest` +5, `GlobalExceptionHandlerTest` +2). Phần IT của lần đó lúc nghiệm thu **chưa đo được** (Docker Desktop tắt giữa chừng, mọi class IT lỗi như nhau) — ✅ **đã đo bù cùng ngày**, xem mốc kế tiếp → **trả nợ #27 wire format ISO (2026-08-12): 997 case unit + 114 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+3` unit: `JsonWireFormatTest` +3 (mới); `+4` IT là của `RolePermissionRepositoryIT` (**class IT thứ 16**) từ lượt trước, nay mới chạy được thật — bản thân lượt này không thêm case IT nào, không đụng repository/JPQL) → **FE báo Assignment `expiresAt` mất (2026-08-13): 998 case unit + 115 case IT / 16 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. 🔴 **Không sửa `src/main`** — chẩn đoán ra là cùng lỗi `§0.42`, môi trường FE test chưa chạy bản sửa (`+1` unit: `AccessControlControllerTest`; `+1` IT: `UserRoleAssignmentRepositoryIT`; `AccessControlServiceTest.assignRole_success` **sửa tại chỗ** theo `R10` — trước đó truyền `expiresAt` mà không assert gì về nó, xem `§0.42a`) → **FE handoff Dashboard API (2026-08-14): 1009 case unit + 119 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+11` unit: `InventoryAlertServiceTest` +7, `InventoryReportControllerTest` +3, `InventoryAvailabilityServiceTest` +1 ròng — 1 case cũ **sửa tại chỗ** theo `R10` khi `getAvailableQuantitiesByWarehouse` đổi thành `getStockQuantitiesByWarehouse`; `+4` IT: `StockMovementRepositoryIT` (**class IT thứ 17**, mới) 3 case + `StockBalanceRepositoryIT` +1) → **trả lời `live-data-audit.md` (2026-08-14): 1025 case unit + 120 case IT / 17 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker (`+16` unit: `InventoryMapperTest` +9 (mới), `InventoryLotServiceTest` +1, `MrpRunServiceTest` +4, `PlanningRunControllerTest` +2; `+1` IT: `FlywayMigrationIT.migrate_v58_*`, **không** thêm class IT mới. ⚠️ Lần chạy đầu **mọi** class IT lỗi vì Docker Desktop tắt giữa chừng — bẫy `§0.41`, phải bật lại rồi đo lại) → **bộ dữ liệu demo + sửa lỗi `MultipleBagFetchException` (2026-08-14): 1025 case unit / 127 class + 124 case IT / 18 class IT**, failures = 0, errors = 0 (`+0` unit — lượt này **không** thêm case unit nào, có chủ đích: lỗi nằm trong `@EntityGraph` nên unit test dùng mock repository không bao giờ dựng được câu query để bắt, xem `§0.45` hệ quả #2; `+4` IT từ `WorkCalendarLookupServiceIT`, **class IT thứ 18**, mới) → **track `EH-*` (2026-08-23): 1181 case unit / 152 class + 142 case IT / 21 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. Baseline ngay trước track này là **1155 unit / 147 class + 140 IT / 20 class** (số của các lượt sau `§0.45` chưa từng được ghi vào hàng này). `+26` unit: `RateLimitFilterErrorEnvelopeTest` +4 (mới), `DataIntegrityErrorMapperTest` +8 (mới), `ApiErrorControllerTest` +3 (mới), `OrganizationLookupServiceTest` +4 (do nghiệm thu mutation phát hiện lỗ hổng, xem §0.47 hệ quả #5), `GlobalExceptionHandlerTest` +3, `MrpRunServiceTest` +2, `JwtAuthenticationFilterTest` +1, `BomServiceTest` +1; `+2` IT từ `MrpRunStateRecorderIT` (**class IT thứ 21**, mới). 🔴 **23 assertion cũ đổi theo `R10`, không xóa cái nào** — và đó chỉ là 23/59 throw site bị đổi mã, xem §0.47 hệ quả #4 → **contract giá trị Audit Log (2026-08-25): 1184 case unit / 152 class + 142 case IT / 21 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. `+3` unit: `AuditLogQueryServiceTest` +2 (mọi hình dạng `jsonb` → `String`/`null`; SQL `NULL` không thành chuỗi `"null"`), `AuditLogControllerTest` +1 (`isString()` ở tầng HTTP — `value(...)` một mình **cũng xanh** cho một object node, nên assertion kiểu mới là thứ khoá thật). `+0` IT — không đụng repository/JPQL/schema nào. 3 assertion cũ **sửa tại chỗ** theo `R10` (bỏ `.asText()`), không xoá case nào → **track `AR-*` (2026-09-02): 1225 case unit / 158 class + 154 case IT / 22 class IT**, failures = 0, errors = 0 — đo bằng `mvn -o clean verify` thật với Docker. Baseline ngay trước track này: **1184 unit / 152 class + 142 IT / 21 class** (đo lại thật, khớp hàng cũ). `+41` unit / `+6` class: `AuditInputSanitizerTest` 11 (mới), `AuditRecorderTest` 8 (mới), `AuditExpressionEvaluatorTest` 7 (mới), `RbacAuditDescriptorProviderTest` 5 (mới), `AuditOutboxPropertiesTest` 4 (mới), `AuditPayloadCodecTest` 3 (mới), `AuditableAspectTest` +3 ròng (1→4, **viết lại** theo `R10`). `+12` IT / `+1` class: `AuditPipelineIT` 10 (**class IT thứ 22**, mới) + `FlywayMigrationIT` +2 (`migrate_v67_*`, `migrate_v68_*`). 🔴 **4 assertion cũ sửa tại chỗ, không xoá case nào**: `FlywayMigrationIT` pin version `66`→`68`, `AuditLogControllerTest` ×2 đổi `entityId` từ `doesNotExist()` sang **có giá trị** (AR-6 khôi phục field đó — assertion cũ pin đúng cái gap, nay pin cái fix), `AuditChangeCaptureServiceTest` + `AuditLogQueryServiceTest`/`AuditLogMethodSecurityTest` sửa constructor/chữ ký |
 | **Coverage tool** | ✅ JaCoCo 0.8.12 — **unit một mình: line 74.3% / branch 59.5%**; **unit + IT: line 80.5% / branch 64.2%** (cả hai đo lại 2026-08-03 sau `D8b`; số unit+IT trước đó 80.1% / 63.9% là của `F10`). ⚠️ **Xu hướng đã xác nhận tám phase liên tiếp:** `D7` +34 case ⇒ +0.6 line; `D7b` +60 ⇒ +0.8; `D11` +6 ⇒ +0.0 / +0.2; `F7` +12 ⇒ +0.2 / +0.2; `F8` +40 ⇒ +0.5 / +0.4; `F9` +8 ⇒ +0.1 / +0.0; `F10` +7 unit / +2 IT ⇒ +0.0 / +0.4; **`D8b` +9 unit ⇒ +0.1 line / +0.1 branch** (unit một mình). 🔴 **Số ở hàng này là số đo sau `D8b`; `§0.24` (bugfix), `§0.25` (`C2-5`), `§0.26` (`C2-3`), `§0.27` (`C2-4`), `§0.28` (`C2-6`), `§0.29` (`C2-7`), `§0.30` (`C2-8`), `§0.31` (`P3`), `§0.32` (concurrent refresh-token race), `§0.33` (`P5`), `§0.34` (`P6`), `§0.35` (`D8c`), `§0.36` (`C2-1`), `§0.37` (`C2-2`), `§0.38` (bugfix P0 auth), FE contract fix Sales Order version + activate API (2026-08-08) KHÔNG đo lại** — đừng đọc nó như đã tính các phần đó. **Coverage không đo được contract** — thước đo thật là nghiệm thu mutation (§0.15–§0.27). `C2-5` là ví dụ thêm: `PermissionCatalogTest` phủ 100% đường permission mà **không** thấy 12 quyền chỉ `ADMIN` có, vì "tồn tại" và "được cấp cho role" là hai sự thật khác nhau. `D8b` là ví dụ sắc nhất tới nay: mutation #1 của nó (carry-forward stamp `now`) **giữ nguyên 100% coverage, response byte-identical, mã lỗi và HTTP status không đổi** — tính năng thành no-op hoàn toàn mà mọi thước đo trừ assertion đối số đều báo xanh. Xem cảnh báo cách đo ngay dưới bảng |
-| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đã đóng hết, `C2-1`+`C2-2` xong 2026-08-06): cùng file §8** — bảng phase §8.1, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (roadmap) |
+| **Bảng theo dõi phase** | Nghiệp vụ `P*`: `MANUFACTURING_GAP_ROADMAP.md §2.1` (**`P1`–`P6` xong, `P7`–`P11` mở 2026-09-25**; ma trận đối chiếu PDF lý thuyết ở **§2.0**) · Kiểm thử `T*`: `TEST_IMPROVEMENT_PLAN.md §0` (xong hết) · Căn chỉnh FE `F*`: `FRONTEND_ALIGNMENT_ROADMAP.md §1` (lịch sử, đã đóng ở `F10`) · Trả nợ `D*`: cùng file **§6** · **Capstone 2 `C2-*` (đã đóng hết, `C2-1`+`C2-2` xong 2026-08-06): cùng file §8** — bảng phase §8.1, bẫy từng phase §8.8 · `NEXT_PHASE_PLAN.md` (roadmap) |
 
 > **Track `F*` là gì:** `OmniPlant_MVP_Production_Backend_Handoff.docx` là đặc tả tích hợp viết
 > **ngược từ frontend đã implement**, nên field name + business rule là phần cố định, tên endpoint
@@ -2782,6 +2785,329 @@ trước khi dùng). `workOrderNo` sinh ra trong `verify.sh` cũng đổi từ h
 9 bước đều PASS; sau đó xoá sạch và seed lại lượt bàn giao thật (0 sales order, 0 MRP run,
 0 work order, 3 tài khoản). `docs/demo-capstone2-guide.md` đã cập nhật theo (bảng dữ liệu, kịch
 bản 9 bước bắt đầu bằng bước "bạn tự tạo Sales Order", §4/§5 hướng dẫn dùng `SALES_ORDER_NO`).
+
+---
+
+**[2026-08-23] Mở rộng bộ dữ liệu và cho seed đi HẾT luồng, theo yêu cầu của user** (*"seed lại
+bộ dataset đầy đủ, nhiều 1 tí để chụp hình giao diện làm slide"*). Bộ `D26-` nay có **40 vật tư /
+3 dòng sản phẩm / 9 BOM / 9 routing / 8 tổ sản xuất / 2 ca / 2 lịch**, cộng **nhà cung cấp, giá
+thành chuẩn, chứng từ mua hàng, đơn bán hàng, 3 lượt chạy MRP và 8 lệnh sản xuất phủ 6 trạng
+thái** — mục đích là mọi màn hình đều có dữ liệu để chụp hình. Tên hiển thị chuyển sang **tiếng
+Anh** (thay đổi user đã tự làm dở trong `catalogue.sh`, nay hoàn tất). Vẫn giữ tinh thần "sạch":
+không `BLOCKED`, không lô `REJECTED`, không bản ghi `INACTIVE`, không phiếu bị từ chối; và vẫn để
+lại **32 đề xuất `DRAFT` + 2 đơn hàng `CONFIRMED` chưa hoạch định** cho người trình bày diễn
+trực tiếp. `verify.sh` không còn bắt buộc — `seed.sh` tự chạy **42 mục preflight** ở cuối (số kỳ
+vọng **suy ra từ `catalogue.sh`**, không viết cứng) và từ chối bàn giao nếu có mục nào trượt.
+**Không sửa một dòng `src/main` nào**, không migration.
+
+🔴 **Ba cái bẫy đã trả giá để biết, ghi lại cho lần sau:**
+1. **Phải tắt `app.rate-limit.enabled` khi seed.** Cờ này ghi cứng `true` trong `application.yml`
+   (không đọc env), ngưỡng 500 request/phút/người dùng, còn bộ dữ liệu này bắn hơn 600 request —
+   seed chết giữa chừng ở `RATE_LIMIT_EXCEEDED`. Ghi đè tạm bằng `-Dapp.rate-limit.enabled=false`
+   trên dòng lệnh; **đừng** sửa `application.yml`.
+2. **Số lượng của lệnh sản xuất sinh từ MRP là số RÒNG, không phải số trên đơn hàng.** Netting đã
+   trừ tồn kho thành phẩm sẵn có, nên báo sản lượng theo số đặt hàng trả **409
+   `PLANNED_QUANTITY_EXCEEDED`** (`B54`). Script nay đọc `plannedQuantity` từ chính lệnh sản xuất
+   thay vì dùng hằng số.
+3. **`git bash` và `python` của Windows KHÔNG cùng hiểu `/tmp`.** Git Bash ánh xạ `/tmp` sang
+   `%TEMP%`, còn python thấy `C:	mp` — ghi file bằng `>` rồi đọc bằng python theo cùng đường dẫn
+   sẽ `FileNotFoundError`. Truyền dữ liệu qua **stdin** (đúng cách `extract` của `lib/common.sh`
+   đang làm), đừng qua file tạm đường dẫn POSIX.
+
+Bản ghi số liệu và hướng dẫn chụp màn hình: `docs/demo-capstone2-guide.md`.
+
+**[2026-08-25] Một hệ thống, HAI công ty + lấp mọi trường thời gian** (yêu cầu của user). `seed.sh`
+nay nhận **`PROFILE`**: `sample` dựng công ty `D26-OMNIPLANT` *(Sample Data)* đi hết luồng để chụp
+hình, `demo` dựng công ty `DEMO-OMNIPLANT` *(Live Demo)* dừng ở tồn kho đầu kỳ để diễn trực tiếp.
+Hai lượt chạy trên **cùng một** cơ sở dữ liệu; catalogue giữ nguyên namespace `D26-` còn seed.sh
+đổi tiền tố tại chỗ, tài khoản tách theo đuôi `.sample` / `.demo`. Nghiệm thu: **42/42** mục
+preflight (sample) và **20/20** (demo), đo thật. **Không sửa `src/main`**, không migration.
+
+🔴 **Không gộp được file backup vào hệ thống theo nghĩa đen** — `backups/*.dump` là `pg_dump`
+**toàn cơ sở dữ liệu** và dùng đúng cùng dãy mã `D26-`, nên nạp chồng sẽ đụng `uk` của
+`companies.code` / `items.code` và hàng chục bảng khác. Công ty thứ hai vì thế được **dựng lại bằng
+chính script** với namespace riêng; các dump cũ vẫn nạp lại nguyên trạng được bằng `restore-db.sh`.
+
+**Lấp trường ngày/giờ** (trước đó FE thấy toàn dấu "—"): phân quyền có `expiresAt` (+365 ngày),
+lệnh sản xuất có `plannedEndAt` (+5 ngày kể từ `plannedStartAt`), phiếu ghi sản lượng gắn vào
+**công đoạn cuối** của ảnh chụp quy trình (nhờ đó có công đoạn/thứ tự/tổ sản xuất). Riêng
+`InventoryLot.expiresAt` **không có đường ghi qua REST API** (không request DTO nào mang field đó)
+⇒ tách hẳn ra `scripts/demo-capstone2/set-lot-expiry.sh` — script **duy nhất** của bộ này chạy SQL,
+để `seed.sh` giữ nguyên bất biến "không một câu SQL nào". Danh sách trường **cố ý vẫn trống** (và
+lý do từng cái) ở `docs/demo-capstone2-guide.md §9`.
+
+🔴 **Ba cái bẫy nữa, trả giá lần này:**
+1. **`GET /v1/inventory/item-warehouse-settings` KHÔNG có tham số `plantId`** — truyền vào thì bị
+   bỏ qua **im lặng** và endpoint trả cấu hình của **mọi** công ty. Preflight PF-03 vì thế "đúng"
+   suốt khi chỉ có một công ty, và báo gấp đôi ngay khi có công ty thứ hai. Nay cộng theo **từng
+   kho**. Bài học: một phép kiểm chỉ chạy trên một tập dữ liệu duy nhất chưa chứng minh nó lọc đúng.
+2. **Backend là single-session** (`AuthService.login` thu hồi mọi phiên cũ của cùng tài khoản) ⇒
+   hai tiến trình seed cùng đăng nhập `admin` thì tiến trình chạy trước chết giữa chừng với
+   `TOKEN_REVOKED`. Thấy mã đó gần như chắc chắn là còn một lượt seed cũ đang chạy nền.
+3. **Biên dịch tăng dần không sửa được `target/classes` bị cắt dở.** Giết Maven giữa lúc biên dịch
+   để lại class hỏng (lần này: `UserMapperImpl` mất mệnh đề `implements`, Spring báo *No qualifying
+   bean of type UserMapper*), và `mvn compile` lần sau tưởng không có gì thay đổi nên không sửa.
+   Phải `mvn -o -DskipTests clean compile`.
+
+---
+
+### 0.47 Track `EH-*` – Refactor Hạ Tầng Xử Lý Lỗi (2026-08-23)
+
+**Không migration, không permission mới, không endpoint mới.** Nguồn: `ExceptionHandlerRefactorPlan.md`
+(đánh giá 2026-08-22, khảo sát ~380 throw site + 48 catch block). **Không** phải phase nghiệp vụ
+`P*`/`F*`/`D*`/`C2-*` — đây là nợ kỹ thuật xuyên module về hạ tầng lỗi. 6/8 hạng mục xong; `EH-7`/`EH-8`
+hoãn có chủ đích (lý do ở §4 của plan).
+
+| ID | Nội dung | Đụng `src/main` |
+|---|---|---|
+| `EH-1` | Lưới an toàn cho lỗi thoát khỏi filter chain + `ApiErrorController` + `/error` `permitAll` | ✅ |
+| `EH-2` | Tách `OPERATION_NOT_ALLOWED` thành 3 mã cụ thể trên 59/96 site | ✅ |
+| `EH-3` | `DataIntegrityErrorMapper` thay chuỗi `contains()` hardcode | ✅ |
+| `EH-4` | `MrpRunService.fail`: sanitize message + `MrpRunStateRecorder` (`REQUIRES_NEW`) | ✅ |
+| `EH-5` | Xoá 4 mã lỗi chưa từng ném, giữ 5 kèm javadoc nêu lý do | ✅ |
+| `EH-6` | Viết lại `error-handling.md` §5.2/§5.3 + thêm §5.4.1/§5.4.2 | ❌ (tài liệu) |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Đừng bao giờ để một exception thoát khỏi một `Filter`.** `@RestControllerAdvice` **chỉ** phủ
+   những gì phát sinh trong `DispatcherServlet`; filter chạy trước nó. Trước `EH-1`, Redis không kết
+   nối được trong `assertNotBlacklisted` (hoặc bất kỳ `RuntimeException` lạ nào trong 3 filter bảo mật)
+   bay thẳng ra ngoài chain và client nhận trang `/error` mặc định của Boot —
+   `{timestamp,status,error,path}`, hình dạng JSON **không client nào trong hệ thống này parse được**.
+   Mỗi filter nay tự bắt và trả envelope; `ApiErrorController` là lưới cuối cùng.
+2. 🔴 **`/error` phải `permitAll`, và đó không phải chi tiết thừa.** Spring Boot đăng ký security chain
+   cho **cả** dispatcher type `ERROR`, nên thiếu dòng đó thì một request chưa xác thực mà lỗi thật là
+   500 sẽ bị trả lời lại thành **401** và **mất status thật**. `ApiErrorController` không tiết lộ gì về
+   sự cố (không echo message, không stack trace) nên mở nó không tốn gì.
+3. 🔴 **`EH-2` KHÔNG "thay thế" `OPERATION_NOT_ALLOWED`** — nó **thu hẹp** mã đó về đúng vai catch-all.
+   **37/96 site cố ý giữ nguyên**: sai `ItemType`, lot/serial tracking không khớp, `dueDate <
+   orderDate`, break ngoài ca, nhiều supplier trong 1 PR… Đừng "đồng bộ nốt" — nhóm đó không có trục
+   chung nào để FE rẽ nhánh, tách tiếp chỉ tạo ra mã không ai phân biệt nổi (`§11.5` theo chiều ngược).
+   Bảng phân loại đầy đủ 96 site: `ExceptionHandlerRefactorPlan.md §8`.
+4. 🔴 **Bài học đo được của lượt này: đổi 59 throw site mà chỉ 23 assertion đỏ.** Hơn một nửa số chỗ
+   được sửa **không có test nào pin `code`** — chúng chỉ được phủ qua `isInstanceOf(AppException.class)`
+   (đúng lỗ hổng rule `R1` sinh ra để chặn) hoặc qua mock stub **tự nhất quán** ở tầng controller (stub
+   ném mã cũ, rồi assert đúng mã cũ ⇒ xanh vĩnh viễn dù service thật đã đổi). Khi đổi mã lỗi hàng loạt,
+   **phải đọc *test nào đỏ*, không chỉ chờ build xanh** — và rà cả controller test có stub.
+5. 🔴 **Mutation #5 lộ ra lỗ hổng lớn nhất, và nó nằm ở đúng chỗ ít ngờ nhất.**
+   `OrganizationLookupService.getActive{Company,Plant,Warehouse}` là **bộ validate được tái dùng nhiều
+   nhất repo** — mọi module chạm master data đều đi qua — nhưng `OrganizationLookupServiceTest` chỉ phủ
+   `resolveScope`, **không case nào pin `code` của ba nhánh `INACTIVE`**. Các test *trông như* phủ chúng
+   (`OrganizationServiceTest.createPlant_underInactiveCompany_fails`…) thực ra kiểm nhánh **riêng** bên
+   trong `OrganizationService`, không đi qua lookup service. Đổi mã ở đó ⇒ **toàn bộ suite vẫn xanh**.
+   Đã bổ sung 4 case. **Bài học:** class càng được tái dùng rộng thì càng dễ bị tưởng là "chắc đã có ai
+   test rồi".
+6. **`EH-3`: tên constraint KHÔNG bao giờ ra response** — chỉ ghi log, cùng lý do catch-all không echo
+   message exception. Thêm entry vào `KNOWN` khi một constraint **thật sự** từng làm ai đó mất công chẩn
+   đoán, không phải vì nó tồn tại: schema có ~170 constraint có tên, mỗi cái một mã thì client không
+   phân biệt nổi.
+7. 🔴 **`EH-4`: `saveAndFlush` KHÔNG đủ để một hàng "sống sót" transaction đang hỏng.** Hàng đã flush
+   nhưng **chưa commit** là **vô hình** với mọi transaction khác, kể cả `REQUIRES_NEW` — nên bản nháp
+   "chỉ thêm recorder" sẽ không tìm thấy hàng nào để đánh dấu `FAILED`. Phải commit hàng `mrp_runs`
+   **trước** khi tính toán (`MrpRunStateRecorder.start`), rồi mới ghi nhận thất bại ở transaction thứ
+   hai. Hệ quả phụ **có lợi và có chủ đích**: lời hứa "một `Idempotency-Key` trùng sẽ fail fast trên
+   `uk_mrp_runs_idempotency_key`" (javadoc `MrpRunService.run` viết từ `§0.44`) nay **mới thành sự
+   thật** — trước đó request thứ hai **chờ** trên index cho tới khi request đầu chạy xong cả lượt MRP.
+   Đánh đổi đã chấp nhận: nếu transaction chính chết **sau** khi tính xong, run nằm lại ở `RUNNING`
+   thay vì biến mất — một trạng thái thấy được và chẩn đoán được.
+8. **`EH-5` giữ lại 5 mã chưa từng ném, mỗi cái có javadoc nêu lý do** — `ITEM_ALREADY_ISSUED` /
+   `PRODUCTION_ORDER_CLOSED` (đã hứa với FE trong `docs/api-guide-for-frontend.md`),
+   `LOT_WAREHOUSE_CONFLICT` / `RECEIPT_STATE_CONFLICT` / `BOM_REQUIREMENT_EXCEEDED` (hợp đồng lỗi của
+   phase BE-2/BE-4, `BE_SYSTEM_ISSUES_RESOLUTION_PLAN_2026-08-19.md`). **Đừng xoá chúng vì "grep ra 0
+   kết quả"** — đó chính là câu hỏi `EH-5` đã trả lời rồi.
+9. **`EH-6`: cây exception 12 lớp trong `error-handling.md §5.2` CHƯA BAO GIỜ tồn tại.** Code thật chỉ
+   có `AppException` + `MultiErrorException` + interface `ErrorCode` với 3 enum triển khai — **đơn giản
+   hơn** bản vẽ, không phức tạp hơn. Ai đọc tài liệu trước code sẽ đi tìm nhầm class và tệ hơn là tưởng
+   phải *thêm một lớp exception* cho mỗi loại lỗi mới (thực tế: thêm **một hằng** vào enum).
+
+**Hai phát hiện phụ, cố ý KHÔNG sửa trong lượt này** (ghi lại để không mất, chi tiết ở plan §8.1):
+
+1. 🔴 **`ImportRunService.invalidState` trả 422 nhưng đọc *status chứng từ*** (3 call site). Theo đúng
+   ba tiêu chí `error-handling.md §5.3` thì phải là `STATE_CONFLICT` (**409**) — **cùng loại nợ `#26`**
+   mà `D11` đã đóng cho `planning`; `dataimport` ra đời sau nên chưa từng được rà. Ngoài phạm vi `EH-2`
+   (EH-2 tách mã **trong cùng** status 422; đây là đổi status, một quyết định riêng).
+2. **`WorkOrderService.ensureDoesNotExceed` (`:543`) là dead code** — private, 0 call site. Chỉ ghi
+   nhận, không xoá (dead code ngoài phạm vi task).
+
+**Nghiệm thu mutation (5, **5/5 đụng `src/main`**, đã revert):** bảng đầy đủ ở
+`ExceptionHandlerRefactorPlan.md §9.5`. Đáng chú ý: #2 giữ **nguyên HTTP status** ở cả hai phía (409 vs
+409) nên chỉ assert bám `$.code` mới bắt được; #4 làm đỏ **2/2 case IT** trong khi **1177 case unit vẫn
+xanh** — minh hoạ trực tiếp `R7`; #5 lần chạy đầu **0 case đỏ**, xem hệ quả #5 ở trên.
+
+**Breaking changes — wire: CÓ.** `code` đổi ở 59 throw site (`EH-2`) và ở ràng buộc CSDL không phải
+trùng khoá (`EH-3`, 409 → 422); **HTTP status không đổi ở `EH-2`**. Bảng đầy đủ từng nhóm:
+`ExceptionHandlerRefactorPlan.md §9.1`. FE đã được cập nhật trong `docs/api-guide-for-frontend.md`
+(user tự báo FE — quyết định của user qua `AskUserQuestion`). **Java positional:** `MrpRunService`
+constructor **+1** tham số (`MrpRunStateRecorder`). Test cũ **sửa** theo `R10`, không xoá.
+
+---
+
+
+### 0.48 Contract Giá Trị Của Audit Log — `changes[].oldValue`/`newValue` Về `string` (2026-08-25)
+
+**Không** phase, **không** migration, **không** permission mới, **không** endpoint mới. Nguồn:
+`BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md` (FE báo: màn hình chi tiết Audit **sập** vì một
+object lọt vào cây render React). Bugfix thứ tư phát hiện từ báo cáo thật thay vì đối chiếu spec, sau
+`§0.24`, `§0.38`, `§0.40`. Bất biến **`B118`** (`common/audit/CLAUDE.md`).
+
+| | Trước (2026-08-17 → 2026-08-25) | Sau |
+|---|---|---|
+| Kiểu Java của DTO | `JsonNode` | **`String`** |
+| Kiểu runtime **trong cùng một** audit `WORK_ORDER_CREATED` | `['int', 'list', 'str']` | **`['str']`** (+ `null`) |
+| Schema OpenAPI runtime | `$ref: JsonNode` ⇒ `{"type":"object"}` | **`{"type":"string"}`** |
+
+**Hệ quả cần nhớ khi code tiếp:**
+
+1. 🔴 **Đây là hồi quy do chính commit `caps2 done` (`e124885`) gây ra, và không dòng tài liệu nào ghi
+   nhận.** Lượt đó bật field-level diff thật (`AuditChangeCaptureService`) **và** đổi
+   `AuditLogChangeResponse` từ `String` sang `JsonNode` trong cùng một commit khổng lồ (~50 file, kèm
+   `.docx`/`.pdf`). Tài liệu FE thậm chí ghi lại **hệ quả** như thể đó là tính năng —
+   *"`oldValue`/`newValue` giữ đúng kiểu JSON"* — nên không ai đọc ra rằng contract vừa bị phá. Cột
+   lưu là `jsonb`: đo trên DB demo có **2758** dòng thì `string` 2266 · `boolean` 222 · `number` 162 ·
+   `array` 108 ⇒ **cùng một field, năm kiểu runtime**, thứ mà không client sinh mã nào type nổi.
+2. 🔴 **Sửa ở tầng đọc, KHÔNG đụng đường ghi.** `AuditFieldChange`, `AuditChangeCaptureService`,
+   `AuditLogListener` và cột `jsonb` giữ **nguyên** — chúng lưu đúng thứ cần lưu (JSON có cấu trúc,
+   truy vấn được bằng toán tử `jsonb` của Postgres). Chỉ `AuditLogQueryService.textValue` chuẩn hoá
+   lúc map ra wire. Ép đường ghi thành text là mất khả năng query cấu trúc mà không đổi gì cho FE.
+3. 🔴 **Không được trả thẳng chuỗi thô trong cột ra ngoài** — nghe như "đơn giản nhất" nhưng sai:
+   một giá trị chữ được lưu **kèm dấu nháy JSON** (`"DRAFT"`), nên trả thô sẽ hiện `"DRAFT"` **có
+   nháy** trên UI cho **2266/2758** dòng. Phải parse rồi mới rẽ nhánh: `isValueNode() → asText()`,
+   còn lại `toString()`.
+4. **Compact, không pretty.** Tài liệu FE gợi ý chuỗi có xuống dòng; backend trả **byte-for-byte**
+   thứ đã lưu (compact) — một `JSON.parse` là lấy lại cấu trúc, còn muốn đẹp thì `JSON.stringify(…, null, 2)`
+   ở phía hiển thị. Định dạng để đọc là việc của tầng hiển thị, không phải của wire.
+5. **`JSON null` và SQL `NULL` gộp về `null`** — cả hai đều nghĩa "không có giá trị"; để `json null`
+   thành chuỗi `"null"` là dựng một giá trị giả mà FE sẽ hiển thị nguyên văn.
+6. 🔴 **Kiểu `String` trong record là bảo đảm mạnh hơn mọi test ở đây.** Sau khi đổi kiểu, một
+   `JsonNode` **không compile được** vào DTO này — hồi quy cũ không thể tái diễn mà không ai nhận ra.
+   Test chỉ phải canh phần *nội dung* của chuẩn hoá.
+7. **`isString()` chứ không phải `value(...)` ở tầng HTTP.** `jsonPath("...").value("X")` **cũng xanh**
+   khi giá trị là object node có nội dung tương ứng — đúng loại assertion đã để lọt lỗi này. Case mới
+   ở `AuditLogControllerTest` assert `isString()` **trước**, rồi mới assert nội dung.
+
+**Nghiệm thu mutation (3, đã revert — **3/3 đụng `src/main`**):**
+
+| # | Mutation | Case đỏ | Chứng minh |
+|---|---|---|---|
+| 1 | Luôn `node.toString()` (không bỏ nháy cho scalar) | **3** — kể cả 2 case đã có từ `C2-1` | Bắt đúng bẫy hệ quả #3: contract vẫn "là `String`" nhưng nội dung sai cho phần lớn dòng |
+| 2 | Luôn `node.asText()` (container bị làm phẳng thành `""`) | **1** — `get_everyStoredJsonShape_isRenderedAsStringOrNull` | Object/array **không** được âm thầm biến mất; đây là dòng dữ liệu FE cần nhất |
+| 3 | Bỏ nhánh `node.isNull()` | **1** — cùng case trên | `json null` không được thành chuỗi `"null"` |
+
+**Nghiệm thu:** `mvn -o clean verify` — **1184 case unit + 142 case IT / 21 class IT, failures = 0,
+errors = 0** (baseline trước: 1181 unit + 142 IT / 21 class).
+
+**Smoke test HTTP thật** (`mvn -o spring-boot:run -Dspring-boot.run.profiles=dev`, Postgres + Redis
+qua `docker compose`, **không** phải Testcontainer) — chạy **A/B**, cùng một bản ghi, hai build:
+
+| Probe | Trước sửa | Sau sửa |
+|---|---|---|
+| `GET /v1/audit-logs/9db449ce-…` (`WORK_ORDER_CREATED`, `D26-WO-1004`) | `componentLines` là **list**, `plannedQuantity` là **int** | cả hai là **string**; `componentLines` = `[{"uom":"EA","lineNo":1,…}]` |
+| Tập kiểu của **mọi** `newValue` trên audit đó | `['int', 'list', 'str']` | **`['str']`** |
+| `ITEM_CREATED` (`lotTracked`/`serialTracked`) | boolean | `"true"` / `"false"` |
+| `BOM_ACTIVATED` (`UPDATE`, có `oldValue`) | — | `old='DRAFT'` → `new='ACTIVE'`, **không** kèm dấu nháy |
+| `USER_CREATED` (`roles`) | array | `'["OPERATOR"]'` |
+| `GET /v3/api-docs` → `AuditLogChangeResponse` | `$ref: JsonNode` ⇒ `{"type":"object"}` | **`{"type":"string"}`** |
+
+> ⚠️ **Bẫy đo lường gặp lại lần thứ hai (sau `§0.42a`):** `pkill -f "spring-boot:run"` **không** giết
+> tiến trình con `java`, nên lượt A/B đầu tiên suýt đo hai lần trên **cùng một** build. Chỉ lộ ra vì
+> lần khởi động sau báo `Port 8081 was already in use`. Phải `netstat -ano | grep :<port>` rồi
+> `taskkill //PID <pid> //F`. Và trap `/tmp` của `§0.46` cũng tái diễn: `curl -o /tmp/x.json` rồi
+> `python` đọc `/tmp/x.json` ⇒ `FileNotFoundError` (Git Bash ánh xạ `/tmp` sang `%TEMP%`, python thấy
+> đường dẫn Windows khác hẳn) — truyền qua **stdin**.
+
+**Breaking changes — wire: CÓ, hẹp.** `changes[].oldValue`/`newValue` đổi từ JSON đa kiểu về `string`
+| `null`. Nhưng đây là **khôi phục** contract mà OpenAPI vẫn công bố suốt thời gian đó (`type: string`,
+đúng hình dạng `C2-1`), nên client viết theo tài liệu **hết hỏng**, không phải bắt đầu hỏng; FE cũng
+đã tự chuẩn hoá phòng vệ nên bản sửa này biến lớp đó thành no-op. **Java positional: không có** —
+không đổi constructor nào.
+
+---
+
+
+### 0.49 Track `AR-*` – Refactor Hạ Tầng Audit (2026-09-02)
+
+Nguồn: `AuditRefactorPlan.md` (AR-0 → AR-10). **Không** phải phase nghiệp vụ — đây là nợ kỹ thuật hạ
+tầng, cùng loại với track `EH-*` (`§0.47`). Migration **`V67`** + **`V68`**, **không** permission mới,
+**không** breaking change wire. Bất biến mới **`B119`–`B123`** (`common/audit/CLAUDE.md`).
+
+**Hai quyết định user chốt trước khi viết code** (`AskUserQuestion`): phạm vi **toàn bộ AR-0 → AR-10**;
+failure policy **`FAIL_OPEN` toàn hệ thống** (§11.1) — audit hỏng không bao giờ đổi kết quả nghiệp vụ.
+
+#### Ba defect gốc — cả ba đều im lặng
+
+| # | Defect | Hệ quả |
+|---|---|---|
+| 1 | `@TransactionalEventListener(AFTER_COMMIT)` **chỉ** giao event khi thread publish đang trong transaction, mà **`AuthService` không có `@Transactional` ở bất kỳ đâu** | **Mọi** event auth bị vứt bỏ hoàn toàn. Nửa quan trọng nhất về bảo mật của audit trail **chưa bao giờ tồn tại** |
+| 2 | Khoảng giữa business `COMMIT` và `INSERT` của listener không có bảo đảm nào; event `FAILURE` trong transaction rollback không bao giờ được ghi | Thay đổi nghiệp vụ còn, bản ghi ai làm thì mất. Lệnh bị từ chối **không để lại dấu vết nào** |
+| 3 | `X-Trace-Id` (filter nhận 64 ký tự) → cột `VARCHAR(32)`; `User-Agent` client tự đặt → `VARCHAR(512)` | **Client tự tắt được audit trail của chính mình bằng một header** |
+
+🔴 **Không log, không lỗi, không test nào đỏ.** 1184 case unit và 142 case IT đều xanh suốt thời gian
+cả ba defect còn sống — đúng bài học `R7` lần thứ bảy trong repo (sau `§0.24`, `§0.27`, `§0.28`,
+`§0.40`, `§0.43`, `§0.45`).
+
+#### Hệ quả cần nhớ khi code tiếp
+
+1. 🔴 **Outbox row nằm TRONG transaction nghiệp vụ (`B119`), và đó là toàn bộ lý do nó tồn tại.**
+   `AuditOutboxWriter` dùng `Propagation.REQUIRED`. Đổi thành `REQUIRES_NEW` là phá bất biến này
+   **mà mọi test đơn vị vẫn xanh** — chỉ `AuditPipelineIT` bắt được.
+2. 🔴 **Failure writer phải là BEAN RIÊNG (`B120`).** Spring áp `@Transactional` qua proxy, nên gọi
+   từ `AuditOutboxWriter` sang method `REQUIRES_NEW` của **chính nó** sẽ bypass proxy ⇒ annotation bị
+   bỏ qua im lặng ⇒ mọi failure audit lại biến mất khi rollback. **Bẫy này suýt tái diễn lần thứ hai
+   ngay trong lượt làm việc này**: bản nháp `AuditOutboxDispatcher` gọi `claimBatch()`/`deliver()`
+   trên chính nó — đã tách thành `AuditOutboxProcessor`. Cùng bẫy từng tạo lỗ hổng bảo mật thật ở
+   `§0.19` hệ quả #3.
+3. 🔴 **Thứ tự AOP ↔ transaction phải ghim tường minh.** Cả `AuditableAspect` lẫn transaction advisor
+   mặc định là `Ordered.LOWEST_PRECEDENCE`, và **thứ tự giữa hai advisor bằng nhau là không xác định**
+   ⇒ tính nguyên tử của outbox insert sẽ phụ thuộc thứ tự đăng ký bean. Nay: transaction
+   `LOWEST_PRECEDENCE - 100` (`@EnableTransactionManagement` ở `AuditConfig`), aspect
+   `LOWEST_PRECEDENCE - 50`. Khai `@EnableTransactionManagement` làm Boot **nhường** auto-config của
+   nó — giá trị vẫn thấp hơn hẳn method-security nên `@PreAuthorize` vẫn chạy ngoài cả hai.
+4. 🔴 **KHÔNG backfill cột mới.** Suy `plant_id` của một dòng lịch sử từ dữ liệu hôm nay là **làm giả
+   snapshot**. `NULL` nghĩa là "không ai chụp lại lúc đó" — câu trả lời đúng duy nhất. Cùng lý do
+   `V65` không backfill `entity_name`.
+5. 🔴 **`occurred_at` và `created_at` là hai thứ khác nhau, mọi query lọc/sắp thời gian phải dùng
+   `COALESCE(occurred_at, created_at)`.** Dòng trước `V67` không có `occurred_at`; lọc theo một mình
+   cột mới làm **toàn bộ lịch sử biến mất** khỏi kết quả — read API sẽ trông như vừa mất nhiều năm
+   trail đúng lúc deploy.
+6. 🔴 **Heuristic cũ đoán `CREATE`/`UPDATE`/`DELETE` từ HẬU TỐ TÊN ENUM.** Sai cho mọi action không
+   theo quy ước (`BOM_ACTIVATED`, `WORK_ORDER_RELEASED`, `PERMISSION_GRANTED`, `ROLE_REVOKED`). Một
+   lệnh thu hồi bị ghi thành UPDATE không phải chuyện đặt tên — đó là khác biệt giữa "grant này bị gỡ"
+   và "có gì đó về role thay đổi". `AuditOperation` nay khai tường minh; `INFERRED` giữ heuristic cũ
+   cho call site chưa di trú.
+7. 🔴 **`BomService.updateLine` ghi `entity_id` của BOM HEADER dưới `entityType = "BomLine"`** — id
+   trỏ tới một dòng **có thật nhưng khác**, tệ hơn `null` vì nó chỉ người điều tra đi sai một cách tự
+   tin. Đã sửa + `BomLineAuditProvider` cho diff thật (differ tự động so `BomHeader` scalar với
+   `BomResponse` ⇒ mọi lệnh sửa dòng báo **"không có thay đổi nào"**, đọc như bằng chứng rằng không
+   có gì xảy ra).
+8. **Class implement CẢ HAI SPI bắt buộc override `order()`** — Java từ chối kế thừa hai default
+   method cùng chữ ký (`BomLineAuditProvider`).
+9. **Trigger `FOR EACH ROW` KHÔNG chặn `TRUNCATE`** — phần đó do lệnh `REVOKE` gánh (mẫu ghi trong
+   `V68`). Đó cũng là lý do `AuditPipelineIT` dọn bảng bằng `TRUNCATE` được.
+10. **Tài liệu KHÔNG được gọi đây là "tamper-proof".** `payload_hash` đã tính và lưu, nhưng hash nằm
+    **cùng** database mà nó bảo vệ thì không chống được tampering ở mức DBA. Gọi đúng là
+    **"append-only activity trail"** cho tới khi có anchor ngoài (§11.3 chưa chốt).
+11. **`@DataJpaTest` bọc mỗi test trong transaction rollback** ⇒ test outbox phải
+    `@Transactional(propagation = NOT_SUPPORTED)` + `TransactionTemplate` tường minh, nếu không mọi
+    assertion đều vô nghĩa.
+
+#### Còn mở, cố ý (không phải bỏ sót) — chi tiết `AuditRefactorPlan.md §13.2`
+
+Tamper anchor ngoài DB · partition theo tháng (chưa có số đo volume) · bật retention ở production
+(§11.2 cần người duyệt pháp lý) · export endpoint + masking IP/User-Agent (§11.7) · rà 131
+`AuditAction` để deprecate action stale · xoá legacy path (giữ ít nhất một release ổn định theo §8.1).
+
+**Nghiệm thu:** `mvn -o clean verify` — **1225 case unit / 158 class + 154 case IT / 22 class IT,
+failures = 0, errors = 0**. `AuditPipelineIT` (class IT thứ 22) chứng minh trên Postgres thật: commit
+sinh **đúng một** row; rollback **không** sinh `SUCCESS` nhưng **có** `FAILURE`; event auth **không có
+transaction** vẫn được ghi; header dài bị cắt thay vì làm mất event; snapshot quá cỡ thành marker;
+redelivery cùng `eventId` không trùng; lease hết hạn được thu hồi; dead letter **không bị xoá**;
+UPDATE/DELETE bị DB từ chối; đường maintenance là lối duy nhất xoá được.
+
+**Breaking changes — wire: KHÔNG có** (thuần additive: 11 field mới + 6 filter mới trên read API,
+`entityId` được **khôi phục**, `status`/`createdAt` giữ nguyên). **Java positional: có** —
+`AuditLogQueryService.list(...)` nhận `AuditLogSearchCriteria` thay 8 tham số rời;
+`AuditLogResponse`/`AuditLogDetailResponse` đổi hình dạng record; `AuditableAspect` và
+`AuditChangeCaptureService` đổi constructor. Test cũ **sửa** theo `R10`, không xoá case nào.
 
 ---
 

@@ -1,6 +1,5 @@
 package com.erp.manufacturing.common.audit.controller;
 
-import com.fasterxml.jackson.databind.node.TextNode;
 import com.erp.manufacturing.common.audit.AuditLogQueryService;
 import com.erp.manufacturing.common.audit.dto.AuditLogChangeResponse;
 import com.erp.manufacturing.common.audit.dto.AuditLogDetailResponse;
@@ -28,6 +27,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -69,9 +69,11 @@ class AuditLogControllerTest {
     void list_defaultRequest_returns200() throws Exception {
         UUID auditId = UUID.randomUUID();
         AuditLogResponse response = new AuditLogResponse(
-                auditId, UUID.randomUUID(), "admin", "LOGIN", "Uom", "Piece", null, "SUCCESS",
-                "127.0.0.1", "curl/8.0", "trace-1", null, Instant.parse("2026-08-06T10:00:00Z"));
-        when(auditLogQueryService.list(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                auditId, UUID.randomUUID(), "admin", "LOGIN", "Uom", "uom-1", "Piece", null,
+                "SUCCESS", "LOGIN_OK", "AUTH", "127.0.0.1", "curl/8.0", "trace-1",
+                "POST", "/api/auth/v1/login", null, null, null,
+                Instant.parse("2026-08-06T10:00:00Z"), "SUCCESS", Instant.parse("2026-08-06T10:00:00Z"));
+        when(auditLogQueryService.list(any(), any()))
                 .thenReturn(PageResult.from(
                         new PageImpl<>(List.of(response), PageRequest.of(0, 20), 1)));
 
@@ -81,7 +83,12 @@ class AuditLogControllerTest {
                 .andExpect(jsonPath("$.result.content[0].auditId").value(auditId.toString()))
                 .andExpect(jsonPath("$.result.content[0].action").value("LOGIN"))
                 .andExpect(jsonPath("$.result.content[0].entityName").value("Piece"))
-                .andExpect(jsonPath("$.result.content[0].entityId").doesNotExist())
+                // AR-6 restored entityId: without a stable key a client can see WHICH KIND of object
+                // an event was about but has nothing to link to or filter by. The previous assertion
+                // pinned that gap; it now pins the fix.
+                .andExpect(jsonPath("$.result.content[0].entityId").value("uom-1"))
+                .andExpect(jsonPath("$.result.content[0].outcome").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.content[0].source").value("AUTH"))
                 .andExpect(jsonPath("$.result.page").value(0))
                 .andExpect(jsonPath("$.result.size").value(20))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
@@ -103,12 +110,16 @@ class AuditLogControllerTest {
     void get_knownId_returns200WithChanges() throws Exception {
         UUID auditId = UUID.randomUUID();
         AuditLogChangeResponse change = new AuditLogChangeResponse(
-                UUID.randomUUID(), "status", TextNode.valueOf("DRAFT"),
-                TextNode.valueOf("RELEASED"), "UPDATE", Instant.parse("2026-08-06T10:00:00Z"));
+                UUID.randomUUID(), "status", "DRAFT",
+                "RELEASED", "UPDATE", Instant.parse("2026-08-06T10:00:00Z"));
         AuditLogDetailResponse response = new AuditLogDetailResponse(
-                auditId, UUID.randomUUID(), "admin", "WORK_ORDER_UPDATED", "WorkOrder", "WO-2026-001",
-                null, "SUCCESS", "127.0.0.1", "curl/8.0", "trace-1", null,
-                Instant.parse("2026-08-06T10:00:00Z"), List.of(change));
+                auditId, UUID.randomUUID(), "admin", "WORK_ORDER_UPDATED", "WorkOrder", "wo-1",
+                "WO-2026-001", null, "SUCCESS", null, "HTTP", "127.0.0.1", "curl/8.0", "trace-1",
+                "POST", "/api/v1/work-orders", null, null, null, null,
+                Instant.parse("2026-08-06T10:00:00Z"), "SUCCESS", Instant.parse("2026-08-06T10:00:00Z"),
+                List.of(new com.erp.manufacturing.common.audit.dto.AuditLogEntityResponse(
+                        "PRIMARY", "WorkOrder", "wo-1", "WO-2026-001")),
+                List.of(change));
         when(auditLogQueryService.get(auditId)).thenReturn(response);
 
         mockMvc.perform(get("/v1/audit-logs/" + auditId))
@@ -116,11 +127,41 @@ class AuditLogControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.auditId").value(auditId.toString()))
                 .andExpect(jsonPath("$.result.entityName").value("WO-2026-001"))
-                .andExpect(jsonPath("$.result.entityId").doesNotExist())
+                .andExpect(jsonPath("$.result.entityId").value("wo-1"))
+                // audit_log_entities: the targets a single entityType/entityId pair cannot express.
+                .andExpect(jsonPath("$.result.entities[0].relation").value("PRIMARY"))
                 .andExpect(jsonPath("$.result.changes").isArray())
                 .andExpect(jsonPath("$.result.changes[0].fieldName").value("status"))
                 .andExpect(jsonPath("$.result.changes[0].oldValue").value("DRAFT"))
                 .andExpect(jsonPath("$.result.changes[0].newValue").value("RELEASED"));
+    }
+
+    /**
+     * The frontend crash of {@code BACKEND_AUDIT_LOG_VALUE_CONTRACT_2026-08-25.md} happened here, at the
+     * HTTP layer: a structured snapshot reached React as a JSON object. {@code isString()} is the
+     * assertion that matters — {@code value(...)} alone would also pass for an object node.
+     */
+    @Test
+    @DisplayName("get: a structured snapshot is serialised as a JSON string, never as a nested object")
+    void get_structuredSnapshot_isSerialisedAsAString() throws Exception {
+        UUID auditId = UUID.randomUUID();
+        String snapshot = "{\"uom\":\"EA\",\"lineNo\":1,\"componentItemCode\":\"D26-RM-CHAINRING\"}";
+        AuditLogChangeResponse change = new AuditLogChangeResponse(
+                UUID.randomUUID(), "componentRequirements", null, snapshot, "CREATE",
+                Instant.parse("2026-08-25T10:00:00Z"));
+        AuditLogDetailResponse response = new AuditLogDetailResponse(
+                auditId, UUID.randomUUID(), "admin", "WORK_ORDER_CREATED", "WorkOrder", "wo-1",
+                "WO-2026-001", null, "SUCCESS", null, "HTTP", "127.0.0.1", "curl/8.0", "trace-1",
+                "POST", "/api/v1/work-orders", null, null, null, null,
+                Instant.parse("2026-08-25T10:00:00Z"), "SUCCESS", Instant.parse("2026-08-25T10:00:00Z"),
+                List.of(), List.of(change));
+        when(auditLogQueryService.get(auditId)).thenReturn(response);
+
+        mockMvc.perform(get("/v1/audit-logs/" + auditId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.changes[0].newValue").isString())
+                .andExpect(jsonPath("$.result.changes[0].newValue").value(snapshot))
+                .andExpect(jsonPath("$.result.changes[0].oldValue").value(nullValue()));
     }
 
     @Test

@@ -41,7 +41,7 @@ public class OrganizationLookupService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Company", companyId));
         if (company.getStatus() != OrganizationStatus.ACTIVE) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive company cannot be used: " + companyId);
         }
         return company;
@@ -53,7 +53,7 @@ public class OrganizationLookupService {
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Plant", plantId));
         if (plant.getStatus() != OrganizationStatus.ACTIVE) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive plant cannot be used: " + plantId);
         }
         return plant;
@@ -66,7 +66,7 @@ public class OrganizationLookupService {
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (warehouse.getStatus() != OrganizationStatus.ACTIVE
                 || warehouse.getPlant().getStatus() != OrganizationStatus.ACTIVE) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
                     "Inactive warehouse cannot be used: " + warehouseId);
         }
         return warehouse;
@@ -80,7 +80,7 @@ public class OrganizationLookupService {
     public Warehouse getActiveWarehouseInPlant(UUID warehouseId, UUID plantId) {
         Warehouse warehouse = getActiveWarehouse(warehouseId);
         if (!warehouse.getPlant().getPlantId().equals(plantId)) {
-            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                     "Warehouse " + warehouseId + " does not belong to plant " + plantId);
         }
         return warehouse;
