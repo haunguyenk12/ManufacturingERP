@@ -1,6 +1,12 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
-> Cập nhật ad-hoc mới nhất: **Track `AR-*` — refactor toàn bộ hạ tầng Audit** hoàn thành
+> **`G2` — FE handoff Giai đoạn 2** (`FE_HANDOFF_GD_02_2026-10-12.md`): ✅ **BE xong + nghiệm thu
+> 2026-10-14** — `G2-1`..`G2-5` hoàn tất, file trả lời `BE_RESPONSE_GD_02_2026-10-14.md` đã viết (**user tự
+> gửi qua Zalo**). Còn **một quyết định mở**: `leadTimeDays: 1.5` bị cắt thành `1` (§9.6). Phase chỉ đóng
+> khi **FE** báo A01–A22 đạt. **1320 case unit / 162 class + 184 case IT / 27 class IT · failures = 0,
+> errors = 0** (`mvn -o clean verify` thật với Docker). Bản ghi `CLAUDE.md §0.50`, chi tiết **§9**.
+>
+> Trước đó: **Track `AR-*` — refactor toàn bộ hạ tầng Audit** hoàn thành
 > **2026-09-02** — bản ghi đầy đủ `CLAUDE.md §0.49`, kế hoạch + log triển khai + danh sách "cố ý chưa
 > làm" ở `AuditRefactorPlan.md §13`, chi tiết kỹ thuật `common/audit/CLAUDE.md` (viết lại hoàn toàn).
 > Migration **`V67`** (outbox + `audit_log_entities` + 10 cột mới, thuần additive, **không backfill**)
@@ -82,9 +88,9 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(không có — `C2-2` vừa xong, toàn bộ track `C2-*`/`P*`/`D8` đã đóng)* |
-| **Ứng viên kế tiếp** | *(chưa chốt — xem Phụ lục cho nợ nhỏ còn mở, hoặc hỏi user)* |
-| **Bị chặn** | *(không có)* |
+| **Đang chạy** | **`G2` — FE handoff Giai đoạn 2: Tổ chức + danh mục nền** — ✅ BE xong 2026-10-14, **chờ FE nghiệm thu** + 1 quyết định mở (§9.6) — xem **§9** |
+| **Ứng viên kế tiếp** | `G1` — FE handoff Giai đoạn 1 (`BE_HANDOFF_GD_01_2026-10-09.md`, Auth/tài khoản/quyền) — **chưa lập kế hoạch**; `G2` phụ thuộc nó ở đúng một chỗ (chính sách scope `GLOBAL`, Q15). `G3`/`G4` — FE handoff Giai đoạn 3 (nhập Excel) và 4 (tồn kho/lô/chuyển kho) — **chưa lập kế hoạch**, lượt phân tích bị dừng trước khi có kết quả |
+| **Bị chặn** | *(không có — D1–D7 đã chốt 2026-10-13)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `G2-1` đã dùng `V69`/`V70` ⇒ phải đánh số lại trước khi làm `P7` |
 
 ---
 
@@ -100,6 +106,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 6 | ~~`C2-1` — Audit Logs read API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.36` |
 | 7 | ~~`C2-2` — Inventory Lot lifecycle API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.37` |
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
+| 9 | **`G2` — FE handoff Giai đoạn 2 (tổ chức + danh mục nền)** | ✅ **BE xong (2026-10-14)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_02_2026-10-12.md`, P1. Chi tiết **§9**, bản ghi `CLAUDE.md §0.50` |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -214,6 +221,191 @@ repo). Không migration.
 
 ---
 
+## 9. `G2` — FE handoff Giai đoạn 2: Tổ chức và danh mục nền ✅ BE XONG (2026-10-14) — chờ FE nghiệm thu
+
+Nguồn: `FE_HANDOFF_GD_02_2026-10-12.md` (v1, P1, PO chốt FE ngày 12/10/2026). FE đã chốt mock; BE phải
+(1) **trả lời** 16 câu §5 của họ, (2) **đối chiếu** 11 kết quả R1–R11 với API hiện có, (3) **chỉ code
+phần thiếu**. Đầu ra gửi FE theo `BETaskDeliveryRules.md`: file `BE_RESPONSE_GD_02_<ngày gửi>.md`.
+
+> 🔴 **Đọc như bảng câu hỏi, không như danh sách việc** (`BETaskDeliveryRules.md §5` lỗi #1, đã mắc
+> thật ở `§0.41`/`§0.43`). Trong 16 câu §5, phần lớn trả lời được bằng hành vi hiện có; chỉ những mục
+> đánh dấu **CODE** ở §9.1 mới là việc phải viết. FE cũng ghi rõ: *"Không coi bảng này là xác nhận rằng
+> API hiện có đang sai."*
+
+### 9.1 Đối chiếu yêu cầu FE ↔ code thật *(rà ngày 2026-10-13, bằng đọc source — chưa gọi live)*
+
+Phạm vi đã rà: `SupplierController/Service/Repository`, `ItemWarehouseSettingService/Request/Response`,
+`OrganizationController` + `OrganizationService.deactivatePlant/activateWarehouse/resolveTimezone`,
+`ItemController` + `ItemService.create/update/listItems`, `UomController`, `UomLookupService`,
+`PageableFactory`, `V13`/`V20`/`V21`/`V66` + unique constraint của `plants`/`warehouses`/`items`/`uoms`,
+`application.yml` (`spring.jackson`). **Chưa rà:** `AccessControl`/scope `GLOBAL` (thuộc `G1`), FE
+adapter (không có repo FE).
+
+| # | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| R1 | Supplier: list/create/detail/update/activate/deactivate | **Đã có** nhưng **lệch hình dạng**: path `/v1/suppliers?companyId=` (không phải `/companies/{C}/suppliers`), query `keyword` (không phải `search`), deactivate là `PATCH .../deactivate`, **không có activate**, thiếu `contactName`/`notes`, thừa `taxCode`/`companyCode` | **CODE** (§9.2 D1) |
+| R1 | Customer master | **Không tồn tại.** `sales_orders.customer_name` là text tự do | **CODE** — module mới |
+| R2 | code trim/uppercase, unique theo Company + loại danh mục | Supplier: `UNIQUE (company_id, code)` (`V20`) + service uppercase. Item/Plant/Warehouse: `@Pattern("^[A-Z0-9._-]+$")` chạy **trước** normalize ⇒ `" partner-01 "` bị **400**, không được chuẩn hoá | Trả lời (FE đã tự normalize) |
+| R3 | Update không đổi code/parent/type/tracking; unit theo Q6 | `ItemUpdateRequest` chỉ có `name`+`unit` ⇒ code/type/tracking **không đổi được**, nhưng field lạ bị **bỏ qua im lặng** (`fail-on-unknown-properties: false`, `§0.42`) chứ không bị từ chối. **`unit` sửa được** qua PATCH | Trả lời + **CODE** (Q6, D5) |
+| R4 | Không tạo/kích hoạt Warehouse dưới Plant INACTIVE; không ghi settings cho master INACTIVE | Đã có (`activateWarehouse`, `B108`; settings dùng `getActiveItem` + `findActiveWarehouse`). ⚠️ Settings **không** kiểm Plant của kho có ACTIVE không | Trả lời + **CODE nhỏ** |
+| R5 | GET settings đúng Plant đã authorize | 🔴 **Lỗ hổng thật:** `GET /v1/inventory/item-warehouse-settings` **không** có filter plant; không truyền `warehouseId` thì guard là `hasPermission` (chỉ đọc scope `GLOBAL`) và trả settings của **mọi công ty** — đúng cái bẫy đã ghi ở `CLAUDE.md §0.46` (PF-03). `X-Plant-Id` FE gửi bị bỏ qua | **CODE** |
+| R6 | safety/ROP decimal ≥ 0, leadTime nguyên ≥ 0 | Đã có (`@PositiveOrZero`, `@Min(0)`, `Integer`). ⚠️ Wire là **JSON number**, không phải "decimal string" như FE ghi | Trả lời (Q12) |
+| R7 | Không 2 mapping ACTIVE cùng pair; ≤ 1 default ACTIVE / Item+Plant+mục đích | Đã có ở DB: `uk_item_wh_settings_active` (partial, `V13`) + trigger `trg_item_warehouse_default_role` (`V66`) | Trả lời |
+| R8 | Thay default có xác nhận, nguyên tử, serialize đồng thời | 🔴 **Ngược thiết kế FE:** `upsert` **luôn tự chuyển** cờ từ kho cũ sang kho mới, **không hỏi** (`releaseDefaultRoleFromOtherWarehouses`). Nguyên tử trong 1 transaction: có. Serialize đồng thời: **không** — hai request cùng đọc rồi cùng flush, trigger chặn một bên nhưng mã lỗi trả ra chưa ai kiểm | **CODE** (D2) + `*IT` |
+| R9 | Ngừng dùng là logical; reference mới loại INACTIVE | Đã có cho mọi master. ⚠️ `ItemWarehouseSetting.deactivate()` **không xoá cờ** default ⇒ row INACTIVE giữ `defaultSupply=true` | **CODE nhỏ** (cần cho Q7) |
+| R10 | Search/filter trước pagination, tie-breaker ổn định | 🔴 `GET /companies/{C}/plants` và `/plants/{P}/warehouses` **không có** `search`/`status` — FE adapter gửi, Spring **bỏ qua im lặng** ⇒ live trả danh sách không lọc. Item list chỉ có `search`. Phần lớn list dùng `PageableFactory.of(4 tham số)` — **không** tie-breaker | **CODE** |
+| R11 | Sai quyền/scope bị từ chối trên server | Đã có `@PreAuthorize` mọi method. Ngoại lệ chính là R5 | Trả lời + R5 |
+| §4 | `INVALID_TIMEZONE` | 🔴 **Bug tiềm ẩn:** `resolveTimezone` chỉ `trim()`, **không** `ZoneId.of` ⇒ timezone rác được lưu, rồi nổ **500** về sau ở `WorkCalendarLookupService.computeEndInstant` lúc release WO (`C2-8`) | **CODE** |
+| A08 | UOM INACTIVE không dùng tạo Item mới | 🔴 **Chưa nối:** `UomLookupService` có **0 caller ngoài module `uom`**; `Item.unit` là `String` tự do, không kiểm với bảng `uoms` (nợ ghi từ `C2-3`) | **CODE** (D5) |
+| Q4 | Chặn deactivate Plant còn Warehouse ACTIVE | `deactivatePlant` **không kiểm gì** | **CODE** (D4) |
+| Q10 | Replay `Idempotency-Key` cho mutation master | **Không** controller master nào đọc header | Trả lời (D6) |
+
+### 9.2 Quyết định phải chốt với user trước khi code ✅ *(chốt 2026-10-13: user trả lời "làm" ⇒ cả 7 theo cột "Khuyến nghị BE")*
+
+Hai chi tiết con chốt khi giao việc: D4 dùng **mã mới** `ACTIVE_CHILDREN_EXIST` (422); timezone sai dùng
+**`VALIDATION_ERROR` + `errors[{field:"timezone"}]`** (mã đã có, tương đương `INVALID_TIMEZONE` của FE — không thêm mã).
+
+| # | Quyết định | Khuyến nghị BE | Lý do | Chặn |
+|---|---|---|---|---|
+| **D1** | Supplier: đổi sang hình dạng FE đề xuất, hay **thêm song song**? | **Thêm song song (additive)**: thêm `GET/POST /v1/companies/{C}/suppliers` (query `search`) + `POST /v1/suppliers/{id}/activate` + `POST /v1/suppliers/{id}/deactivate`; **giữ** path cũ (`/v1/suppliers?companyId=`, `PATCH .../deactivate`) | Path cũ đang dùng cho luồng mua hàng (`§0.46` seed gọi nó). Đổi tại chỗ = breaking không cần thiết. Customer dùng **đúng** hình dạng mới ngay từ đầu | `G2-2` |
+| **D2** | `replaceDefaults` trên `PUT` settings | `Boolean replaceDefaults` **nullable**: `null` ⇒ **giữ hành vi hiện tại** (tự chuyển cờ), `false` ⇒ `409 DEFAULT_CONFLICT` nếu kho khác giữ cờ, `true` ⇒ chuyển cờ. Thêm lock bi quan theo `(item, plant)` để serialize | FE đề xuất mặc định `false` ⇒ mọi client hiện tại (adapter cũ, script seed `D26-`/`VIETBIKE`) đang thành công sẽ **bắt đầu nhận 409** — breaking. Nullable vừa cho FE đúng hành vi mới, vừa không phá ai | `G2-3` |
+| **D3** | PATCH đối tác: `omitted = giữ, null = xoá` (Q3)? | **Không theo FE** — giữ quy ước toàn repo: `null`/omitted = giữ, **chuỗi rỗng `""` = xoá** | Java `record` không phân biệt được omitted với `null` nếu không thêm `JsonNullable`/`Map` — một cơ chế mới chỉ cho 2 endpoint. Tiền lệ: `CLAUDE.md §0.29` hệ quả #4. Trả lời Q3 bằng phương án khác + ví dụ JSON | `G2-1`, `G2-2` (PATCH) |
+| **D4** | Deactivate Plant còn Warehouse ACTIVE (Q4) | **Chặn**, `422` mã mới `ACTIVE_CHILDREN_EXIST` (hoặc tái dùng `OPERATION_NOT_ALLOWED` nếu user không muốn mã mới) | Không cascade ngoài ý định người dùng — FE cũng nghiêng về chặn. ⚠️ Rà script seed có deactivate plant không trước khi bật | `G2-4` |
+| **D5** | `Item.unit`: bất biến qua PATCH (Q6) + kiểm với UOM master (A08) | **Có cả hai**: create ⇒ `unit` phải là UOM **ACTIVE** (`RESOURCE_INACTIVE`/`ENTITY_NOT_FOUND`); PATCH ⇒ `unit` khác giá trị cũ thì `422`, giống thì chấp nhận (adapter cũ vẫn gửi `unit` không đổi). Giữ `unit` trong `ItemUpdateRequest` để không breaking | 🔴 **Rủi ro:** item tạo với unit **không có** trong bảng `uoms` (dữ liệu demo, script seed) sẽ hết tạo được. Phải rà `scripts/demo*/catalogue.sh` tạo UOM trước item chưa | `G2-4` |
+| **D6** | `Idempotency-Key` cho mutation master (Q10) | **Không làm ở phase này** — trả lời: header bị bỏ qua; retry create được chặn bởi unique code ⇒ `409 RESOURCE_ALREADY_EXISTS` (FE hiểu là "đã tạo"), retry PATCH/activate là idempotent tự nhiên | `A2` giới hạn idempotency cho POST nhạy cảm ghi tồn kho/chứng từ. Làm cho ~20 endpoint master là phase riêng, chưa ai cần ngoài nghiệm thu A21 | Không (chỉ trả lời) |
+| **D7** | Permission settings: FE ghi `PERM_ITEM_*`, code dùng `PERM_INVENTORY_*` | **Giữ `PERM_INVENTORY_*`**, trả lời FE mapping đúng | Đổi permission = đổi cấu hình role của mọi môi trường. Customer: thêm `PERM_CUSTOMER_READ/_MANAGE` theo đúng ma trận grant hiện có của `PERM_SUPPLIER_*` (Q2) | `G2-1` (perm Customer), `G2-0` |
+
+### 9.3 Gói công việc *(thứ tự thực thi; mỗi gói là một commit theo `dev-workflow.md §6.6`)*
+
+#### `G2-0` — Baseline + trả lời §5 cho FE *(không code `src/main`, không bị chặn)*
+
+1. `mvn -o clean verify` với Docker ⇒ ghi baseline thật (số cuối cùng đã ghi là **1225 unit / 158
+   class + 154 IT / 22 class**, `§0.49` — **đo lại, không chép**).
+2. Chạy backend + gọi live từng endpoint hiện có ở FE §3.3 trên DB dùng-một-lần (chuỗi C1→P1→W1/W2→
+   KG→I1) để có **request/response thật** cho file trả lời (`B2`: cấm mẫu viết tay).
+3. Viết `BE_RESPONSE_GD_02_<ngày>.md` §0–§8: trả lời Q1–Q16 (đã làm / sẽ làm sau quyết định §9.2 /
+   khác đề xuất + ví dụ JSON), bảng mapping mã lỗi FE §4 ↔ mã thật (Q13):
+
+   | FE đề xuất | Mã thật | HTTP thật |
+   |---|---|---|
+   | `DUPLICATE_CODE` | `RESOURCE_ALREADY_EXISTS` | 409 |
+   | `INACTIVE_PARENT` / `INACTIVE_REFERENCE` | `RESOURCE_INACTIVE` | **422**, không phải 409 |
+   | `NOT_FOUND` | `ENTITY_NOT_FOUND` | 404 |
+   | `PLANT_CONTEXT_MISMATCH` | `STATE_CONFLICT` | **409**, không phải 400 (`error-handling.md §5.6.1`) |
+   | `IMMUTABLE_FIELD` | *(không có — field lạ bị bỏ qua, response trả giá trị cũ)* | 200 |
+   | `INTERNAL_ERROR` | `INTERNAL_SERVER_ERROR` | 500 |
+   | `INVALID_TIMEZONE` · `ACTIVE_CHILDREN` · `DEFAULT_CONFLICT` | chưa có ⇒ theo `G2-3`/`G2-4` | — |
+
+   Kèm trả lời Q12 (decimal là **JSON number**, scale theo DB `NUMERIC(19,6)`), Q14 (unique: Plant/Item/
+   Supplier theo Company, Warehouse theo Plant, UOM toàn hệ thống — **đúng như FE đề xuất**, đã có ở
+   DB), Q15 (chờ `G1`).
+4. Gửi **sau** khi user chốt §9.2 — câu trả lời phụ thuộc D1–D7.
+
+#### `G2-1` — Customer master *(mới hoàn toàn; chỉ chặn bởi D3 cho PATCH)*
+
+- **Vị trí:** `module/sales/` (entity `Customer` + repository + service + controller + lookup service),
+  đối xứng với `Supplier` nằm trong `module/purchasing`. **Không** nối `SalesOrder.customerName` →
+  `customer_id` (FE ghi bán hàng đầy đủ là ngoài phạm vi).
+- **Migration `V69`:** bảng `customers` (`customer_id` UUID, `company_id` FK, `code` 100, `name` 255,
+  `contact_name` 255, `email` 255, `phone` 255, `address` 500, `notes` 500, `status` + `CHECK`, audit
+  field, `version`), `UNIQUE (company_id, code)`, index `(company_id, status)`. Cùng migration: thêm
+  `contact_name`/`notes` vào `suppliers` (cho `G2-2`).
+- **Migration `V70`:** seed `PERM_CUSTOMER_READ`/`_MANAGE`, grant **đúng ma trận** `PERM_SUPPLIER_*`
+  đang có trong DB (đọc từ `role_permissions` thật, không đoán từ `V21`); ghi `docs/roles-and-permissions.md` (`C10`).
+- **6 endpoint** đúng FE §3.4: `GET/POST /v1/companies/{C}/customers`, `GET/PATCH /v1/customers/{id}`,
+  `POST /v1/customers/{id}/activate|deactivate`. Guard: `hasResourceAccess(..., 'COMPANY', ...)` +
+  guard record cho path `{id}` (mẫu `purchasingPermissionGuard.hasSupplierAccess`). Sort mặc định `code
+  asc` **có tie-breaker** id.
+- `AuditAction`: `CUSTOMER_CREATED/UPDATED/ACTIVATED/DEACTIVATED`.
+- **Test:** service (uniqueness, normalize, lifecycle idempotent, Supplier + Customer cùng code hợp lệ),
+  method-security (deny + allow + `verify` chuỗi `PERM_*`), controller (envelope, 201, 409, 400 email),
+  `FlywayMigrationIT.migrate_v70_*` (ma trận grant **dương + cấm**), `CustomerRepositoryIT` nếu `search`
+  dùng `concat`/`like` trên tham số nullable (bẫy `lower(bytea)`, `§0.24`).
+
+#### `G2-2` — Căn chỉnh Supplier *(chặn bởi D1, D3)*
+
+- Thêm `contactName`/`notes` vào request/response (additive). Giữ `taxCode`.
+- Theo D1: thêm path company-scoped + `activate` + `POST deactivate`; path cũ giữ nguyên.
+  `Supplier.activate()` chặn khi Company `INACTIVE` (đúng `B108`).
+- Test sửa theo `R10` cho record positional (`SupplierResponse`, `SupplierCreateRequest`).
+
+#### `G2-3` — Item–Warehouse settings *(chặn bởi D2)*
+
+1. **R5 (lỗ hổng scope):** thêm query `plantId` vào `GET`; guard `hasResourceAccess(..., 'PLANT',
+   plantId)`; repository lọc `warehouse.plant`. Cross-check `X-Plant-Id` qua `PlantContextResolver` cho
+   `GET` (có `plantId`) và `PUT` (đối chiếu plant của `warehouseId`) — theo `§5.6.1`.
+   ⚠️ Giữ nhánh `warehouseId` hiện có. Bỏ hẳn nhánh "không filter + `hasPermission`" là **breaking** ⇒ ghi
+   rõ, hỏi user nếu phải bỏ.
+2. **R8/D2:** `replaceDefaults` nullable + `BusinessErrorCode.DEFAULT_CONFLICT` (409) + lock bi quan
+   (`@Lock(PESSIMISTIC_WRITE)` trên query lấy settings của `(item, plant)`) **trước** khi đọc peer.
+3. **Q7:** upsert tìm cả row `INACTIVE` của cùng pair ⇒ **kích hoạt lại** (giữ `settingId`) thay vì
+   insert row mới.
+4. **R9:** `deactivate()` xoá cả hai cờ default (bắt buộc cho bước 3 — nếu không, kích hoạt lại một row
+   mang cờ cũ sẽ đụng trigger `V66`).
+5. **R4:** từ chối khi Plant của kho `INACTIVE` (`RESOURCE_INACTIVE`).
+6. **Test:** unit cho cả 3 nhánh `replaceDefaults`; **`ItemWarehouseSettingConcurrencyIT`** (2 thread,
+   cùng item+plant, cả hai `replaceDefaults=true` ⇒ cuối cùng đúng 1 default, không 500) — mock **không**
+   kiểm được lock/trigger (`R7`); IT cho filter `plantId` (đúng bẫy `§0.46` PF-03: fixture **phải có 2
+   công ty**).
+
+#### `G2-4` — Organization + Item: filter, lifecycle, validation *(chặn bởi D4, D5)*
+
+1. **R10:** `search` (code/name) + `status` cho list plants/warehouses; `status`/`type`/`lotTracked`
+   cho list item (Q9 — tên tham số chốt `type`, khớp field response). Mọi list trong phạm vi dùng
+   `PageableFactory.of(..., tieBreaker)`. JPQL nullable ⇒ `cast(... as string)` + `*IT` (bẫy `§0.24`,
+   enum `null` cũng cần kiểm).
+2. **Timezone:** `resolveTimezone` validate bằng `ZoneId.of` ⇒ `400` mã mới `INVALID_TIMEZONE` (hoặc
+   `VALIDATION_ERROR` + `errors[{field:"timezone"}]` — chốt cùng D4). **Không** sửa dữ liệu cũ đã lưu.
+3. **D4:** `deactivatePlant` chặn khi còn Warehouse `ACTIVE`.
+4. **D5:** `ItemService.create` resolve `unit` qua `UomLookupService` (ACTIVE); `update` từ chối đổi
+   `unit`. Lần đầu nối `items.unit` với UOM master — **không** đổi cột (vẫn là code string).
+5. **Test:** service + controller cho từng nhánh mới; `OrganizationRepositoryIT`/`ItemRepositoryIT` cho
+   filter; regression: chạy lại `scripts/demo-capstone2/seed.sh` trên DB trắng (D5 có thể phá seed).
+
+#### `G2-5` — Nghiệm thu + bàn giao
+
+- `mvn -o clean verify` thật với Docker; số case **≥ baseline G2-0** (`R10`).
+- Nghiệm thu mutation, ưu tiên các chỗ mock không thấy: bỏ lock bi quan (IT concurrency phải đỏ), bỏ
+  filter `plantId` trong JPQL, đổi `DEFAULT_CONFLICT` sang mã khác **cùng 409**, bỏ vế `ACTIVE` khi
+  resolve UOM.
+- Smoke test HTTP thật cho A01–A22 phần thuộc BE (A18 thuộc `G1`; A21 trả lời theo D6) — ghi request/
+  response/`X-Trace-Id`/giờ đo.
+- Cập nhật `BE_RESPONSE_GD_02_*.md` (§7 bằng chứng + mục **chưa nghiệm thu**), `CLAUDE.md §0`
+  (bản ghi mới), `module/sales|purchasing|inventory|organization/CLAUDE.md` (bất biến mới — tiếp số từ
+  `B123`), `docs/api-guide-for-frontend.md`, `docs/roles-and-permissions.md`.
+
+### 9.4 Breaking change dự kiến *(tuỳ quyết định §9.2)*
+
+| Thay đổi | Breaking? | Phụ thuộc |
+|---|---|---|
+| Customer + `PERM_CUSTOMER_*` + path Supplier mới + `contactName`/`notes` | **Không** (additive) | D1 |
+| `replaceDefaults` nullable | **Không** nếu theo khuyến nghị D2; **có** nếu mặc định `false` như FE đề xuất | D2 |
+| `GET settings` thêm `plantId` | Không (tuỳ chọn); **có** nếu bỏ nhánh không-filter | §9.3 G2-3 #1 |
+| Deactivate Plant còn kho ACTIVE ⇒ 422 | **Có** (request trước đây 200) | D4 |
+| Item create với unit không có/INACTIVE trong UOM ⇒ lỗi; PATCH đổi unit ⇒ 422 | **Có** | D5 |
+| Timezone rác ⇒ 400 | **Có** (sửa sai: trước đây lưu rồi 500 về sau) | — |
+| Filter `search`/`status` trên list org | Nới lỏng (trước đây bị bỏ qua) | — |
+
+### 9.6 Kết quả thực thi *(2026-10-14)*
+
+Làm đúng §9.3; breaking change thực tế khớp §9.4 (6 mục "chặn mới", chi tiết `BE_RESPONSE_GD_02_2026-10-14.md §3`).
+Bản ghi đầy đủ: `CLAUDE.md §0.50`.
+
+| Còn mở | Trạng thái | Cần gì |
+|---|---|---|
+| 🔴 **`leadTimeDays: 1.5` ⇒ lưu `1`** (FE A10 đòi 400) | Đo live, **chưa sửa**. Jackson `ACCEPT_FLOAT_AS_INT` mặc định bật ⇒ áp cho **mọi** field số nguyên mọi endpoint | User chốt: sửa riêng field này hay toàn hệ thống. Sửa xong gửi FE bản `_v2` |
+| FE nghiệm thu A01–A22 | Chờ FE | FE gửi kết quả; chưa đạt ⇒ trả lời bằng `_v2`, không mở file mới |
+| A04/A14 live, A17 bằng tài khoản giới hạn, A19 (125 UOM), Q5, Q16 live | Chưa đo — ghi ở `BE_RESPONSE_GD_02_2026-10-14.md §7.3` | Xem file đó |
+
+### 9.5 Ngoài phạm vi *(theo FE §1.3 + quyết định BE)*
+
+CRUD Company; Import Excel; PO/GRN, giá, công nợ; nối `SalesOrder` với `Customer`; serial tracking;
+UOM quy đổi; tự chọn kho khi thiếu mapping; `Idempotency-Key` cho master (D6); mọi thay đổi Auth/scope
+`GLOBAL` (thuộc `G1`); đổi định dạng decimal sang string toàn hệ thống (Q12 — tác động mọi endpoint,
+`BETaskDeliveryRules.md §5` lỗi #7).
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -290,6 +482,17 @@ repo). Không migration.
   - [x] `InventoryLotService` (list/get/changeStatus) — reuse `InventoryMovementService.changeLotStatus`
   - [x] Endpoint `GET /inventory/lots` + `GET /inventory/lots/{lotId}` + `POST .../status` — không migration
   - [x] Test (925 case unit + 105 case IT / 14 class IT) + docs
+- [ ] **`G2`** — FE handoff Giai đoạn 2: tổ chức + danh mục nền *(BE xong 2026-10-14; mở cho tới khi FE nghiệm thu đạt)*
+  - [x] Chốt 7 quyết định §9.2 (D1–D7) với user — 2026-10-13, theo khuyến nghị
+  - [x] Baseline đo thật 2026-10-13: **1225 unit + 154 IT, failures = 0, errors = 0** (`mvn -o clean verify`, Docker)
+  - [x] `G2-1` Customer master (`V69`+`V70`, 6 endpoint, `PERM_CUSTOMER_*`) — `B136`
+  - [x] `G2-2` Supplier: `contactName`/`notes` + path company-scoped + activate — `B141`
+  - [x] `G2-3` Settings: filter `plantId` (lỗ hổng R5), `replaceDefaults`, lock, kích hoạt lại pair cũ — `B137`, `B138`
+  - [x] `G2-4` Org/Item: `search`/`status`/`type` filter, timezone, Plant có kho ACTIVE, unit ↔ UOM — `B139`, `B140`
+  - [x] `G2-5` `mvn -o clean verify` (**1320 unit + 184 IT**, 0/0) + mutation 3/3 + smoke 59 lượt gọi + docs
+  - [x] `G2-0` `BE_RESPONSE_GD_02_2026-10-14.md` trả lời R1–R11 + Q1–Q16, mẫu JSON copy từ lượt gọi thật
+  - [ ] Quyết định `leadTimeDays` số lẻ (§9.6) → nếu sửa, gửi FE bản `_v2`
+  - [ ] FE báo A01–A22 đạt
 
 ---
 

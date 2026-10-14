@@ -40,19 +40,45 @@ public class SupplierService {
     @Auditable(action = AuditAction.SUPPLIER_CREATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
                companyId = "#result?.companyId()")
     public SupplierResponse create(SupplierCreateRequest request) {
-        Company company = organizationLookupService.getActiveCompany(request.companyId());
-        String code = normalizeCode(request.code(), "Supplier code");
+        return createInCompany(request.companyId(), request.code(), request.name(), request.email(),
+                request.phone(), request.address(), request.taxCode(), request.contactName(), request.notes());
+    }
+
+    /**
+     * {@code POST /v1/companies/{companyId}/suppliers} (G2-2): the company comes from the path.
+     *
+     * <p>Carries its own {@code @PreAuthorize}/{@code @Auditable} and shares only the private
+     * {@link #createInCompany} routine with {@link #create(SupplierCreateRequest)}. Calling the other
+     * public method on {@code this} instead would bypass the Spring proxy and skip both annotations
+     * (the self-invocation hole of CLAUDE.md §0.19 hệ quả #3).
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SUPPLIER_MANAGE', 'COMPANY', #companyId)")
+    @Auditable(action = AuditAction.SUPPLIER_CREATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
+               companyId = "#result?.companyId()")
+    public SupplierResponse createForCompany(UUID companyId, CompanySupplierCreateRequest request) {
+        return createInCompany(companyId, request.code(), request.name(), request.email(),
+                request.phone(), request.address(), request.taxCode(), request.contactName(), request.notes());
+    }
+
+    private SupplierResponse createInCompany(UUID companyId, String rawCode, String name, String email,
+                                             String phone, String address, String taxCode,
+                                             String contactName, String notes) {
+        Company company = organizationLookupService.getActiveCompany(companyId);
+        String code = normalizeCode(rawCode, "Supplier code");
         if (supplierRepository.existsByCompanyCompanyIdAndCode(company.getCompanyId(), code)) {
             throw ExceptionFactory.alreadyExists(ValidationErrorCode.RESOURCE_ALREADY_EXISTS, "Supplier code", code);
         }
         Supplier supplier = Supplier.builder()
                 .company(company)
                 .code(code)
-                .name(requireText(request.name(), "Supplier name"))
-                .email(trimToNull(request.email()))
-                .phone(trimToNull(request.phone()))
-                .address(trimToNull(request.address()))
-                .taxCode(trimToNull(request.taxCode()))
+                .name(requireText(name, "Supplier name"))
+                .email(trimToNull(email))
+                .phone(trimToNull(phone))
+                .address(trimToNull(address))
+                .taxCode(trimToNull(taxCode))
+                .contactName(trimToNull(contactName))
+                .notes(trimToNull(notes))
                 .build();
         return mapper.toResponse(supplierRepository.save(supplier));
     }
@@ -92,6 +118,31 @@ public class SupplierService {
         if (request.taxCode() != null) {
             supplier.setTaxCode(trimToNull(request.taxCode()));
         }
+        if (request.contactName() != null) {
+            supplier.setContactName(trimToNull(request.contactName()));
+        }
+        if (request.notes() != null) {
+            supplier.setNotes(trimToNull(request.notes()));
+        }
+        return mapper.toResponse(supplierRepository.save(supplier));
+    }
+
+    /**
+     * G2-2: the way back from {@code INACTIVE}, which suppliers never had. Idempotent, and refused
+     * while the owning company is {@code INACTIVE} — the same rule as Plant/Warehouse/Item/Customer
+     * activation (B108).
+     */
+    @Transactional
+    @PreAuthorize("@purchasingPermissionGuard.hasSupplierAccess(authentication, 'PERM_SUPPLIER_MANAGE', #supplierId)")
+    @Auditable(action = AuditAction.SUPPLIER_ACTIVATED, entityType = "Supplier", entityIdExpression = "supplierId.toString()",
+               companyId = "#result?.companyId()")
+    public SupplierResponse activate(UUID supplierId) {
+        Supplier supplier = findSupplier(supplierId);
+        if (!supplier.getCompany().isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
+                    "Cannot activate a supplier while its company is inactive: " + supplierId);
+        }
+        supplier.activate();
         return mapper.toResponse(supplierRepository.save(supplier));
     }
 

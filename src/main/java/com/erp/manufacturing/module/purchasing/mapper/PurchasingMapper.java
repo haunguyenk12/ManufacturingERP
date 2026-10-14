@@ -24,7 +24,9 @@ public class PurchasingMapper {
                 supplier.getTaxCode(),
                 supplier.getStatus().name(),
                 supplier.getCreatedAt(),
-                supplier.getUpdatedAt());
+                supplier.getUpdatedAt(),
+                supplier.getContactName(),
+                supplier.getNotes());
     }
 
     public ItemSupplierResponse toResponse(ItemSupplier itemSupplier) {

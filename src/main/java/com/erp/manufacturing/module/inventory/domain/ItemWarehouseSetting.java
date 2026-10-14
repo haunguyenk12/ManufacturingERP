@@ -63,7 +63,14 @@ public class ItemWarehouseSetting extends BaseEntity {
         status = ItemWarehouseSettingStatus.ACTIVE;
     }
 
+    /**
+     * Also drops both default roles (G2-3). A row that kept its flag while INACTIVE would carry it back
+     * into the V66 default-role trigger the moment the pair is reactivated by an upsert — colliding with
+     * whichever warehouse took the role in the meantime.
+     */
     public void deactivate() {
         status = ItemWarehouseSettingStatus.INACTIVE;
+        defaultSupply = false;
+        defaultOutput = false;
     }
 }

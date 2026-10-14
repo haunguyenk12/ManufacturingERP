@@ -5,7 +5,11 @@ import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
 import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
 import com.erp.manufacturing.module.inventory.dto.ItemWarehouseSettingRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
+import com.erp.manufacturing.common.web.PlantContextResolver;
+import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
+import com.erp.manufacturing.module.organization.domain.Plant;
+import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -59,7 +65,7 @@ class ItemWarehouseSettingMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq("WAREHOUSE"), eq(warehouseId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> settingService.upsert(request))
+        assertThatThrownBy(() -> settingService.upsert(request, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(itemLookupService);
@@ -72,7 +78,7 @@ class ItemWarehouseSettingMethodSecurityTest {
         when(inventorySettingPermissionGuard.hasSettingAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(settingId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> settingService.deactivate(settingId))
+        assertThatThrownBy(() -> settingService.deactivate(settingId, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(settingRepository);
@@ -84,13 +90,44 @@ class ItemWarehouseSettingMethodSecurityTest {
         UUID settingId = UUID.randomUUID();
         when(inventorySettingPermissionGuard.hasSettingAccess(any(), eq("PERM_INVENTORY_MANAGE"), eq(settingId)))
                 .thenReturn(true);
+        // A setting always has a warehouse in a plant (NOT NULL FK); G2-3 reads that plant to check X-Plant-Id.
+        Plant plant = Plant.builder().plantId(UUID.randomUUID()).build();
+        Warehouse warehouse = Warehouse.builder().warehouseId(UUID.randomUUID()).plant(plant).build();
         when(settingRepository.findWithDetailsBySettingId(settingId)).thenReturn(Optional.of(
                 ItemWarehouseSetting.builder()
                         .settingId(settingId)
+                        .warehouse(warehouse)
                         .status(ItemWarehouseSettingStatus.ACTIVE)
                         .build()));
 
-        assertThatCode(() -> settingService.deactivate(settingId)).doesNotThrowAnyException();
+        assertThatCode(() -> settingService.deactivate(settingId, null)).doesNotThrowAnyException();
+    }
+
+    /** G2-3: listing by plant is a PLANT-scoped check on the exact permission string. */
+    @Test
+    void list_byPlant_deniedWhenInventoryReadMissingOnThePlant() {
+        UUID plantId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("PLANT"), eq(plantId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> settingService.list(plantId, null, null, PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(settingRepository);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("PLANT"), eq(plantId));
+        verify(permissionGuard, never()).hasPermission(any(), any());
+    }
+
+    @Test
+    void list_byPlant_allowedWhenInventoryReadPresentOnThePlant() {
+        UUID plantId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("PLANT"), eq(plantId)))
+                .thenReturn(true);
+        when(settingRepository.search(any(), any(), any(), any(), any())).thenReturn(Page.empty());
+
+        assertThatCode(() -> settingService.list(plantId, null, null, PageRequest.of(0, 20)))
+                .doesNotThrowAnyException();
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_READ"), eq("PLANT"), eq(plantId));
     }
 
     @Configuration
@@ -105,7 +142,9 @@ class ItemWarehouseSettingMethodSecurityTest {
             return new ItemWarehouseSettingService(
                     settingRepository,
                     itemLookupService,
+                    mock(ItemRepository.class),
                     warehouseRepository,
+                    new PlantContextResolver(),
                     mapper);
         }
 

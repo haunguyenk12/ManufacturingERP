@@ -193,6 +193,15 @@ xử lý riêng, sớm hơn, ngay trong `JwtAuthenticationFilter`, không bao gi
 
 Chi tiết + bối cảnh phát hiện (hai lỗi P0 FE báo): `common/security/CLAUDE.md §4.20`.
 
+**Constant thêm ở `G2` (2026-10-14):**
+
+| `code` | HTTP | Ném ở đâu | Vì sao không tái dùng mã có sẵn |
+|---|---|---|---|
+| `DEFAULT_CONFLICT` | 409 | `PUT /inventory/item-warehouse-settings` với `replaceDefaults=false` khi kho khác của cùng item/plant đang giữ vai trò default được yêu cầu. **Không ghi gì** | FE cần phân biệt "hỏi người dùng rồi gửi lại với `replaceDefaults=true`" với một xung đột trạng thái chung — `STATE_CONFLICT` không mang được ý đó |
+| `ACTIVE_CHILDREN_EXIST` | **422** | `DELETE /plants/{id}` khi plant còn Warehouse `ACTIVE` (từ chối, không cascade) | Là luật master data, không phải status chứng từ ⇒ 422 cùng nhóm `RESOURCE_INACTIVE`; khác hướng (cha → con) nên không gộp vào mã đó |
+
+Timezone sai ở Plant **không** có mã riêng: dùng `VALIDATION_ERROR` + `errors[{field:"timezone"}]` (tương đương `INVALID_TIMEZONE` FE đề xuất, xem bất biến `B140`).
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

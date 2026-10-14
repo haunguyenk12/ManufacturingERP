@@ -45,6 +45,12 @@ public class Supplier extends BaseEntity {
     @Column(name = "tax_code", length = 100)
     private String taxCode;
 
+    @Column(name = "contact_name", length = 255)
+    private String contactName;
+
+    @Column(name = "notes", length = 500)
+    private String notes;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
@@ -52,6 +58,10 @@ public class Supplier extends BaseEntity {
 
     public boolean isActive() {
         return status == SupplierStatus.ACTIVE;
+    }
+
+    public void activate() {
+        status = SupplierStatus.ACTIVE;
     }
 
     public void deactivate() {

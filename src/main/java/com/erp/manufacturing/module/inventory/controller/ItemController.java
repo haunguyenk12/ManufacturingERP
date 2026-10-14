@@ -2,6 +2,8 @@ package com.erp.manufacturing.module.inventory.controller;
 
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.module.inventory.domain.ItemStatus;
+import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.dto.ItemCreateRequest;
 import com.erp.manufacturing.module.inventory.dto.ItemResponse;
 import com.erp.manufacturing.module.inventory.dto.ItemUpdateRequest;
@@ -38,15 +40,15 @@ public class ItemController {
     public ResponseEntity<ApiResponse<PageResult<ItemResponse>>> listItems(
             @PathVariable UUID companyId,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) ItemStatus status,
+            @RequestParam(required = false) ItemType type,
+            @RequestParam(required = false) Boolean lotTracked,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
-        return ResponseEntity.ok(ApiResponse.ok(search == null
-                ? itemService.listItems(companyId,
-                        PageableFactory.of(page, size, sortBy, sortDir, "itemId"))
-                : itemService.listItems(companyId, search,
-                        PageableFactory.of(page, size, sortBy, sortDir, "itemId"))));
+        return ResponseEntity.ok(ApiResponse.ok(itemService.listItems(companyId, search, status, type, lotTracked,
+                PageableFactory.of(page, size, sortBy, sortDir, "itemId"))));
     }
 
     @GetMapping("/v1/items/{itemId}")

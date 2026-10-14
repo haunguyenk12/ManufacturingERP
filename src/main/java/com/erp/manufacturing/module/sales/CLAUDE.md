@@ -84,3 +84,13 @@ Chiều ngược lại (`workorder → sales`) cố tình **không** dùng assoc
 Theo tiền lệ `F2`. Lưu ý phân biệt trong chính service này: lỗi **dữ liệu không hợp lệ** (line
 `dueDate` trước `orderDate`, item khác company, plant khác company) vẫn dùng
 `OPERATION_NOT_ALLOWED` (422) — đó là validation, không phải xung đột trạng thái.
+
+---
+
+## Bất Biến Customer Master (`G2-1`, 2026-10-14)
+
+> Số `B136`+ (không phải `B124`): `MANUFACTURING_PHASE_PLAN_P7_P11.md` đã giữ chỗ `B124`–`B135` cho P7–P11 dù chưa implement — dùng chung dãy số sẽ trùng.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B136 | Customer là master data **company-scoped**, đối xứng `Supplier` (`module/purchasing`). `code` **trim + uppercase rồi mới** kiểm `^[A-Z0-9._-]+$` và độ dài 1..100 (sai ⇒ `VALIDATION_ERROR` + `errors[{field:"code"}]`) — khác `@Pattern` của Item/Plant/Warehouse vốn từ chối `" partner-01 "`. Unique `(company_id, code)` **bất kể status**: customer `INACTIVE` vẫn giữ mã của nó. Supplier và Customer **được trùng mã** (hai danh mục khác nhau). `activate` idempotent và **bị chặn khi company `INACTIVE`** (`RESOURCE_INACTIVE` 422, cùng luật `B108`); `deactivate` luôn được. PATCH: `null`/omitted = giữ, **chuỗi rỗng = xoá** field tuỳ chọn (`NEXT_PHASE_PLAN.md §9.2 D3`, không theo đề xuất "null = xoá" của FE); `name` không xoá được. **Không** nối `SalesOrder.customerName` → `customer_id` (ngoài phạm vi G2). Permission `PERM_CUSTOMER_READ/_MANAGE` (`V70`) **sao chép grant từ `PERM_SUPPLIER_*` trong DB lúc migrate**, không viết lại danh sách role | `CustomerServiceTest` (16), `CustomerMethodSecurityTest` (10), `SalesPermissionGuardTest` (4), `CustomerControllerTest` (9), **`CustomerRepositoryIT`** (6 — mutation bỏ `cast(:search as string)` ⇒ 2 case đỏ với đúng `lower(bytea)`), `FlywayMigrationIT.migrate_v69_*`/`migrate_v70_*` |

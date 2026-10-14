@@ -8,6 +8,8 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.purchasing.domain.SupplierStatus;
+import com.erp.manufacturing.module.purchasing.dto.CompanySupplierCreateRequest;
 import com.erp.manufacturing.module.purchasing.dto.ItemSupplierRequest;
 import com.erp.manufacturing.module.purchasing.dto.ItemSupplierResponse;
 import com.erp.manufacturing.module.purchasing.dto.SupplierCreateRequest;
@@ -15,7 +17,10 @@ import com.erp.manufacturing.module.purchasing.dto.SupplierResponse;
 import com.erp.manufacturing.module.purchasing.service.SupplierService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -29,9 +34,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -81,7 +88,7 @@ class SupplierControllerTest {
     private SupplierResponse sampleSupplier(String statusValue) {
         return new SupplierResponse(SUPPLIER_ID, COMPANY_ID, "COMP-01", "SUP-001", "Acme Steel",
                 "sales@acme.test", "0900000000", "1 Industrial Rd", "TAX-01",
-                statusValue, Instant.now(), Instant.now());
+                statusValue, Instant.now(), Instant.now(), "Demo Contact", null);
     }
 
     private ItemSupplierResponse sampleItemSupplier() {
@@ -211,5 +218,84 @@ class SupplierControllerTest {
                 .andExpect(jsonPath("$.result.last").value(true));
 
         verify(supplierService).list(eq(COMPANY_ID), eq(null), eq(null), any());
+    }
+
+    // ---- G2-2: company-scoped routes added alongside the ones above ----
+
+    @Test
+    @DisplayName("createForCompany: POST /v1/companies/{id}/suppliers returns 201, company from the path")
+    void createForCompany_returns201AndUsesThePathCompany() throws Exception {
+        when(supplierService.createForCompany(eq(COMPANY_ID), any(CompanySupplierCreateRequest.class)))
+                .thenReturn(sampleSupplier("ACTIVE"));
+
+        mockMvc.perform(post("/v1/companies/{companyId}/suppliers", COMPANY_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"SUP-001","name":"Acme Steel","contactName":"Demo Contact"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.supplierId").value(SUPPLIER_ID.toString()))
+                .andExpect(jsonPath("$.result.contactName").value("Demo Contact"))
+                .andExpect(jsonPath("$.result.notes").value((Object) null));
+
+        verify(supplierService).createForCompany(eq(COMPANY_ID), any(CompanySupplierCreateRequest.class));
+    }
+
+    @Test
+    @DisplayName("createForCompany: an over-long contactName is a 400 field error")
+    void createForCompany_overLongContactName_returns400() throws Exception {
+        mockMvc.perform(post("/v1/companies/{companyId}/suppliers", COMPANY_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"SUP-001","name":"Acme Steel","contactName":"%s"}
+                                """.formatted("x".repeat(256))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("contactName"));
+
+        verifyNoInteractions(supplierService);
+    }
+
+    @Test
+    @DisplayName("listForCompany: forwards search as the keyword, sort code asc with supplierId tie-breaker")
+    void listForCompany_forwardsSearchAndStableSort() throws Exception {
+        when(supplierService.list(eq(COMPANY_ID), eq(SupplierStatus.ACTIVE), eq("acme"), any(Pageable.class)))
+                .thenReturn(new PageResult<>(List.of(sampleSupplier("ACTIVE")), 0, 20, 1L, 1, true, true));
+
+        mockMvc.perform(get("/v1/companies/{companyId}/suppliers", COMPANY_ID)
+                        .param("search", "acme")
+                        .param("status", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.content[0].code").value("SUP-001"))
+                .andExpect(jsonPath("$.result.totalElements").value(1));
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(supplierService).list(eq(COMPANY_ID), eq(SupplierStatus.ACTIVE), eq("acme"), pageable.capture());
+        assertThat(pageable.getValue().getSort()).containsExactly(
+                Sort.Order.asc("code"), Sort.Order.asc("supplierId"));
+    }
+
+    @Test
+    @DisplayName("activate: inactive company surfaces as 422 RESOURCE_INACTIVE")
+    void activate_underInactiveCompany_returns422() throws Exception {
+        when(supplierService.activate(SUPPLIER_ID))
+                .thenThrow(new AppException(BusinessErrorCode.RESOURCE_INACTIVE, "Company is inactive"));
+
+        mockMvc.perform(post("/v1/suppliers/{supplierId}/activate", SUPPLIER_ID))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()));
+    }
+
+    @Test
+    @DisplayName("deactivate: POST form reaches the same service method as the PATCH route")
+    void deactivateViaPost_returns200Inactive() throws Exception {
+        when(supplierService.deactivate(SUPPLIER_ID)).thenReturn(sampleSupplier("INACTIVE"));
+
+        mockMvc.perform(post("/v1/suppliers/{supplierId}/deactivate", SUPPLIER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("INACTIVE"));
+
+        verify(supplierService).deactivate(SUPPLIER_ID);
     }
 }

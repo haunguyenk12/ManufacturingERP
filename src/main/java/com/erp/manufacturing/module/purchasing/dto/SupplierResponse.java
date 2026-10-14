@@ -15,5 +15,7 @@ public record SupplierResponse(
         String taxCode,
         String status,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String contactName,
+        String notes
 ) {}

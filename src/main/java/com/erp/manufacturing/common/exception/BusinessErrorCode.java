@@ -44,6 +44,13 @@ public enum BusinessErrorCode implements ErrorCode {
      * called out in {@code .claude/rules/error-handling.md} §5.3 as the boundary people get wrong.
      */
     DOCUMENT_HAS_NO_LINES     ("DOCUMENT_HAS_NO_LINES",     "Document has no lines yet",                     HttpStatus.UNPROCESSABLE_ENTITY),
+    /**
+     * G2-4: a parent cannot be deactivated while it still has ACTIVE children — today a plant with an
+     * ACTIVE warehouse. Refused rather than cascaded: deactivating the children is a separate decision
+     * the user has to make (NEXT_PHASE_PLAN.md 9.2 D4). 422 like {@link #RESOURCE_INACTIVE}: it is
+     * about master data, not about a document's status.
+     */
+    ACTIVE_CHILDREN_EXIST     ("ACTIVE_CHILDREN_EXIST",     "Record still has active children",              HttpStatus.UNPROCESSABLE_ENTITY),
     STATE_CONFLICT            ("STATE_CONFLICT",            "Action is not valid for the current state",     HttpStatus.CONFLICT),
     CONCURRENT_MODIFICATION   ("CONCURRENT_MODIFICATION",   "Record was modified by another request",        HttpStatus.CONFLICT),
     IDEMPOTENCY_CONFLICT      ("IDEMPOTENCY_CONFLICT",      "Idempotency key was reused with a different payload", HttpStatus.CONFLICT),
@@ -84,6 +91,12 @@ public enum BusinessErrorCode implements ErrorCode {
     OVER_BOM_APPROVAL_REQUIRED("OVER_BOM_APPROVAL_REQUIRED", "Over-BOM issue requires manager approval",      HttpStatus.CONFLICT),
     MISSING_WAREHOUSE_POLICY  ("MISSING_WAREHOUSE_POLICY",  "No warehouse policy resolves this requirement", HttpStatus.CONFLICT),
     AMBIGUOUS_WAREHOUSE_POLICY("AMBIGUOUS_WAREHOUSE_POLICY", "Multiple warehouses match without a default",   HttpStatus.CONFLICT),
+    /**
+     * G2-3: an item-warehouse setting claims a default role (supply/output) another warehouse of the
+     * same item and plant already holds, and the caller sent {@code replaceDefaults=false}. Nothing is
+     * written; the client should confirm and retry with {@code replaceDefaults=true}.
+     */
+    DEFAULT_CONFLICT          ("DEFAULT_CONFLICT",          "Default warehouse role is held by another warehouse", HttpStatus.CONFLICT),
     PLANNED_QUANTITY_EXCEEDED ("PLANNED_QUANTITY_EXCEEDED", "Quantity exceeds the planned limit",            HttpStatus.CONFLICT),
 
     // ── System ─────────────────────────────────────────────────────────────

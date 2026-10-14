@@ -19,7 +19,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -83,9 +86,11 @@ public class OrganizationService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_READ', 'COMPANY', #companyId)")
-    public PageResult<PlantResponse> listPlants(UUID companyId, Pageable pageable) {
+    public PageResult<PlantResponse> listPlants(UUID companyId, String search, OrganizationStatus status,
+                                                Pageable pageable) {
         ensureCompanyExists(companyId);
-        return PageResult.from(plantRepository.findByCompanyCompanyId(companyId, pageable).map(mapper::toResponse));
+        return PageResult.from(plantRepository.search(companyId, status, trimToNull(search), pageable)
+                .map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -140,6 +145,11 @@ public class OrganizationService {
                plantId = "#result?.plantId()")
     public PlantResponse deactivatePlant(UUID plantId) {
         Plant plant = findPlant(plantId);
+        // G2-4 (D4): refused, not cascaded — deactivating the warehouses is the user's own decision.
+        if (warehouseRepository.existsByPlantPlantIdAndStatus(plantId, OrganizationStatus.ACTIVE)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.ACTIVE_CHILDREN_EXIST,
+                    "Plant still has active warehouses; deactivate them first: " + plantId);
+        }
         plant.deactivate();
         return mapper.toResponse(plantRepository.save(plant));
     }
@@ -161,9 +171,11 @@ public class OrganizationService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_ORG_READ', 'PLANT', #plantId)")
-    public PageResult<WarehouseResponse> listWarehouses(UUID plantId, Pageable pageable) {
+    public PageResult<WarehouseResponse> listWarehouses(UUID plantId, String search, OrganizationStatus status,
+                                                        Pageable pageable) {
         ensurePlantExists(plantId);
-        return PageResult.from(warehouseRepository.findByPlantPlantId(plantId, pageable).map(mapper::toResponse));
+        return PageResult.from(warehouseRepository.search(plantId, status, trimToNull(search), pageable)
+                .map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -268,7 +280,26 @@ public class OrganizationService {
         return code.trim().toUpperCase(Locale.ROOT);
     }
 
+    /**
+     * G2-4: an unknown zone id is a field error now. It used to be stored as typed and only blew up as
+     * a 500 later, when {@code WorkCalendarLookupService} called {@code ZoneId.of} while releasing a
+     * work order. Rows already stored are left alone.
+     */
     private String resolveTimezone(String timezone) {
-        return StringUtils.hasText(timezone) ? timezone.trim() : Plant.DEFAULT_TIMEZONE;
+        if (!StringUtils.hasText(timezone)) {
+            return Plant.DEFAULT_TIMEZONE;
+        }
+        String zone = timezone.trim();
+        try {
+            ZoneId.of(zone);
+        } catch (DateTimeException e) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("timezone", "must be a valid IANA time zone id, e.g. Asia/Ho_Chi_Minh"));
+        }
+        return zone;
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 }

@@ -1193,6 +1193,61 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 > receipt, `referenceType="GOODS_RECEIPT"` nếu nhận từ PO) — có thể `null` nếu không tìm thấy movement
 > `RECEIVE` gốc.
 
+### Danh mục nền — FE giai đoạn 2 *(`G2`, 2026-10-14)*
+
+Mọi path dưới đây nằm dưới context `/api` (ví dụ `/api/v1/companies/{companyId}/customers`).
+
+**Khách hàng (mới)** — permission `PERM_CUSTOMER_READ` / `PERM_CUSTOMER_MANAGE` (ADMIN + MANAGER, sao chép từ quyền Supplier; OPERATOR không có):
+
+| Thao tác | Endpoint |
+|---|---|
+| Danh sách | `GET /v1/companies/{companyId}/customers?search=&status=&page=0&size=20&sortBy=code&sortDir=asc` |
+| Tạo | `POST /v1/companies/{companyId}/customers` — body `{code, name, contactName?, email?, phone?, address?, notes?}` → **201** |
+| Chi tiết / sửa | `GET /v1/customers/{customerId}` · `PATCH /v1/customers/{customerId}` |
+| Kích hoạt / ngừng | `POST /v1/customers/{customerId}/activate` · `POST /v1/customers/{customerId}/deactivate` |
+
+> `code` được **trim + viết hoa trước khi kiểm tra**: gửi `" partner-01 "` sẽ lưu `PARTNER-01`. Mã trùng trong
+> cùng công ty (kể cả bản ghi đã ngừng) ⇒ `409 RESOURCE_ALREADY_EXISTS`. Supplier và Customer **được trùng mã**.
+> 🔴 **PATCH:** bỏ field hoặc gửi `null` = **giữ nguyên**; gửi chuỗi rỗng `""` = **xoá** field tuỳ chọn. Đây
+> **không** phải quy ước "null = xoá" mà tài liệu FE giai đoạn 2 đề xuất. `name` không xoá được (rỗng ⇒ 400).
+> Kích hoạt khi công ty đang ngừng ⇒ `422 RESOURCE_INACTIVE`.
+
+**Nhà cung cấp** — đường mới **song song**, đường cũ (`/v1/suppliers?companyId=&keyword=`, `PATCH .../deactivate`) vẫn chạy:
+
+| Thao tác | Endpoint |
+|---|---|
+| Danh sách theo công ty | `GET /v1/companies/{companyId}/suppliers?search=&status=` (sort mặc định `code asc`) |
+| Tạo theo công ty | `POST /v1/companies/{companyId}/suppliers` — body như Customer, cộng `taxCode?` |
+| Kích hoạt / ngừng | `POST /v1/suppliers/{supplierId}/activate` · `POST /v1/suppliers/{supplierId}/deactivate` |
+
+> Response Supplier có thêm `contactName`, `notes` (cuối object). PATCH dùng cùng quy ước rỗng-là-xoá.
+
+**Thiết lập kho của vật tư** (`PERM_INVENTORY_READ` / `PERM_INVENTORY_MANAGE` — **không** phải `PERM_ITEM_*`):
+
+| Thao tác | Endpoint |
+|---|---|
+| Danh sách theo nhà máy | `GET /v1/inventory/item-warehouse-settings?plantId=&itemId=&warehouseId=` + header `X-Plant-Id` (tuỳ chọn, phải trùng `plantId`) |
+| Lưu (upsert theo cặp vật tư + kho) | `PUT /v1/inventory/item-warehouse-settings` — body thêm `replaceDefaults?` |
+| Ngừng | `DELETE /v1/inventory/item-warehouse-settings/{settingId}` |
+
+> 🔴 **`replaceDefaults`** khi kho khác của cùng vật tư/nhà máy đang giữ vai trò default bạn yêu cầu:
+> **bỏ field** ⇒ chuyển cờ ngay (hành vi cũ) · **`false`** ⇒ `409 DEFAULT_CONFLICT`, **không ghi gì** — hiện
+> confirmation rồi gửi lại với **`true`** ⇒ chuyển cờ. Chỉ vai trò bạn yêu cầu bị gỡ khỏi kho kia.
+> Lưu lại một cặp đã ngừng sẽ **kích hoạt lại đúng bản ghi cũ** (giữ `settingId`). Ngừng một setting xoá luôn
+> hai cờ default của nó. `X-Plant-Id` lệch với nhà máy của kho ⇒ `409 STATE_CONFLICT`; sai định dạng ⇒ 400.
+> Kho thuộc nhà máy đang ngừng ⇒ `422 RESOURCE_INACTIVE`.
+
+**Tổ chức & vật tư — thay đổi hành vi:**
+
+| Endpoint | Thay đổi |
+|---|---|
+| `GET /v1/companies/{companyId}/plants`, `GET /v1/plants/{plantId}/warehouses` | Nay **nhận** `search` (mã/tên) và `status` — trước đây hai tham số này bị bỏ qua im lặng |
+| `GET /v1/companies/{companyId}/items` | Thêm `status`, `type`, `lotTracked` (cạnh `search` đã có), lọc trước phân trang |
+| `POST`/`PATCH /v1/companies/{companyId}/plants`, `/v1/plants/{plantId}` | Timezone không hợp lệ ⇒ `400 VALIDATION_ERROR`, `errors[0].field = "timezone"` |
+| `DELETE /v1/plants/{plantId}` | Còn kho `ACTIVE` ⇒ **`422 ACTIVE_CHILDREN_EXIST`** — ngừng kho trước |
+| `POST /v1/companies/{companyId}/items` | `unit` phải là mã UOM **tồn tại** (404 nếu không) và **đang hoạt động** (`422 RESOURCE_INACTIVE`) |
+| `PATCH /v1/items/{itemId}` | `unit` **không đổi được**: gửi lại đúng giá trị cũ thì được, khác ⇒ `422 OPERATION_NOT_ALLOWED` |
+
 ---
 
 ## 6. Tham chiếu DTO
@@ -1350,6 +1405,7 @@ overIssue, overrideReason`
 | `SERIAL_NOT_ELIGIBLE` | Issue một serial không ở trạng thái `AVAILABLE` (vd đã `ISSUED`/`REJECTED`) |
 | `MISSING_BOM` / `MISSING_ROUTING` | Thiếu master data `ACTIVE` |
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
+| **`DEFAULT_CONFLICT`** 🆕 | Lưu thiết lập kho với `replaceDefaults=false` khi kho khác đang giữ vai trò default. Không có gì được ghi — hỏi người dùng rồi gửi lại với `replaceDefaults=true` |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |
 | `RESOURCE_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `EMAIL_ALREADY_EXISTS` | Trùng khoá |
 | `LOT_CODE_ALREADY_EXISTS` | Mã lô đã tồn tại cho vật tư đó |
@@ -1360,6 +1416,7 @@ overIssue, overrideReason`
 |---|---|
 | **`RESOURCE_INACTIVE`** 🆕 | Một bản ghi được tham chiếu đang `INACTIVE` (công ty/nhà máy/kho/vật tư/nhà cung cấp/role/scope/work center/work calendar), hoặc kích hoạt bản ghi con khi cha còn `INACTIVE`. **Cách xử lý khác hẳn**: kích hoạt lại bản ghi đó, không phải sửa form |
 | **`RESOURCE_SCOPE_MISMATCH`** 🆕 | Hai bản ghi trong request thuộc hai chủ khác nhau — vật tư khác công ty, kho khác nhà máy, lô/sê-ri khác vật tư. Cách xử lý: đổi lựa chọn trên form |
+| **`ACTIVE_CHILDREN_EXIST`** 🆕 | Ngừng một nhà máy khi nó còn kho đang hoạt động — ngừng kho trước, backend không tự cascade |
 | **`DOCUMENT_HAS_NO_LINES`** 🆕 | Chứng từ chưa có dòng con nào (BOM/quy trình chưa có dòng, import run không có dòng hợp lệ, scope chưa có resource) |
 | `OPERATION_NOT_ALLOWED` | **[2026-08-23] Đã thu hẹp**: nay chỉ còn là catch-all cho dữ liệu đầu vào sai (sai `ItemType`, lot/serial không khớp, `dueDate` < `orderDate`, nhiều nhà cung cấp trong 1 PR…). Ba tình huống ở trên **trước đây cũng trả mã này** — nếu bạn đang rẽ nhánh theo nó, xem lại |
 | `BUSINESS_RULE_VIOLATION` | Vi phạm quy tắc nghiệp vụ chung — **[2026-08-23] nay còn gồm ràng buộc CSDL không phải trùng khoá** (khoá ngoại, `CHECK`, `NOT NULL`). Trước đó những lỗi này bị trả nhầm là `RESOURCE_ALREADY_EXISTS` (409), khiến client tưởng là trùng dữ liệu và thử lại vô ích |

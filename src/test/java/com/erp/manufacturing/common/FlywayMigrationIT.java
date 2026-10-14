@@ -47,8 +47,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        // V67 (audit outbox + richer audit_logs) and V68 (append-only triggers) are the audit refactor.
-        assertThat(current.getVersion().getVersion()).isEqualTo("68");
+        // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1.
+        assertThat(current.getVersion().getVersion()).isEqualTo("70");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -526,6 +526,92 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(grantedDataImportPermissions("MANAGER"))
                 .containsExactlyInAnyOrder("PERM_DATA_IMPORT_READ", "PERM_DATA_IMPORT_EXECUTE");
         assertThat(grantedDataImportPermissions("OPERATOR")).isEmpty();
+    }
+
+    /**
+     * G2-1 / {@code V69}: the customer catalogue owns its code per company regardless of status, and
+     * suppliers gain the two contact columns G2-2 maps. Asserted on the real catalog because the
+     * entity mapping would happily compile against columns that do not exist.
+     */
+    @Test
+    void migrate_v69_createsCustomersAndAddsSupplierContactColumns() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            assertThat(columnLengths(statement, "customers"))
+                    .containsEntry("code", 100)
+                    .containsEntry("name", 255)
+                    .containsEntry("contact_name", 255)
+                    .containsEntry("email", 255)
+                    .containsEntry("phone", 255)
+                    .containsEntry("address", 500)
+                    .containsEntry("notes", 500);
+            assertThat(columnLengths(statement, "suppliers"))
+                    .containsEntry("contact_name", 255)
+                    .containsEntry("notes", 500);
+
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT pg_get_constraintdef(c.oid) AS def
+                    FROM pg_constraint c
+                    JOIN pg_class t ON t.oid = c.conrelid
+                    WHERE t.relname = 'customers' AND c.conname = 'uk_customers_company_code'
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                // No status column in the key: a deactivated customer keeps its code.
+                assertThat(rs.getString("def")).isEqualTo("UNIQUE (company_id, code)");
+            }
+        }
+    }
+
+    /**
+     * G2-1 / {@code V70}: Customer copies Supplier's grant matrix from the database rather than
+     * restating roles. Asserted both ways — the two sets must be equal, and they must be the documented
+     * ADMIN + MANAGER with OPERATOR holding neither — so a copy that silently matched nothing (empty =
+     * empty) cannot pass.
+     */
+    @Test
+    void migrate_v70_grantsCustomerPermissionsToExactlyTheRolesHoldingSupplierPermissions() throws Exception {
+        migratePublicSchema();
+
+        assertThat(rolesHolding("PERM_CUSTOMER_READ")).isEqualTo(rolesHolding("PERM_SUPPLIER_READ"));
+        assertThat(rolesHolding("PERM_CUSTOMER_MANAGE")).isEqualTo(rolesHolding("PERM_SUPPLIER_MANAGE"));
+        assertThat(rolesHolding("PERM_CUSTOMER_READ")).containsExactlyInAnyOrder("ADMIN", "MANAGER");
+        assertThat(rolesHolding("PERM_CUSTOMER_MANAGE")).containsExactlyInAnyOrder("ADMIN", "MANAGER");
+    }
+
+    private java.util.Map<String, Integer> columnLengths(Statement statement, String table) throws SQLException {
+        java.util.Map<String, Integer> lengths = new java.util.HashMap<>();
+        try (ResultSet rs = statement.executeQuery("""
+                SELECT column_name, character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = '%s'
+                """.formatted(table))) {
+            while (rs.next()) {
+                lengths.put(rs.getString("column_name"), rs.getInt("character_maximum_length"));
+            }
+        }
+        return lengths;
+    }
+
+    private Set<String> rolesHolding(String permissionCode) throws Exception {
+        Set<String> roles = new TreeSet<>();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT r.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE p.code = '%s'
+                     """.formatted(permissionCode))) {
+            while (rows.next()) {
+                roles.add(rows.getString("code"));
+            }
+        }
+        return roles;
     }
 
     private Set<String> grantedDataImportPermissions(String roleCode) throws Exception {

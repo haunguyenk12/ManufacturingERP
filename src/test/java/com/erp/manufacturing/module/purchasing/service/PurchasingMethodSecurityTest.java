@@ -6,6 +6,7 @@ import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.purchasing.domain.Supplier;
+import com.erp.manufacturing.module.purchasing.dto.CompanySupplierCreateRequest;
 import com.erp.manufacturing.module.purchasing.dto.SupplierCreateRequest;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
 import com.erp.manufacturing.module.purchasing.repository.ItemSupplierRepository;
@@ -59,7 +60,7 @@ class PurchasingMethodSecurityTest {
                 .thenReturn(false);
 
         assertThatThrownBy(() -> supplierService.create(new SupplierCreateRequest(
-                companyId, "SUP", "Supplier", null, null, null, null)))
+                companyId, "SUP", "Supplier", null, null, null, null, null, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(supplierRepository);
@@ -95,8 +96,72 @@ class PurchasingMethodSecurityTest {
         when(supplierRepository.save(any(Supplier.class))).thenAnswer(inv -> inv.getArgument(0));
 
         assertThatCode(() -> supplierService.create(new SupplierCreateRequest(
-                companyId, "SUP", "Supplier", null, null, null, null)))
+                companyId, "SUP", "Supplier", null, null, null, null, null, null)))
                 .doesNotThrowAnyException();
+    }
+
+    /**
+     * G2-2: the company-path create carries its own guard. Both the deny branch and the allow branch
+     * pin the exact permission string and the path company id.
+     */
+    @Test
+    void createForCompany_deniedWhenSupplierManageMissingOnThePathCompany() {
+        UUID companyId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq("COMPANY"), eq(companyId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> supplierService.createForCompany(companyId, new CompanySupplierCreateRequest(
+                "SUP", "Supplier", null, null, null, null, null, null)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(supplierRepository, organizationLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq("COMPANY"), eq(companyId));
+    }
+
+    @Test
+    void createForCompany_allowedWhenSupplierManagePresentOnThePathCompany() {
+        UUID companyId = UUID.randomUUID();
+        Company company = Company.builder().companyId(companyId).code("ACME").name("ACME")
+                .status(OrganizationStatus.ACTIVE).build();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq("COMPANY"), eq(companyId)))
+                .thenReturn(true);
+        when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
+        when(supplierRepository.existsByCompanyCompanyIdAndCode(companyId, "SUP")).thenReturn(false);
+        when(supplierRepository.save(any(Supplier.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatCode(() -> supplierService.createForCompany(companyId, new CompanySupplierCreateRequest(
+                "SUP", "Supplier", null, null, null, null, null, null)))
+                .doesNotThrowAnyException();
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq("COMPANY"), eq(companyId));
+    }
+
+    @Test
+    void activate_deniedWhenSupplierManageMissingOnTheRecord() {
+        UUID supplierId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasSupplierAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq(supplierId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> supplierService.activate(supplierId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(supplierRepository);
+        verify(purchasingPermissionGuard).hasSupplierAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq(supplierId));
+    }
+
+    @Test
+    void activate_allowedWhenSupplierManagePresentOnTheRecord() {
+        UUID supplierId = UUID.randomUUID();
+        Company company = Company.builder().companyId(UUID.randomUUID()).code("ACME").name("ACME")
+                .status(OrganizationStatus.ACTIVE).build();
+        Supplier supplier = Supplier.builder().supplierId(supplierId).company(company).code("SUP").name("Supplier")
+                .build();
+        when(purchasingPermissionGuard.hasSupplierAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq(supplierId)))
+                .thenReturn(true);
+        when(supplierRepository.findWithCompanyBySupplierId(supplierId)).thenReturn(java.util.Optional.of(supplier));
+        when(supplierRepository.save(any(Supplier.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatCode(() -> supplierService.activate(supplierId)).doesNotThrowAnyException();
+        verify(purchasingPermissionGuard).hasSupplierAccess(any(), eq("PERM_SUPPLIER_MANAGE"), eq(supplierId));
     }
 
     @Configuration

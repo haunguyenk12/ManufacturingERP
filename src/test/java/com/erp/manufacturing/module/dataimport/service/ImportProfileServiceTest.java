@@ -16,6 +16,7 @@ import com.erp.manufacturing.module.inventory.service.ItemService;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.Mockito.mock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -48,7 +50,7 @@ class ImportProfileServiceTest {
     @BeforeEach
     void setUp() {
         var registry = new ImportTargetRegistry(List.<ImportTargetHandler>of(
-                new ItemImportTargetHandler(itemService, itemLookupService)));
+                new ItemImportTargetHandler(itemService, itemLookupService, mock(UomLookupService.class))));
         service = new ImportProfileService(
                 profileRepository, organizationLookupService, registry, new DataImportMapper());
         companyId = UUID.randomUUID();

@@ -23,15 +23,31 @@ public interface ItemWarehouseSettingRepository extends JpaRepository<ItemWareho
     @EntityGraph(attributePaths = {"item", "warehouse", "warehouse.plant", "warehouse.plant.company"})
     Optional<ItemWarehouseSetting> findWithDetailsBySettingId(UUID settingId);
 
+    /**
+     * Most recently touched INACTIVE row of a pair. G2-3: an upsert of a pair that was deactivated
+     * reactivates this row (keeping its {@code settingId}) instead of inserting a second row for the
+     * same item and warehouse.
+     */
+    @EntityGraph(attributePaths = {"item", "warehouse", "warehouse.plant", "warehouse.plant.company"})
+    Optional<ItemWarehouseSetting> findFirstByItemItemIdAndWarehouseWarehouseIdAndStatusOrderByUpdatedAtDesc(
+            UUID itemId, UUID warehouseId, ItemWarehouseSettingStatus status);
+
+    /**
+     * {@code plantId} (G2-3) closes a scope leak: without it, a call that named no warehouse returned the
+     * settings of every company the caller could see. All three filters are optional and combine.
+     * {@code ItemWarehouseSettingRepositoryIT} proves each null branch on Postgres.
+     */
     @EntityGraph(attributePaths = {"item", "warehouse", "warehouse.plant", "warehouse.plant.company"})
     @Query("""
             select s
             from ItemWarehouseSetting s
-            where (:warehouseId is null or s.warehouse.warehouseId = :warehouseId)
+            where (:plantId is null or s.warehouse.plant.plantId = :plantId)
+              and (:warehouseId is null or s.warehouse.warehouseId = :warehouseId)
               and (:itemId is null or s.item.itemId = :itemId)
               and (:status is null or s.status = :status)
             """)
-    Page<ItemWarehouseSetting> search(@Param("warehouseId") UUID warehouseId,
+    Page<ItemWarehouseSetting> search(@Param("plantId") UUID plantId,
+                                      @Param("warehouseId") UUID warehouseId,
                                       @Param("itemId") UUID itemId,
                                       @Param("status") ItemWarehouseSettingStatus status,
                                       Pageable pageable);

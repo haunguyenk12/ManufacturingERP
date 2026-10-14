@@ -8,6 +8,7 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
+import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.dto.ItemCreateRequest;
 import com.erp.manufacturing.module.inventory.dto.ItemResponse;
 import com.erp.manufacturing.module.inventory.dto.ItemUpdateRequest;
@@ -15,12 +16,15 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.repository.CompanyRepository;
+import com.erp.manufacturing.module.uom.domain.Uom;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -30,6 +34,7 @@ public class ItemService {
 
     private final ItemRepository itemRepository;
     private final CompanyRepository companyRepository;
+    private final UomLookupService uomLookupService;
     private final InventoryMapper mapper;
 
     @Transactional
@@ -61,7 +66,7 @@ public class ItemService {
                 .code(code)
                 .name(request.name().trim())
                 .type(request.type())
-                .unit(normalizeUnit(request.unit()))
+                .unit(requireActiveUom(request.unit()))
                 .lotTracked(request.lotTracked())
                 .serialTracked(request.serialTracked())
                 .status(ItemStatus.ACTIVE)
@@ -69,22 +74,14 @@ public class ItemService {
         return mapper.toResponse(itemRepository.save(item));
     }
 
+    /** G2-4: every filter is optional and applied in one query, before pagination. */
     @Transactional(readOnly = true)
     @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_READ', #companyId)")
-    public PageResult<ItemResponse> listItems(UUID companyId, Pageable pageable) {
-        ensureCompanyExists(companyId);
-        return PageResult.from(itemRepository.findByCompanyCompanyId(companyId, pageable).map(mapper::toResponse));
-    }
-
-    @Transactional(readOnly = true)
-    @PreAuthorize("@inventoryPermissionGuard.hasItemCompanyAccess(authentication, 'PERM_ITEM_READ', #companyId)")
-    public PageResult<ItemResponse> listItems(UUID companyId, String search, Pageable pageable) {
+    public PageResult<ItemResponse> listItems(UUID companyId, String search, ItemStatus status, ItemType type,
+                                              Boolean lotTracked, Pageable pageable) {
         ensureCompanyExists(companyId);
         String normalizedSearch = search == null || search.isBlank() ? null : search.trim();
-        if (normalizedSearch == null) {
-            return PageResult.from(itemRepository.findByCompanyCompanyId(companyId, pageable).map(mapper::toResponse));
-        }
-        return PageResult.from(itemRepository.searchByCodeOrName(companyId, normalizedSearch, pageable)
+        return PageResult.from(itemRepository.search(companyId, normalizedSearch, status, type, lotTracked, pageable)
                 .map(mapper::toResponse));
     }
 
@@ -98,11 +95,20 @@ public class ItemService {
     @PreAuthorize("@inventoryPermissionGuard.hasItemAccess(authentication, 'PERM_ITEM_MANAGE', #itemId)")
     @Auditable(action = AuditAction.ITEM_UPDATED, entityType = "Item", entityIdExpression = "itemId.toString()",
                companyId = "#result?.companyId()")
+    /**
+     * {@code unit} stays in the request so clients that resend it keep working, but it can no longer
+     * change (G2-4, NEXT_PHASE_PLAN.md 9.2 D5): quantities already posted against the item are in the old
+     * unit and there is no conversion. An unchanged value is accepted without a UOM lookup, because
+     * items created before units were validated may carry a code the UOM catalogue never had.
+     */
     public ItemResponse updateItem(UUID itemId, ItemUpdateRequest request) {
         Item item = findItem(itemId);
         ensureActiveItem(item);
+        if (!normalizeUnit(request.unit()).equals(item.getUnit())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Item unit cannot be changed (" + item.getUnit() + "): " + itemId);
+        }
         item.setName(request.name().trim());
-        item.setUnit(normalizeUnit(request.unit()));
         return mapper.toResponse(itemRepository.save(item));
     }
 
@@ -159,5 +165,22 @@ public class ItemService {
 
     private String normalizeUnit(String unit) {
         return unit.trim().toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * G2-4 (D5): a new item's unit must be a UOM code that exists and is ACTIVE — the first time
+     * {@code items.unit} is tied to the UOM catalogue. The column stays a code string; no FK.
+     */
+    private String requireActiveUom(String rawUnit) {
+        String unit = normalizeUnit(rawUnit);
+        Uom uom = uomLookupService.findByCode(List.of(unit)).get(unit);
+        if (uom == null) {
+            throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "UOM code not found: " + unit);
+        }
+        if (!uom.isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
+                    "Inactive UOM cannot be used for a new item: " + unit);
+        }
+        return unit;
     }
 }

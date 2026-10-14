@@ -8,6 +8,8 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.inventory.domain.ItemStatus;
+import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.dto.ItemCreateRequest;
 import com.erp.manufacturing.module.inventory.dto.ItemResponse;
 import com.erp.manufacturing.module.inventory.service.ItemService;
@@ -156,7 +158,7 @@ class ItemControllerTest {
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/totalPages/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(itemService.listItems(eq(COMPANY_ID), any()))
+        when(itemService.listItems(eq(COMPANY_ID), any(), any(), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse()), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items"))
@@ -175,18 +177,44 @@ class ItemControllerTest {
     @DisplayName("list: size beyond the A4 ceiling is clamped to 100 before it reaches the service "
             + "(`D7b.3` — proves best-practices.md A4 is enforced, not just documented)")
     void list_sizeAboveMax_isClampedToHundred() throws Exception {
-        when(itemService.listItems(eq(COMPANY_ID), any()))
+        when(itemService.listItems(eq(COMPANY_ID), any(), any(), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items").param("size", "500"))
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(itemService).listItems(eq(COMPANY_ID), pageable.capture());
+        verify(itemService).listItems(eq(COMPANY_ID), any(), any(), any(), any(), pageable.capture());
         // The literal 100 is the number best-practices.md A4 promises clients, so it is asserted
         // literally: comparing against PageableFactory.MAX_PAGE_SIZE would move with the constant
         // and stay green even if the ceiling were raised (R6).
         assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
+    }
+
+    /** G2-4: the adapter's filters used to be dropped silently; they now reach the service. */
+    @Test
+    @DisplayName("list: search/status/type/lotTracked are forwarded to the service")
+    void list_forwardsEveryFilter() throws Exception {
+        when(itemService.listItems(eq(COMPANY_ID), any(), any(), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items")
+                        .param("search", "coil")
+                        .param("status", "ACTIVE")
+                        .param("type", "RAW_MATERIAL")
+                        .param("lotTracked", "true"))
+                .andExpect(status().isOk());
+
+        verify(itemService).listItems(eq(COMPANY_ID), eq("coil"), eq(ItemStatus.ACTIVE),
+                eq(ItemType.RAW_MATERIAL), eq(true), any());
+    }
+
+    @Test
+    @DisplayName("list: an unknown item type is a 400, not a 500")
+    void list_unknownType_returns400() throws Exception {
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/items").param("type", "SERVICE_X"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
     }
 
     @Test

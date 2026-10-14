@@ -34,3 +34,13 @@ và vì mỗi goods receipt line có thể có `receivedQuantity` > 1 trong khi 
 receive, endpoint sẽ cần chấp nhận **danh sách** serial number thay vì một chuỗi đơn — khác hẳn shape
 `lotCode` hiện tại. Xem `module/inventory/CLAUDE.md` (mục Serial Tracking) + `module/workorder/CLAUDE.md`
 cho phần đã làm.
+
+---
+
+## Bất Biến Supplier — căn chỉnh FE giai đoạn 2 (`G2-2`, 2026-10-14)
+
+> Số `B136`+ (không phải `B124`): `MANUFACTURING_PHASE_PLAN_P7_P11.md` đã giữ chỗ `B124`–`B135` cho P7–P11 dù chưa implement — dùng chung dãy số sẽ trùng.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B141 | Đường company-scoped FE §3.4 (`GET/POST /v1/companies/{companyId}/suppliers`, `POST /v1/suppliers/{id}/activate`, `POST /v1/suppliers/{id}/deactivate`) được **thêm song song**, không thay đường cũ (`/v1/suppliers?companyId=&keyword=`, `PATCH .../deactivate`) — purchasing và seed script vẫn gọi đường cũ (`§9.2 D1`). `createForCompany` mang **`@PreAuthorize`/`@Auditable` riêng** và chỉ chia sẻ routine **private** `createInCompany` với `create` — gọi method public kia qua `this` là bypass proxy, mất cả guard lẫn audit (bẫy `§0.19` hệ quả #3). `activate` idempotent, **chặn khi company `INACTIVE`** (`B108`), audit `SUPPLIER_ACTIVATED`. `contactName` (255) / `notes` (500) — cột từ `V69` — PATCH cùng luật `B136` (`null` giữ, rỗng xoá). `taxCode`/`companyCode` giữ nguyên trên response | `SupplierServiceTest` (+7: `createForCompany_*`, `update_nullKeepsContactAndNotes_blankClearsThem`, `activate_*`), `PurchasingMethodSecurityTest` (+4, deny+allow+verify chuỗi `PERM_SUPPLIER_MANAGE`), `SupplierControllerTest` (+5) |

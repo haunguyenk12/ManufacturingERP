@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.organization.controller;
 
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.dto.*;
 import com.erp.manufacturing.module.organization.service.OrganizationService;
 import com.erp.manufacturing.common.web.PageableFactory;
@@ -65,12 +66,14 @@ public class OrganizationController {
     @Operation(summary = "List plants by company")
     public ResponseEntity<ApiResponse<PageResult<PlantResponse>>> listPlants(
             @PathVariable UUID companyId,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) OrganizationStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.listPlants(
-                companyId, PageableFactory.of(page, size, sortBy, sortDir))));
+                companyId, search, status, PageableFactory.of(page, size, sortBy, sortDir, "plantId"))));
     }
 
     @PostMapping("/v1/companies/{companyId}/plants")
@@ -113,12 +116,14 @@ public class OrganizationController {
     @Operation(summary = "List warehouses by plant")
     public ResponseEntity<ApiResponse<PageResult<WarehouseResponse>>> listWarehouses(
             @PathVariable UUID plantId,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) OrganizationStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(organizationService.listWarehouses(
-                plantId, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, search, status, PageableFactory.of(page, size, sortBy, sortDir, "warehouseId"))));
     }
 
     @PostMapping("/v1/plants/{plantId}/warehouses")

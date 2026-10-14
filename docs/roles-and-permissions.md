@@ -99,6 +99,7 @@ ADMIN **không** can thiệp vào luồng sản xuất hay mua hàng.
 | `LOT_WRITE` | Quản lý Lot/Batch: trạng thái AVAILABLE · HOLD · REJECTED · EXPIRED |
 | `BOM_WRITE` | Tạo / sửa BOM Header & BOM Lines |
 | `SUPPLIER_WRITE` | Tạo / sửa Supplier Master và Item Supplier |
+| `PERM_CUSTOMER_MANAGE` | Tạo / sửa / activate / deactivate Customer Master (`G2-1`, `V70`). Company-scoped. Grant **sao chép từ `PERM_SUPPLIER_MANAGE`** lúc migrate ⇒ ADMIN + MANAGER, OPERATOR không có |
 | `PERM_UOM_MANAGE` | Tạo / sửa / activate / deactivate đơn vị tính (`C2-3`, `V43`). **Global** — không gắn company/plant |
 
 ### Organization
@@ -137,6 +138,8 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_ITEM_MANAGE` | Tạo / sửa / activate / vô hiệu Item; không cấp cho OPERATOR |
 | `BOM_READ` | Xem BOM và cây BOM |
 | `SUPPLIER_READ` | Xem danh sách nhà cung cấp |
+| `PERM_CUSTOMER_READ` | Xem danh mục khách hàng của Company (`G2-1`, `V70`, sao chép grant từ `PERM_SUPPLIER_READ`) |
+| `PERM_CUSTOMER_MANAGE` | Tạo / sửa / activate / deactivate khách hàng (`G2-1`, `V70`, sao chép grant từ `PERM_SUPPLIER_MANAGE`) |
 | `ORG_READ` | Xem cấu trúc tổ chức (Company / Plant / Warehouse) |
 | `PERM_UOM_READ` | Xem danh mục đơn vị tính |
 | `PERM_UOM_MANAGE` | Tạo / sửa / activate / deactivate đơn vị tính (`C2-3`, `V43`) |

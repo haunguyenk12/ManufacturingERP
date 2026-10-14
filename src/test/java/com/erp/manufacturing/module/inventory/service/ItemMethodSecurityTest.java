@@ -9,6 +9,7 @@ import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.repository.CompanyRepository;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -107,7 +108,7 @@ class ItemMethodSecurityTest {
         when(inventoryPermissionGuard.hasItemCompanyAccess(any(), eq("PERM_ITEM_READ"), eq(companyId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> itemService.listItems(companyId, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> itemService.listItems(companyId, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verify(inventoryPermissionGuard)
@@ -138,7 +139,7 @@ class ItemMethodSecurityTest {
         ItemService itemService(ItemRepository itemRepository,
                                  CompanyRepository companyRepository,
                                  InventoryMapper mapper) {
-            return new ItemService(itemRepository, companyRepository, mapper);
+            return new ItemService(itemRepository, companyRepository, mock(UomLookupService.class), mapper);
         }
 
         @Bean

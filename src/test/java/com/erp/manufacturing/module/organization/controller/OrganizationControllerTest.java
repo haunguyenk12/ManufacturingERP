@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.organization.controller;
 
+import com.erp.manufacturing.common.exception.MultiErrorException;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -8,6 +9,7 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.dto.CompanyCreateRequest;
 import com.erp.manufacturing.module.organization.dto.CompanyResponse;
 import com.erp.manufacturing.module.organization.dto.PlantCreateRequest;
@@ -16,10 +18,13 @@ import com.erp.manufacturing.module.organization.dto.WarehouseResponse;
 import com.erp.manufacturing.module.organization.service.OrganizationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -29,6 +34,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -272,6 +278,74 @@ class OrganizationControllerTest {
         mockMvc.perform(post("/v1/warehouses/" + WAREHOUSE_ID + "/activate"))
                 .andExpect(status().is(BusinessErrorCode.RESOURCE_INACTIVE.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.RESOURCE_INACTIVE.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    // ---- G2-4 ----
+
+    @Test
+    @DisplayName("listPlants: search and status are forwarded; sort gets a plantId tie-breaker")
+    void listPlants_forwardsFiltersAndStableSort() throws Exception {
+        when(organizationService.listPlants(eq(COMPANY_ID), eq("hanoi"), eq(OrganizationStatus.ACTIVE), any()))
+                .thenReturn(new PageResult<>(List.of(samplePlant()), 0, 20, 1L, 1, true, true));
+
+        mockMvc.perform(get("/v1/companies/" + COMPANY_ID + "/plants")
+                        .param("search", "hanoi")
+                        .param("status", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.totalElements").value(1));
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(organizationService).listPlants(eq(COMPANY_ID), eq("hanoi"), eq(OrganizationStatus.ACTIVE),
+                pageable.capture());
+        assertThat(pageable.getValue().getSort()).containsExactly(
+                Sort.Order.desc("createdAt"), Sort.Order.desc("plantId"));
+    }
+
+    @Test
+    @DisplayName("listWarehouses: search and status are forwarded; sort gets a warehouseId tie-breaker")
+    void listWarehouses_forwardsFiltersAndStableSort() throws Exception {
+        when(organizationService.listWarehouses(eq(PLANT_ID), eq("raw"), eq(OrganizationStatus.INACTIVE), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/warehouses")
+                        .param("search", "raw")
+                        .param("status", "INACTIVE"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(organizationService).listWarehouses(eq(PLANT_ID), eq("raw"), eq(OrganizationStatus.INACTIVE),
+                pageable.capture());
+        assertThat(pageable.getValue().getSort()).containsExactly(
+                Sort.Order.desc("createdAt"), Sort.Order.desc("warehouseId"));
+    }
+
+    @Test
+    @DisplayName("createPlant: an unknown timezone surfaces as 400 with errors[0].field = timezone")
+    void createPlant_unknownTimezone_returns400WithTimezoneFieldError() throws Exception {
+        when(organizationService.createPlant(eq(COMPANY_ID), any(PlantCreateRequest.class)))
+                .thenThrow(new MultiErrorException(ValidationErrorCode.INVALID_INPUT,
+                        java.util.Map.of("timezone", "must be a valid IANA time zone id")));
+
+        mockMvc.perform(post("/v1/companies/" + COMPANY_ID + "/plants")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"PLANT-01","name":"Hanoi Plant","timezone":"Mars/Olympus"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("timezone"));
+    }
+
+    @Test
+    @DisplayName("deactivatePlant: a plant with ACTIVE warehouses returns 422 ACTIVE_CHILDREN_EXIST")
+    void deactivatePlant_withActiveWarehouses_returns422() throws Exception {
+        when(organizationService.deactivatePlant(PLANT_ID))
+                .thenThrow(new AppException(BusinessErrorCode.ACTIVE_CHILDREN_EXIST, "Plant still has active warehouses"));
+
+        mockMvc.perform(delete("/v1/plants/" + PLANT_ID))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.ACTIVE_CHILDREN_EXIST.code()))
                 .andExpect(jsonPath("$.result").doesNotExist());
     }
 }

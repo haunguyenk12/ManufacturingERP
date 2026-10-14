@@ -7,6 +7,8 @@ import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.dto.ItemCreateRequest;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.inventory.service.ItemService;
+import com.erp.manufacturing.module.uom.domain.Uom;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -49,6 +51,7 @@ public class ItemImportTargetHandler implements ImportTargetHandler {
 
     private final ItemService itemService;
     private final ItemLookupService itemLookupService;
+    private final UomLookupService uomLookupService;
 
     @Override
     public ImportTargetType targetType() {
@@ -86,6 +89,13 @@ public class ItemImportTargetHandler implements ImportTargetHandler {
                         .toList()))
                 .keySet();
 
+        // G2-4: ItemService now refuses a unit that is not an ACTIVE UOM. Resolved here for the whole file in
+        // one query, so a bad unit is a row error at validation instead of a failure mid-apply.
+        Map<String, Uom> uoms = uomLookupService.findByCode(rows.stream()
+                .map(row -> normaliseUnit(row.get(FIELD_UNIT)))
+                .filter(unit -> unit != null)
+                .collect(java.util.stream.Collectors.toSet()));
+
         Set<String> seenInFile = new HashSet<>();
         for (int index = 0; index < rows.size(); index++) {
             Map<String, String> row = rows.get(index);
@@ -113,6 +123,18 @@ public class ItemImportTargetHandler implements ImportTargetHandler {
                         "An item cannot be both lot-tracked and serial-tracked"));
             }
 
+            String unit = normaliseUnit(row.get(FIELD_UNIT));
+            if (unit != null) {
+                Uom uom = uoms.get(unit);
+                if (uom == null) {
+                    rowProblems.add(ImportCellError.of(null, FIELD_UNIT, ImportErrorCode.REFERENCE_NOT_FOUND,
+                            "Unit of measure '" + unit + "' does not exist"));
+                } else if (!uom.isActive()) {
+                    rowProblems.add(ImportCellError.of(null, FIELD_UNIT, ImportErrorCode.RULE_VIOLATION,
+                            "Unit of measure '" + unit + "' is inactive"));
+                }
+            }
+
             if (!rowProblems.isEmpty()) {
                 problems.put(index, rowProblems);
             }
@@ -134,6 +156,11 @@ public class ItemImportTargetHandler implements ImportTargetHandler {
 
     /** Same normalisation {@code ItemService} applies, so duplicate detection sees the stored form. */
     private String normaliseCode(String raw) {
+        return raw == null || raw.isBlank() ? null : raw.trim().toUpperCase(Locale.ROOT);
+    }
+
+    /** Same normalisation {@code ItemService} applies to the unit before resolving the UOM. */
+    private String normaliseUnit(String raw) {
         return raw == null || raw.isBlank() ? null : raw.trim().toUpperCase(Locale.ROOT);
     }
 }

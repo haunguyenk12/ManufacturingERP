@@ -107,8 +107,15 @@ public enum AuditAction {
     SUPPLIER_CREATED,
     SUPPLIER_UPDATED,
     SUPPLIER_DEACTIVATED,
+    /** G2-2: suppliers had no way back from INACTIVE before (FE_HANDOFF_GD_02_2026-10-12.md §3.4). */
+    SUPPLIER_ACTIVATED,
     ITEM_SUPPLIER_CREATED,
     ITEM_SUPPLIER_UPDATED,
+    /** G2-1: customer master data (FE_HANDOFF_GD_02_2026-10-12.md §3.4). */
+    CUSTOMER_CREATED,
+    CUSTOMER_UPDATED,
+    CUSTOMER_ACTIVATED,
+    CUSTOMER_DEACTIVATED,
     /** C2-3: unit of measure master data (BACKEND_CAPSTONE2_API_GAPS.md §3.1). */
     UOM_CREATED,
     UOM_UPDATED,

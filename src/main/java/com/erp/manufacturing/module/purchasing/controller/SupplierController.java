@@ -64,6 +64,44 @@ public class SupplierController {
         return ResponseEntity.ok(ApiResponse.ok(supplierService.deactivate(supplierId)));
     }
 
+    // G2-2: the company-scoped shape FE §3.4 uses for both partner catalogues. Added alongside the
+    // routes above, not instead of them — purchasing screens and seed scripts still call those.
+
+    @PostMapping("/v1/companies/{companyId}/suppliers")
+    @Operation(summary = "Create supplier in a company")
+    public ResponseEntity<ApiResponse<SupplierResponse>> createForCompany(
+            @PathVariable UUID companyId,
+            @Valid @RequestBody CompanySupplierCreateRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created(supplierService.createForCompany(companyId, request)));
+    }
+
+    @GetMapping("/v1/companies/{companyId}/suppliers")
+    @Operation(summary = "List suppliers of a company")
+    public ResponseEntity<ApiResponse<PageResult<SupplierResponse>>> listForCompany(
+            @PathVariable UUID companyId,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) SupplierStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "code") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir) {
+        return ResponseEntity.ok(ApiResponse.ok(supplierService.list(
+                companyId, status, search, PageableFactory.of(page, size, sortBy, sortDir, "supplierId"))));
+    }
+
+    @PostMapping("/v1/suppliers/{supplierId}/activate")
+    @Operation(summary = "Activate supplier")
+    public ResponseEntity<ApiResponse<SupplierResponse>> activate(@PathVariable UUID supplierId) {
+        return ResponseEntity.ok(ApiResponse.ok(supplierService.activate(supplierId)));
+    }
+
+    @PostMapping("/v1/suppliers/{supplierId}/deactivate")
+    @Operation(summary = "Deactivate supplier (POST form of the PATCH route above)")
+    public ResponseEntity<ApiResponse<SupplierResponse>> deactivateViaPost(@PathVariable UUID supplierId) {
+        return ResponseEntity.ok(ApiResponse.ok(supplierService.deactivate(supplierId)));
+    }
+
     @PostMapping("/v1/items/{itemId}/suppliers")
     @Operation(summary = "Add supplier for item")
     public ResponseEntity<ApiResponse<ItemSupplierResponse>> addItemSupplier(

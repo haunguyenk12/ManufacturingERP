@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.organization.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.MultiErrorException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.dto.*;
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -283,6 +286,119 @@ class OrganizationServiceTest {
                         .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
 
         verify(warehouseRepository, never()).save(any());
+    }
+
+    // ── G2-4: list filters, timezone, deactivate guard ─────────────────────
+
+    @Test
+    void listPlants_forwardsTrimmedSearchAndStatusToOneQuery() {
+        UUID companyId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(companyRepository.existsById(companyId)).thenReturn(true);
+        when(plantRepository.search(companyId, OrganizationStatus.ACTIVE, "hanoi", pageable)).thenReturn(Page.empty());
+
+        service.listPlants(companyId, "  hanoi ", OrganizationStatus.ACTIVE, pageable);
+
+        verify(plantRepository).search(companyId, OrganizationStatus.ACTIVE, "hanoi", pageable);
+    }
+
+    @Test
+    void listWarehouses_blankSearchIsForwardedAsNull() {
+        UUID plantId = UUID.randomUUID();
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(plantRepository.existsById(plantId)).thenReturn(true);
+        when(warehouseRepository.search(plantId, null, null, pageable)).thenReturn(Page.empty());
+
+        service.listWarehouses(plantId, "   ", null, pageable);
+
+        verify(warehouseRepository).search(plantId, null, null, pageable);
+    }
+
+    /** It used to be stored as typed and fail later as a 500 when a work order was released. */
+    @Test
+    void createPlant_unknownTimezone_isAFieldErrorOnTimezoneAndNothingIsSaved() {
+        UUID companyId = UUID.randomUUID();
+        when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
+        when(plantRepository.existsByCompanyCompanyIdAndCode(companyId, "PLANT-01")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.createPlant(companyId,
+                new PlantCreateRequest("PLANT-01", "Hanoi Plant", "Mars/Olympus")))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    assertThat(((AppException) ex).getErrorCode()).isEqualTo(ValidationErrorCode.INVALID_INPUT);
+                    assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys("timezone");
+                });
+        verify(plantRepository, never()).save(any());
+    }
+
+    @Test
+    void createPlant_blankTimezone_defaultsToHoChiMinh() {
+        UUID companyId = UUID.randomUUID();
+        when(companyRepository.findById(companyId)).thenReturn(Optional.of(activeCompany(companyId)));
+        when(plantRepository.existsByCompanyCompanyIdAndCode(companyId, "PLANT-01")).thenReturn(false);
+        when(plantRepository.save(any(Plant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.createPlant(companyId, new PlantCreateRequest("PLANT-01", "Hanoi Plant", "  "));
+
+        ArgumentCaptor<Plant> captor = ArgumentCaptor.forClass(Plant.class);
+        verify(plantRepository).save(captor.capture());
+        assertThat(captor.getValue().getTimezone()).isEqualTo("Asia/Ho_Chi_Minh");
+    }
+
+    @Test
+    void updatePlant_unknownTimezone_isAFieldErrorAndTheStoredZoneIsKept() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = activePlant(plantId);
+        plant.setTimezone("Asia/Ho_Chi_Minh");
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+
+        assertThatThrownBy(() -> service.updatePlant(plantId, new PlantUpdateRequest("Renamed", "GMT+99")))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys("timezone"));
+        assertThat(plant.getTimezone()).isEqualTo("Asia/Ho_Chi_Minh");
+        verify(plantRepository, never()).save(any());
+    }
+
+    @Test
+    void updatePlant_validTimezone_isStoredTrimmed() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = activePlant(plantId);
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+        when(plantRepository.save(any(Plant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updatePlant(plantId, new PlantUpdateRequest("Renamed", " America/New_York "));
+
+        assertThat(plant.getTimezone()).isEqualTo("America/New_York");
+    }
+
+    /** D4: refused, never cascaded — the plant stays ACTIVE and nothing is written. */
+    @Test
+    void deactivatePlant_withAnActiveWarehouse_throwsActiveChildrenExistAndStaysActive() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = activePlant(plantId);
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+        when(warehouseRepository.existsByPlantPlantIdAndStatus(plantId, OrganizationStatus.ACTIVE)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deactivatePlant(plantId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.ACTIVE_CHILDREN_EXIST));
+        assertThat(plant.getStatus()).isEqualTo(OrganizationStatus.ACTIVE);
+        verify(plantRepository, never()).save(any());
+    }
+
+    @Test
+    void deactivatePlant_withOnlyInactiveWarehouses_succeeds() {
+        UUID plantId = UUID.randomUUID();
+        Plant plant = activePlant(plantId);
+        when(plantRepository.findById(plantId)).thenReturn(Optional.of(plant));
+        when(warehouseRepository.existsByPlantPlantIdAndStatus(plantId, OrganizationStatus.ACTIVE)).thenReturn(false);
+        when(plantRepository.save(any(Plant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.deactivatePlant(plantId);
+
+        assertThat(plant.getStatus()).isEqualTo(OrganizationStatus.INACTIVE);
+        verify(warehouseRepository).existsByPlantPlantIdAndStatus(plantId, OrganizationStatus.ACTIVE);
     }
 
     private Company activeCompany(UUID companyId) {

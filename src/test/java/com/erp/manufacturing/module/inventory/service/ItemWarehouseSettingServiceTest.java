@@ -2,9 +2,11 @@ package com.erp.manufacturing.module.inventory.service;
 
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.web.PlantContextResolver;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.dto.ItemWarehouseSettingRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
+import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
@@ -24,6 +26,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +37,7 @@ class ItemWarehouseSettingServiceTest {
     @Mock ItemWarehouseSettingRepository settingRepository;
     @Mock ItemLookupService itemLookupService;
     @Mock WarehouseRepository warehouseRepository;
+    @Mock ItemRepository itemRepository;
 
     ItemWarehouseSettingService service;
 
@@ -41,7 +46,9 @@ class ItemWarehouseSettingServiceTest {
         service = new ItemWarehouseSettingService(
                 settingRepository,
                 itemLookupService,
+                itemRepository,
                 warehouseRepository,
+                new PlantContextResolver(),
                 new InventoryMapper());
     }
 
@@ -58,7 +65,7 @@ class ItemWarehouseSettingServiceTest {
                 itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.empty());
         when(settingRepository.save(any(ItemWarehouseSetting.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.upsert(request(itemId, warehouseId, "10", "5", 7));
+        service.upsert(request(itemId, warehouseId, "10", "5", 7), null);
 
         ArgumentCaptor<ItemWarehouseSetting> captor = ArgumentCaptor.forClass(ItemWarehouseSetting.class);
         verify(settingRepository).save(captor.capture());
@@ -82,7 +89,7 @@ class ItemWarehouseSettingServiceTest {
                 itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.of(existing));
         when(settingRepository.save(existing)).thenReturn(existing);
 
-        service.upsert(request(itemId, warehouseId, "12", "6", 3));
+        service.upsert(request(itemId, warehouseId, "12", "6", 3), null);
 
         verify(settingRepository).save(existing);
         assertThat(existing.getSafetyStock()).isEqualByComparingTo("12");
@@ -98,7 +105,7 @@ class ItemWarehouseSettingServiceTest {
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(
                 warehouse(warehouseId, UUID.randomUUID(), OrganizationStatus.ACTIVE)));
 
-        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1)))
+        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
@@ -115,7 +122,7 @@ class ItemWarehouseSettingServiceTest {
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(
                 warehouse(warehouseId, companyId, OrganizationStatus.INACTIVE)));
 
-        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1)))
+        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
@@ -130,7 +137,7 @@ class ItemWarehouseSettingServiceTest {
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(
                 warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE)));
 
-        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "-1", "5", 1)))
+        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "-1", "5", 1), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.BUSINESS_RULE_VIOLATION));
@@ -144,7 +151,7 @@ class ItemWarehouseSettingServiceTest {
                 warehouse(UUID.randomUUID(), UUID.randomUUID(), OrganizationStatus.ACTIVE));
         when(settingRepository.findWithDetailsBySettingId(settingId)).thenReturn(Optional.of(setting));
 
-        service.deactivate(settingId);
+        service.deactivate(settingId, null);
 
         assertThat(setting.getStatus()).isEqualTo(ItemWarehouseSettingStatus.INACTIVE);
         verify(settingRepository).save(setting);
@@ -187,7 +194,7 @@ class ItemWarehouseSettingServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         service.upsert(new ItemWarehouseSettingRequest(itemId, warehouseId,
-                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false));
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false), null);
 
         assertThat(incumbent.isDefaultSupply()).isFalse();
         ArgumentCaptor<ItemWarehouseSetting> captor = ArgumentCaptor.forClass(ItemWarehouseSetting.class);
@@ -229,7 +236,7 @@ class ItemWarehouseSettingServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         service.upsert(new ItemWarehouseSettingRequest(itemId, warehouseId,
-                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false));
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false), null);
 
         assertThat(incumbent.isDefaultSupply()).isFalse();
         assertThat(incumbent.isDefaultOutput()).isTrue();
@@ -251,10 +258,232 @@ class ItemWarehouseSettingServiceTest {
         when(settingRepository.save(any(ItemWarehouseSetting.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.upsert(request(itemId, warehouseId, "10", "5", 7));
+        service.upsert(request(itemId, warehouseId, "10", "5", 7), null);
 
         verify(settingRepository, never()).findByItemItemIdAndWarehousePlantPlantIdAndStatus(any(), any(), any());
         verify(settingRepository, never()).saveAllAndFlush(any());
+    }
+
+    // ── G2-3: replaceDefaults, pair reactivation, plant scope ─────────────
+
+    /** replaceDefaults=false asks first: a peer holding the role means 409 and nothing written. */
+    @Test
+    void upsert_replaceDefaultsFalse_whileAPeerHoldsTheRole_throwsDefaultConflictAndWritesNothing() {
+        Fixture f = fixtureWithSupplyIncumbent();
+
+        assertThatThrownBy(() -> service.upsert(new ItemWarehouseSettingRequest(f.itemId, f.warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false, false), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.DEFAULT_CONFLICT));
+
+        assertThat(f.incumbent.isDefaultSupply()).isTrue();
+        verify(settingRepository, never()).saveAllAndFlush(any());
+        verify(settingRepository, never()).save(any());
+    }
+
+    /** The confirmed form moves the role exactly like the legacy omitted form does. */
+    @Test
+    void upsert_replaceDefaultsTrue_movesTheRoleOffThePeer() {
+        Fixture f = fixtureWithSupplyIncumbent();
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(new ItemWarehouseSettingRequest(f.itemId, f.warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false, true), null);
+
+        assertThat(f.incumbent.isDefaultSupply()).isFalse();
+        verify(settingRepository).saveAllAndFlush(List.of(f.incumbent));
+    }
+
+    /** replaceDefaults=false only bites when someone else holds the role. */
+    @Test
+    void upsert_replaceDefaultsFalse_withNoPeerHoldingTheRole_succeeds() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(settingRepository.findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                itemId, warehouse.getPlant().getPlantId(), ItemWarehouseSettingStatus.ACTIVE)).thenReturn(List.of());
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(new ItemWarehouseSettingRequest(itemId, warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false, false), null);
+
+        ArgumentCaptor<ItemWarehouseSetting> captor = ArgumentCaptor.forClass(ItemWarehouseSetting.class);
+        verify(settingRepository).save(captor.capture());
+        assertThat(captor.getValue().isDefaultSupply()).isTrue();
+    }
+
+    /** The item row is locked before the peers are read; reading first would let two requests both win. */
+    @Test
+    void upsert_locksTheItemBeforeReadingThePeers() {
+        Fixture f = fixtureWithSupplyIncumbent();
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(new ItemWarehouseSettingRequest(f.itemId, f.warehouseId,
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, true, false), null);
+
+        InOrder inOrder = inOrder(itemRepository, settingRepository);
+        inOrder.verify(itemRepository).lockByItemId(f.itemId);
+        inOrder.verify(settingRepository).findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                f.itemId, f.target.getPlant().getPlantId(), ItemWarehouseSettingStatus.ACTIVE);
+    }
+
+    /** FE Q7: a deactivated pair comes back as the same row, not as a second one. */
+    @Test
+    void upsert_pairWithOnlyAnInactiveRow_reactivatesThatRowKeepingItsId() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        ItemWarehouseSetting old = setting(item, warehouse);
+        old.deactivate();
+        UUID oldId = old.getSettingId();
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(settingRepository.findByItemItemIdAndWarehouseWarehouseIdAndStatus(
+                itemId, warehouseId, ItemWarehouseSettingStatus.ACTIVE)).thenReturn(Optional.empty());
+        when(settingRepository.findFirstByItemItemIdAndWarehouseWarehouseIdAndStatusOrderByUpdatedAtDesc(
+                itemId, warehouseId, ItemWarehouseSettingStatus.INACTIVE)).thenReturn(Optional.of(old));
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(request(itemId, warehouseId, "8", "4", 2), null);
+
+        ArgumentCaptor<ItemWarehouseSetting> captor = ArgumentCaptor.forClass(ItemWarehouseSetting.class);
+        verify(settingRepository).save(captor.capture());
+        assertThat(captor.getValue()).isSameAs(old);
+        assertThat(captor.getValue().getSettingId()).isEqualTo(oldId);
+        assertThat(captor.getValue().getStatus()).isEqualTo(ItemWarehouseSettingStatus.ACTIVE);
+        assertThat(captor.getValue().getSafetyStock()).isEqualByComparingTo("8");
+    }
+
+    /** A deactivated row must not keep a default flag it could carry back into the V66 trigger. */
+    @Test
+    void deactivate_clearsBothDefaultFlags() {
+        UUID settingId = UUID.randomUUID();
+        ItemWarehouseSetting setting = setting(
+                item(UUID.randomUUID(), UUID.randomUUID(), ItemStatus.ACTIVE),
+                warehouse(UUID.randomUUID(), UUID.randomUUID(), OrganizationStatus.ACTIVE));
+        setting.setDefaultSupply(true);
+        setting.setDefaultOutput(true);
+        when(settingRepository.findWithDetailsBySettingId(settingId)).thenReturn(Optional.of(setting));
+
+        service.deactivate(settingId, null);
+
+        assertThat(setting.isDefaultSupply()).isFalse();
+        assertThat(setting.isDefaultOutput()).isFalse();
+    }
+
+    @Test
+    void upsert_warehouseOfAnInactivePlant_throwsResourceInactiveBeforeTouchingSettings() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        warehouse.getPlant().setStatus(OrganizationStatus.INACTIVE);
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item(itemId, companyId, ItemStatus.ACTIVE));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
+        verifyNoInteractions(settingRepository, itemRepository);
+    }
+
+    /** X-Plant-Id naming another plant than the warehouse's is refused before any lock or write. */
+    @Test
+    void upsert_plantHeaderNamingAnotherPlant_throwsStateConflictBeforeAnyWrite() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item(itemId, companyId, ItemStatus.ACTIVE));
+        when(warehouseRepository.findById(warehouseId))
+                .thenReturn(Optional.of(warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE)));
+
+        assertThatThrownBy(() -> service.upsert(request(itemId, warehouseId, "10", "5", 1),
+                UUID.randomUUID().toString()))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verifyNoInteractions(settingRepository, itemRepository);
+    }
+
+    @Test
+    void upsert_plantHeaderMatchingTheWarehousePlant_isAccepted() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item(itemId, companyId, ItemStatus.ACTIVE));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(settingRepository.save(any(ItemWarehouseSetting.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(request(itemId, warehouseId, "10", "5", 1), warehouse.getPlant().getPlantId().toString());
+
+        verify(settingRepository).save(any(ItemWarehouseSetting.class));
+    }
+
+    @Test
+    void deactivate_plantHeaderNamingAnotherPlant_throwsStateConflictAndStaysActive() {
+        UUID settingId = UUID.randomUUID();
+        ItemWarehouseSetting setting = setting(
+                item(UUID.randomUUID(), UUID.randomUUID(), ItemStatus.ACTIVE),
+                warehouse(UUID.randomUUID(), UUID.randomUUID(), OrganizationStatus.ACTIVE));
+        when(settingRepository.findWithDetailsBySettingId(settingId)).thenReturn(Optional.of(setting));
+
+        assertThatThrownBy(() -> service.deactivate(settingId, UUID.randomUUID().toString()))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        assertThat(setting.getStatus()).isEqualTo(ItemWarehouseSettingStatus.ACTIVE);
+        verify(settingRepository, never()).save(any());
+    }
+
+    @Test
+    void list_forwardsThePlantFilterToTheRepository() {
+        UUID plantId = UUID.randomUUID();
+        when(settingRepository.search(eq(plantId), eq(null), eq(null), eq(ItemWarehouseSettingStatus.ACTIVE), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        service.list(plantId, null, null, org.springframework.data.domain.PageRequest.of(0, 20));
+
+        verify(settingRepository).search(eq(plantId), eq(null), eq(null), eq(ItemWarehouseSettingStatus.ACTIVE), any());
+    }
+
+    private record Fixture(UUID itemId, UUID warehouseId, Warehouse target, ItemWarehouseSetting incumbent) {}
+
+    /** Item with an ACTIVE supply default on another warehouse of the same plant; target pair is new. */
+    private Fixture fixtureWithSupplyIncumbent() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Item item = item(itemId, companyId, ItemStatus.ACTIVE);
+        Warehouse target = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        Warehouse incumbentWarehouse = Warehouse.builder()
+                .warehouseId(UUID.randomUUID())
+                .plant(target.getPlant())
+                .code("WH2").name("Warehouse 2")
+                .type(WarehouseType.RAW_MATERIAL)
+                .status(OrganizationStatus.ACTIVE)
+                .build();
+        ItemWarehouseSetting incumbent = setting(item, incumbentWarehouse);
+        incumbent.setDefaultSupply(true);
+        when(itemLookupService.getActiveItem(itemId)).thenReturn(item);
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(target));
+        when(settingRepository.findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                itemId, target.getPlant().getPlantId(), ItemWarehouseSettingStatus.ACTIVE))
+                .thenReturn(List.of(incumbent));
+        return new Fixture(itemId, warehouseId, target, incumbent);
     }
 
     private ItemWarehouseSettingRequest request(UUID itemId, UUID warehouseId, String safety, String reorder, int leadTime) {
