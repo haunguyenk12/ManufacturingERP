@@ -47,8 +47,9 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
 
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
-        // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1.
-        assertThat(current.getVersion().getVersion()).isEqualTo("70");
+        // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
+        // V71 (fixed-template import batches on import_runs) is G3.
+        assertThat(current.getVersion().getVersion()).isEqualTo("71");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -579,6 +580,56 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(rolesHolding("PERM_CUSTOMER_MANAGE")).isEqualTo(rolesHolding("PERM_SUPPLIER_MANAGE"));
         assertThat(rolesHolding("PERM_CUSTOMER_READ")).containsExactlyInAnyOrder("ADMIN", "MANAGER");
         assertThat(rolesHolding("PERM_CUSTOMER_MANAGE")).containsExactlyInAnyOrder("ADMIN", "MANAGER");
+    }
+
+    /**
+     * G3 / {@code V71}: the fixed-template batch columns on {@code import_runs}. Asserted against the
+     * database because each guarantee lives there and nowhere else: an existing run reads back as
+     * {@code MAPPED_PROFILE} without a backfill, a batch cannot exist without an owner, the three new
+     * statuses are accepted, and an upload key is unique per owner — but only where one was sent.
+     */
+    @Test
+    void migrate_v71_addsFixedTemplateBatchColumnsAndConstraints() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            UUID companyId = UUID.randomUUID();
+            String tag = companyId.toString().substring(0, 8).toUpperCase();
+            statement.execute("INSERT INTO companies (company_id, code, name) VALUES ('%s', 'V71_%s', 'V71')"
+                    .formatted(companyId, companyId));
+            String owner;
+            try (ResultSet rs = statement.executeQuery("SELECT user_id FROM users ORDER BY created_at LIMIT 1")) {
+                assertThat(rs.next()).isTrue();
+                owner = rs.getString(1);
+            }
+            String insert = "INSERT INTO import_runs (import_run_id, code, target_type, company_id,"
+                    + " original_filename, file_size_bytes, file_sha256, detected_headers, status";
+
+            UUID legacy = UUID.randomUUID();
+            statement.execute(insert + ") VALUES ('%s', 'L-%s', 'ITEM', '%s', 'a.xlsx', 1, 'x', '[]', 'PARSED')"
+                    .formatted(legacy, tag, companyId));
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT kind FROM import_runs WHERE import_run_id = '%s'".formatted(legacy))) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("kind")).isEqualTo("MAPPED_PROFILE");
+            }
+
+            assertThatThrownBy(() -> statement.execute((insert + ", kind) VALUES (gen_random_uuid(),"
+                    + " 'N-%s', 'CUSTOMER', '%s', 'a.xlsx', 1, 'x', '[]', 'READY', 'FIXED_TEMPLATE')")
+                    .formatted(tag, companyId)))
+                    .hasMessageContaining("chk_import_runs_fixed_template_owner");
+
+            String batch = insert + ", kind, owner_user_id, upload_idempotency_key) VALUES (gen_random_uuid(),"
+                    + " '%s', 'CUSTOMER', '%s', 'a.xlsx', 1, 'x', '[]', '%s', 'FIXED_TEMPLATE', '%s', %s)";
+            statement.execute(batch.formatted("B1-" + tag, companyId, "READY", owner, "'K-" + tag + "'"));
+            statement.execute(batch.formatted("B2-" + tag, companyId, "COMMITTED", owner, "NULL"));
+            statement.execute(batch.formatted("B3-" + tag, companyId, "INVALID", owner, "NULL"));
+            assertThatThrownBy(() -> statement.execute(
+                    batch.formatted("B4-" + tag, companyId, "READY", owner, "'K-" + tag + "'")))
+                    .hasMessageContaining("uk_import_runs_owner_upload_key");
+        }
     }
 
     private java.util.Map<String, Integer> columnLengths(Statement statement, String table) throws SQLException {

@@ -183,6 +183,9 @@ app:
   # Spreadsheet import row limit (synchronous apply path)
   data-import:
     max-rows: ${DATA_IMPORT_MAX_ROWS:5000}
+    # G3 fixed-template batches (/v1/data-import/batches): committed in ONE transaction.
+    fixed-template-max-rows: ${DATA_IMPORT_FIXED_TEMPLATE_MAX_ROWS:500}
+    fixed-template-max-file-bytes: ${DATA_IMPORT_FIXED_TEMPLATE_MAX_FILE_BYTES:5242880}
 
   # Redis sliding-window rate limiting, per IP/user and per route pattern
   rate-limit:

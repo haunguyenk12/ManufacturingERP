@@ -56,6 +56,14 @@ public record ApiResponse<T>(
         return new ApiResponse<>(code.code(), null, code.message(), null);
     }
 
+    /**
+     * Error that still carries the resource's new state — only for
+     * {@link com.erp.manufacturing.common.exception.ResultCarryingException}.
+     */
+    public static <T> ApiResponse<T> errorWithResult(ErrorCode code, String message, T result) {
+        return new ApiResponse<>(code.code(), result, message, null);
+    }
+
     /** Multi-field error (for validation aggregation). */
     public static <T> ApiResponse<T> fieldErrors(ErrorCode code, String message,
                                                   List<FieldErrorResponse> fieldErrors) {

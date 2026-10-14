@@ -17,6 +17,7 @@ import com.erp.manufacturing.module.dataimport.domain.ImportProfile;
 import com.erp.manufacturing.module.dataimport.domain.ImportRow;
 import com.erp.manufacturing.module.dataimport.domain.ImportRowStatus;
 import com.erp.manufacturing.module.dataimport.domain.ImportRun;
+import com.erp.manufacturing.module.dataimport.domain.ImportRunKind;
 import com.erp.manufacturing.module.dataimport.domain.ImportRunStatus;
 import com.erp.manufacturing.module.dataimport.domain.ImportTargetType;
 import com.erp.manufacturing.module.dataimport.dto.ImportRowResponse;
@@ -288,7 +289,7 @@ public class ImportRunService {
     @Transactional(readOnly = true)
     @PreAuthorize("@dataImportPermissionGuard.hasRunAccess(authentication, 'PERM_DATA_IMPORT_READ', #runId)")
     public PageResult<ImportRowResponse> rows(UUID runId, ImportRowStatus status, Pageable pageable) {
-        if (!runRepository.existsById(runId)) {
+        if (!runRepository.existsByImportRunIdAndKind(runId, ImportRunKind.MAPPED_PROFILE)) {
             throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Import run", runId);
         }
         return PageResult.from(rowRepository.search(runId, status, pageable).map(mapper::toResponse));

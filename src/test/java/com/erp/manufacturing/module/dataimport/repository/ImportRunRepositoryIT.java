@@ -75,6 +75,28 @@ class ImportRunRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(page).extracting(ImportRun::getImportRunId).contains(run.getImportRunId());
     }
 
+    /**
+     * G3: both import paths share {@code import_runs}. A fixed-template batch must be invisible to the
+     * mapped-profile path — otherwise its {@code cancel} could cancel a READY batch and its list would
+     * show other owners' batches.
+     */
+    @Test
+    void mappedProfileQueriesNeverSeeAFixedTemplateBatch() {
+        Company company = persistCompany();
+        ImportRun batch = persistRun(company, null);
+        batch.setKind(com.erp.manufacturing.module.dataimport.domain.ImportRunKind.FIXED_TEMPLATE);
+        batch.setOwnerUserId(entityManager.getEntityManager()
+                .createQuery("select u.userId from User u where u.username = 'admin'", UUID.class)
+                .getSingleResult());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(runRepository.findWithDetailsByImportRunId(batch.getImportRunId())).isEmpty();
+        assertThat(runRepository.search(company.getCompanyId(), null, null, PageRequest.of(0, 10))).isEmpty();
+        assertThat(runRepository.existsByImportRunIdAndKind(batch.getImportRunId(),
+                com.erp.manufacturing.module.dataimport.domain.ImportRunKind.MAPPED_PROFILE)).isFalse();
+    }
+
     private Company persistCompany() {
         Instant now = Instant.now();
         String suffix = UUID.randomUUID().toString();

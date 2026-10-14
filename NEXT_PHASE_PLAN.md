@@ -88,8 +88,9 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G2` — FE handoff Giai đoạn 2: Tổ chức + danh mục nền** — ✅ BE xong 2026-10-14, **chờ FE nghiệm thu** (§9.6) — xem **§9** |
-| **Ứng viên kế tiếp** | `G1` — FE handoff Giai đoạn 1 (`BE_HANDOFF_GD_01_2026-10-09.md`, Auth/tài khoản/quyền) — **chưa lập kế hoạch**; `G2` phụ thuộc nó ở đúng một chỗ (chính sách scope `GLOBAL`, Q15). `G3`/`G4` — FE handoff Giai đoạn 3 (nhập Excel) và 4 (tồn kho/lô/chuyển kho) — **chưa lập kế hoạch**, lượt phân tích bị dừng trước khi có kết quả |
+| **Đang chạy** | **`G3` — FE handoff Giai đoạn 3: Nhập Excel dữ liệu nền** (`FE_HANDOFF_GD_03_2026-10-12.md`, P1) — ✅ **BE xong 2026-10-14** (D1–D8 chốt theo khuyến nghị), chờ **FE** nghiệm thu A01–A26 — xem **§10**, bản ghi `CLAUDE.md §0.51` |
+| **Chờ FE** | `G2` — ✅ BE xong 2026-10-14, chờ FE nghiệm thu (§9.6) — xem **§9** |
+| **Ứng viên kế tiếp** | `G1` — FE handoff Giai đoạn 1 (`BE_HANDOFF_GD_01_2026-10-09.md`, Auth/tài khoản/quyền) — **chưa lập kế hoạch**. `G4` — FE handoff Giai đoạn 4 (tồn kho/lô/chuyển kho) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có — D1–D7 đã chốt 2026-10-13)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `G2-1` đã dùng `V69`/`V70` ⇒ phải đánh số lại trước khi làm `P7` |
 
 ---
@@ -107,6 +108,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 7 | ~~`C2-2` — Inventory Lot lifecycle API~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.37` |
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 | 9 | **`G2` — FE handoff Giai đoạn 2 (tổ chức + danh mục nền)** | ✅ **BE xong (2026-10-14)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_02_2026-10-12.md`, P1. Chi tiết **§9**, bản ghi `CLAUDE.md §0.50` |
+| 10 | **`G3` — FE handoff Giai đoạn 3 (nhập Excel dữ liệu nền)** | ✅ **BE xong — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_03_2026-10-12.md`, P1. Phụ thuộc `G2` (Customer/Supplier master) — đã xong. Chi tiết **§10** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -406,6 +408,94 @@ UOM quy đổi; tự chọn kho khi thiếu mapping; `Idempotency-Key` cho maste
 
 ---
 
+## 10. `G3` — FE handoff Giai đoạn 3: Nhập Excel dữ liệu nền ✅ BE XONG (2026-10-14) — chờ FE nghiệm thu
+
+Nguồn: `FE_HANDOFF_GD_03_2026-10-12.md` (v1, P1). FE/mock đã xong; BE phải (1) trả lời Q1–Q14 §5, (2) đối chiếu R01–R09 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_03_<ngày>.md` theo `BETaskDeliveryRules.md`. Mọi path/DTO/mã lỗi trong file FE là **[Đề xuất BE]**, không phải API đã có; FE chưa gọi live lần nào (§2: không có bằng chứng lỗi).
+
+> 🔴 **Bảng câu hỏi, không phải danh sách việc** (`BETaskDeliveryRules.md §5` lỗi #1). Và lần này còn một điều nặng hơn: **repo đã có module nhập dữ liệu** (`module/dataimport`, `V59`/`V60`/`V64`, `/v1/import-runs`) mà file FE **không biết tới** — nó được dựng cho một hợp đồng khác. Quyết định lớn nhất của phase là reuse hay dựng song song (D1).
+
+### 10.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-14 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: `ImportRunController`, `ImportRunService`, `ImportRowApplyService`, `ImportRun`, `ImportTargetType`, `ImportTargetRegistry`, `pom.xml` (POI 5.5.1), `application.yml` (`multipart`, `data-import.max-rows`), `V60`. **Chưa rà:** `SpreadsheetReader`/`SpreadsheetTemplateWriter` (guard ZIP, kiểu ô), `ItemImportTargetHandler`, `ImportProfile`/`ColumnMapping`, `DataImportPermissionGuard`, `V59`/`V64` chi tiết — phải đọc ở `G3-0`.
+
+| Chủ đề | FE yêu cầu | Hiện trạng | Lệch? |
+|---|---|---|---|
+| Luồng | `POST batches` (upload + validate một phát) → `POST .../commit` | `POST /v1/import-runs` (chỉ stage, **không** validate) → `POST .../validate` (cần **profile** ánh xạ cột) → `POST .../apply` | 🔴 Có — FE dùng **mẫu cố định** `omniplant-import-v1`, không có profile/mapping cột |
+| Atomicity | **Tất cả hoặc không** (R03, A15, A18) | `apply` lặp từng dòng, mỗi dòng `REQUIRES_NEW`, có trạng thái `PARTIALLY_APPLIED`; javadoc ghi đó là "import contract" | 🔴 **Xung đột ngữ nghĩa trực diện** |
+| Đối tượng | `items` + `suppliers` + `customers` | Chỉ `ImportTargetType.ITEM` | 🔴 Thiếu 2 handler (Supplier/Customer master đã có từ `G2`) |
+| Quyền | READ+MANAGE **của chính loại** (`PERM_ITEM_*`/`SUPPLIER_*`/`CUSTOMER_*`), không permission import riêng | `PERM_DATA_IMPORT_READ/EXECUTE` (`V60`), một cặp cho mọi target | 🔴 Có — mô hình quyền khác hẳn |
+| Giới hạn | 5 MiB, **500** dòng | `max-file-size` 10MB, `max-rows` **5000** | 🟡 Cấu hình |
+| Retry | `Idempotency-Key` trên cả upload lẫn commit; commit lại trả receipt cũ | Chỉ `apply`, key tuỳ chọn, replay trả run cũ (đã đúng tinh thần) | 🟡 Thiếu ở upload |
+| History | list/detail theo **owner** + quyền loại | `list` theo công ty (`PERM_DATA_IMPORT_READ`), **không** lọc owner | 🟡 Lệch (Q13) |
+| Mẫu `.xlsx` | metadata `_OmniPlant` veryHidden, VI/EN, tải mẫu do **FE** tạo | Có `SpreadsheetTemplateWriter` (chưa rõ mẫu), ánh xạ theo tên cột người dùng chọn | 🟡 Cần đọc |
+| Item type/tracking | enum + `NONE\|LOT` | `ItemService.createItem` có `serialTracked`, `type` | Trả lời |
+| Trùng mã | unique `(company, loại, code)` kể cả INACTIVE | Đã có ở DB cho `items`/`suppliers`/`customers` (`G2`) | Trả lời (Q8) |
+| `unit` | UOM ACTIVE thật, không tin sheet tham chiếu | `ItemService.create` đã resolve UOM ACTIVE từ `G2` (D5) | Trả lời |
+
+### 10.2 Quyết định đã chốt với user *(2026-10-14, `AskUserQuestion` — cả 8 theo cột "Khuyến nghị BE"; D4/D6 không chặn nên theo đề xuất FE)*
+
+| # | Quyết định | Khuyến nghị BE | Lý do | Chặn |
+|---|---|---|---|---|
+| **D1** | Reuse `module/dataimport` hay dựng module batch mới song song? | **Mở rộng `module/dataimport`**: thêm đường "mẫu cố định" cạnh đường profile (path mới `/v1/data-import/batches`, **giữ** `/v1/import-runs`); thêm target `SUPPLIER`/`CUSTOMER` vào `ImportTargetType` + 2 `ImportTargetHandler` | Tái dùng `ImportRun`/`ImportRow`, `SpreadsheetReader`, registry, audit. Dựng bảng `data_import_batches` riêng = hai hệ nhập cho cùng việc. Rủi ro: hai luồng cùng tồn tại — chấp nhận, đường cũ không đổi | `G3-1` |
+| **D2** | Atomic all-or-nothing (FE) vs per-row partial (đang có) | **Atomic cho đường mới, giữ per-row cho đường cũ.** Commit mới chạy **một** transaction (500 dòng ⇒ nhỏ), bất kỳ dòng nào lỗi ⇒ rollback cả lô + trả `409 IMPORT_REVALIDATION_FAILED` | FE dựa vào atomic (A15, A18) và loại partial khỏi phạm vi. Đường cũ có sẵn khách (seed/script) — đổi ngữ nghĩa tại chỗ là breaking. Cần trạng thái `READY`/`INVALID`/`COMMITTED` riêng với enum cũ | `G3-1` |
+| **D3** | Mô hình quyền | **Theo FE**: đường mới cần READ+MANAGE **của đúng loại**; kiểm trong service với `hasResourceAccess` đúng scope (Item: PLANT/COMPANY/GLOBAL; đối tác: COMPANY/GLOBAL). **Không** dùng `PERM_DATA_IMPORT_*` cho đường mới | FE đã thiết kế và chặn ghép chéo loại. `PERM_DATA_IMPORT_*` giữ nguyên cho đường cũ. ⚠️ cần đọc `DataImportPermissionGuard` xem có tái dùng được không | `G3-1` |
+| **D4** | Path: `/v1/data-import/batches` (FE) | **Theo FE** | Không xung đột `/v1/import-runs`. Context-path `/api` đã ở ngoài | — |
+| **D5** | Giới hạn 500 dòng / 5 MiB | **Theo FE** cho đường mới (cấu hình riêng `max-rows-fixed-template`, **không** hạ ngưỡng 5000 của đường cũ). Thêm giới hạn giải nén thực tế/entry trong parser | A04 đòi 500 dòng hợp lệ nhận, 501 bị từ chối. Q11 đòi BE công bố ngưỡng server cụ thể | `G3-1` |
+| **D6** | Mẫu `.xlsx`: ai là nguồn sự thật | **BE chỉ đọc** theo `omniplant-import-v1` (sheet metadata `_OmniPlant` `A1/B1/C1`), **không** thêm endpoint tải mẫu (FE đã tự tạo, §3.2) | Đúng đề xuất FE "bản đầu không yêu cầu endpoint download riêng" | — |
+| **D7** | History/detail: lọc theo **owner** (FE Q13) hay công ty | **Owner + quyền hiện tại của loại**, ID trái owner/scope ⇒ `404` (không lộ tồn tại) | Khớp UI FE; đường cũ lọc theo công ty — khác biệt có chủ đích, ghi rõ trong response | `G3-1` |
+| **D8** | Cắt số lẻ & kiểu ô (Q10): server strict hơn FE (boolean/ô công thức) | **Strict**: formula ⇒ `FORMULA`, số ở cột mã/điện thoại ⇒ `TEXT_REQUIRED`, ngày/lỗi ⇒ `CELL_TYPE`; rich text ghép chữ; boolean ⇒ `CELL_TYPE` | FE đồng ý đồng bộ strict khi làm adapter. ⚠️ liên quan nợ `leadTimeDays` ở `G2` (§9.6): cùng loại lỗi "ép kiểu im lặng" | `G3-1` |
+
+### 10.2a Kết quả *(2026-10-14)*
+
+- `G3-0`/`G3-1`/`G3-2` xong; chi tiết + bất biến `B142`–`B148`: `CLAUDE.md §0.51`, `module/dataimport/CLAUDE.md`.
+- **Khác kế hoạch (có chủ đích):** batch không `READY` ⇒ `STATE_CONFLICT`, `expectedVersion` lệch ⇒ `CONCURRENT_MODIFICATION`
+  (mã sẵn có theo `error-handling.md §5.3`, không thêm `IMPORT_BATCH_NOT_READY`/`_VERSION_CONFLICT`); `X-Plant-Id` lệch ⇒ 409
+  `STATE_CONFLICT` (quy ước sẵn có, không phải `400 PLANT_CONTEXT_MISMATCH`); plant khác công ty ⇒ 422 `RESOURCE_SCOPE_MISMATCH`.
+- **Hai lỗi phát sinh, đã sửa trong phase:** `MaxUploadSizeExceededException` → 500 (nay 413); `committedAt`/`createdAt` lệch µs giữa
+  response đầu và lần đọc lại (smoke lượt 1 bắt được).
+- **Chưa nghiệm thu:** A21 nhánh "thu hồi assignment **sau** COMMITTED" chỉ đo bằng method-security test (smoke dùng user không quyền
+  từ đầu); A26 "CPU/timeout" không có timeout riêng — chặn bằng ngưỡng kích thước; bộ mẫu `.xlsx` **do FE tạo** chưa từng được BE đọc thử
+  (smoke dùng file tự dựng theo §3.2).
+
+### 10.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+#### `G3-0` — Đọc nốt + baseline *(không code `src/main`)*
+
+1. Đọc những file còn thiếu ở §10.1 (đặc biệt `SpreadsheetReader` — kiểu ô/ZIP guard; `ItemImportTargetHandler`; `DataImportPermissionGuard`; `V59`/`V64`). Cập nhật bảng §10.1 nếu có gì đổi.
+2. `mvn -o clean verify` với Docker ⇒ baseline thật (số cuối đã ghi: **1320 unit / 162 class + 184 IT / 27 class**, `§0.50` — **đo lại**).
+3. Chạy `/v1/import-runs` live (upload → validate → apply) trên DB dùng-một-lần để có request/response **thật** cho file trả lời (`B2`).
+4. Chốt D1–D8 với user.
+
+#### `G3-1` — Đường "mẫu cố định" atomic *(chặn bởi D1–D3, D5, D7, D8)*
+
+- **Migration `V71`** *(V69/V70 đã dùng ở `G2`; ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` phải đánh số lại)*: thêm vào `import_runs` các cột cho batch (`kind`, `locale`, `template_version`, `owner_user_id`, `version`, `created_ids` jsonb) + mở rộng `CHECK` status/`target_type`; **không backfill**, dòng cũ giữ nguyên. Thêm `idempotency_key` cho upload (unique `(owner_user_id, key)`).
+- `ImportTargetType` + `SUPPLIER`, `CUSTOMER`; 2 handler gọi đúng service tạo master của `G2` (không INSERT thẳng — bài học `§0.45` #4).
+- `SpreadsheetReader` đọc mẫu cố định + guard giải nén/entry/macro/external link.
+- Service: `validate` (một phát, ghi batch `INVALID`/`READY`, **0 master**), `commit` (một transaction, revalidate UOM/mã/quyền, `expectedVersion`, retry COMMITTED trả receipt cũ **sau** authorization), `list`/`detail` theo owner.
+- Mã lỗi theo FE §4 ↔ mã thật (đối chiếu `error-handling.md`; mã nghiệp vụ import là enum riêng `ImportErrorCode` đã có — **chốt mapping** ở `G3-0`).
+- **Test:** unit (từng issue code, atomic, retry), method-security (deny+allow+`verify` chuỗi `PERM_*` cho **cả ba loại**, ghép chéo bị từ chối), controller, **`DataImportBatchIT`** (rollback thật khi dòng cuối lỗi; hai commit song song cùng mã ⇒ một lô thắng; 0 master khi validate — mock **không** kiểm được, `R7`; fixture **hai công ty**, bẫy `§0.46`), `FlywayMigrationIT.migrate_v71_*`.
+
+#### `G3-2` — Nghiệm thu + bàn giao
+
+- `mvn -o clean verify` thật; số case **≥ baseline** (`R10`).
+- Nghiệm thu mutation, ưu tiên chỗ mock không thấy: đổi transaction commit về per-row (IT atomic phải đỏ), bỏ revalidate UOM ở commit, bỏ lọc owner ở list, đổi `IMPORT_REVALIDATION_FAILED` sang mã khác **cùng 409**.
+- Smoke HTTP thật cho A01–A26 phần BE; **A21 (thu hồi quyền)** cần tài khoản giới hạn — ghi rõ nếu chưa đo.
+- Docs: `BE_RESPONSE_GD_03_*.md` (Q1–Q14 + §7 bằng chứng + mục **chưa nghiệm thu**), `CLAUDE.md §0`, `module/dataimport/CLAUDE.md` (**chưa tồn tại — tạo**; bất biến tiếp từ `B141`), `docs/api-guide-for-frontend.md`, `docs/roles-and-permissions.md` nếu đổi quyền.
+
+### 10.4 Breaking change dự kiến
+
+| Thay đổi | Breaking? |
+|---|---|
+| Path `/v1/data-import/batches*` mới, `SUPPLIER`/`CUSTOMER` target mới, cột `import_runs` mới | **Không** (additive) nếu theo D1/D2 |
+| Atomic thay per-row | **Có** nếu áp lên `/v1/import-runs` — **tránh** bằng D2 (chỉ đường mới) |
+| Giới hạn 500 dòng | Chỉ đường mới |
+
+### 10.5 Ngoài phạm vi *(theo FE §1.2)*
+
+`.csv`/`.xls`/`.xlsm`, upsert/xoá qua file, partial import, import Company/Plant/Warehouse/UOM, tồn đầu kỳ/BOM/routing, giá/công nợ, tài khoản đăng nhập, job queue/`PROCESSING` (Q14), endpoint tải mẫu (D6), xem batch người khác của admin (Q13), thay Auth/email giai đoạn 1.
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -493,6 +583,12 @@ UOM quy đổi; tự chọn kho khi thiếu mapping; `Idempotency-Key` cho maste
   - [x] `G2-0` `BE_RESPONSE_GD_02_2026-10-14.md` trả lời R1–R11 + Q1–Q16, mẫu JSON copy từ lượt gọi thật
   - [x] `leadTimeDays` số lẻ (§9.6) — user chốt sửa **toàn hệ thống**; 1325 unit + 184 IT, mutation 2/2, smoke live; `BE_RESPONSE_GD_02_2026-10-14_v2.md`
   - [ ] FE báo A01–A22 đạt
+- [x] **`G3`** — FE handoff Giai đoạn 3: nhập Excel dữ liệu nền *(BE xong 2026-10-14, §10 — chờ FE nghiệm thu)*
+  - [x] `G3-0` đọc nốt file §10.1 + baseline đo thật (1325 + 184, khớp) — *live `/v1/import-runs` không chạy: đường cũ không đổi, smoke chỉ kiểm nó không thấy batch mới*
+  - [ ] Chốt 8 quyết định §10.2 (D1–D8) với user
+  - [x] `G3-1` đường mẫu cố định atomic (`V71`, target `SUPPLIER`/`CUSTOMER`, validate/commit/list/detail theo owner)
+  - [x] `G3-2` `mvn -o clean verify` (1394 + 192) + mutation 10/10 + smoke 2 lượt × 78 gọi + `BE_RESPONSE_GD_03_2026-10-14.md` + docs
+  - [ ] FE nghiệm thu
 
 ---
 

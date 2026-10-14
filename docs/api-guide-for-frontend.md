@@ -1249,6 +1249,32 @@ Mọi path dưới đây nằm dưới context `/api` (ví dụ `/api/v1/compani
 | `PATCH /v1/items/{itemId}` | `unit` **không đổi được**: gửi lại đúng giá trị cũ thì được, khác ⇒ `422 OPERATION_NOT_ALLOWED` |
 | **Mọi endpoint nhận body JSON** | Số có dấu chấm gửi vào field **số nguyên** (`leadTimeDays`, `capacityUnits`, `lineNo`, `sequence`, `priority`, `headerRowIndex`…) ⇒ **`400 VALIDATION_ERROR`**, `errors[0].field` = tên field, `message` = `"must be a whole number"`. Trước đây `1.5` bị **cắt thành `1` và lưu**, trả 200. 🔴 **`5.0` cũng bị từ chối** — gửi số nguyên không có phần thập phân (`5`). Field thập phân (`safetyStock`, `quantity`, `quantityPer`…) **không** bị ảnh hưởng |
 
+
+### Nhập Excel dữ liệu nền — FE giai đoạn 3 *(`G3`, 2026-10-14)*
+
+Mẫu `omniplant-import-v1` (sheet `_OmniPlant`: `A1` = phiên bản, `B1` = `items|suppliers|customers`, `C1` = `vi|en`).
+Đường cũ `/v1/import-runs*` (profile ánh xạ cột, ghi từng dòng) **không đổi** và **không thấy** các batch dưới đây.
+
+| Thao tác | Endpoint | Ghi chú |
+|---|---|---|
+| Kiểm tra file | `POST /v1/data-import/batches` — multipart `file`, `kind`, `companyId`, `plantId` (bắt buộc với `items`, bị bỏ qua với đối tác) · header `Idempotency-Key?`, `X-Plant-Id?` | **201** kể cả khi có dòng lỗi (batch `INVALID`). **Không tạo master nào** |
+| Xác nhận nhập | `POST /v1/data-import/batches/{id}/commit` — body `{"expectedVersion": <version>}` · `Idempotency-Key?` | Tạo **cả lô trong một transaction** hoặc không gì cả |
+| Lịch sử | `GET /v1/data-import/batches?companyId=&plantId=&kind=&status=&search=&page=0&size=20` | Chỉ batch **của chính người gọi**, mới nhất trước |
+| Chi tiết | `GET /v1/data-import/batches/{id}` | Đủ `rows[]` + `createdIds[]` |
+
+Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*` (nhà máy được chọn; gán COMPANY/GLOBAL phủ nhà máy cũng
+được), `PERM_SUPPLIER_*` / `PERM_CUSTOMER_*` (công ty). **Không** dùng `PERM_DATA_IMPORT_*`. Batch của người khác ⇒ **404**
+(không lộ tồn tại); batch của mình nhưng đã mất quyền ⇒ **403**.
+
+> 🔴 `version` bắt đầu từ **0** sau upload (không phải 1), tăng 1 mỗi lần đổi trạng thái — gửi lại đúng số đã nhận.
+> 🔴 Commit một batch **đã `COMMITTED`** luôn trả lại receipt cũ (200, cùng `createdIds`/`committedAt`), kiểm quyền trước.
+> 🔴 Dữ liệu đã đổi kể từ lúc kiểm tra (mã bị chiếm, UOM ngừng) ⇒ **409 `IMPORT_REVALIDATION_FAILED` kèm `result`** = batch đã
+> chuyển `INVALID` với lỗi mới — mã lỗi **duy nhất** của hệ thống có `result` khi lỗi.
+> Giới hạn: 5 MiB/file (vượt ⇒ `413 FILE_SIZE`), 500 dòng có dữ liệu (vượt ⇒ `400 ROW_LIMIT`), ≤ 64 phần trong archive,
+> ≤ 25 MiB sau giải nén. Mã lỗi theo dòng (`rows[].issues[].code`): `REQUIRED_MISSING`, `TOO_LONG`, `INVALID_FORMAT`,
+> `NOT_ALLOWED_VALUE`, `DUPLICATE_IN_FILE`, `ALREADY_EXISTS`, `REFERENCE_NOT_FOUND`, `RULE_VIOLATION`, `FORMULA`,
+> `TEXT_REQUIRED`, `CELL_TYPE`.
+
 ---
 
 ## 6. Tham chiếu DTO
@@ -1368,6 +1394,9 @@ overIssue, overrideReason`
 | `LOT_REQUIRED` | Item lot-tracked mà thiếu `lotNumber` |
 | `SERIAL_REQUIRED` | Item serial-tracked mà thiếu `serialNumber`/`serialId` |
 | `APPROVAL_REASON_REQUIRED` | Thiếu `reason` khi cancel WO / reject receipt / QC |
+| `FILE_FORMAT` 🆕 `G3` | File nhập không phải `.xlsx` hợp lệ, hoặc chứa macro / ActiveX / liên kết ngoài |
+| `TEMPLATE` 🆕 `G3` | Không đúng mẫu `omniplant-import-v1`: thiếu metadata, sai phiên bản/loại/ngôn ngữ, sai header, thừa cột |
+| `EMPTY_FILE` / `ROW_LIMIT` 🆕 `G3` | Không có dòng dữ liệu / quá 500 dòng |
 
 ```jsonc
 {
@@ -1395,6 +1424,9 @@ overIssue, overrideReason`
 
 ### 404 · `ENTITY_NOT_FOUND`
 
+### 413 · `FILE_SIZE` 🆕 `G3`
+File nhập vượt 5 MiB (giới hạn của đường nhập mẫu cố định), vượt 10 MB (giới hạn upload chung — trước `G3` trường hợp này trả nhầm **500**), hoặc giải nén ra hơn 25 MiB.
+
 ### 409 — xung đột trạng thái (nhóm quan trọng nhất)
 | `code` | Khi nào |
 |---|---|
@@ -1406,6 +1438,7 @@ overIssue, overrideReason`
 | `SERIAL_NOT_ELIGIBLE` | Issue một serial không ở trạng thái `AVAILABLE` (vd đã `ISSUED`/`REJECTED`) |
 | `MISSING_BOM` / `MISSING_ROUTING` | Thiếu master data `ACTIVE` |
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
+| **`IMPORT_REVALIDATION_FAILED`** 🆕 `G3` | Commit batch nhập mà dữ liệu đã đổi kể từ lúc kiểm tra. **Có `result`** = batch đã `INVALID` kèm lỗi mới. Không tạo master nào |
 | **`DEFAULT_CONFLICT`** 🆕 | Lưu thiết lập kho với `replaceDefaults=false` khi kho khác đang giữ vai trò default. Không có gì được ghi — hỏi người dùng rồi gửi lại với `replaceDefaults=true` |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |
 | `RESOURCE_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `EMAIL_ALREADY_EXISTS` | Trùng khoá |

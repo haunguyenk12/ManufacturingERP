@@ -81,6 +81,19 @@ class ExceptionTestController {
         throw new ObjectOptimisticLockingFailureException("WorkOrder", "some-id");
     }
 
+    /** G3: a failure that changed the resource carries its new state in {@code result}. */
+    @GetMapping("/with-result")
+    void withResult() {
+        throw new com.erp.manufacturing.common.exception.ResultCarryingException(
+                BusinessErrorCode.IMPORT_REVALIDATION_FAILED, "stale", java.util.Map.of("status", "INVALID"));
+    }
+
+    /** What the multipart resolver throws above {@code spring.servlet.multipart.max-file-size}. */
+    @GetMapping("/upload-too-large")
+    void uploadTooLarge() {
+        throw new org.springframework.web.multipart.MaxUploadSizeExceededException(10L * 1024 * 1024);
+    }
+
     @GetMapping("/generic")
     String generic() {
         throw new RuntimeException("boom - internal detail");

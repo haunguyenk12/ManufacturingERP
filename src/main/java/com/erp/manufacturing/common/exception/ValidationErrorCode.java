@@ -24,6 +24,15 @@ public enum ValidationErrorCode implements ErrorCode {
     SERIAL_REQUIRED          ("SERIAL_REQUIRED",           "Serial number is required for a serial-tracked item", HttpStatus.BAD_REQUEST),
     APPROVAL_REASON_REQUIRED ("APPROVAL_REASON_REQUIRED",  "A reason is required for this decision",        HttpStatus.BAD_REQUEST),
 
+    // ── Spreadsheet file (G3, /v1/data-import/batches) ─────────────────────
+    // File-level refusals: no batch is created. Row-level problems are not errors at all — they are
+    // the INVALID batch returned by a successful 201.
+    FILE_FORMAT              ("FILE_FORMAT",               "File is not a supported .xlsx workbook",        HttpStatus.BAD_REQUEST),
+    FILE_SIZE                ("FILE_SIZE",                 "File exceeds the size limit",                   HttpStatus.PAYLOAD_TOO_LARGE),
+    TEMPLATE                 ("TEMPLATE",                  "File does not match the import template",       HttpStatus.BAD_REQUEST),
+    EMPTY_FILE               ("EMPTY_FILE",                "File contains no data rows",                    HttpStatus.BAD_REQUEST),
+    ROW_LIMIT                ("ROW_LIMIT",                 "File contains too many data rows",              HttpStatus.BAD_REQUEST),
+
     // ── General resource ───────────────────────────────────────────────────
     RESOURCE_NOT_FOUND       ("ENTITY_NOT_FOUND",          "Requested resource was not found",              HttpStatus.NOT_FOUND),
     RESOURCE_ALREADY_EXISTS  ("RESOURCE_ALREADY_EXISTS",   "Resource already exists",                       HttpStatus.CONFLICT);

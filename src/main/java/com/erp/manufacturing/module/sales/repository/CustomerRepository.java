@@ -9,12 +9,17 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface CustomerRepository extends JpaRepository<Customer, UUID> {
 
     boolean existsByCompanyCompanyIdAndCode(UUID companyId, String code);
+
+    /** Batch duplicate check for the importer (G3) — every status, since a code is unique regardless. */
+    List<Customer> findByCompanyCompanyIdAndCodeIn(UUID companyId, Collection<String> codes);
 
     @EntityGraph(attributePaths = {"company"})
     Optional<Customer> findWithCompanyByCustomerId(UUID customerId);

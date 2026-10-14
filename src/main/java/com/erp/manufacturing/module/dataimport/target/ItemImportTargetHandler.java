@@ -39,12 +39,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ItemImportTargetHandler implements ImportTargetHandler {
 
-    static final String FIELD_CODE = "code";
-    static final String FIELD_NAME = "name";
-    static final String FIELD_TYPE = "type";
-    static final String FIELD_UNIT = "unit";
-    static final String FIELD_LOT_TRACKED = "lotTracked";
-    static final String FIELD_SERIAL_TRACKED = "serialTracked";
+    public static final String FIELD_CODE = "code";
+    public static final String FIELD_NAME = "name";
+    public static final String FIELD_TYPE = "type";
+    public static final String FIELD_UNIT = "unit";
+    public static final String FIELD_LOT_TRACKED = "lotTracked";
+    public static final String FIELD_SERIAL_TRACKED = "serialTracked";
 
     /** Same expression {@code ItemCreateRequest} enforces, checked here so the row names the cell. */
     private static final String CODE_PATTERN = "^[A-Z0-9._-]+$";

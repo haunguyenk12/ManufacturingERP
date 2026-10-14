@@ -83,6 +83,25 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("ResultCarryingException keeps the ErrorCode's status and code and adds result")
+    void resultCarryingException_returnsTheResourceStateInResult() throws Exception {
+        mockMvc.perform(get("/v1/test/exceptions/with-result"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.IMPORT_REVALIDATION_FAILED.code()))
+                .andExpect(jsonPath("$.message").value("stale"))
+                .andExpect(jsonPath("$.result.status").value("INVALID"));
+    }
+
+    @Test
+    @DisplayName("Oversized multipart upload is 413 FILE_SIZE, not the 500 catch-all")
+    void maxUploadSizeExceeded_returns413FileSize() throws Exception {
+        mockMvc.perform(get("/v1/test/exceptions/upload-too-large"))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.FILE_SIZE.code()))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    @Test
     @DisplayName("MultiErrorException with field errors returns the errors array of {field, message}")
     void multiErrorException_withFieldErrors_returnsFieldErrorsArray() throws Exception {
         mockMvc.perform(get("/v1/test/exceptions/multi"))

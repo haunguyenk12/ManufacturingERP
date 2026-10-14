@@ -37,5 +37,17 @@ public enum ImportErrorCode {
     RULE_VIOLATION,
 
     /** The write failed for a reason only surfacing at apply time. */
-    APPLY_FAILED
+    APPLY_FAILED,
+
+    /** Fixed template (G3): the cell holds a formula. It is never evaluated, so its value is unknown. */
+    FORMULA,
+
+    /**
+     * Fixed template (G3): a code or phone cell is stored as a number. The leading zeros of
+     * {@code 0007} are already gone in such a cell, so the value is refused instead of guessed.
+     */
+    TEXT_REQUIRED,
+
+    /** Fixed template (G3): date, boolean or error cell where text is expected. */
+    CELL_TYPE
 }

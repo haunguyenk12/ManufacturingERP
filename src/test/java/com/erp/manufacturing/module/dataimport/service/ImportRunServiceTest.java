@@ -72,7 +72,7 @@ class ImportRunServiceTest {
         service = new ImportRunService(runRepository, rowRepository, profileRepository,
                 new SpreadsheetReader(), registry, organizationLookupService, rowApplyService,
                 new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
-                new DataImportProperties(5_000), new DataImportMapper(), auditLogService);
+                new DataImportProperties(5_000, 0, 0), new DataImportMapper(), auditLogService);
         companyId = UUID.randomUUID();
         company = Company.builder().companyId(companyId).code("CO").name("Company")
                 .status(OrganizationStatus.ACTIVE).build();

@@ -122,6 +122,33 @@ public class ImportRun extends BaseEntity {
     @Column(name = "payload_hash", length = 64)
     private String payloadHash;
 
+    /** Which path created this run; each path filters every query on it (V71). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "kind", nullable = false, length = 20)
+    @Builder.Default
+    private ImportRunKind kind = ImportRunKind.MAPPED_PROFILE;
+
+    /** Uploader of a fixed-template batch; {@code null} on every mapped-profile run. */
+    @Column(name = "owner_user_id")
+    private UUID ownerUserId;
+
+    /** {@code vi} or {@code en}, from the template metadata sheet. */
+    @Column(name = "locale", length = 5)
+    private String locale;
+
+    @Column(name = "template_version", length = 40)
+    private String templateVersion;
+
+    @Column(name = "committed_at")
+    private Instant committedAt;
+
+    /** Upload {@code Idempotency-Key}, unique per owner ({@code uk_import_runs_owner_upload_key}). */
+    @Column(name = "upload_idempotency_key", length = 120)
+    private String uploadIdempotencyKey;
+
+    @Column(name = "upload_payload_hash", length = 64)
+    private String uploadPayloadHash;
+
     /**
      * Derives the human-facing run code from the identifier.
      *
@@ -176,6 +203,39 @@ public class ImportRun extends BaseEntity {
         } else {
             status = ImportRunStatus.APPLIED;
         }
+    }
+
+    /**
+     * Fixed template: records a fresh validation. {@code READY} only when no row has an issue —
+     * a batch is never partly committable.
+     */
+    public void markBatchValidated(Instant now, int total, int errors) {
+        status = errors == 0 ? ImportRunStatus.READY : ImportRunStatus.INVALID;
+        validatedAt = now;
+        totalRows = total;
+        validRows = total - errors;
+        errorRows = errors;
+    }
+
+    /**
+     * Fixed template: every row was created in the same transaction as this call.
+     *
+     * <p>Truncated to microseconds — what {@code TIMESTAMPTZ} stores. The JVM clock on Windows ticks
+     * in 100 ns, and Postgres <em>rounds</em> the extra digit away, so an untruncated value made the
+     * first commit response disagree with every later read of the same receipt (found by the G3 live
+     * smoke test; FE A17 requires the receipt to be stable).
+     */
+    public void markCommitted(Instant now) {
+        Instant stored = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        status = ImportRunStatus.COMMITTED;
+        committedAt = stored;
+        appliedAt = stored;
+        appliedRows = totalRows;
+        failedRows = 0;
+    }
+
+    public boolean isFixedTemplate() {
+        return kind == ImportRunKind.FIXED_TEMPLATE;
     }
 
     public void cancel() {

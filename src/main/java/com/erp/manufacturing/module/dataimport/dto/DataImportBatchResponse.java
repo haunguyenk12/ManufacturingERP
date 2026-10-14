@@ -1,0 +1,39 @@
+package com.erp.manufacturing.module.dataimport.dto;
+
+import com.erp.manufacturing.module.dataimport.domain.DataImportKind;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * A fixed-template import batch (G3, FE_HANDOFF_GD_03 §3.4).
+ *
+ * <p>{@code version} is the optimistic-lock counter: {@code 0} right after upload, bumped by every
+ * state change. Send back exactly what was received as {@code expectedVersion}.
+ *
+ * <p>{@code rowCount = validRowCount + errorRowCount}; {@code errorRowCount} counts rows, not issues.
+ * When {@code COMMITTED}: {@code createdCount = rowCount = createdIds.size()}, in row order.
+ */
+public record DataImportBatchResponse(
+        UUID id,
+        UUID actorId,
+        UUID companyId,
+        UUID plantId,
+        DataImportKind kind,
+        String locale,
+        String templateVersion,
+        String fileName,
+        long fileSize,
+        String status,
+        long version,
+        Instant createdAt,
+        Instant committedAt,
+        int rowCount,
+        int validRowCount,
+        int errorRowCount,
+        int createdCount,
+        List<DataImportBatchRowResponse> rows,
+        List<UUID> createdIds
+) {
+}

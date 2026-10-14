@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.List;
@@ -68,6 +69,21 @@ public class GlobalExceptionHandler {
         }
         return ResponseEntity.status(ex.getHttpStatus())
                 .body(ApiResponse.multiErrors(ex.getErrorCode(), ex.getErrors()));
+    }
+
+    // ── 2a. Business exception that still carries the resource's new state ──
+
+    /**
+     * Same envelope as {@link #handleAppException} plus {@code result}. Spring picks the most specific
+     * handler, so this wins over the {@link AppException} one for this subclass only.
+     */
+    @ExceptionHandler(ResultCarryingException.class)
+    public ResponseEntity<ApiResponse<Object>> handleResultCarrying(
+            ResultCarryingException ex, HttpServletRequest request) {
+
+        log.warn("[{}] {} – {} (with result)", ex.getCode(), request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(ex.getHttpStatus())
+                .body(ApiResponse.errorWithResult(ex.getErrorCode(), ex.getMessage(), ex.getResult()));
     }
 
     // ── 2. Single custom business exception ────────────────────────────────
@@ -179,6 +195,18 @@ public class GlobalExceptionHandler {
 
         return badRequestWithFields(List.of(
                 new FieldErrorResponse(ex.getRequestPartName(), "is a required multipart part")));
+    }
+
+    /**
+     * Multipart body above {@code spring.servlet.multipart.max-file-size}. Thrown before any controller
+     * runs, so without this it fell through to the catch-all as a 500 — an oversize upload looked like
+     * a server crash (G3; the same gap §0.24 and §0.41 closed for two sibling exceptions).
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSize(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(ValidationErrorCode.FILE_SIZE.status())
+                .body(ApiResponse.error(ValidationErrorCode.FILE_SIZE,
+                        "Uploaded file exceeds the server upload limit"));
     }
 
     // ── 8. Wrong HTTP verb ─────────────────────────────────────────────────

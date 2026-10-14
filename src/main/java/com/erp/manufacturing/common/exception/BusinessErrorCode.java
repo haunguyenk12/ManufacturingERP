@@ -98,6 +98,13 @@ public enum BusinessErrorCode implements ErrorCode {
      */
     DEFAULT_CONFLICT          ("DEFAULT_CONFLICT",          "Default warehouse role is held by another warehouse", HttpStatus.CONFLICT),
     PLANNED_QUANTITY_EXCEEDED ("PLANNED_QUANTITY_EXCEEDED", "Quantity exceeds the planned limit",            HttpStatus.CONFLICT),
+    /**
+     * G3: a {@code READY} import batch could not be committed because the data it was validated
+     * against changed (a code was taken, a UOM was deactivated). Nothing was created; the batch is now
+     * {@code INVALID} and travels in {@code result} — the one error whose envelope carries a payload,
+     * so the client can show the new row issues without losing its preview.
+     */
+    IMPORT_REVALIDATION_FAILED("IMPORT_REVALIDATION_FAILED", "Import batch is no longer valid; nothing was created", HttpStatus.CONFLICT),
 
     // ── System ─────────────────────────────────────────────────────────────
     INTERNAL_SERVER_ERROR     ("INTERNAL_SERVER_ERROR",     "An unexpected internal error occurred",         HttpStatus.INTERNAL_SERVER_ERROR),

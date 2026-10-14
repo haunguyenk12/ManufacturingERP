@@ -156,6 +156,10 @@ public enum AuditAction {
     IMPORT_RUN_VALIDATED,
     IMPORT_RUN_APPLIED,
     IMPORT_RUN_FAILED,
+    /** G3: a fixed-template batch was uploaded and validated (READY or INVALID). Creates no master. */
+    IMPORT_BATCH_VALIDATED,
+    /** G3: a fixed-template batch was committed — every row created in one transaction. */
+    IMPORT_BATCH_COMMITTED,
     INVENTORY_RECEIVED,
     INVENTORY_ISSUED,
     INVENTORY_ADJUSTED,

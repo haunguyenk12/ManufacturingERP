@@ -127,7 +127,7 @@ class DataImportMethodSecurityTest {
             return new ImportRunService(runRepository, rowRepository, profileRepository,
                     new SpreadsheetReader(), registry, organizationLookupService, rowApplyService,
                     new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
-                    new DataImportProperties(5_000), new DataImportMapper(), auditLogService);
+                    new DataImportProperties(5_000, 0, 0), new DataImportMapper(), auditLogService);
         }
 
         @Bean(name = "permissionGuard")

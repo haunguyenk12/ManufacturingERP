@@ -30,6 +30,11 @@
 > đúng tên constant như §5.3 mô tả. Vì rule `R8` cấm assert magic string, toàn bộ test hiện có
 > vẫn xanh sau thay đổi này.
 
+> 🔴 **[`G3`, 2026-10-14] Ngoại lệ duy nhất của "`result` vắng mặt khi lỗi":** `ResultCarryingException`
+> (`common/exception/`). Chỉ dùng khi chính thất bại đã **đổi** resource và client cần trạng thái mới để hiển
+> thị — hiện chỉ có `409 IMPORT_REVALIDATION_FAILED` của `/v1/data-import/batches/{id}/commit` (batch vừa chuyển
+> `INVALID`, `result` = batch kèm lỗi mới). Đừng dùng nó để "trả thêm thông tin" cho lỗi thường.
+
 > **`errors` là mảng object, không phải map.** Mỗi field có thể xuất hiện **nhiều lần** (nhiều
 > constraint cùng vi phạm) — không gộp, không "giữ lỗi đầu tiên".
 
@@ -200,6 +205,21 @@ Chi tiết + bối cảnh phát hiện (hai lỗi P0 FE báo): `common/security/
 | `DEFAULT_CONFLICT` | 409 | `PUT /inventory/item-warehouse-settings` với `replaceDefaults=false` khi kho khác của cùng item/plant đang giữ vai trò default được yêu cầu. **Không ghi gì** | FE cần phân biệt "hỏi người dùng rồi gửi lại với `replaceDefaults=true`" với một xung đột trạng thái chung — `STATE_CONFLICT` không mang được ý đó |
 | `ACTIVE_CHILDREN_EXIST` | **422** | `DELETE /plants/{id}` khi plant còn Warehouse `ACTIVE` (từ chối, không cascade) | Là luật master data, không phải status chứng từ ⇒ 422 cùng nhóm `RESOURCE_INACTIVE`; khác hướng (cha → con) nên không gộp vào mã đó |
 
+**Constant thêm ở `G3` (2026-10-14)** — nhập Excel mẫu cố định (`/v1/data-import/batches`):
+
+| `code` | HTTP | Khi nào |
+|---|---|---|
+| `FILE_FORMAT` | 400 | không phải `.xlsx` hợp lệ; có macro / ActiveX / external link |
+| `FILE_SIZE` | **413** | > 5 MiB (đường mẫu cố định), > giới hạn multipart chung, hoặc giải nén > 25 MiB |
+| `TEMPLATE` | 400 | sai mẫu `omniplant-import-v1` (metadata, phiên bản, loại, ngôn ngữ, header, thừa cột) |
+| `EMPTY_FILE` / `ROW_LIMIT` | 400 | không có dòng dữ liệu / quá 500 dòng |
+| `IMPORT_REVALIDATION_FAILED` | 409 | commit batch mà dữ liệu đã đổi — **kèm `result`** (xem §5.1) |
+
+Lỗi **theo dòng** của file **không** phải lỗi HTTP: chúng nằm trong batch `INVALID` của một response **201**
+(`ImportErrorCode`, enum riêng). Batch không `READY` khi commit ⇒ `STATE_CONFLICT`; `expectedVersion` lệch ⇒
+`CONCURRENT_MODIFICATION` — dùng mã sẵn có theo §5.3, **không** tạo `IMPORT_BATCH_NOT_READY` /
+`IMPORT_BATCH_VERSION_CONFLICT` như FE đề xuất.
+
 Timezone sai ở Plant **không** có mã riêng: dùng `VALIDATION_ERROR` + `errors[{field:"timezone"}]` (tương đương `INVALID_TIMEZONE` FE đề xuất, xem bất biến `B140`).
 
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
@@ -269,6 +289,7 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 | `HttpMessageNotReadableException` (JSON hỏng/thiếu body, **hoặc** sai kiểu ở một field) | 400 | `VALIDATION_ERROR` | ✅ chỉ khi sai kiểu ở field (vd `1.5` cho field số nguyên ⇒ `"must be a whole number"`); JSON hỏng thì không |
 | `HttpRequestMethodNotSupportedException` | 405 | `VALIDATION_ERROR` | — |
 | `NoResourceFoundException` / `NoHandlerFoundException` (không có endpoint ở path đó) | 404 | `ENTITY_NOT_FOUND` | — |
+| `MaxUploadSizeExceededException` (multipart vượt `spring.servlet.multipart.max-file-size`) | **413** | `FILE_SIZE` | — |
 | `AccessDeniedException` (Spring) | 403 | `PERMISSION_DENIED` | — |
 | `ObjectOptimisticLockingFailureException` (`@Version`) | 409 | `CONCURRENT_MODIFICATION` | — |
 | `DataIntegrityViolationException` | **409 hoặc 422 — tuỳ constraint** | `RESOURCE_ALREADY_EXISTS` · `BUSINESS_RULE_VIOLATION` · `LOT_CODE_ALREADY_EXISTS` | — |
