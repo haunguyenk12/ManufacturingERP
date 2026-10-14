@@ -1,10 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
 > **`G2` — FE handoff Giai đoạn 2** (`FE_HANDOFF_GD_02_2026-10-12.md`): ✅ **BE xong + nghiệm thu
-> 2026-10-14** — `G2-1`..`G2-5` hoàn tất, file trả lời `BE_RESPONSE_GD_02_2026-10-14.md` đã viết (**user tự
-> gửi qua Zalo**). Còn **một quyết định mở**: `leadTimeDays: 1.5` bị cắt thành `1` (§9.6). Phase chỉ đóng
-> khi **FE** báo A01–A22 đạt. **1320 case unit / 162 class + 184 case IT / 27 class IT · failures = 0,
-> errors = 0** (`mvn -o clean verify` thật với Docker). Bản ghi `CLAUDE.md §0.50`, chi tiết **§9**.
+> 2026-10-14** — `G2-1`..`G2-5` hoàn tất, file trả lời **`BE_RESPONSE_GD_02_2026-10-14_v2.md`** (thay v1,
+> **user tự gửi qua Zalo**). Lỗi `leadTimeDays: 1.5` bị cắt thành `1` **đã sửa cho toàn hệ thống** (§9.6).
+> Phase chỉ đóng khi **FE** báo A01–A22 đạt. **1325 case unit / 162 class + 184 case IT / 27 class IT ·
+> failures = 0, errors = 0** (`mvn -o clean verify` thật với Docker). Bản ghi `CLAUDE.md §0.50`, chi tiết **§9**.
 >
 > Trước đó: **Track `AR-*` — refactor toàn bộ hạ tầng Audit** hoàn thành
 > **2026-09-02** — bản ghi đầy đủ `CLAUDE.md §0.49`, kế hoạch + log triển khai + danh sách "cố ý chưa
@@ -88,7 +88,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G2` — FE handoff Giai đoạn 2: Tổ chức + danh mục nền** — ✅ BE xong 2026-10-14, **chờ FE nghiệm thu** + 1 quyết định mở (§9.6) — xem **§9** |
+| **Đang chạy** | **`G2` — FE handoff Giai đoạn 2: Tổ chức + danh mục nền** — ✅ BE xong 2026-10-14, **chờ FE nghiệm thu** (§9.6) — xem **§9** |
 | **Ứng viên kế tiếp** | `G1` — FE handoff Giai đoạn 1 (`BE_HANDOFF_GD_01_2026-10-09.md`, Auth/tài khoản/quyền) — **chưa lập kế hoạch**; `G2` phụ thuộc nó ở đúng một chỗ (chính sách scope `GLOBAL`, Q15). `G3`/`G4` — FE handoff Giai đoạn 3 (nhập Excel) và 4 (tồn kho/lô/chuyển kho) — **chưa lập kế hoạch**, lượt phân tích bị dừng trước khi có kết quả |
 | **Bị chặn** | *(không có — D1–D7 đã chốt 2026-10-13)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `G2-1` đã dùng `V69`/`V70` ⇒ phải đánh số lại trước khi làm `P7` |
 
@@ -393,7 +393,7 @@ Bản ghi đầy đủ: `CLAUDE.md §0.50`.
 
 | Còn mở | Trạng thái | Cần gì |
 |---|---|---|
-| 🔴 **`leadTimeDays: 1.5` ⇒ lưu `1`** (FE A10 đòi 400) | Đo live, **chưa sửa**. Jackson `ACCEPT_FLOAT_AS_INT` mặc định bật ⇒ áp cho **mọi** field số nguyên mọi endpoint | User chốt: sửa riêng field này hay toàn hệ thống. Sửa xong gửi FE bản `_v2` |
+| ~~`leadTimeDays: 1.5` ⇒ lưu `1`~~ (FE A10) | ✅ **Đã sửa cho toàn hệ thống** (user chốt): `accept-float-as-int: false` + handler trả `errors[{field}]`. `5.0` cũng bị từ chối. Breaking mục 7 trong `_v2` | — (đã gửi trong `BE_RESPONSE_GD_02_2026-10-14_v2.md`) |
 | FE nghiệm thu A01–A22 | Chờ FE | FE gửi kết quả; chưa đạt ⇒ trả lời bằng `_v2`, không mở file mới |
 | A04/A14 live, A17 bằng tài khoản giới hạn, A19 (125 UOM), Q5, Q16 live | Chưa đo — ghi ở `BE_RESPONSE_GD_02_2026-10-14.md §7.3` | Xem file đó |
 
@@ -491,7 +491,7 @@ UOM quy đổi; tự chọn kho khi thiếu mapping; `Idempotency-Key` cho maste
   - [x] `G2-4` Org/Item: `search`/`status`/`type` filter, timezone, Plant có kho ACTIVE, unit ↔ UOM — `B139`, `B140`
   - [x] `G2-5` `mvn -o clean verify` (**1320 unit + 184 IT**, 0/0) + mutation 3/3 + smoke 59 lượt gọi + docs
   - [x] `G2-0` `BE_RESPONSE_GD_02_2026-10-14.md` trả lời R1–R11 + Q1–Q16, mẫu JSON copy từ lượt gọi thật
-  - [ ] Quyết định `leadTimeDays` số lẻ (§9.6) → nếu sửa, gửi FE bản `_v2`
+  - [x] `leadTimeDays` số lẻ (§9.6) — user chốt sửa **toàn hệ thống**; 1325 unit + 184 IT, mutation 2/2, smoke live; `BE_RESPONSE_GD_02_2026-10-14_v2.md`
   - [ ] FE báo A01–A22 đạt
 
 ---

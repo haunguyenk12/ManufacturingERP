@@ -266,7 +266,7 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 | `ConstraintViolationException` (`@Validated` path/query) | 400 | `VALIDATION_ERROR` | ✅ |
 | `MethodArgumentTypeMismatchException` (vd UUID sai ở path) | 400 | `VALIDATION_ERROR` | ✅ |
 | `MissingServletRequestParameterException` (thiếu `@RequestParam` bắt buộc) | 400 | `VALIDATION_ERROR` | ✅ |
-| `HttpMessageNotReadableException` (JSON hỏng/thiếu body) | 400 | `VALIDATION_ERROR` | — |
+| `HttpMessageNotReadableException` (JSON hỏng/thiếu body, **hoặc** sai kiểu ở một field) | 400 | `VALIDATION_ERROR` | ✅ chỉ khi sai kiểu ở field (vd `1.5` cho field số nguyên ⇒ `"must be a whole number"`); JSON hỏng thì không |
 | `HttpRequestMethodNotSupportedException` | 405 | `VALIDATION_ERROR` | — |
 | `NoResourceFoundException` / `NoHandlerFoundException` (không có endpoint ở path đó) | 404 | `ENTITY_NOT_FOUND` | — |
 | `AccessDeniedException` (Spring) | 403 | `PERMISSION_DENIED` | — |
@@ -298,6 +298,14 @@ Xử lý theo thứ tự ưu tiên (thêm `@Order(HIGHEST_PRECEDENCE)`):
 > `required = false` (`Idempotency-Key`, `X-Plant-Id`) nên exception đó **không có đường ném** —
 > thêm handler cho nó là code speculative (`coding-rules.md §11.5`). Khi nào có header bắt buộc đầu
 > tiên thì **đó** mới là lúc thêm, cùng test.
+
+> 🔴 **[2026-10-14, `G2`] Số lẻ gửi vào field số nguyên nay là 400, không còn bị cắt im lặng.** Jackson
+> mặc định bật `ACCEPT_FLOAT_AS_INT` ⇒ `{"leadTimeDays":1.5}` được nhận thành `1` và **lưu**, trả 200
+> (đo live, FE A10). `application.yml` nay đặt `spring.jackson.deserialization.accept-float-as-int:
+> false` — **áp cho mọi endpoint**, và `5.0` cũng bị từ chối (Jackson coi mọi số có dấu chấm là số
+> thực); `5` vẫn nhận. Handler 5 đọc `MismatchedInputException.getPath()` để trả `errors[{field}]`
+> (`lines[0].lineNo` cho field lồng); **không** echo giá trị bị từ chối. Guard: `JsonWireFormatTest`
+> (đọc `application.yml` thật) + `GlobalExceptionHandlerTest` + `ItemWarehouseSettingControllerTest`.
 
 > **Catch-all không bao giờ expose stack trace ra client.** Log đầy đủ phía server.
 

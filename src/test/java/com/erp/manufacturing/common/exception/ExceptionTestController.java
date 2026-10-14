@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -85,6 +86,10 @@ class ExceptionTestController {
         throw new RuntimeException("boom - internal detail");
     }
 
-    record ValidationTestRequest(@NotBlank String name) {
+    /** {@code quantity}/{@code lines} are optional so the existing {@code {"name":...}} bodies still bind. */
+    record ValidationTestRequest(@NotBlank String name, Integer quantity, List<TestLine> lines) {
+    }
+
+    record TestLine(Integer lineNo) {
     }
 }

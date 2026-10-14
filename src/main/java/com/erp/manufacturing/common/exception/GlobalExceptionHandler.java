@@ -2,6 +2,8 @@ package com.erp.manufacturing.common.exception;
 
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.FieldErrorResponse;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -118,6 +120,18 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException ex, HttpServletRequest request) {
 
         log.debug("Unreadable request body at {}: {}", request.getRequestURI(), ex.getMessage());
+
+        // Well-formed JSON whose value has the wrong type for a known field (1.5 for an integer, "x" for
+        // an enum): name the field so the client can show the error next to it. The rejected value is
+        // never echoed back.
+        if (ex.getMostSpecificCause() instanceof MismatchedInputException mismatch && !mismatch.getPath().isEmpty()) {
+            Class<?> target = mismatch.getTargetType();
+            String message = target != null && isIntegral(target)
+                    ? "must be a whole number"
+                    : "has an invalid value";
+            return badRequestWithFields(List.of(new FieldErrorResponse(fieldPath(mismatch.getPath()), message)));
+        }
+
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(ValidationErrorCode.INVALID_INPUT,
                         "Request body is missing or not valid JSON"));
@@ -257,6 +271,28 @@ public class GlobalExceptionHandler {
     }
 
     /** Shared 400 shape: structured {@code errors} array plus the same content flattened into {@code message}. */
+    /** {@code lines[0].lineNo} — the same dotted form Bean Validation uses for nested fields. */
+    private static String fieldPath(List<JsonMappingException.Reference> path) {
+        StringBuilder field = new StringBuilder();
+        for (JsonMappingException.Reference ref : path) {
+            if (ref.getFieldName() != null) {
+                if (!field.isEmpty()) {
+                    field.append('.');
+                }
+                field.append(ref.getFieldName());
+            } else if (ref.getIndex() >= 0) {
+                field.append('[').append(ref.getIndex()).append(']');
+            }
+        }
+        return field.toString();
+    }
+
+    private static boolean isIntegral(Class<?> type) {
+        return type == Integer.class || type == int.class
+                || type == Long.class || type == long.class
+                || type == Short.class || type == short.class;
+    }
+
     private ResponseEntity<ApiResponse<Void>> badRequestWithFields(List<FieldErrorResponse> fieldErrors) {
         String summary = fieldErrors.stream()
                 .map(fe -> fe.field() + ": " + fe.message())

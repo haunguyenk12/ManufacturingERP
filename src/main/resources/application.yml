@@ -66,6 +66,9 @@ spring:
       write-dates-as-timestamps: false
     deserialization:
       fail-on-unknown-properties: false
+      # 1.5 sent to an integer field (leadTimeDays, capacityUnits, lineNo...) must be a 400, not
+      # silently truncated to 1 and saved. Applies to every endpoint (CLAUDE.md §0.50 #6).
+      accept-float-as-int: false
 
 # HTTP server
 server:

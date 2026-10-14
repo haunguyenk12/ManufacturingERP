@@ -1,6 +1,7 @@
 package com.erp.manufacturing.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -62,6 +64,27 @@ class JsonWireFormatTest {
     void nullFields_areStillPresentOnTheWire() {
         contextRunner.run(context -> assertThat(serialize(context.getBean(ObjectMapper.class)))
                 .contains("\"cancelReason\":null"));
+    }
+
+    record IntegerPayload(Integer leadTimeDays) {}
+
+    /**
+     * Read side of the same contract (FE acceptance A10, 2026-10-14). Jackson's default truncates
+     * {@code 1.5} to {@code 1} for an integer field and the request succeeds; {@code application.yml}
+     * pins {@code accept-float-as-int: false} so every endpoint rejects it instead. {@code 5.0} is
+     * rejected too — Jackson treats any decimal point as a float token — while a plain {@code 5} binds.
+     */
+    @Test
+    void fractionalNumber_isRejectedForAnIntegerFieldInsteadOfTruncated() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            assertThatThrownBy(() -> mapper.readValue("{\"leadTimeDays\":1.5}", IntegerPayload.class))
+                    .isInstanceOf(MismatchedInputException.class);
+            assertThatThrownBy(() -> mapper.readValue("{\"leadTimeDays\":5.0}", IntegerPayload.class))
+                    .isInstanceOf(MismatchedInputException.class);
+            assertThat(mapper.readValue("{\"leadTimeDays\":5}", IntegerPayload.class).leadTimeDays())
+                    .isEqualTo(5);
+        });
     }
 
     private String serialize(ObjectMapper mapper) throws Exception {

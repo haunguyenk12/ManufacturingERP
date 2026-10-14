@@ -128,6 +128,26 @@ class ItemWarehouseSettingControllerTest {
         verifyNoInteractions(settingService);
     }
 
+    /**
+     * FE acceptance A10. Before 2026-10-14 Jackson truncated 1.5 to 1 and the setting was saved with a
+     * lead time nobody entered (200, live trace 4efc9c9fb6144584).
+     */
+    @Test
+    @DisplayName("upsert: fractional leadTimeDays returns 400 naming the field and never reaches the service")
+    void upsert_fractionalLeadTime_returns400WithFieldErrorInsteadOfTruncating() throws Exception {
+        mockMvc.perform(put("/v1/inventory/item-warehouse-settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"%s","warehouseId":"%s","safetyStock":25,"reorderPoint":40,"leadTimeDays":1.5}
+                                """.formatted(ITEM_ID, WAREHOUSE_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("leadTimeDays"))
+                .andExpect(jsonPath("$.errors[0].message").value("must be a whole number"));
+
+        verifyNoInteractions(settingService);
+    }
+
     @Test
     @DisplayName("upsert: item and warehouse in different companies stays 422 OPERATION_NOT_ALLOWED "
             + "(§5.3 — cross-company master data, not a state conflict)")

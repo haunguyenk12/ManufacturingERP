@@ -113,7 +113,51 @@ class GlobalExceptionHandlerTest {
                         .contentType("application/json")
                         .content("{\"name\": "))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                // Broken JSON has no field to blame — only a type mismatch on a known field gets errors[].
+                .andExpect(jsonPath("$.errors").doesNotExist());
+    }
+
+    /**
+     * {@code spring.jackson.deserialization.accept-float-as-int: false} turns 1.5 for an integer field
+     * into a 400 instead of a silent truncation to 1. The handler must still say WHICH field, or the
+     * client is left with "body is not valid JSON" for a body that is perfectly valid JSON.
+     */
+    @Test
+    @DisplayName("Fractional number for an integer field returns 400 naming the field, not a truncated save")
+    void fractionalNumberForIntegerField_returns400NamingTheField() throws Exception {
+        mockMvc.perform(post("/v1/test/exceptions/validation")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType("application/json")
+                        .content("{\"name\":\"ok\",\"quantity\":1.5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("quantity"))
+                .andExpect(jsonPath("$.errors[0].message").value("must be a whole number"));
+    }
+
+    @Test
+    @DisplayName("Type mismatch inside a list names the full path, e.g. lines[0].lineNo")
+    void fractionalNumberInsideAList_namesTheIndexedPath() throws Exception {
+        mockMvc.perform(post("/v1/test/exceptions/validation")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType("application/json")
+                        .content("{\"name\":\"ok\",\"lines\":[{\"lineNo\":2.5}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("lines[0].lineNo"));
+    }
+
+    @Test
+    @DisplayName("Non-integer type mismatch still names the field, without echoing the rejected value")
+    void wrongTypeForField_namesTheFieldWithoutEchoingTheValue() throws Exception {
+        mockMvc.perform(post("/v1/test/exceptions/validation")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType("application/json")
+                        .content("{\"name\":\"ok\",\"quantity\":\"secret-value\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("quantity"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("secret-value"))));
     }
 
     /**

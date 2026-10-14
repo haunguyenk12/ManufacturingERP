@@ -1247,6 +1247,7 @@ Mọi path dưới đây nằm dưới context `/api` (ví dụ `/api/v1/compani
 | `DELETE /v1/plants/{plantId}` | Còn kho `ACTIVE` ⇒ **`422 ACTIVE_CHILDREN_EXIST`** — ngừng kho trước |
 | `POST /v1/companies/{companyId}/items` | `unit` phải là mã UOM **tồn tại** (404 nếu không) và **đang hoạt động** (`422 RESOURCE_INACTIVE`) |
 | `PATCH /v1/items/{itemId}` | `unit` **không đổi được**: gửi lại đúng giá trị cũ thì được, khác ⇒ `422 OPERATION_NOT_ALLOWED` |
+| **Mọi endpoint nhận body JSON** | Số có dấu chấm gửi vào field **số nguyên** (`leadTimeDays`, `capacityUnits`, `lineNo`, `sequence`, `priority`, `headerRowIndex`…) ⇒ **`400 VALIDATION_ERROR`**, `errors[0].field` = tên field, `message` = `"must be a whole number"`. Trước đây `1.5` bị **cắt thành `1` và lưu**, trả 200. 🔴 **`5.0` cũng bị từ chối** — gửi số nguyên không có phần thập phân (`5`). Field thập phân (`safetyStock`, `quantity`, `quantityPer`…) **không** bị ảnh hưởng |
 
 ---
 
