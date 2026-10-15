@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
@@ -184,9 +186,14 @@ class InventoryLotMethodSecurityTest {
         verifyNoInteractions(inventoryPermissionGuard);
     }
 
+    /**
+     * G4-1 (B149): lot status is global, so the guard must cover every warehouse holding the lot, not
+     * only the one in the request body. Before G4 this test pinned the single-warehouse check.
+     */
     @Test
-    void changeStatus_deniedWhenWarehouseScopeMissing() {
-        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(WAREHOUSE_ID)))
+    void changeStatus_deniedWhenAnyPositionOfTheLotIsOutOfScope() {
+        when(inventoryPermissionGuard.hasLotPositionsAccess(
+                any(), eq("PERM_INVENTORY_MOVE"), eq(LOT_ID), eq(WAREHOUSE_ID)))
                 .thenReturn(false);
         InventoryLotStatusChangeRequest request =
                 new InventoryLotStatusChangeRequest(WAREHOUSE_ID, LotStatus.HOLD, "Found damage", null, null);
@@ -195,12 +202,14 @@ class InventoryLotMethodSecurityTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(lotRepository, movementService);
-        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(WAREHOUSE_ID));
+        verify(inventoryPermissionGuard).hasLotPositionsAccess(
+                any(), eq("PERM_INVENTORY_MOVE"), eq(LOT_ID), eq(WAREHOUSE_ID));
     }
 
     @Test
-    void changeStatus_allowedWhenWarehouseScopePresent() {
-        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(WAREHOUSE_ID)))
+    void changeStatus_allowedWhenEveryPositionOfTheLotIsInScope() {
+        when(inventoryPermissionGuard.hasLotPositionsAccess(
+                any(), eq("PERM_INVENTORY_MOVE"), eq(LOT_ID), eq(WAREHOUSE_ID)))
                 .thenReturn(true);
         InventoryLot lot = lot();
         when(lotRepository.findById(LOT_ID)).thenReturn(Optional.of(lot));
@@ -275,7 +284,7 @@ class InventoryLotMethodSecurityTest {
                                                  InventoryMapper mapper) {
             return new InventoryLotService(
                     lotRepository, balanceRepository, movementRepository, movementService,
-                    lotQcOriginLookupService, mapper);
+                    lotQcOriginLookupService, mapper, new IdempotencySupport(new ObjectMapper()));
         }
 
         @Bean

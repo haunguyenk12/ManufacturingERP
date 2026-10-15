@@ -88,10 +88,10 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G3` — FE handoff Giai đoạn 3: Nhập Excel dữ liệu nền** (`FE_HANDOFF_GD_03_2026-10-12.md`, P1) — ✅ **BE xong 2026-10-14** (D1–D8 chốt theo khuyến nghị), chờ **FE** nghiệm thu A01–A26 — xem **§10**, bản ghi `CLAUDE.md §0.51` |
-| **Chờ FE** | `G2` — ✅ BE xong 2026-10-14, chờ FE nghiệm thu (§9.6) — xem **§9** |
-| **Ứng viên kế tiếp** | `G1` — FE handoff Giai đoạn 1 (`BE_HANDOFF_GD_01_2026-10-09.md`, Auth/tài khoản/quyền) — **chưa lập kế hoạch**. `G4` — FE handoff Giai đoạn 4 (tồn kho/lô/chuyển kho) — **chưa lập kế hoạch** |
-| **Bị chặn** | *(không có — D1–D7 đã chốt 2026-10-13)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `G2-1` đã dùng `V69`/`V70` ⇒ phải đánh số lại trước khi làm `P7` |
+| **Đang chạy** | **`G4` — FE handoff Giai đoạn 4: tồn kho, lô, chuyển kho** (`FE_HANDOFF_GD_04_2026-10-12.md`, P1) — ✅ **BE xong 2026-10-15**, chờ **FE** nghiệm thu A01–A26 — xem **§11**, bản ghi `CLAUDE.md §0.52`, trả lời FE `BE_RESPONSE_GD_04_2026-10-15.md` |
+| **Chờ FE** | `G2` (§9), `G3` (§10) — ✅ BE xong 2026-10-14, chờ FE nghiệm thu |
+| **Ứng viên kế tiếp** | Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
+| **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
 
 ---
 
@@ -109,6 +109,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 8 | ~~`D8c` — Forgot-password / Account Recovery~~ | ✅ **Đã xong (2026-08-06)** | Bản ghi: `CLAUDE.md §0.35` |
 | 9 | **`G2` — FE handoff Giai đoạn 2 (tổ chức + danh mục nền)** | ✅ **BE xong (2026-10-14)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_02_2026-10-12.md`, P1. Chi tiết **§9**, bản ghi `CLAUDE.md §0.50` |
 | 10 | **`G3` — FE handoff Giai đoạn 3 (nhập Excel dữ liệu nền)** | ✅ **BE xong — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_03_2026-10-12.md`, P1. Phụ thuộc `G2` (Customer/Supplier master) — đã xong. Chi tiết **§10** |
+| 11 | **`G4` — FE handoff Giai đoạn 4 (tồn kho, lô, chuyển kho)** | ✅ **BE xong (2026-10-15)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_04_2026-10-12.md`, P1. Quyết định lớn nhất: có làm định giá tồn kho (moving average) hay không — đụng vùng `P7` (D1). Chi tiết **§11** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -496,6 +497,118 @@ Phạm vi đã rà: `ImportRunController`, `ImportRunService`, `ImportRowApplySe
 
 ---
 
+## 11. `G4` — FE handoff Giai đoạn 4: Tồn kho, lô và chuyển kho ✅ BE XONG (2026-10-15) — chờ FE nghiệm thu
+
+> **Kết quả (2026-10-15).** Quyết định user qua `AskUserQuestion`: D1 **không** làm định giá; hết hạn chặn
+> **chỉ ở luồng kho thủ công**; D8 **từ chối dòng trùng**; D7/D10 thêm `NO_CHANGE` + `RESERVED_STOCK`; và
+> (phát sinh từ smoke) aggregate thêm `heldLotQuantity` + lô quá hạn vào `expiredQuantity`. D2–D6, D9 theo
+> khuyến nghị — **trừ D5**: thiếu quyền ở một kho của lô trả **403**, không phải 404 (lô vẫn đọc được ở kho
+> A nên 404 là sai nghĩa). Migration `V72`. Bất biến `B149`–`B154` (`module/inventory/CLAUDE.md`).
+> `mvn -o clean verify` **1461 unit / 173 class + 202 IT / 29 class** (baseline đo lại trên worktree sạch:
+> 1394 + 192). Mutation **7/7** bị giết. Smoke HTTP thật 4 lượt × 70–72 gọi, 0 lệch status. Bản ghi
+> đầy đủ: `CLAUDE.md §0.52`. Phát hiện ngoài kế hoạch: `GET /movements` **đã có** filter `lotId` (§11.1
+> R02 ghi sai); `issue` không kiểm hạn dùng (R04 "chưa rõ" → đã rõ, đã chặn ở luồng thủ công); và
+> `postedAt` lệch µs giữa tạo và đọc lại (đã sửa, cùng lỗi §0.51 #3).
+
+Nguồn: `FE_HANDOFF_GD_04_2026-10-12.md` (v1, P1). FE/mock đã xong 4 màn hình (Kho, Lô, Biến động, **Chuyển kho mới**); BE phải (1) trả lời Q1–Q14 §5, (2) đối chiếu R01–R12 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_04_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào; mọi path/DTO/mã lỗi là **[Đề xuất BE]**.
+
+> 🔴 **Bảng câu hỏi, không phải danh sách việc** (`BETaskDeliveryRules.md §5` lỗi #1). Và lần này phạm vi FE mô tả **rộng hơn nhiều** so với tên phase: ngoài chuyển kho (thứ duy nhất FE ghi là "bị chặn"), file còn đòi **định giá tồn kho** (giá bình quân, giá trị tồn, snapshot giá trên từng movement) — một năng lực repo **chưa từng có** và `P3` đã **cố ý từ chối** (`CLAUDE.md §0.31` quyết định #2). Phạm vi phải chốt trước (D1), không suy ra từ độ dài file FE.
+
+### 11.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-15 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: `InventoryController` (6 endpoint), `InventoryLotController` (3), `InventoryLotService.changeStatus`, `MovementType`, `StockReceiveRequest`, `StockAdjustRequest`, `StockMovementResponse`, `StockBalanceAggregateResponse`, `StockBalance` (cột), `InventoryLot.expiresAt`, grep `unit_cost`/`@Lock` trong `module/inventory`. **Chưa rà:** `InventoryMovementService` chi tiết (khoá, thứ tự check), `MaterialReservationService` (R11), nhánh `adjust` với reservation, `InventoryMapper` aggregate, migration `V8`/`V16`/`V56`.
+
+| # | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| R01 | Aggregate 1 dòng Item+Warehouse, 6 lượng | **Đã có** `GET /v1/inventory/balances/aggregate` đủ 6 lượng + `lotCount`. Thiếu `averageCost`/`stockValue`/`version`/`search` | Trả lời + **CODE** (`search`; giá trị theo D1) |
+| R02 | Lot detail/history theo `lotId`+`warehouseId` | **Đã có** `GET /lots/{id}?warehouseId=`. `GET /movements` **không** có filter `lotId` | **CODE nhỏ** (filter `lotId`) |
+| R03 | Receive có `unitCost` bắt buộc + `expiresAt` | `StockReceiveRequest` **không có** `unitCost` lẫn `expiresAt`. `InventoryLot.expiresAt` có cột nhưng **không có đường ghi qua API** (đúng phát hiện `§0.46`, `set-lot-expiry.sh` phải chạy SQL) | **CODE** (`expiresAt`); `unitCost` theo D1 |
+| R04 | Issue chỉ trừ free AVAILABLE chưa hết hạn, an toàn đồng thời | Gate lot status có (`B3`). **Chưa rõ** có loại lot hết hạn và có khoá khi hai issue tranh nhau không — `grep @Lock` trong `module/inventory/repository` chỉ ra **`ItemRepository`** (từ `G2`) | Rà ở `G4-0` + `*IT` concurrency |
+| R05 | Count tuyệt đối + `expectedVersion` | **Không có.** Chỉ `POST /adjust` nhận `quantityDelta` có dấu. `StockBalance` có `@Version` (từ `BaseEntity`) ⇒ đủ làm `expectedVersion` | **CODE** — endpoint mới (D3) |
+| R06 | Chuyển kho atomic, cùng Plant, cặp OUT/IN | **Không tồn tại** (grep `transfer` = 0). `MovementType` không có `TRANSFER_OUT`/`TRANSFER_IN` ⇒ đụng `CHECK` constraint (`coding-rules.md §11.3`) | **CODE** — aggregate mới |
+| R07 | Đổi status: từ chối reserved / no-op / expired→AVAILABLE; kiểm scope mọi vị thế | 🔴 `changeStatus` đổi `InventoryLot.status` — tức **đã là global** (Q6) — nhưng `@PreAuthorize` chỉ kiểm **một** `warehouseId` trong body ⇒ người có quyền ở kho A đổi được chất lượng lô đang nằm ở kho B ngoài phạm vi. **Không** thấy check reservation, no-op, hay expired→AVAILABLE. Quyền là `PERM_INVENTORY_MOVE`, FE ghi `PERM_INVENTORY_MANAGE` | **CODE** (lỗ hổng scope + 3 check) |
+| R08 | Decimal ≤ 6 số lẻ, không làm tròn âm thầm | Cột `NUMERIC(19,6)`; request nhận `BigDecimal` không giới hạn scale ⇒ Postgres **làm tròn** `1.2345678` thành `1.234568` mà không báo | **CODE** (`@Digits(integer=13, fraction=6)`) — cùng họ lỗi "ép kiểu im lặng" `§0.50` #6 |
+| R09 | Idempotency theo actor+command+key | Có theo `(key, movement_type)` (`B69`), **không** theo actor (nợ `C` ở Phụ lục) | Trả lời; transfer/count làm key riêng theo tài liệu |
+| R10 | Snapshot giá trên movement | **Không có** cột giá nào trên `stock_movements` | Theo D1 |
+| R11 | WO reserve/issue/output/QC dùng cùng ledger | Đã đúng thiết kế (`B1`–`B6`, `B62`) | Trả lời |
+| R12 | Actor/time/trace do server ghi | `created_by`/`created_at`/`trace_id` có trên `stock_movements`; `StockMovementResponse` **không** trả `createdBy`/`traceId` | **CODE nhỏ** (`createdByUsername` batch, `traceId`) |
+| — | `GET /inventory/reservations` | Không có endpoint đọc reservation theo kho/item | **CODE** (read-only) |
+| — | `GET /inventory/movements/{id}` | Không có | **CODE** (read-only) |
+| — | Decimal là **chuỗi** trên wire (Q13) | Toàn repo trả **JSON number** (`G2` Q12) | Trả lời — **không đổi** (D9) |
+
+### 11.2 Quyết định phải chốt với user trước khi code
+
+| # | Quyết định | Khuyến nghị BE | Lý do | Chặn |
+|---|---|---|---|---|
+| **D1** | Có làm **định giá tồn kho** (moving average theo Item+Warehouse, `unitCost` trên receive, `averageCost`/`stockValue`, snapshot giá trên movement) trong `G4` không? | **Không làm ở `G4`** — tách thành phase riêng, gộp với `P7` (WIP valuation) | Đây là lớp actual-costing mà `P3` đã từ chối có chủ đích. Làm nó đụng **mọi** đường ghi tồn kho (receive/issue/adjust/QC/goods receipt/material issue/production receipt), cần migration cột giá trên `stock_balances` + `stock_movements`, chính sách cho dữ liệu lịch sử không có giá (Q12), làm tròn (Q10). Một phase FE handoff không phải chỗ đặt nó. FE đã xác nhận chưa trả lời thì **không chặn mock**; trả `null` cho các field giá là hợp đồng hợp lệ theo chính đề xuất của FE ("thiếu giá là null, không phải 0") | Cả phase |
+| **D2** | Chuyển kho: cùng Plant, không in-transit, không approval, không sửa/huỷ sau post (Q2) | **Theo FE** | Đúng phạm vi FE đã duyệt; không có gì cần đàm phán | `G4-2` |
+| **D3** | Count tuyệt đối: endpoint **mới** `POST /v1/inventory/counts`, giữ nguyên `POST /adjust` (Q3) | **Theo FE** — count tính `delta = counted − quantity` dưới khoá rồi gọi đúng đường `adjust` hiện có (`ADJUST_IN`/`ADJUST_OUT`) | Không đổi ngữ nghĩa API cũ (breaking). Không thêm `MovementType` mới cho count | `G4-3` |
+| **D4** | `expectedVersion` bắt buộc cho count (Q4) — version của **dòng `stock_balances`** nào? | Version của **đúng vị thế** (Item+Warehouse+Lot, hoặc không lô); trả `version` trên `StockBalanceResponse` | Aggregate gộp nhiều dòng nên không có một version duy nhất. Count theo lot ⇒ phải đếm theo vị thế, đúng như FE mô tả bước 5 | `G4-3` |
+| **D5** | Lot status: global (đã đúng code) **và** kiểm scope **mọi** kho có vị thế của lô (Q6, R07) | **Có cả hai.** Thiếu quyền ở bất kỳ kho nào ⇒ 404 (không lộ kho ngoài scope) | Đây là sửa **lỗ hổng phân quyền thật** ở §11.1 R07, không phải tính năng mới | `G4-1` |
+| **D6** | Đổi status: quyền `PERM_INVENTORY_MOVE` (code) hay `PERM_INVENTORY_MANAGE` (FE)? | **Giữ `MOVE`**, trả lời FE | Đổi quyền = đổi cấu hình role mọi môi trường (cùng lý do `G2` D7). Sau `V57`, `PERM_INVENTORY_MANAGE` là quyền **thiết lập kho**, không phải chất lượng lô | Không (chỉ trả lời) |
+| **D7** | Đổi status bị chặn khi lô còn **reservation `ACTIVE`** (R07) | **Có**, `409` mã mới hoặc tái dùng `STATE_CONFLICT` — chốt ở `G4-0` theo `error-handling.md §5.3` | Đổi lô đang được giữ cho WO sang `HOLD` âm thầm làm WO đó không xuất được nữa | `G4-1` |
+| **D8** | Transfer: cho dòng trùng vị thế và kiểm **tổng** toàn phiếu (Q9) | **Từ chối dòng trùng** (`VALIDATION_ERROR` trỏ `lines[i]`) | Đơn giản hơn và loại bỏ hẳn lớp lỗi "mỗi dòng < free nhưng tổng > free". FE nghiêng về "cho trùng + kiểm tổng" — cả hai đều đúng tinh thần; reject rẻ hơn để test | `G4-2` |
+| **D9** | Decimal trên wire là chuỗi (Q13) | **Không** — giữ JSON number như toàn hệ thống | Đổi kiểu số cho riêng endpoint mới là hai hợp đồng trong một API; đổi toàn hệ thống là ngoài phạm vi (cùng lý do `G2` Q12) | — |
+| **D10** | Mã lỗi (Q14) | Ánh xạ vào mã **sẵn có** theo `§5.3`; chỉ thêm mã khi không có câu trả lời | Ví dụ ánh xạ dự kiến: `WAREHOUSE_INACTIVE`/`ITEM_INACTIVE`/`PLANT_INACTIVE` → `RESOURCE_INACTIVE` (422); `PLANT_SCOPE_MISMATCH` → `RESOURCE_SCOPE_MISMATCH` (422); `STALE_VERSION` → `CONCURRENT_MODIFICATION` (409); `LOT_ITEM_MISMATCH` → `RESOURCE_SCOPE_MISMATCH`; `DECIMAL_PRECISION_EXCEEDED` → `VALIDATION_ERROR` + `errors[{field}]`. Ứng viên mã mới: `SAME_WAREHOUSE`?, `NO_CHANGE`?, `RESERVED_STOCK`? — chốt từng cái | Tất cả gói |
+
+### 11.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+#### `G4-0` — Đọc nốt + baseline + trả lời §5 *(không code `src/main`)*
+
+1. Đọc những phần "chưa rà" ở §11.1 — đặc biệt khoá đồng thời của `InventoryMovementService.issue` và `adjust` (R04), check hết hạn ở gate xuất, `MaterialReservationService` (reservation theo vị thế hay theo item).
+2. `mvn -o clean verify` với Docker ⇒ baseline thật (số cuối đã ghi: **1394 unit / 169 class + 192 IT / 28 class**, `§0.51` — **đo lại**).
+3. Chạy live các endpoint FE liệt kê ở §3.1 trên DB dùng-một-lần để có request/response **thật** cho file trả lời (`B2`).
+4. Chốt D1–D10 với user.
+
+#### `G4-1` — Lot status: phân quyền mọi vị thế + 3 check *(chặn bởi D5, D7)*
+
+- Guard mới: resolve mọi `warehouseId` có `stock_balances` của lô, yêu cầu `PERM_INVENTORY_MOVE` ở **tất cả**; thiếu ⇒ 404.
+- Từ chối: cùng trạng thái (no-op), `expiresAt <= now` ⇒ `AVAILABLE`, còn reservation `ACTIVE` trên lô.
+- **Test:** method-security (deny khi một kho ngoài scope), service từng nhánh, **`*IT`** cho query "mọi kho của lô" (fixture lô nằm ở **hai** kho thuộc **hai** plant — bẫy `§0.46`).
+
+#### `G4-2` — Chuyển kho *(chặn bởi D2, D8)*
+
+- **Migration `V72`** *(V69–V71 đã dùng ở `G2`/`G3`; ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` phải đánh số lại)*: bảng `stock_transfers` + `stock_transfer_lines` (`code` sinh ở `@PrePersist` — `B68`, `idempotency_key` + `payload_hash`, `UNIQUE`), `MovementType` + `TRANSFER_OUT`/`TRANSFER_IN` + sửa `chk_stock_movements_type` (`§11.3`), cột `stock_movements.transfer_line_id` nếu cần nối cặp.
+- Service: validate trước mọi ghi (`C9`) — hai kho `ACTIVE`, khác nhau, cùng Plant `ACTIVE`, 1–100 dòng, không trùng vị thế; **khoá** các vị thế nguồn theo thứ tự xác định (`balance_id` tăng dần) để không deadlock; lô giữ nguyên mã/ngày/hạn; chỉ chuyển phần free AVAILABLE chưa hết hạn; một transaction cho cả phiếu.
+- 4 endpoint: `POST/GET /v1/inventory/transfers`, `GET /v1/inventory/transfers/{id}`. Cross-check `X-Plant-Id` (endpoint nêu kho ⇒ suy plant; `§5.6.1`).
+- Quyền: tái dùng `PERM_INVENTORY_MOVE`/`_READ` ⇒ **không** permission mới, `docs/roles-and-permissions.md` không đổi.
+- **Test:** unit mỗi nhánh từ chối + `verifyNoInteractions` (`R5`), idempotency (`R9`), method-security, controller, **`StockTransferIT`** (rollback thật khi dòng cuối lỗi; hai transfer tranh free cuối ⇒ không âm; lô hai kho), `FlywayMigrationIT` cho `CHECK` mới.
+
+#### `G4-3` — Kiểm đếm tuyệt đối *(chặn bởi D3, D4)*
+
+- `POST /v1/inventory/counts` — khoá dòng `stock_balances`, so `expectedVersion`, `delta = counted − quantity`; `0` ⇒ từ chối không ghi; `counted < reservedQuantity` ⇒ từ chối; delta ≠ 0 đi qua đường `adjust` hiện có (không `MovementType` mới). `Idempotency-Key` bắt buộc theo FE.
+- `version` thêm vào `StockBalanceResponse` (additive).
+
+#### `G4-4` — Read model + validation nhỏ
+
+- `GET /movements`: filter `lotId`, trả `createdByUsername` (batch, `C14`) + `traceId`; `GET /movements/{id}`.
+- `GET /balances/aggregate`: filter `search` (code/name, `cast(... as string)` + `*IT` — bẫy `§0.24`).
+- `GET /v1/inventory/reservations` (read-only, phân trang).
+- `StockReceiveRequest.expiresAt` (chỉ khi tạo **lô mới**; quá khứ ⇒ 400) — đóng luôn lý do tồn tại của `scripts/demo-capstone2/set-lot-expiry.sh`.
+- `@Digits(fraction = 6)` cho mọi quantity trên request inventory (R08).
+
+#### `G4-5` — Nghiệm thu + bàn giao
+
+- `mvn -o clean verify` thật; số case **≥ baseline** (`R10`).
+- Nghiệm thu mutation, ưu tiên chỗ mock không thấy: bỏ khoá vị thế nguồn (IT tranh chấp phải đỏ), bỏ transaction chung (IT rollback phải đỏ), guard status chỉ kiểm một kho, đổi mã lỗi sang mã khác **cùng HTTP status**.
+- Smoke HTTP thật A01–A26 phần thuộc BE; ca định giá (A03, A04, A13, A14 phần giá trị, A25) ghi **"ngoài phạm vi theo D1"** nếu D1 = không làm.
+- Docs: `BE_RESPONSE_GD_04_*.md`, `CLAUDE.md §0`, `module/inventory/CLAUDE.md` (bất biến mới tiếp từ `B148`), `docs/api-guide-for-frontend.md`.
+
+### 11.4 Breaking change dự kiến
+
+| Thay đổi | Breaking? |
+|---|---|
+| Transfer, count, reservations, movement detail, filter `lotId`/`search`, field `version`/`createdByUsername`/`traceId`/`expiresAt` | **Không** (additive) |
+| Lot status từ chối khi kho khác ngoài scope / reserved / no-op / expired→AVAILABLE | **Có** — request trước đây 200 nay bị chặn (sửa sai) |
+| Quantity quá 6 số lẻ ⇒ 400 trên endpoint inventory | **Có** — trước đây bị làm tròn im lặng (sửa sai) |
+| Valuation | Chỉ khi D1 = làm; thêm field `null` là additive, bắt buộc `unitCost` trên receive là **breaking** |
+
+### 11.5 Ngoài phạm vi *(theo FE §1.2 + quyết định BE)*
+
+Chuyển khác Plant, in-transit, sửa/huỷ/đảo phiếu đã post, chuyển reservation, serial tracking, FIFO, FX/VAT, sổ kế toán, full costing, import tồn đầu kỳ, decimal-as-string toàn hệ thống (D9), idempotency theo actor cho ledger cũ (nợ `C`), định giá tồn kho nếu D1 = không làm.
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -588,6 +701,15 @@ Phạm vi đã rà: `ImportRunController`, `ImportRunService`, `ImportRowApplySe
   - [ ] Chốt 8 quyết định §10.2 (D1–D8) với user
   - [x] `G3-1` đường mẫu cố định atomic (`V71`, target `SUPPLIER`/`CUSTOMER`, validate/commit/list/detail theo owner)
   - [x] `G3-2` `mvn -o clean verify` (1394 + 192) + mutation 10/10 + smoke 2 lượt × 78 gọi + `BE_RESPONSE_GD_03_2026-10-14.md` + docs
+  - [ ] FE nghiệm thu
+- [x] **`G4`** — FE handoff Giai đoạn 4: tồn kho, lô, chuyển kho *(BE xong 2026-10-15, §11 — chờ FE nghiệm thu)*
+  - [x] `G4-0` đọc nốt phần "chưa rà" §11.1 + baseline đo thật (1394 + 192 trên worktree sạch) — *live endpoint cũ chạy trong smoke chung, không có lượt riêng trước khi sửa*
+  - [x] Chốt D1, D7/D8/D10 + quy tắc hết hạn với user; D2–D6/D9 theo khuyến nghị (D5 trả 403, xem ghi chú §11)
+  - [x] `G4-1` lot status: kiểm scope mọi kho có vị thế + từ chối reserved/no-op/expired→AVAILABLE
+  - [x] `G4-2` chuyển kho atomic (`V72`, `TRANSFER_OUT`/`TRANSFER_IN`, 3 endpoint — create/list/detail)
+  - [x] `G4-3` kiểm đếm tuyệt đối `POST /inventory/counts` + `version` trên balance
+  - [x] `G4-4` read model: movement actor/trace + detail, aggregate `search` + `heldLotQuantity`/expired, reservations, receive `expiresAt`, `@Digits(6)`
+  - [x] `G4-5` `mvn -o clean verify` (1461 + 202) + mutation 7/7 + smoke 4 lượt + `BE_RESPONSE_GD_04_2026-10-15.md` + docs
   - [ ] FE nghiệm thu
 
 ---

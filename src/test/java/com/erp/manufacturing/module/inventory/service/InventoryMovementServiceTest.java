@@ -47,7 +47,9 @@ class InventoryMovementServiceTest {
     InventoryMovementService service;
 
     // R3: IdempotencySupport carries real hashing logic, so it is a real instance, not a mock.
-    IdempotencySupport idempotency = new IdempotencySupport(new ObjectMapper());
+    // JavaTimeModule: the production mapper (Boot) has it, and InventoryReceiveCommand.expiresAt is an Instant.
+    IdempotencySupport idempotency = new IdempotencySupport(
+            new ObjectMapper().registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule()));
 
     @BeforeEach
     void setUp() {
@@ -86,7 +88,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-1", new BigDecimal("10.500"), "PO receipt", "PO", "PO-1", null, null), "KEY-1");
+                itemId, warehouseId, null, "LOT-1", new BigDecimal("10.500"), "PO receipt", "PO", "PO-1", null, null, null), "KEY-1");
 
         ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
         verify(balanceRepository).save(balanceCaptor.capture());
@@ -122,7 +124,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-WO-1", new BigDecimal("5"), null, "WORK_ORDER", "WO-1", null, null),
+                itemId, warehouseId, null, "LOT-WO-1", new BigDecimal("5"), null, "WORK_ORDER", "WO-1", null, null, null),
                 "KEY-HOLD", LotStatus.HOLD);
 
         ArgumentCaptor<InventoryLot> lotCaptor = ArgumentCaptor.forClass(InventoryLot.class);
@@ -149,7 +151,7 @@ class InventoryMovementServiceTest {
 
         service.receive(new InventoryReceiveCommand(
                         itemId, warehouseId, null, null, new BigDecimal("5"), null,
-                        "WORK_ORDER", "WO-1", null, null),
+                        "WORK_ORDER", "WO-1", null, null, null),
                 "KEY-NONTRACKED-HOLD", LotStatus.HOLD);
 
         ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
@@ -214,7 +216,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-EXISTING", BigDecimal.ONE, null, "WORK_ORDER", "WO-1", null, null),
+                itemId, warehouseId, null, "LOT-EXISTING", BigDecimal.ONE, null, "WORK_ORDER", "WO-1", null, null, null),
                 "KEY-EXISTING", LotStatus.HOLD);
 
         assertThat(existingLot.getStatus()).isEqualTo(LotStatus.AVAILABLE);
@@ -245,7 +247,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, "LOT-DEFAULT", BigDecimal.ONE, null, "PO", "PO-1", null, null), "KEY-DEFAULT");
+                itemId, warehouseId, null, "LOT-DEFAULT", BigDecimal.ONE, null, "PO", "PO-1", null, null, null), "KEY-DEFAULT");
 
         ArgumentCaptor<InventoryLot> lotCaptor = ArgumentCaptor.forClass(InventoryLot.class);
         verify(lotRepository).save(lotCaptor.capture());
@@ -271,7 +273,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-1", MovementType.RECEIVE)).thenReturn(Optional.of(existing));
 
         service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-1");
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null, null), "KEY-1");
 
         verifyNoInteractions(itemRepository, warehouseRepository, lotRepository, balanceRepository);
         verify(movementRepository, never()).save(any());
@@ -286,7 +288,7 @@ class InventoryMovementServiceTest {
         Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
 
         InventoryReceiveCommand original = new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null);
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null, null);
         StockMovement existing = StockMovement.builder()
                 .item(item)
                 .warehouse(warehouse)
@@ -302,7 +304,7 @@ class InventoryMovementServiceTest {
         // Same key, but quantity 1 -> 99: replaying this silently used to return the original
         // movement and discard the new payload.
         InventoryReceiveCommand tampered = new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null);
+                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null, null);
 
         assertThatThrownBy(() -> service.receive(tampered, "KEY-1"))
                 .isInstanceOf(AppException.class)
@@ -334,7 +336,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.findByIdempotencyKeyAndMovementType("LEGACY-1", MovementType.RECEIVE)).thenReturn(Optional.of(legacy));
 
         InventoryMovementResult result = service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null), "LEGACY-1");
+                itemId, warehouseId, null, null, new BigDecimal("99"), null, null, null, null, null, null), "LEGACY-1");
 
         assertThat(result.created()).isFalse();
         assertThat(result.movement()).isSameAs(legacy);
@@ -619,7 +621,7 @@ class InventoryMovementServiceTest {
         // Master-data validation, not a lot status problem — deliberately left at 422 when F5
         // moved the lot-status refusals to LOT_NOT_ELIGIBLE (409).
         assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-4"))
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null, null), "KEY-4"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
@@ -653,7 +655,7 @@ class InventoryMovementServiceTest {
         when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         InventoryMovementResult result = service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-1"), "KEY-SN-1");
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-1", null), "KEY-SN-1");
 
         ArgumentCaptor<SerialNumber> serialCaptor = ArgumentCaptor.forClass(SerialNumber.class);
         verify(serialNumberRepository).save(serialCaptor.capture());
@@ -679,7 +681,7 @@ class InventoryMovementServiceTest {
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
 
         assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, new BigDecimal("2"), null, null, null, null, "SN-2"), "KEY-SN-2"))
+                itemId, warehouseId, null, null, new BigDecimal("2"), null, null, null, null, "SN-2", null), "KEY-SN-2"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
@@ -701,7 +703,7 @@ class InventoryMovementServiceTest {
         when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
 
         assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null), "KEY-SN-3"))
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, null, null), "KEY-SN-3"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
@@ -730,7 +732,7 @@ class InventoryMovementServiceTest {
         when(serialNumberRepository.findByItemItemIdAndSerialCode(itemId, "SN-4")).thenReturn(Optional.of(existingSerial));
 
         assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-4"), "KEY-SN-4"))
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null, "SN-4", null), "KEY-SN-4"))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_ALREADY_EXISTS));
@@ -884,6 +886,303 @@ class InventoryMovementServiceTest {
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
         verifyNoInteractions(balanceRepository, serialNumberRepository);
+    }
+
+    // ── G4-3: absolute stock count ─────────────────────────────────────────
+
+    private StockBalance position(Item item, Warehouse warehouse, InventoryLot lot, String quantity,
+                                  String reserved, long version) {
+        StockBalance balance = StockBalance.builder()
+                .item(item)
+                .warehouse(warehouse)
+                .lot(lot)
+                .quantity(new BigDecimal(quantity))
+                .reservedQuantity(new BigDecimal(reserved))
+                .build();
+        balance.setVersion(version);
+        return balance;
+    }
+
+    private void stubCountMasters(Item item, Warehouse warehouse) {
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+    }
+
+    @Test
+    @DisplayName("count: decrease writes one ADJUST_OUT for the delta computed from the locked quantity")
+    void count_belowCurrent_writesAdjustOutForTheServerComputedDelta() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+        StockBalance balance = position(item, warehouse, null, "10", "3", 4L);
+        when(balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(balance));
+        when(balanceRepository.saveAndFlush(balance)).thenReturn(balance);
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryCountResult result = service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("8"), 4L, "Cycle count"), "COUNT-1");
+
+        assertThat(balance.getQuantity()).isEqualByComparingTo("8");
+        assertThat(result.previousQuantity()).isEqualByComparingTo("10");
+        StockMovement movement = result.movement();
+        assertThat(movement.getMovementType()).isEqualTo(MovementType.ADJUST_OUT);
+        assertThat(movement.getDirection()).isEqualTo(MovementDirection.OUT);
+        assertThat(movement.getQuantity()).isEqualByComparingTo("2");
+        assertThat(movement.getReferenceType()).isEqualTo(InventoryMovementService.COUNT_REFERENCE_TYPE);
+        assertThat(movement.getIdempotencyKey()).isEqualTo("COUNT-1");
+        assertThat(movement.getPayloadHash()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("count: increase writes one ADJUST_IN")
+    void count_aboveCurrent_writesAdjustIn() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+        StockBalance balance = position(item, warehouse, null, "10", "0", 1L);
+        when(balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(balance));
+        when(balanceRepository.saveAndFlush(balance)).thenReturn(balance);
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryCountResult result = service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("12.5"), 1L, "Found more"), "COUNT-2");
+
+        assertThat(balance.getQuantity()).isEqualByComparingTo("12.5");
+        assertThat(result.movement().getMovementType()).isEqualTo(MovementType.ADJUST_IN);
+        assertThat(result.movement().getQuantity()).isEqualByComparingTo("2.5");
+    }
+
+    @Test
+    @DisplayName("count: a stale expectedVersion is CONCURRENT_MODIFICATION and writes nothing")
+    void count_staleVersion_throwsConcurrentModificationBeforeAnyWrite() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+        StockBalance balance = position(item, warehouse, null, "10", "0", 5L);
+        when(balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(balance));
+
+        assertThatThrownBy(() -> service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("8"), 4L, "Cycle count"), "COUNT-3"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
+
+        assertThat(balance.getQuantity()).isEqualByComparingTo("10");
+        verify(balanceRepository, never()).saveAndFlush(any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("count: equal to the current quantity is NO_CHANGE and writes nothing")
+    void count_equalToCurrent_throwsNoChange() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+        when(balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(position(item, warehouse, null, "10.000000", "0", 2L)));
+
+        assertThatThrownBy(() -> service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("10"), 2L, "Same"), "COUNT-4"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.NO_CHANGE));
+
+        verify(balanceRepository, never()).saveAndFlush(any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("count: below the reserved quantity is RESERVED_STOCK and writes nothing")
+    void count_belowReserved_throwsReservedStock() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+        when(balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(position(item, warehouse, null, "10", "3", 2L)));
+
+        assertThatThrownBy(() -> service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("2"), 2L, "Lost"), "COUNT-5"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.RESERVED_STOCK));
+
+        verify(balanceRepository, never()).saveAndFlush(any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("count: a lot-tracked item without lotId is LOT_REQUIRED before any lock")
+    void count_lotTrackedWithoutLot_throwsLotRequired() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        stubCountMasters(item, warehouse);
+
+        assertThatThrownBy(() -> service.count(new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("2"), 0L, "Count"), "COUNT-6"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.LOT_REQUIRED));
+
+        verifyNoInteractions(balanceRepository);
+    }
+
+    @Test
+    @DisplayName("count: replaying the same key returns the original movement without locking again")
+    void count_replay_returnsTheOriginalMovementWithoutANewCount() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, false, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryCountCommand command = new InventoryCountCommand(
+                item.getItemId(), warehouse.getWarehouseId(), null, new BigDecimal("8"), 4L, "Cycle count");
+        StockMovement original = StockMovement.builder()
+                .item(item).warehouse(warehouse)
+                .movementType(MovementType.ADJUST_OUT).direction(MovementDirection.OUT)
+                .quantity(new BigDecimal("2"))
+                .idempotencyKey("COUNT-7")
+                .payloadHash(idempotency.payloadHash(command))
+                .build();
+        when(movementRepository.findByIdempotencyKeyAndMovementType("COUNT-7", MovementType.ADJUST_IN))
+                .thenReturn(Optional.empty());
+        when(movementRepository.findByIdempotencyKeyAndMovementType("COUNT-7", MovementType.ADJUST_OUT))
+                .thenReturn(Optional.of(original));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(
+                item.getItemId(), warehouse.getWarehouseId()))
+                .thenReturn(Optional.of(position(item, warehouse, null, "8", "0", 5L)));
+
+        InventoryCountResult result = service.count(command, "COUNT-7");
+
+        assertThat(result.movement()).isSameAs(original);
+        assertThat(result.previousQuantity()).isEqualByComparingTo("10");
+        verify(balanceRepository, never()).lockPositionWithoutLot(any(), any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    // ── G4: manual issue refuses an expired lot; work-order issue does not ──
+
+    @Test
+    @DisplayName("issueManual: an AVAILABLE lot past its expiry is LOT_NOT_ELIGIBLE and stock is untouched")
+    void issueManual_expiredLot_throwsLotNotEligible() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(item).lotCode("OLD")
+                .status(LotStatus.AVAILABLE).expiresAt(Instant.now().minusSeconds(60)).build();
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+        when(lotRepository.findById(lot.getLotId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> service.issueManual(new InventoryIssueCommand(
+                item.getItemId(), warehouse.getWarehouseId(), lot.getLotId(), null, BigDecimal.ONE,
+                null, null, null, null, null), "ISSUE-EXP"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        verifyNoInteractions(balanceRepository);
+    }
+
+    @Test
+    @DisplayName("issue (work-order path): the expiry gate is not applied — decision G4, manual flows only")
+    void issue_workOrderPath_stillIssuesFromAnExpiredAvailableLot() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(item).lotCode("OLD")
+                .status(LotStatus.AVAILABLE).expiresAt(Instant.now().minusSeconds(60)).build();
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+        when(lotRepository.findById(lot.getLotId())).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                item.getItemId(), warehouse.getWarehouseId(), lot.getLotId()))
+                .thenReturn(Optional.of(position(item, warehouse, lot, "5", "0", 0L)));
+        when(balanceRepository.save(any(StockBalance.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryMovementResult result = service.issue(new InventoryIssueCommand(
+                item.getItemId(), warehouse.getWarehouseId(), lot.getLotId(), null, BigDecimal.ONE,
+                null, "WORK_ORDER", "WO-1", null, null), "ISSUE-WO");
+
+        assertThat(result.created()).isTrue();
+    }
+
+    // ── G4-4: expiresAt on receipt ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("receive: expiresAt is stored on a lot the receipt creates")
+    void receive_newLotWithExpiry_storesTheExpiry() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        Instant expiry = Instant.parse("2030-12-31T16:59:59Z");
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+        when(lotRepository.findByItemItemIdAndLotCode(item.getItemId(), "NEW-LOT")).thenReturn(Optional.empty());
+        when(lotRepository.save(any(InventoryLot.class))).thenAnswer(invocation -> {
+            InventoryLot lot = invocation.getArgument(0);
+            lot.setLotId(UUID.randomUUID());
+            return lot;
+        });
+        when(balanceRepository.save(any(StockBalance.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(movementRepository.save(any(StockMovement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.receive(new InventoryReceiveCommand(item.getItemId(), warehouse.getWarehouseId(), null, "NEW-LOT",
+                BigDecimal.ONE, null, null, null, null, null, expiry), "RCV-EXP");
+
+        ArgumentCaptor<InventoryLot> lotCaptor = ArgumentCaptor.forClass(InventoryLot.class);
+        verify(lotRepository).save(lotCaptor.capture());
+        assertThat(lotCaptor.getValue().getExpiresAt()).isEqualTo(expiry);
+    }
+
+    @Test
+    @DisplayName("receive: expiresAt on an existing lot is refused — a receipt must not rewrite another lot's expiry")
+    void receive_existingLotWithExpiry_isRefusedBeforeAnyWrite() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> service.receive(new InventoryReceiveCommand(item.getItemId(),
+                warehouse.getWarehouseId(), UUID.randomUUID(), null, BigDecimal.ONE, null, null, null, null, null,
+                Instant.parse("2030-12-31T00:00:00Z")), "RCV-EXP-2"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
+
+        verifyNoInteractions(balanceRepository);
+        verify(lotRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("receive: a null expiresAt keeps the payload fingerprint of commands stored before G4")
+    void receiveCommand_nullExpiry_isLeftOutOfThePayloadHash() {
+        IdempotencySupport support = new IdempotencySupport(new ObjectMapper());
+        String withNull = support.payloadHash(new InventoryReceiveCommand(UUID.fromString(
+                "00000000-0000-4000-8000-000000000001"), UUID.fromString("00000000-0000-4000-8000-000000000002"),
+                null, "L1", BigDecimal.ONE, null, null, null, null, null, null));
+        String json = "{\"itemId\":\"00000000-0000-4000-8000-000000000001\","
+                + "\"warehouseId\":\"00000000-0000-4000-8000-000000000002\",\"lotId\":null,\"lotCode\":\"L1\","
+                + "\"quantity\":1,\"reason\":null,\"referenceType\":null,\"referenceId\":null,"
+                + "\"serialId\":null,\"serialCode\":null}";
+        assertThat(withNull).isEqualTo(sha256(json));
+    }
+
+    private static String sha256(String text) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private Item item(UUID itemId, UUID companyId, boolean lotTracked, ItemStatus status) {

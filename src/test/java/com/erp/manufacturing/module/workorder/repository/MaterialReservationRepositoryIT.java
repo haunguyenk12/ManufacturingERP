@@ -25,6 +25,8 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import org.springframework.data.domain.PageRequest;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -259,5 +261,34 @@ class MaterialReservationRepositoryIT extends AbstractPostgresIntegrationTest {
         reservation.setCreatedAt(now);
         reservation.setUpdatedAt(now);
         entityManager.persistAndFlush(reservation);
+    }
+
+    /**
+     * G4-4: the warehouse reservation list. The component here is not lot-tracked, so every row has
+     * {@code lot_id IS NULL} — an inner join on {@code lot} would return nothing at all.
+     */
+    @Test
+    void searchByWarehouse_keepsReservationsWithoutALot_andHonoursStatusAndLotFilters() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        persistReservation(workOrder, line, fixture, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("5.000000"), new BigDecimal("2.000000"));
+        persistReservation(workOrder, line, fixture, MaterialReservationStatus.RELEASED,
+                new BigDecimal("1.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+        UUID warehouseId = fixture.warehouse.getWarehouseId();
+
+        var all = repository.searchByWarehouse(warehouseId, null, null, null, PageRequest.of(0, 20));
+        var active = repository.searchByWarehouse(warehouseId, fixture.component.getItemId(), null,
+                MaterialReservationStatus.ACTIVE, PageRequest.of(0, 20));
+        var otherLot = repository.searchByWarehouse(warehouseId, null, UUID.randomUUID(), null, PageRequest.of(0, 20));
+
+        assertThat(all.getTotalElements()).isEqualTo(2);
+        assertThat(active.getContent()).singleElement().satisfies(r -> {
+            assertThat(r.remainingQuantity()).isEqualByComparingTo("3");
+            assertThat(r.getWorkOrder().getWorkOrderNo()).isEqualTo(workOrder.getWorkOrderNo());
+        });
+        assertThat(otherLot.getTotalElements()).isZero();
     }
 }

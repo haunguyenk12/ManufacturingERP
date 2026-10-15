@@ -16,6 +16,7 @@ public record StockBalanceAggregateResponse(
         BigDecimal qualityHoldQuantity,
         BigDecimal rejectedQuantity,
         BigDecimal expiredQuantity,
+        BigDecimal heldLotQuantity,
         Long lotCount,
         Instant updatedAt
 ) {}

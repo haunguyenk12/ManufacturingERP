@@ -166,6 +166,10 @@ public enum AuditAction {
     /** C2-2: generic lot status change (BACKEND_CAPSTONE2_API_GAPS.md §3.2) — distinct from
      *  QC_DISPOSITION_RECORDED, which is the QC-specific way a lot leaves HOLD. */
     INVENTORY_LOT_STATUS_CHANGED,
+    /** G4-2: a warehouse-to-warehouse transfer was posted (one document, an OUT/IN pair per line). */
+    INVENTORY_TRANSFERRED,
+    /** G4-3: an absolute stock count was recorded (one ADJUST_IN/ADJUST_OUT movement). */
+    INVENTORY_COUNTED,
     /**
      * P3: item standard cost master data (NEXT_PHASE_PLAN.md "P3 — Costing Engine"). One action,
      * not CREATED/UPDATED — the write path is a single upsert (PUT, matches

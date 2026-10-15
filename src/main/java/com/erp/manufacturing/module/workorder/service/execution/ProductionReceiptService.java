@@ -163,7 +163,8 @@ public class ProductionReceiptService {
                     WorkOrderExecutionSupport.WORK_ORDER_REFERENCE_TYPE,
                     workOrder.getWorkOrderId().toString(),
                     null,
-                    line.getRequestedSerialCode()),
+                    line.getRequestedSerialCode(),
+                    null),
                     idempotency.childKey(receipt.getIdempotencyKey() + ":approve", index),
                     LotStatus.HOLD,
                     false);

@@ -3,6 +3,8 @@ package com.erp.manufacturing.module.inventory.service;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.dto.InventoryLotDetailResponse;
 import com.erp.manufacturing.module.inventory.dto.InventoryLotResponse;
@@ -57,7 +59,8 @@ class InventoryLotServiceTest {
     void setUp() {
         service = new InventoryLotService(
                 lotRepository, balanceRepository, movementRepository, movementService,
-                lotQcOriginLookupService, new InventoryMapper());
+                lotQcOriginLookupService, new InventoryMapper(),
+                new IdempotencySupport(new ObjectMapper()));
     }
 
     @Test
@@ -280,6 +283,115 @@ class InventoryLotServiceTest {
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
         verifyNoInteractions(lotRepository, movementService, balanceRepository, lotQcOriginLookupService);
+    }
+
+    // ── G4-1: three refusals + replay ──────────────────────────────────────
+
+    @Test
+    @DisplayName("changeStatus: the status the lot already has is NO_CHANGE and nothing is written")
+    void changeStatus_sameStatus_throwsNoChangeBeforeAnyWrite() {
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot(LotStatus.HOLD)));
+
+        assertThatThrownBy(() -> service.changeStatus(lotId,
+                new InventoryLotStatusChangeRequest(warehouseId, LotStatus.HOLD, "Again", null, null), "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.NO_CHANGE));
+
+        verifyNoInteractions(movementService, balanceRepository);
+    }
+
+    @Test
+    @DisplayName("changeStatus: an expired lot cannot be made AVAILABLE")
+    void changeStatus_expiredLotIntoAvailable_throwsLotNotEligible() {
+        InventoryLot lot = lot(LotStatus.HOLD);
+        lot.setExpiresAt(Instant.now().minusSeconds(1));
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> service.changeStatus(lotId,
+                new InventoryLotStatusChangeRequest(warehouseId, LotStatus.AVAILABLE, "Release", null, null), "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        verifyNoInteractions(movementService, balanceRepository, lotQcOriginLookupService);
+    }
+
+    @Test
+    @DisplayName("changeStatus: an expired lot may still be rejected — only release is blocked")
+    void changeStatus_expiredLotIntoRejected_isAllowed() {
+        InventoryLot lot = lot(LotStatus.AVAILABLE);
+        lot.setExpiresAt(Instant.now().minusSeconds(1));
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(itemId, warehouseId, lotId))
+                .thenReturn(Optional.of(balance(lot, new BigDecimal("4"), BigDecimal.ZERO)));
+        when(movementService.changeLotStatus(any(LotStatusChangeCommand.class), eq("KEY-1")))
+                .thenReturn(new InventoryMovementResult(receiveMovement("MANUAL", null), true));
+
+        service.changeStatus(lotId,
+                new InventoryLotStatusChangeRequest(warehouseId, LotStatus.REJECTED, "Expired", null, null), "KEY-1");
+
+        verify(movementService).changeLotStatus(any(LotStatusChangeCommand.class), eq("KEY-1"));
+    }
+
+    @Test
+    @DisplayName("changeStatus: a lot with reserved stock is RESERVED_STOCK — a work order is holding it")
+    void changeStatus_lotWithActiveReservation_throwsReservedStock() {
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot(LotStatus.AVAILABLE)));
+        when(balanceRepository.existsByLotLotIdAndReservedQuantityGreaterThan(lotId, BigDecimal.ZERO))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> service.changeStatus(lotId,
+                new InventoryLotStatusChangeRequest(warehouseId, LotStatus.HOLD, "Damage", null, null), "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.RESERVED_STOCK));
+
+        verifyNoInteractions(movementService);
+        verify(balanceRepository, never()).findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("changeStatus: replaying a request that already succeeded is not NO_CHANGE — R9")
+    void changeStatus_replayOfASucceededRequest_skipsTheNewRefusals() {
+        InventoryLot lot = lot(LotStatus.HOLD);
+        when(movementRepository.findByIdempotencyKeyAndMovementType("KEY-1", MovementType.LOT_STATUS_CHANGE))
+                .thenReturn(Optional.of(receiveMovement("MANUAL", null)));
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(itemId, warehouseId, lotId))
+                .thenReturn(Optional.of(balance(lot, new BigDecimal("4"), BigDecimal.ZERO)));
+        when(movementService.changeLotStatus(any(LotStatusChangeCommand.class), eq("KEY-1")))
+                .thenReturn(new InventoryMovementResult(receiveMovement("MANUAL", null), false));
+
+        service.changeStatus(lotId,
+                new InventoryLotStatusChangeRequest(warehouseId, LotStatus.HOLD, "Damage", null, null), " KEY-1 ");
+
+        verify(movementService).changeLotStatus(any(LotStatusChangeCommand.class), eq("KEY-1"));
+        verify(balanceRepository, never()).existsByLotLotIdAndReservedQuantityGreaterThan(any(), any());
+    }
+
+    @Test
+    @DisplayName("get: a lot that arrived by transfer reports its TRANSFER_IN as the source in that warehouse")
+    void get_withWarehouse_lotArrivedByTransfer_reportsTheTransferAsSource() {
+        InventoryLot lot = lot(LotStatus.AVAILABLE);
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(itemId, warehouseId, lotId))
+                .thenReturn(Optional.of(balance(lot, new BigDecimal("2"), BigDecimal.ZERO)));
+        StockMovement transferIn = StockMovement.builder()
+                .movementId(UUID.randomUUID()).item(item()).warehouse(warehouse())
+                .movementType(MovementType.TRANSFER_IN).direction(MovementDirection.IN)
+                .quantity(new BigDecimal("2")).referenceType("STOCK_TRANSFER").referenceId("tr-1")
+                .createdAt(Instant.parse("2026-10-15T00:00:00Z")).build();
+        when(movementRepository.findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                warehouseId, lotId, MovementType.RECEIVE)).thenReturn(Optional.empty());
+        when(movementRepository.findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                warehouseId, lotId, MovementType.TRANSFER_IN)).thenReturn(Optional.of(transferIn));
+
+        InventoryLotDetailResponse response = service.get(lotId, warehouseId);
+
+        assertThat(response.sourceMovementType()).isEqualTo("TRANSFER_IN");
+        assertThat(response.sourceReferenceType()).isEqualTo("STOCK_TRANSFER");
+        assertThat(response.sourceReferenceId()).isEqualTo("tr-1");
     }
 
     private InventoryLot lot(LotStatus status) {

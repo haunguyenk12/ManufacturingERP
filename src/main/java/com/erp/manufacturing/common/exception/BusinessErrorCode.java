@@ -54,10 +54,23 @@ public enum BusinessErrorCode implements ErrorCode {
     STATE_CONFLICT            ("STATE_CONFLICT",            "Action is not valid for the current state",     HttpStatus.CONFLICT),
     CONCURRENT_MODIFICATION   ("CONCURRENT_MODIFICATION",   "Record was modified by another request",        HttpStatus.CONFLICT),
     IDEMPOTENCY_CONFLICT      ("IDEMPOTENCY_CONFLICT",      "Idempotency key was reused with a different payload", HttpStatus.CONFLICT),
+    /**
+     * G4: the command would not change anything — a stock count equal to the current quantity, a lot
+     * status change to the status it already has. Nothing is written. Split from
+     * {@link #STATE_CONFLICT} so the client can say "nothing to record" instead of "refresh and retry".
+     */
+    NO_CHANGE                 ("NO_CHANGE",                 "The request would not change anything",         HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */
     INSUFFICIENT_STOCK        ("INSUFFICIENT_AVAILABLE_STOCK", "Insufficient stock for this operation",      HttpStatus.CONFLICT),
+    /**
+     * G4: the command would break stock that is reserved for a work order — changing the status of a
+     * lot with an ACTIVE reservation, or counting a position below its reserved quantity. The remedy
+     * is to release the reservation at its source first, which is why this is not
+     * {@link #INSUFFICIENT_STOCK}.
+     */
+    RESERVED_STOCK            ("RESERVED_STOCK",            "Stock is reserved and cannot be changed",       HttpStatus.CONFLICT),
     NEGATIVE_QUANTITY         ("NEGATIVE_QUANTITY",         "Quantity cannot be negative",                   HttpStatus.UNPROCESSABLE_ENTITY),
     /** EH-5: no throw site yet. Kept because {@code docs/api-guide-for-frontend.md} already lists it
      *  for the frontend; removing it would break a published contract before anything replaces it. */

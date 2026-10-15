@@ -45,6 +45,14 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.adjust(request, idempotencyKey)));
     }
 
+    @PostMapping("/v1/inventory/counts")
+    @Operation(summary = "Record an absolute stock count for one position (G4-3)")
+    public ResponseEntity<ApiResponse<StockCountResponse>> count(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody StockCountRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(inventoryService.count(request, idempotencyKey)));
+    }
+
     @GetMapping("/v1/inventory/balances")
     @Operation(summary = "List stock balances")
     public ResponseEntity<ApiResponse<PageResult<StockBalanceResponse>>> listBalances(
@@ -63,12 +71,13 @@ public class InventoryController {
     public ResponseEntity<ApiResponse<PageResult<StockBalanceAggregateResponse>>> listAggregateBalances(
             @RequestParam UUID warehouseId,
             @RequestParam(required = false) UUID itemId,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "updatedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.listAggregateBalances(
-                warehouseId, itemId, PageableFactory.of(page, size, sortBy, sortDir))));
+                warehouseId, itemId, search, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     @GetMapping("/v1/inventory/movements")
@@ -82,7 +91,13 @@ public class InventoryController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(inventoryService.listMovements(
-                warehouseId, itemId, lotId, PageableFactory.of(page, size, sortBy, sortDir))));
+                warehouseId, itemId, lotId, PageableFactory.of(page, size, sortBy, sortDir, "movementId"))));
+    }
+
+    @GetMapping("/v1/inventory/movements/{movementId}")
+    @Operation(summary = "Get one stock movement (G4-4)")
+    public ResponseEntity<ApiResponse<StockMovementResponse>> getMovement(@PathVariable UUID movementId) {
+        return ResponseEntity.ok(ApiResponse.ok(inventoryService.getMovement(movementId)));
     }
 
 }

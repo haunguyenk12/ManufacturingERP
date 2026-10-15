@@ -2,12 +2,14 @@ package com.erp.manufacturing.module.inventory.service;
 
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.inventory.domain.*;
+import com.erp.manufacturing.module.inventory.dto.StockCountRequest;
 import com.erp.manufacturing.module.inventory.dto.StockReceiveRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
+import com.erp.manufacturing.module.user.service.UserLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,10 +39,12 @@ class InventoryMethodSecurityTest {
     @Autowired InventoryService inventoryService;
     @Autowired PermissionGuard permissionGuard;
     @Autowired InventoryMovementService movementService;
+    @Autowired InventoryPermissionGuard inventoryPermissionGuard;
+    @Autowired StockMovementRepository movementRepository;
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, movementService);
+        reset(permissionGuard, movementService, inventoryPermissionGuard, movementRepository);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, java.util.List.of()));
     }
@@ -55,7 +59,7 @@ class InventoryMethodSecurityTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         StockReceiveRequest request = new StockReceiveRequest(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null);
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null);
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(warehouseId)))
                 .thenReturn(false);
 
@@ -71,13 +75,69 @@ class InventoryMethodSecurityTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         StockReceiveRequest request = new StockReceiveRequest(
-                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null);
+                itemId, warehouseId, null, null, BigDecimal.ONE, null, null, null, null);
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(warehouseId)))
                 .thenReturn(true);
         when(movementService.receive(any(InventoryReceiveCommand.class), eq("KEY-1")))
                 .thenReturn(new InventoryMovementResult(movement(itemId, warehouseId), true));
 
         assertThatCode(() -> inventoryService.receive(request, "KEY-1")).doesNotThrowAnyException();
+    }
+
+    // ── G4-3 count / G4-4 movement detail ──────────────────────────────────
+
+    @Test
+    void count_deniedWhenWarehouseMoveScopeMissing() {
+        UUID warehouseId = UUID.randomUUID();
+        StockCountRequest request = new StockCountRequest(
+                UUID.randomUUID(), warehouseId, null, BigDecimal.ONE, 0L, "Count");
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(warehouseId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> inventoryService.count(request, "KEY-C"))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(movementService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(warehouseId));
+    }
+
+    @Test
+    void count_allowedWhenWarehouseMoveScopePresent() {
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        StockMovement movement = movement(itemId, warehouseId);
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_INVENTORY_MOVE"), eq("WAREHOUSE"), eq(warehouseId)))
+                .thenReturn(true);
+        when(movementService.count(any(InventoryCountCommand.class), eq("KEY-C")))
+                .thenReturn(new InventoryCountResult(movement, StockBalance.builder()
+                        .item(movement.getItem()).warehouse(movement.getWarehouse())
+                        .quantity(BigDecimal.ONE).build(), BigDecimal.ZERO));
+
+        assertThatCode(() -> inventoryService.count(new StockCountRequest(
+                itemId, warehouseId, null, BigDecimal.ONE, 0L, "Count"), "KEY-C")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void getMovement_deniedWhenTheMovementWarehouseIsOutOfScope() {
+        UUID movementId = UUID.randomUUID();
+        when(inventoryPermissionGuard.hasMovementAccess(any(), eq("PERM_INVENTORY_READ"), eq(movementId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> inventoryService.getMovement(movementId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(inventoryPermissionGuard).hasMovementAccess(any(), eq("PERM_INVENTORY_READ"), eq(movementId));
+        verifyNoInteractions(movementRepository);
+    }
+
+    @Test
+    void getMovement_allowedWhenTheMovementWarehouseIsInScope() {
+        StockMovement movement = movement(UUID.randomUUID(), UUID.randomUUID());
+        when(inventoryPermissionGuard.hasMovementAccess(any(), eq("PERM_INVENTORY_READ"), eq(movement.getMovementId())))
+                .thenReturn(true);
+        when(movementRepository.findDetailByMovementId(movement.getMovementId())).thenReturn(java.util.Optional.of(movement));
+
+        assertThatCode(() -> inventoryService.getMovement(movement.getMovementId())).doesNotThrowAnyException();
     }
 
     private StockMovement movement(UUID itemId, UUID warehouseId) {
@@ -130,13 +190,20 @@ class InventoryMethodSecurityTest {
                                           WarehouseRepository warehouseRepository,
                                           StockBalanceRepository balanceRepository,
                                           StockMovementRepository movementRepository,
-                                          InventoryMapper mapper) {
+                                          InventoryMapper mapper,
+                                          UserLookupService userLookupService) {
             return new InventoryService(
                     movementService,
                     warehouseRepository,
                     balanceRepository,
                     movementRepository,
-                    mapper);
+                    mapper,
+                    userLookupService);
+        }
+
+        @Bean
+        UserLookupService userLookupService() {
+            return mock(UserLookupService.class);
         }
 
         @Bean
@@ -147,6 +214,11 @@ class InventoryMethodSecurityTest {
         @Bean(name = "permissionGuard")
         PermissionGuard permissionGuard() {
             return mock(PermissionGuard.class);
+        }
+
+        @Bean(name = "inventoryPermissionGuard")
+        InventoryPermissionGuard inventoryPermissionGuard() {
+            return mock(InventoryPermissionGuard.class);
         }
 
         @Bean

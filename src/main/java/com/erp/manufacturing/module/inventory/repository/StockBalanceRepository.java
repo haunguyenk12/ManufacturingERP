@@ -4,10 +4,13 @@ import com.erp.manufacturing.module.inventory.domain.StockBalance;
 import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -32,13 +35,18 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
                    b.warehouse.warehouseId as warehouseId,
                    coalesce(sum(b.quantity), 0) as onHandQuantity,
                    coalesce(sum(b.reservedQuantity), 0) as reservedQuantity,
-                   coalesce(sum(case when l is null or l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.AVAILABLE
+                   coalesce(sum(case when l is null
+                                          or (l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.AVAILABLE
+                                              and (l.expiresAt is null or l.expiresAt > :now))
                                      then b.quantity - b.reservedQuantity - b.qualityHoldQuantity else 0 end), 0)
                        as availableQuantity,
                    coalesce(sum(b.qualityHoldQuantity), 0) as qualityHoldQuantity,
+                   coalesce(sum(case when l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.HOLD
+                                     then b.quantity else 0 end), 0) as heldLotQuantity,
                    coalesce(sum(case when l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.REJECTED
                                      then b.quantity else 0 end), 0) as rejectedQuantity,
                    coalesce(sum(case when l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.EXPIRED
+                                          or (l.status = com.erp.manufacturing.module.inventory.domain.LotStatus.AVAILABLE and l.expiresAt <= :now)
                                      then b.quantity else 0 end), 0) as expiredQuantity,
                    count(distinct l.lotId) as lotCount,
                    max(b.updatedAt) as updatedAt
@@ -46,16 +54,30 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             left join b.lot l
             where b.warehouse.warehouseId = :warehouseId
               and (:itemId is null or b.item.itemId = :itemId)
+              and (cast(:search as string) is null
+                   or lower(b.item.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(b.item.name) like lower(concat('%', cast(:search as string), '%')))
             group by b.item.itemId, b.item.code, b.item.name, b.item.unit, b.warehouse.warehouseId
             """, countQuery = """
             select count(distinct b.item.itemId)
             from StockBalance b
             where b.warehouse.warehouseId = :warehouseId
               and (:itemId is null or b.item.itemId = :itemId)
+              and (cast(:search as string) is null
+                   or lower(b.item.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(b.item.name) like lower(concat('%', cast(:search as string), '%')))
             """)
+    /*
+     * G4 (user decision 2026-10-15): heldLotQuantity = stock in HOLD lots, kept apart from
+     * qualityHoldQuantity, which stays the carrier for stock with no lot (B2/B116). An AVAILABLE lot
+     * whose expiresAt is not after :now is reported as expired, not available — the same rule the
+     * manual issue/transfer/count gates apply. Buckets available/heldLot/rejected/expired never overlap.
+     */
     Page<StockBalanceAggregateProjection> aggregateBalances(
             @Param("warehouseId") UUID warehouseId,
             @Param("itemId") UUID itemId,
+            @Param("search") String search,
+            @Param("now") Instant now,
             Pageable pageable);
 
     /**
@@ -64,6 +86,69 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
      * stock in more than one warehouse, so this returns a list, not an {@code Optional}.
      */
     List<StockBalance> findByLotLotId(UUID lotId);
+
+    /**
+     * Every warehouse where the lot still has stock (G4-1). Lot status is global — one row on
+     * {@code inventory_lots} — so a status change acts on all of these at once, and the caller must be
+     * allowed in each of them, not only in the warehouse named in the request.
+     */
+    @Query("""
+            select distinct b.warehouse.warehouseId
+            from StockBalance b
+            where b.lot.lotId = :lotId
+              and b.quantity > 0
+            """)
+    List<UUID> findWarehouseIdsHoldingLot(@Param("lotId") UUID lotId);
+
+    /** True while any position of the lot carries reserved quantity, i.e. an ACTIVE reservation (G4-1). */
+    boolean existsByLotLotIdAndReservedQuantityGreaterThan(UUID lotId, BigDecimal reservedQuantity);
+
+    /**
+     * Locks one stock position (non-lot) for a read-modify-write that must see the latest committed
+     * quantity — the stock count (G4-3) compares {@code version} and derives its delta from it.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from StockBalance b
+            where b.item.itemId = :itemId
+              and b.warehouse.warehouseId = :warehouseId
+              and b.lot is null
+            """)
+    Optional<StockBalance> lockPositionWithoutLot(@Param("itemId") UUID itemId,
+                                                  @Param("warehouseId") UUID warehouseId);
+
+    /** Lot-tracked variant of {@link #lockPositionWithoutLot}. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from StockBalance b
+            where b.item.itemId = :itemId
+              and b.warehouse.warehouseId = :warehouseId
+              and b.lot.lotId = :lotId
+            """)
+    Optional<StockBalance> lockPositionWithLot(@Param("itemId") UUID itemId,
+                                               @Param("warehouseId") UUID warehouseId,
+                                               @Param("lotId") UUID lotId);
+
+    /**
+     * Locks every position of the given items in one warehouse, <b>ordered by {@code balanceId}</b>
+     * (G4-2, B151). Two transfers touching overlapping positions therefore take their locks in the same
+     * order and cannot deadlock. Locking a superset (other lots of the same items) is cheap and keeps
+     * this a single statement. No fetch join: Postgres refuses {@code FOR UPDATE} on the nullable side
+     * of an outer join, and the lots are already in the persistence context by the time this runs.
+     * <p>
+     * 🔴 The lock is load-bearing: without it two transfers both read the same free quantity, and the
+     * loser fails on {@code @Version} with a generic 409 instead of the per-line
+     * {@code INSUFFICIENT_AVAILABLE_STOCK} (mutation-tested, {@code StockTransferIT}).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from StockBalance b
+            where b.warehouse.warehouseId = :warehouseId
+              and b.item.itemId in :itemIds
+            order by b.balanceId
+            """)
+    List<StockBalance> lockPositionsOfItems(@Param("warehouseId") UUID warehouseId,
+                                            @Param("itemIds") Collection<UUID> itemIds);
 
     /**
      * Lot list/search (C2-2). {@code warehouseId} is required — same convention as

@@ -98,7 +98,7 @@ public class GoodsReceiptService {
                             receivedQuantity,
                             request.note(),
                             REFERENCE_TYPE_GOODS_RECEIPT,
-                            receipt.getGoodsReceiptId().toString(), null, null),
+                            receipt.getGoodsReceiptId().toString(), null, null, null),
                     childIdempotencyKey(normalizedKey, lineIndex));
             StockMovement movement = movementResult.movement();
             orderLine.receive(receivedQuantity);

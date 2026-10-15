@@ -145,7 +145,7 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
                 new BigDecimal("7.000000"), BigDecimal.ZERO);
         entityManager.clear();
 
-        var page = repository.aggregateBalances(warehouse.getWarehouseId(), null, PageRequest.of(0, 20));
+        var page = repository.aggregateBalances(warehouse.getWarehouseId(), null, null, Instant.now(), PageRequest.of(0, 20));
 
         assertThat(page.getTotalElements()).isEqualTo(1);
         StockBalanceAggregateProjection row = page.getContent().get(0);
@@ -158,10 +158,37 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         // Available counts only the untracked row and the AVAILABLE lot: (10-2-3) + (5-1).
         assertThat(row.getAvailableQuantity()).isEqualByComparingTo("9.000000");
         assertThat(row.getQualityHoldQuantity()).isEqualByComparingTo("3.000000");
+        // G4: the HOLD lot gets its own bucket instead of vanishing from every bucket.
+        assertThat(row.getHeldLotQuantity()).isEqualByComparingTo("100.000000");
         assertThat(row.getRejectedQuantity()).isEqualByComparingTo("50.000000");
         assertThat(row.getExpiredQuantity()).isEqualByComparingTo("7.000000");
         assertThat(row.getLotCount()).isEqualTo(4);
         assertThat(row.getUpdatedAt()).isNotNull();
+    }
+
+    /**
+     * G4 (user decision 2026-10-15): an AVAILABLE lot whose {@code expiresAt} has passed is counted as
+     * expired, not available — the manual issue refuses it, so offering it as available would be the
+     * "one system, two numbers" defect of CLAUDE.md §0.44 again. A lot expiring later stays available.
+     */
+    @Test
+    void aggregateBalances_availableLotPastItsExpiry_isExpiredNotAvailable() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        Instant now = Instant.parse("2026-10-15T00:00:00Z");
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE, "PAST_" + UUID.randomUUID(),
+                now.minusSeconds(1)), new BigDecimal("4.000000"), BigDecimal.ZERO);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE, "LATER_" + UUID.randomUUID(),
+                now.plusSeconds(86_400)), new BigDecimal("6.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        StockBalanceAggregateProjection row = repository.aggregateBalances(
+                warehouse.getWarehouseId(), null, null, now, PageRequest.of(0, 20)).getContent().get(0);
+
+        assertThat(row.getOnHandQuantity()).isEqualByComparingTo("10.000000");
+        assertThat(row.getAvailableQuantity()).isEqualByComparingTo("6.000000");
+        assertThat(row.getExpiredQuantity()).isEqualByComparingTo("4.000000");
+        assertThat(row.getHeldLotQuantity()).isEqualByComparingTo("0");
     }
 
     /**
@@ -176,7 +203,7 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         persistBalance(item, warehouse, null, new BigDecimal("12.000000"), new BigDecimal("2.000000"));
         entityManager.clear();
 
-        var page = repository.aggregateBalances(warehouse.getWarehouseId(), item.getItemId(),
+        var page = repository.aggregateBalances(warehouse.getWarehouseId(), item.getItemId(), null, Instant.now(),
                 PageRequest.of(0, 20));
 
         assertThat(page.getContent()).hasSize(1);
@@ -199,8 +226,8 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         persistBalance(second, warehouse, null, new BigDecimal("8.000000"), BigDecimal.ZERO);
         entityManager.clear();
 
-        var all = repository.aggregateBalances(warehouse.getWarehouseId(), null, PageRequest.of(0, 20));
-        var filtered = repository.aggregateBalances(warehouse.getWarehouseId(), first.getItemId(),
+        var all = repository.aggregateBalances(warehouse.getWarehouseId(), null, null, Instant.now(), PageRequest.of(0, 20));
+        var filtered = repository.aggregateBalances(warehouse.getWarehouseId(), first.getItemId(), null, Instant.now(),
                 PageRequest.of(0, 20));
 
         assertThat(all.getTotalElements()).isEqualTo(2);
@@ -480,5 +507,68 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(result).hasSize(2);
         assertThat(result).extracting(b -> b.getWarehouse().getWarehouseId())
                 .containsExactlyInAnyOrder(warehouseA.getWarehouseId(), warehouseB.getWarehouseId());
+    }
+
+    /**
+     * G4-1 (B149): the lot-status guard asks for every warehouse that still holds the lot. The fixture
+     * spreads one lot over two warehouses of two different plants — the shape a single-warehouse check
+     * misses — and leaves a third position at zero, which must not demand access it does not affect.
+     */
+    @Test
+    void findWarehouseIdsHoldingLot_returnsEveryWarehouseWithStock_andSkipsEmptyPositions() {
+        Warehouse first = persistWarehouse();
+        Warehouse second = persistWarehouse();
+        Warehouse emptied = persistWarehouse();
+        Item item = persistItem(first.getPlant().getCompany());
+        InventoryLot lot = persistLot(item, LotStatus.AVAILABLE);
+        InventoryLot otherLot = persistLot(item, LotStatus.AVAILABLE);
+        persistBalance(item, first, lot, new BigDecimal("5"), BigDecimal.ZERO);
+        persistBalance(item, second, lot, new BigDecimal("3"), BigDecimal.ZERO);
+        persistBalance(item, emptied, lot, BigDecimal.ZERO, BigDecimal.ZERO);
+        persistBalance(item, emptied, otherLot, new BigDecimal("9"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        assertThat(repository.findWarehouseIdsHoldingLot(lot.getLotId()))
+                .containsExactlyInAnyOrder(first.getWarehouseId(), second.getWarehouseId());
+    }
+
+    /** G4-4: {@code search} filters on item code or name, case-insensitively; {@code null} keeps every row. */
+    @Test
+    void aggregateBalances_searchMatchesCodeOrName_andNullKeepsEveryRow() {
+        Warehouse warehouse = persistWarehouse();
+        Item first = persistItem(warehouse.getPlant().getCompany());
+        Item second = persistItem(warehouse.getPlant().getCompany());
+        persistBalance(first, warehouse, null, BigDecimal.ONE, BigDecimal.ZERO);
+        persistBalance(second, warehouse, null, BigDecimal.ONE, BigDecimal.ZERO);
+        entityManager.clear();
+        String fragment = first.getCode().substring(5, 15).toLowerCase();
+
+        var all = repository.aggregateBalances(warehouse.getWarehouseId(), null, null, Instant.now(), PageRequest.of(0, 20));
+        var byCode = repository.aggregateBalances(warehouse.getWarehouseId(), null, fragment, Instant.now(), PageRequest.of(0, 20));
+        var byName = repository.aggregateBalances(warehouse.getWarehouseId(), null,
+                second.getName().toUpperCase(), Instant.now(), PageRequest.of(0, 20));
+
+        assertThat(all.getTotalElements()).isEqualTo(2);
+        assertThat(byCode.getTotalElements()).isEqualTo(1);
+        assertThat(byCode.getContent().get(0).getItemId()).isEqualTo(first.getItemId());
+        assertThat(byName.getContent()).singleElement()
+                .satisfies(row -> assertThat(row.getItemId()).isEqualTo(second.getItemId()));
+    }
+
+    /** G4-3: the count lock reads one exact position — the lot-less row is not the lot row. */
+    @Test
+    void lockPosition_withAndWithoutLot_selectExactlyThatPosition() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        InventoryLot lot = persistLot(item, LotStatus.AVAILABLE);
+        persistBalance(item, warehouse, null, new BigDecimal("2"), BigDecimal.ZERO);
+        persistBalance(item, warehouse, lot, new BigDecimal("7"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        assertThat(repository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId()))
+                .get().satisfies(b -> assertThat(b.getQuantity()).isEqualByComparingTo("2"));
+        assertThat(repository.lockPositionWithLot(item.getItemId(), warehouse.getWarehouseId(), lot.getLotId()))
+                .get().satisfies(b -> assertThat(b.getQuantity()).isEqualByComparingTo("7"));
+        assertThat(repository.existsByLotLotIdAndReservedQuantityGreaterThan(lot.getLotId(), BigDecimal.ZERO)).isFalse();
     }
 }

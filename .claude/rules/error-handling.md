@@ -220,6 +220,18 @@ Lỗi **theo dòng** của file **không** phải lỗi HTTP: chúng nằm trong
 `CONCURRENT_MODIFICATION` — dùng mã sẵn có theo §5.3, **không** tạo `IMPORT_BATCH_NOT_READY` /
 `IMPORT_BATCH_VERSION_CONFLICT` như FE đề xuất.
 
+**Constant thêm ở `G4` (2026-10-15)** — tồn kho / lô / chuyển kho:
+
+| `code` | HTTP | Khi nào | Vì sao không tái dùng `STATE_CONFLICT` |
+|---|---|---|---|
+| `NO_CHANGE` | 409 | kiểm đếm bằng đúng số hiện tại; đổi lô sang trạng thái nó đang có. **Không ghi gì** | FE nói "không có gì để ghi", không phải "tải lại rồi thử lại" |
+| `RESERVED_STOCK` | 409 | đổi trạng thái lô còn reservation `ACTIVE`; đếm xuống dưới lượng đã giữ cho WO | cách xử lý là giải phóng reservation ở nguồn, khác hẳn thiếu tồn (`INSUFFICIENT_AVAILABLE_STOCK`) |
+
+Còn lại của bảng mã FE đề xuất ánh xạ vào mã **sẵn có**: `STALE_VERSION` → `CONCURRENT_MODIFICATION`;
+`SAME_WAREHOUSE` → `VALIDATION_ERROR` + `errors[{field:"toWarehouseId"}]`; `PLANT_SCOPE_MISMATCH` /
+`LOT_ITEM_MISMATCH` → `RESOURCE_SCOPE_MISMATCH` (422); `WAREHOUSE/ITEM/PLANT_INACTIVE` → `RESOURCE_INACTIVE`
+(422); `LOT_EXPIRED` → `LOT_NOT_ELIGIBLE`; `DECIMAL_PRECISION_EXCEEDED` → `VALIDATION_ERROR` + `errors[{field}]`.
+
 Timezone sai ở Plant **không** có mã riêng: dùng `VALIDATION_ERROR` + `errors[{field:"timezone"}]` (tương đương `INVALID_TIMEZONE` FE đề xuất, xem bất biến `B140`).
 
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,

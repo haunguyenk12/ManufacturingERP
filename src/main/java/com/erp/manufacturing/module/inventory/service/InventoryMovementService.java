@@ -20,12 +20,16 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class InventoryMovementService {
+
+    /** {@code reference_type} of the ADJUST_IN/ADJUST_OUT row written by a stock count (G4-3). */
+    public static final String COUNT_REFERENCE_TYPE = "STOCK_COUNT";
 
     private final ItemRepository itemRepository;
     private final WarehouseRepository warehouseRepository;
@@ -74,7 +78,8 @@ public class InventoryMovementService {
         Warehouse warehouse = findActiveWarehouse(command.warehouseId());
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveReceiveLot(
-                item, command.lotId(), command.lotCode(), initialStatusForNewLot, allowImplicitLotReuse);
+                item, command.lotId(), command.lotCode(), command.expiresAt(),
+                initialStatusForNewLot, allowImplicitLotReuse);
         BigDecimal quantity = requirePositive(command.quantity());
         SerialNumber serial = resolveReceiveSerial(item, command.serialId(), command.serialCode(), quantity);
 
@@ -127,7 +132,18 @@ public class InventoryMovementService {
 
     @Transactional
     public InventoryMovementResult issue(InventoryIssueCommand command, String idempotencyKey) {
-        return issueInternal(command, idempotencyKey, false);
+        return issueInternal(command, idempotencyKey, false, false);
+    }
+
+    /**
+     * {@code POST /v1/inventory/issue} (G4): the same free-stock issue as {@link #issue}, but a lot past
+     * its {@code expiresAt} is refused. Kept apart from {@link #issue} on purpose - work-order material
+     * issue and FEFO reservation still treat an AVAILABLE lot as issuable regardless of its date; moving
+     * that rule into planning is a separate decision (NEXT_PHASE_PLAN.md section 11, user choice 2026-10-15).
+     */
+    @Transactional
+    public InventoryMovementResult issueManual(InventoryIssueCommand command, String idempotencyKey) {
+        return issueInternal(command, idempotencyKey, false, true);
     }
 
     /**
@@ -245,7 +261,7 @@ public class InventoryMovementService {
 
     @Transactional
     public InventoryMovementResult issueReserved(InventoryIssueCommand command, String idempotencyKey) {
-        return issueInternal(command, idempotencyKey, true);
+        return issueInternal(command, idempotencyKey, true, false);
     }
 
     /**
@@ -255,7 +271,8 @@ public class InventoryMovementService {
      */
     private InventoryMovementResult issueInternal(InventoryIssueCommand command,
                                                   String idempotencyKey,
-                                                  boolean consumeReserved) {
+                                                  boolean consumeReserved,
+                                                  boolean rejectExpiredLot) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         Optional<StockMovement> existing =
                 findReplay(normalizedKey, MovementType.ISSUE);
@@ -268,6 +285,9 @@ public class InventoryMovementService {
         Warehouse warehouse = findActiveWarehouse(command.warehouseId());
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveExistingLotForOutbound(item, command.lotId(), command.lotCode());
+        if (rejectExpiredLot) {
+            ensureNotExpired(lot);
+        }
         BigDecimal quantity = requirePositive(command.quantity());
         SerialNumber serial = resolveExistingSerialForOutbound(item, command.serialId(), quantity);
 
@@ -369,6 +389,116 @@ public class InventoryMovementService {
         return new InventoryMovementResult(movementRepository.save(movement), true);
     }
 
+    /**
+     * Absolute stock count (G4-3, invariant B153). The position is locked, its {@code version} compared
+     * with what the user looked at, and the delta derived from the locked quantity - never from the
+     * client. A positive delta writes {@code ADJUST_IN}, a negative one {@code ADJUST_OUT}: a count is an
+     * adjustment whose size the server computes, not a new kind of movement.
+     * <p>
+     * The replay lookup reads both adjustment types because the sign is only known after the lock. A
+     * key once used on {@code POST /adjust} fails the payload check here ({@code IDEMPOTENCY_CONFLICT}).
+     */
+    @Transactional
+    public InventoryCountResult count(InventoryCountCommand command, String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        Optional<StockMovement> existing = findReplay(normalizedKey, MovementType.ADJUST_IN)
+                .or(() -> findReplay(normalizedKey, MovementType.ADJUST_OUT));
+        if (existing.isPresent()) {
+            idempotency.ensureSamePayload(existing.get().getPayloadHash(), command);
+            StockMovement movement = existing.get();
+            BigDecimal previous = movement.getDirection() == MovementDirection.IN
+                    ? command.countedQuantity().subtract(movement.getQuantity())
+                    : command.countedQuantity().add(movement.getQuantity());
+            return new InventoryCountResult(movement,
+                    findBalance(movement.getItem(), movement.getWarehouse(), movement.getLot()), previous);
+        }
+
+        Item item = findActiveItem(command.itemId());
+        Warehouse warehouse = findActiveWarehouse(command.warehouseId());
+        ensureSameCompany(item, warehouse);
+        if (item.isSerialTracked()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial-tracked items are not counted through this endpoint");
+        }
+        InventoryLot lot = resolveCountLot(item, command.lotId());
+        StockBalance balance = (lot == null
+                ? balanceRepository.lockPositionWithoutLot(item.getItemId(), warehouse.getWarehouseId())
+                : balanceRepository.lockPositionWithLot(item.getItemId(), warehouse.getWarehouseId(), lot.getLotId()))
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND,
+                        "No stock position exists for this item, warehouse and lot"));
+        if (!Objects.equals(balance.getVersion(), command.expectedVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Stock position changed since it was read; reload and count again");
+        }
+
+        BigDecimal counted = command.countedQuantity();
+        BigDecimal previous = balance.getQuantity();
+        BigDecimal delta = counted.subtract(previous);
+        if (delta.signum() == 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.NO_CHANGE,
+                    "Counted quantity equals the current quantity; nothing to record");
+        }
+        if (counted.compareTo(balance.getReservedQuantity()) < 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.RESERVED_STOCK,
+                    "Counted quantity is below the quantity reserved for work orders");
+        }
+        if (counted.compareTo(balance.getReservedQuantity().add(balance.getQualityHoldQuantity())) < 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Counted quantity is below the quantity held for quality inspection");
+        }
+
+        boolean inbound = delta.signum() > 0;
+        BigDecimal quantity = delta.abs();
+        if (inbound) {
+            balance.increase(quantity);
+        } else {
+            balance.decrease(quantity);
+        }
+        StockBalance saved = balanceRepository.saveAndFlush(balance);
+
+        StockMovement movement = StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
+                .item(item)
+                .warehouse(warehouse)
+                .lot(lot)
+                .movementType(inbound ? MovementType.ADJUST_IN : MovementType.ADJUST_OUT)
+                .direction(inbound ? MovementDirection.IN : MovementDirection.OUT)
+                .quantity(quantity)
+                .reason(trimToNull(command.reason()))
+                .referenceType(COUNT_REFERENCE_TYPE)
+                .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(command))
+                .createdAt(Instant.now())
+                .build();
+        return new InventoryCountResult(movementRepository.save(movement), saved, previous);
+    }
+
+    private InventoryLot resolveCountLot(Item item, UUID lotId) {
+        if (!item.isLotTracked()) {
+            ensureNoLotProvided(lotId, null);
+            return null;
+        }
+        if (lotId == null) {
+            throw ExceptionFactory.custom(ValidationErrorCode.LOT_REQUIRED,
+                    "A lot-tracked item is counted per lot; lotId is required");
+        }
+        InventoryLot lot = findLotForItem(item, lotId);
+        if (!lot.canIssue()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot cannot be counted in status: " + lot.getStatus());
+        }
+        ensureNotExpired(lot);
+        return lot;
+    }
+
+    /** G4 manual flows only (issue, count, transfer, status to AVAILABLE): expiry is judged on the server clock. */
+    private void ensureNotExpired(InventoryLot lot) {
+        if (lot != null && lot.getExpiresAt() != null && !lot.getExpiresAt().isAfter(Instant.now())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot expired at " + lot.getExpiresAt());
+        }
+    }
+
     private Item findActiveItem(UUID itemId) {
         Item item = itemRepository.findById(itemId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Item", itemId));
@@ -398,14 +528,20 @@ public class InventoryMovementService {
         }
     }
 
-    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode,
+    /**
+     * {@code expiresAt} (G4-4) is only accepted when this receipt <em>creates</em> the lot: an existing
+     * lot already has an expiry, possibly in other warehouses, and a receipt must not rewrite it.
+     */
+    private InventoryLot resolveReceiveLot(Item item, UUID lotId, String lotCode, Instant expiresAt,
                                            LotStatus initialStatusForNewLot,
                                            boolean allowImplicitLotReuse) {
         if (!item.isLotTracked()) {
             ensureNoLotProvided(lotId, lotCode);
+            ensureNoExpiryForExistingLot(expiresAt);
             return null;
         }
         if (lotId != null) {
+            ensureNoExpiryForExistingLot(expiresAt);
             return findLotForItem(item, lotId);
         }
         String normalizedLotCode = requireLotCode(lotCode);
@@ -416,6 +552,7 @@ public class InventoryMovementService {
                 throw ExceptionFactory.custom(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
                         "Lot code already exists; send lotId for an explicit partial receipt");
             }
+            ensureNoExpiryForExistingLot(expiresAt);
             return existing.get();
         }
         return lotRepository.save(InventoryLot.builder()
@@ -423,7 +560,15 @@ public class InventoryMovementService {
                         .lotCode(normalizedLotCode)
                         .status(initialStatusForNewLot)
                         .receivedAt(Instant.now())
+                        .expiresAt(expiresAt)
                         .build());
+    }
+
+    private void ensureNoExpiryForExistingLot(Instant expiresAt) {
+        if (expiresAt != null) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "expiresAt can only be set when the receipt creates a new lot");
+        }
     }
 
     private InventoryLot resolveExistingLotForOutbound(Item item, UUID lotId, String lotCode) {

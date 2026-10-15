@@ -121,6 +121,18 @@ class InventoryMapperTest {
         assertThat(detail.manufactureDate()).isEqualTo(received);
     }
 
+    @Test
+    void availableLotPastItsExpiry_reportsZeroAvailable_futureExpiryDoesNot() {
+        StockBalance expired = balance(LotStatus.AVAILABLE, "10", "0", "0");
+        expired.getLot().setExpiresAt(java.time.Instant.now().minusSeconds(60));
+        StockBalance fresh = balance(LotStatus.AVAILABLE, "10", "0", "0");
+        fresh.getLot().setExpiresAt(java.time.Instant.now().plusSeconds(3600));
+
+        assertThat(mapper.toResponse(expired).availableQuantity()).isEqualByComparingTo("0");
+        assertThat(mapper.toResponse(expired).quantity()).isEqualByComparingTo("10");
+        assertThat(mapper.toResponse(fresh).availableQuantity()).isEqualByComparingTo("10");
+    }
+
     private StockBalance balance(LotStatus lotStatus, String quantity, String reserved, String qualityHold) {
         Company company = Company.builder().companyId(UUID.randomUUID()).code("ACME").name("ACME")
                 .status(OrganizationStatus.ACTIVE).build();

@@ -24,6 +24,21 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, UU
      */
     Optional<StockMovement> findByIdempotencyKeyAndMovementType(String idempotencyKey, MovementType movementType);
 
+    /** Scope lookup for the movement-detail guard (G4-4) — the id alone, no entity load. */
+    @Query("select m.warehouse.warehouseId from StockMovement m where m.movementId = :movementId")
+    Optional<UUID> findWarehouseIdByMovementId(@Param("movementId") UUID movementId);
+
+    /** Movement detail (G4-4): every label the response shows, in one statement (all to-one). */
+    @Query("""
+            select m
+            from StockMovement m
+            join fetch m.item
+            join fetch m.warehouse
+            left join fetch m.lot
+            where m.movementId = :movementId
+            """)
+    Optional<StockMovement> findDetailByMovementId(@Param("movementId") UUID movementId);
+
     Page<StockMovement> findByWarehouseWarehouseId(UUID warehouseId, Pageable pageable);
 
     Page<StockMovement> findByWarehouseWarehouseIdAndItemItemId(UUID warehouseId, UUID itemId, Pageable pageable);

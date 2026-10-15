@@ -38,7 +38,8 @@ public class InventoryMapper {
                 balance.getReservedQuantity(),
                 balance.getQualityHoldQuantity(),
                 issuableQuantity(balance),
-                balance.getUpdatedAt());
+                balance.getUpdatedAt(),
+                balance.getVersion());
     }
 
     /**
@@ -63,10 +64,20 @@ public class InventoryMapper {
         if (lot != null && lot.getStatus() != LotStatus.AVAILABLE) {
             return BigDecimal.ZERO;
         }
+        // G4: an AVAILABLE lot past its expiry is refused by the manual issue/transfer/count gates,
+        // so it is not offered as available either (same rule as the aggregate's expired bucket).
+        if (lot != null && lot.getExpiresAt() != null && !lot.getExpiresAt().isAfter(java.time.Instant.now())) {
+            return BigDecimal.ZERO;
+        }
         return balance.availableQuantity();
     }
 
     public StockMovementResponse toResponse(StockMovement movement) {
+        return toResponse(movement, null);
+    }
+
+    /** {@code createdByUsername} is resolved by the caller in one batch (rule C14) and may be null. */
+    public StockMovementResponse toResponse(StockMovement movement, String createdByUsername) {
         InventoryLot lot = movement.getLot();
         return new StockMovementResponse(
                 movement.getMovementId(),
@@ -81,7 +92,10 @@ public class InventoryMapper {
                 movement.getReferenceType(),
                 movement.getReferenceId(),
                 movement.getIdempotencyKey(),
-                movement.getCreatedAt());
+                movement.getCreatedAt(),
+                movement.getTraceId(),
+                movement.getCreatedBy(),
+                createdByUsername);
     }
 
     /**
@@ -185,6 +199,52 @@ public class InventoryMapper {
                 balance.getQuantity(),
                 balance.getReservedQuantity(),
                 issuableQuantity(balance));
+    }
+
+    /**
+     * Transfer document (G4-2). {@code withLines=false} for list rows, where the lines collection is
+     * not fetched (rule C13) and must not be touched.
+     */
+    public StockTransferResponse toTransferResponse(StockTransfer transfer, String createdByUsername,
+                                                    boolean withLines) {
+        Warehouse from = transfer.getFromWarehouse();
+        Warehouse to = transfer.getToWarehouse();
+        return new StockTransferResponse(
+                transfer.getTransferId(),
+                transfer.getCode(),
+                StockTransfer.STATUS_POSTED,
+                transfer.getPlant().getPlantId(),
+                from.getWarehouseId(),
+                from.getCode(),
+                from.getName(),
+                to.getWarehouseId(),
+                to.getCode(),
+                to.getName(),
+                transfer.getReason(),
+                transfer.getPostedAt(),
+                transfer.getTraceId(),
+                transfer.getCreatedBy(),
+                createdByUsername,
+                transfer.getVersion(),
+                withLines ? transfer.getLines().stream().map(this::toTransferLineResponse).toList() : null);
+    }
+
+    private StockTransferLineResponse toTransferLineResponse(StockTransferLine line) {
+        Item item = line.getItem();
+        InventoryLot lot = line.getLot();
+        return new StockTransferLineResponse(
+                line.getTransferLineId(),
+                line.getLineNo(),
+                item.getItemId(),
+                item.getCode(),
+                item.getName(),
+                item.getUnit(),
+                lot != null ? lot.getLotId() : null,
+                lot != null ? lot.getLotCode() : null,
+                lot != null ? lot.getExpiresAt() : null,
+                line.getQuantity(),
+                line.getOutMovement().getMovementId(),
+                line.getInMovement().getMovementId());
     }
 
     public ItemWarehouseSettingResponse toResponse(ItemWarehouseSetting setting) {

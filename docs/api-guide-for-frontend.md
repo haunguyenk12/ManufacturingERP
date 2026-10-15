@@ -1164,7 +1164,7 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 |---|---|
 | Danh sách lot trong một kho | `GET /inventory/lots?warehouseId=&itemId=&status=&search=&expiryFrom=&expiryTo=&page=&size=&sortBy=&sortDir=` (`warehouseId` **bắt buộc**, mọi filter khác tuỳ chọn) |
 | Chi tiết một lot trong kho đang xem | `GET /inventory/lots/{lotId}?warehouseId=` (`warehouseId` nên luôn gửi từ màn list) |
-| Đổi trạng thái lot (`AVAILABLE`/`HOLD`/`REJECTED`) | `POST /inventory/lots/{lotId}/status` — body `{warehouseId, newStatus, reason, referenceType?, referenceId?}`, header `Idempotency-Key` tuỳ chọn |
+| Đổi trạng thái lot (`AVAILABLE`/`HOLD`/`REJECTED`) | `POST /inventory/lots/{lotId}/status` — body `{warehouseId, newStatus, reason, referenceType?, referenceId?}`, header `Idempotency-Key` **bắt buộc** (thiếu ⇒ `400 MISSING_REQUIRED_FIELD`; dòng này trước 2026-10-15 ghi "tuỳ chọn" — sai, chưa bao giờ tuỳ chọn) |
 
 > 🔴 **Một lot có thể có hàng ở nhiều kho** — bảng `stock_balances` unique theo `(item, warehouse,
 > lot)`, không phải `(item, lot)`. Vì vậy list bắt buộc `warehouseId` (giống `/inventory/balances`),
@@ -1274,6 +1274,32 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > ≤ 25 MiB sau giải nén. Mã lỗi theo dòng (`rows[].issues[].code`): `REQUIRED_MISSING`, `TOO_LONG`, `INVALID_FORMAT`,
 > `NOT_ALLOWED_VALUE`, `DUPLICATE_IN_FILE`, `ALREADY_EXISTS`, `REFERENCE_NOT_FOUND`, `RULE_VIOLATION`, `FORMULA`,
 > `TEXT_REQUIRED`, `CELL_TYPE`.
+
+### Tồn kho, lô, chuyển kho — FE giai đoạn 4 *(`G4`, 2026-10-15)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Chuyển kho | `POST /v1/inventory/transfers` — body `{fromWarehouseId, toWarehouseId, reason, lines:[{itemId, lotId?, quantity}]}` · `Idempotency-Key` **bắt buộc** · `X-Plant-Id?` | **201**. Cả phiếu hoặc không gì; hai kho khác nhau cùng một plant `ACTIVE`; 1–100 dòng; **không** cho hai dòng cùng (item, lô) |
+| Danh sách phiếu | `GET /v1/inventory/transfers?plantId=&warehouseId=&search=&page=&size=` | `plantId` **bắt buộc**; `warehouseId` = phiếu chạm kho đó ở **một trong hai** phía; `lines` = `null` ở danh sách |
+| Chi tiết phiếu | `GET /v1/inventory/transfers/{id}` | Đủ `lines[]` + `outMovementId`/`inMovementId` |
+| Kiểm đếm tuyệt đối | `POST /v1/inventory/counts` — body `{itemId, warehouseId, lotId?, countedQuantity, expectedVersion, reason}` · `Idempotency-Key` **bắt buộc** | `expectedVersion` = `version` của **đúng vị thế** lấy từ `GET /inventory/balances`. `POST /adjust` **giữ nguyên** nghĩa delta |
+| Chi tiết movement | `GET /v1/inventory/movements/{id}` | Có `traceId`, `createdBy`, `createdByUsername` (cũng có trên list) |
+| Giữ cho sản xuất | `GET /v1/inventory/reservations?warehouseId=&itemId=&lotId=&status=&page=&size=` | `status` bỏ trống = mọi trạng thái; `remainingQuantity = quantity − consumedQuantity` |
+| Aggregate | `GET /v1/inventory/balances/aggregate?…&search=` | `search` theo mã/tên vật tư; thêm `heldLotQuantity` |
+
+> 🔴 **Bốn bucket không chồng nhau trên aggregate:** `availableQuantity` (không-lô + lô `AVAILABLE` còn hạn)
+> · `heldLotQuantity` (lô `HOLD`) · `rejectedQuantity` · `expiredQuantity` (lô `EXPIRED` **và** lô `AVAILABLE`
+> đã quá hạn). `qualityHoldQuantity` vẫn chỉ là phần giữ QC của hàng **không** lô. Lô `AVAILABLE` quá hạn báo
+> `availableQuantity = 0` trên `/balances` và `/lots`.
+> 🔴 **Hết hạn chỉ chặn ở luồng kho thủ công** (`/issue`, chuyển kho, kiểm đếm, đổi trạng thái sang
+> `AVAILABLE`): `409 LOT_NOT_ELIGIBLE`. Giữ/xuất vật tư cho Work Order **chưa** xét hạn dùng.
+> 🔴 Đổi trạng thái lô là **toàn cục** (mọi kho có lô đó): cần quyền ở **mọi** kho còn tồn của lô, thiếu ⇒ `403`.
+> Từ chối: cùng trạng thái ⇒ `409 NO_CHANGE`; còn reservation ⇒ `409 RESERVED_STOCK`; quá hạn sang `AVAILABLE` ⇒ `409 LOT_NOT_ELIGIBLE`.
+> 🔴 `expiresAt` trên `POST /inventory/receive` chỉ khi receipt **tạo lô mới** và phải ở tương lai (quá khứ ⇒ `400`
+> trên `expiresAt`; lô có sẵn ⇒ `422 OPERATION_NOT_ALLOWED`).
+> 🔴 Mọi số lượng trên request inventory tối đa **6 số lẻ** (kể cả số 0 thừa: `1.1234560` bị từ chối) ⇒ `400` với
+> `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
+> Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
 ---
 
@@ -1438,6 +1464,8 @@ File nhập vượt 5 MiB (giới hạn của đường nhập mẫu cố địn
 | `SERIAL_NOT_ELIGIBLE` | Issue một serial không ở trạng thái `AVAILABLE` (vd đã `ISSUED`/`REJECTED`) |
 | `MISSING_BOM` / `MISSING_ROUTING` | Thiếu master data `ACTIVE` |
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
+| `NO_CHANGE` 🆕 `G4` | Kiểm đếm bằng đúng số hiện tại / đổi lô sang trạng thái nó đang có — **không ghi gì** |
+| `RESERVED_STOCK` 🆕 `G4` | Đổi trạng thái lô còn reservation, hoặc đếm xuống dưới lượng đã giữ cho WO — giải phóng reservation trước |
 | **`IMPORT_REVALIDATION_FAILED`** 🆕 `G3` | Commit batch nhập mà dữ liệu đã đổi kể từ lúc kiểm tra. **Có `result`** = batch đã `INVALID` kèm lỗi mới. Không tạo master nào |
 | **`DEFAULT_CONFLICT`** 🆕 | Lưu thiết lập kho với `replaceDefaults=false` khi kho khác đang giữ vai trò default. Không có gì được ghi — hỏi người dùng rồi gửi lại với `replaceDefaults=true` |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |

@@ -4,6 +4,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * One stock position. {@code version} (G4-3) is what {@code POST /v1/inventory/counts} expects back as
+ * {@code expectedVersion}: it moves with every write to this position.
+ */
 public record StockBalanceResponse(
         UUID balanceId,
         UUID itemId,
@@ -14,5 +18,6 @@ public record StockBalanceResponse(
         BigDecimal reservedQuantity,
         BigDecimal qualityHoldQuantity,
         BigDecimal availableQuantity,
-        Instant updatedAt
+        Instant updatedAt,
+        Long version
 ) {}

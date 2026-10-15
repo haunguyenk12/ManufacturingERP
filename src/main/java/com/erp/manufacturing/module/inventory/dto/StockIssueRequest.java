@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.dto;
 
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -12,7 +13,7 @@ public record StockIssueRequest(
         @NotNull UUID warehouseId,
         UUID lotId,
         @Size(max = 120) String lotCode,
-        @NotNull @Positive BigDecimal quantity,
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal quantity,
         @Size(max = 1000) String reason,
         @Size(max = 80) String referenceType,
         @Size(max = 120) String referenceId

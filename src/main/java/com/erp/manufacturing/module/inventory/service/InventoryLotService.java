@@ -5,6 +5,7 @@ import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.LotStatus;
@@ -26,6 +27,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -44,6 +46,7 @@ public class InventoryLotService {
     private final InventoryMovementService movementService;
     private final LotQcOriginLookupService lotQcOriginLookupService;
     private final InventoryMapper mapper;
+    private final IdempotencySupport idempotency;
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_READ', 'WAREHOUSE', #warehouseId)")
@@ -78,7 +81,7 @@ public class InventoryLotService {
     }
 
     @Transactional
-    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
+    @PreAuthorize("@inventoryPermissionGuard.hasLotPositionsAccess(authentication, 'PERM_INVENTORY_MOVE', #lotId, #request.warehouseId())")
     @Auditable(action = AuditAction.INVENTORY_LOT_STATUS_CHANGED, entityType = "InventoryLot", entityIdExpression = "lotId.toString()",
                warehouseId = "#result?.warehouseId()")
     public InventoryLotResponse changeStatus(UUID lotId, InventoryLotStatusChangeRequest request,
@@ -88,11 +91,26 @@ public class InventoryLotService {
                     "Lot status can only be changed to AVAILABLE, HOLD, or REJECTED through this endpoint");
         }
 
+        String normalizedKey = idempotency.normalizeKey(idempotencyKey);
+        boolean replay = movementRepository
+                .findByIdempotencyKeyAndMovementType(normalizedKey, MovementType.LOT_STATUS_CHANGE)
+                .isPresent();
+
         InventoryLot lot = findLot(lotId);
+        // A replay already changed the status, so the checks below would reject the very request
+        // that succeeded. changeLotStatus re-validates the payload and returns the original ledger row.
+        if (!replay) {
+            ensureStatusActuallyChanges(lot, request.newStatus());
+            ensureNotExpiredIntoAvailable(lot, request.newStatus());
+        }
         if (lot.getStatus() == LotStatus.HOLD && request.newStatus() != LotStatus.HOLD
                 && lotQcOriginLookupService.requiresQcDispositionBeforeRelease(lotId)) {
             throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot is on hold from a production receipt and must be released via QC disposition");
+        }
+        if (!replay && balanceRepository.existsByLotLotIdAndReservedQuantityGreaterThan(lotId, BigDecimal.ZERO)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.RESERVED_STOCK,
+                    "Lot has stock reserved for a work order; release the reservation first");
         }
 
         StockBalance balance = balanceRepository
@@ -109,11 +127,27 @@ public class InventoryLotService {
                 balance.getQuantity(),
                 request.reason(),
                 request.referenceType(),
-                request.referenceId()), idempotencyKey);
+                request.referenceId()), normalizedKey);
 
         // Same persistence context as changeLotStatus (REQUIRED propagation) — `lot` is the identical
         // managed instance it mutated via setStatus(), so it already reflects the new status here.
         return mapper.toLotResponse(balance, findOriginMovement(lot));
+    }
+
+    private void ensureStatusActuallyChanges(InventoryLot lot, LotStatus target) {
+        if (lot.getStatus() == target) {
+            throw ExceptionFactory.custom(BusinessErrorCode.NO_CHANGE,
+                    "Lot is already in status " + target);
+        }
+    }
+
+    /** G4: expiry is judged against the server clock; an expired lot may be held or rejected, never released. */
+    private void ensureNotExpiredIntoAvailable(InventoryLot lot, LotStatus target) {
+        if (target == LotStatus.AVAILABLE && lot.getExpiresAt() != null
+                && !lot.getExpiresAt().isAfter(Instant.now())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "An expired lot cannot be made AVAILABLE");
+        }
     }
 
     private InventoryLot findLot(UUID lotId) {
@@ -127,10 +161,17 @@ public class InventoryLotService {
                 .orElse(null);
     }
 
+    /**
+     * A lot that reached this warehouse by transfer (G4-2) has no RECEIVE here; its first TRANSFER_IN
+     * is then the source of the stock in this warehouse, and it points at the transfer document.
+     */
     private StockMovement findOriginMovement(InventoryLot lot, UUID warehouseId) {
         return movementRepository
                 .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
                         warehouseId, lot.getLotId(), MovementType.RECEIVE)
+                .or(() -> movementRepository
+                        .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                                warehouseId, lot.getLotId(), MovementType.TRANSFER_IN))
                 .orElse(null);
     }
 }

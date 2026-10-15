@@ -15,6 +15,7 @@ public interface StockBalanceAggregateProjection {
     BigDecimal getReservedQuantity();
     BigDecimal getAvailableQuantity();
     BigDecimal getQualityHoldQuantity();
+    BigDecimal getHeldLotQuantity();
     BigDecimal getRejectedQuantity();
     BigDecimal getExpiredQuantity();
     Long getLotCount();

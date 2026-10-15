@@ -48,8 +48,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         MigrationInfo current = flyway.info().current();
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
-        // V71 (fixed-template import batches on import_runs) is G3.
-        assertThat(current.getVersion().getVersion()).isEqualTo("71");
+        // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
+        assertThat(current.getVersion().getVersion()).isEqualTo("72");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -629,6 +629,43 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             assertThatThrownBy(() -> statement.execute(
                     batch.formatted("B4-" + tag, companyId, "READY", owner, "'K-" + tag + "'")))
                     .hasMessageContaining("uk_import_runs_owner_upload_key");
+        }
+    }
+
+    /**
+     * G4-2 / {@code V72}: a new {@code MovementType} is a breaking change for
+     * {@code chk_stock_movements_type} (coding-rules.md §11.3). The constraint must accept both transfer
+     * types and still carry every older value — V26 once shipped a version that forgot REVERSAL.
+     */
+    @Test
+    void migrate_v72_movementTypeCheckAcceptsTransfersAndKeepsEveryOlderType() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                     WHERE conname = 'chk_stock_movements_type'
+                     """)) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getString(1)).contains("'RECEIVE'", "'ISSUE'", "'ADJUST_IN'", "'ADJUST_OUT'",
+                    "'REVERSAL'", "'LOT_STATUS_CHANGE'", "'TRANSFER_OUT'", "'TRANSFER_IN'");
+        }
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT conname FROM pg_constraint
+                     WHERE conname IN ('uk_stock_transfers_idempotency_key', 'uk_stock_transfers_code',
+                                       'chk_stock_transfers_distinct_warehouses',
+                                       'uk_stock_transfer_lines_transfer_line_no')
+                     """)) {
+            Set<String> names = new TreeSet<>();
+            while (rs.next()) {
+                names.add(rs.getString(1));
+            }
+            assertThat(names).hasSize(4);
         }
     }
 

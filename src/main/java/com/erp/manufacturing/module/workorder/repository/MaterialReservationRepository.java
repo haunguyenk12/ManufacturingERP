@@ -32,6 +32,37 @@ public interface MaterialReservationRepository extends JpaRepository<MaterialRes
     @EntityGraph(attributePaths = {"componentLine", "item", "warehouse", "lot"})
     List<MaterialReservation> findByWorkOrderWorkOrderIdAndStatus(UUID workOrderId, MaterialReservationStatus status);
 
+    /**
+     * Reservations held in one warehouse (G4-4, the "Giữ cho sản xuất" tab). Every fetch is to-one, so
+     * pagination stays in SQL (C13). {@code lot} must stay a <b>left</b> join: an inner one would drop
+     * every reservation of a non-lot-tracked item (same trap as {@code findRecentByWarehouseIds}).
+     */
+    @Query(value = """
+            select r
+            from MaterialReservation r
+            join fetch r.workOrder w
+            join fetch r.componentLine c
+            join fetch r.item i
+            left join fetch r.lot l
+            where r.warehouse.warehouseId = :warehouseId
+              and (:itemId is null or i.itemId = :itemId)
+              and (:lotId is null or l.lotId = :lotId)
+              and (:status is null or r.status = :status)
+            """, countQuery = """
+            select count(r)
+            from MaterialReservation r
+            left join r.lot l
+            where r.warehouse.warehouseId = :warehouseId
+              and (:itemId is null or r.item.itemId = :itemId)
+              and (:lotId is null or l.lotId = :lotId)
+              and (:status is null or r.status = :status)
+            """)
+    Page<MaterialReservation> searchByWarehouse(@Param("warehouseId") UUID warehouseId,
+                                                @Param("itemId") UUID itemId,
+                                                @Param("lotId") UUID lotId,
+                                                @Param("status") MaterialReservationStatus status,
+                                                Pageable pageable);
+
     @Query("""
             select coalesce(sum(r.quantity - r.consumedQuantity), 0)
             from MaterialReservation r
