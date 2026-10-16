@@ -6,6 +6,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -50,4 +52,20 @@ public class RoutingOperation extends BaseEntity {
 
     @Column(name = "run_minutes_per_unit", nullable = false, precision = 19, scale = 6)
     private BigDecimal runMinutesPerUnit;
+
+    /**
+     * Operations of the same routing this one waits for (G5, debt B / C2-8b). Every predecessor has a
+     * smaller {@link #sequence} — {@code RoutingService} enforces it, and it is what makes a cycle
+     * impossible. A {@code Set}, not a {@code List}: the routing's {@code operations} is already a bag,
+     * and a second bag on the same graph is the MultipleBagFetchException trap of §0.27/§0.29/§0.45.
+     *
+     * <p>Not captured onto the work order snapshot: scheduling and the preview stay sequential by
+     * {@code sequence} (FE Q17), so nothing downstream reads this yet.
+     */
+    @ManyToMany
+    @JoinTable(name = "routing_operation_predecessors",
+            joinColumns = @JoinColumn(name = "routing_operation_id"),
+            inverseJoinColumns = @JoinColumn(name = "predecessor_operation_id"))
+    @Builder.Default
+    private Set<RoutingOperation> predecessors = new LinkedHashSet<>();
 }

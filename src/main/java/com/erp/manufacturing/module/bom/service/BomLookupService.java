@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,5 +53,23 @@ public class BomLookupService {
                 .collect(Collectors.toMap(
                         bom -> bom.getParentItem().getItemId(),
                         bom -> bom));
+    }
+
+    /** G5 import: products that already have a BOM in ANY status — the import is create-only (FE §3.4). */
+    @Transactional(readOnly = true)
+    public Set<UUID> findItemIdsWithAnyBom(UUID companyId, Collection<UUID> parentItemIds) {
+        if (parentItemIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(bomHeaderRepository.findParentItemIdsWithBom(companyId, parentItemIds));
+    }
+
+    /** G5 import: which of these BOM codes (upper case) are already taken in the company, in one query. */
+    @Transactional(readOnly = true)
+    public Set<String> findTakenBomCodes(UUID companyId, Collection<String> upperCaseCodes) {
+        if (upperCaseCodes.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(bomHeaderRepository.findTakenBomCodes(companyId, upperCaseCodes));
     }
 }

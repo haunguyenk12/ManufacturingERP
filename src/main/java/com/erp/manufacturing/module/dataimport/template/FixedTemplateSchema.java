@@ -28,6 +28,10 @@ import java.util.Optional;
 public final class FixedTemplateSchema {
 
     public static final String TEMPLATE_VERSION = "omniplant-import-v1";
+    /** G5: the BOM workbook has its own version, sheet and metadata layout (FE_HANDOFF_GD_05 §3.4). */
+    public static final String BOM_TEMPLATE_VERSION = "omniplant-bom-v1";
+    public static final String BOM_DATA_SHEET = "BOM";
+    public static final String BOM_METADATA_SHEET = "_meta";
     public static final String METADATA_SHEET = "_OmniPlant";
     public static final String LOCALE_VI = "vi";
     public static final String LOCALE_EN = "en";
@@ -49,6 +53,15 @@ public final class FixedTemplateSchema {
     public static final String ADDRESS = "address";
     public static final String NOTES = "notes";
 
+    public static final String BOM_CODE = "bomCode";
+    public static final String PRODUCT_CODE = "productCode";
+    public static final String OUTPUT_QUANTITY = "outputQuantity";
+    public static final String OUTPUT_UOM = "outputUom";
+    public static final String COMPONENT_CODE = "componentCode";
+    public static final String COMPONENT_QUANTITY = "componentQuantity";
+    public static final String COMPONENT_UOM = "componentUom";
+    public static final String SCRAP_PERCENT = "scrapPercent";
+
     public static final String TRACKING_NONE = "NONE";
     public static final String TRACKING_LOT = "LOT";
 
@@ -65,7 +78,14 @@ public final class FixedTemplateSchema {
         /** Locale label or canonical {@code ItemType} name. */
         ITEM_TYPE,
         /** Locale label or {@code NONE}/{@code LOT}. */
-        TRACKING
+        TRACKING,
+        /**
+         * G5: a plain decimal greater than zero, at most 6 decimals, no sign or exponent. A number cell
+         * is read by its value, never by its display format — "2.5" shown as "3" is still 2.5.
+         */
+        QUANTITY,
+        /** G5: like {@link #QUANTITY} but 0 ≤ x &lt; 100, blank means 0. 5 means 5 %. */
+        PERCENT
     }
 
     /**
@@ -100,6 +120,18 @@ public final class FixedTemplateSchema {
                 new Column(NOTES, "Ghi chú", "Notes", ValueKind.TEXT, false, 500));
     }
 
+    /** G5 (FE §3.4): one row per component; columns A–D and I repeat identically within a BOM group. */
+    private static final List<Column> BOM_COLUMNS = List.of(
+            new Column(BOM_CODE, "Mã định mức", "BOM code", ValueKind.CODE, true, 100),
+            new Column(PRODUCT_CODE, "Mã sản phẩm", "Product code", ValueKind.CODE, true, 100),
+            new Column(OUTPUT_QUANTITY, "Lượng đầu ra", "Output quantity", ValueKind.QUANTITY, true, null),
+            new Column(OUTPUT_UOM, "Đơn vị đầu ra", "Output UOM", ValueKind.UPPER_TEXT, true, 30),
+            new Column(COMPONENT_CODE, "Mã thành phần", "Component code", ValueKind.CODE, true, 100),
+            new Column(COMPONENT_QUANTITY, "Lượng thành phần", "Component quantity", ValueKind.QUANTITY, true, null),
+            new Column(COMPONENT_UOM, "Đơn vị thành phần", "Component UOM", ValueKind.UPPER_TEXT, true, 30),
+            new Column(SCRAP_PERCENT, "Hao hụt (%)", "Scrap (%)", ValueKind.PERCENT, false, null),
+            new Column(NOTES, "Ghi chú", "Notes", ValueKind.TEXT, false, 1000));
+
     private static final List<Column> SUPPLIER_COLUMNS =
             partnerColumns(SupplierImportTargetHandler.PHONE_MAX_LENGTH);
     private static final List<Column> CUSTOMER_COLUMNS =
@@ -132,7 +164,16 @@ public final class FixedTemplateSchema {
             case ITEMS -> ITEM_COLUMNS;
             case SUPPLIERS -> SUPPLIER_COLUMNS;
             case CUSTOMERS -> CUSTOMER_COLUMNS;
+            case BOMS -> BOM_COLUMNS;
         };
+    }
+
+    public static String templateVersion(DataImportKind kind) {
+        return kind == DataImportKind.BOMS ? BOM_TEMPLATE_VERSION : TEMPLATE_VERSION;
+    }
+
+    public static String dataSheetName(DataImportKind kind, String locale) {
+        return kind == DataImportKind.BOMS ? BOM_DATA_SHEET : dataSheetName(locale);
     }
 
     public static String dataSheetName(String locale) {
@@ -143,7 +184,7 @@ public final class FixedTemplateSchema {
         return LOCALE_VI.equals(locale) || LOCALE_EN.equals(locale);
     }
 
-    /** Excel column letter for a 0-based index (A..Z is enough: the widest template has 7 columns). */
+    /** Excel column letter for a 0-based index (A..Z is enough: the widest template, BOM, has 9 columns). */
     public static String columnLetter(int index) {
         return String.valueOf((char) ('A' + index));
     }

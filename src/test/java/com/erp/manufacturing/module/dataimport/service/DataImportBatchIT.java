@@ -86,6 +86,11 @@ import static org.mockito.Mockito.eq;
         FixedTemplateReader.class, ImportTargetRegistry.class, CustomerImportTargetHandler.class,
         CustomerService.class, CustomerLookupService.class, CustomerMapper.class,
         OrganizationLookupService.class, IdempotencySupport.class, DataImportMapper.class,
+        com.erp.manufacturing.module.dataimport.target.BomImportHandler.class,
+        com.erp.manufacturing.module.bom.service.BomService.class,
+        com.erp.manufacturing.module.bom.service.BomLookupService.class,
+        com.erp.manufacturing.module.bom.mapper.BomMapper.class,
+        com.erp.manufacturing.module.inventory.service.ItemLookupService.class,
         DataImportBatchIT.Config.class})
 class DataImportBatchIT extends AbstractPostgresIntegrationTest {
 
@@ -117,6 +122,7 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
     @Autowired PlantRepository plantRepository;
     @Autowired JdbcTemplate jdbc;
     @SpyBean CustomerService customerService;
+    @SpyBean com.erp.manufacturing.module.bom.service.BomService bomService;
     @MockBean DataImportBatchPermissionGuard batchGuard;
 
     private UUID owner;
@@ -249,14 +255,68 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
         batch(owner, other, null, ImportTargetType.CUSTOMER, "khach-hang-cong-ty-khac.xlsx");
         PageRequest page = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt", "importRunId"));
 
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), null, false, true, true,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), null, false, true, true, false,
                 null, null, page)).extracting(ImportRun::getImportRunId).containsExactly(mineCustomers.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false,
                 null, "KHACH", page)).extracting(ImportRun::getImportRunId).containsExactly(mineCustomers.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, false, false,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, false, false, false,
                 null, null, page)).extracting(ImportRun::getImportRunId).containsExactly(mineItems.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false,
                 ImportRunStatus.COMMITTED, null, page)).isEmpty();
+    }
+
+    /**
+     * G5 FE A11/A16: a BOM workbook of two groups validates READY without creating a BOM; the commit
+     * creates exactly two DRAFTs (one per group, one id per BOM in createdIds) — and when the LAST group
+     * fails at the database, the first BOM is rolled back with it and the batch stays READY.
+     */
+    @Test
+    void bomBatch_validatesWithoutWriting_commitCreatesOneDraftPerGroup_andAFailedLastGroupLeavesNothing() {
+        String tag = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+        for (String code : List.of("FG1-" + tag, "FG2-" + tag)) {
+            jdbc.update("INSERT INTO items (item_id, company_id, code, name, type, unit) VALUES (gen_random_uuid(), ?, ?, ?,"
+                    + " 'FINISHED_GOOD', 'PCS')", company.getCompanyId(), code, code);
+        }
+        jdbc.update("INSERT INTO items (item_id, company_id, code, name, type, unit) VALUES (gen_random_uuid(), ?, ?, ?,"
+                + " 'RAW_MATERIAL', 'KG')", company.getCompanyId(), "RM-" + tag, "RM");
+        byte[] file = TemplateWorkbooks.boms("en")
+                .row(2, "BOM1-" + tag, "FG1-" + tag, "10", "PCS", "RM-" + tag, "25", "KG", "5", "Notes")
+                .row(3, "BOM2-" + tag, "FG2-" + tag, "1", "PCS", "RM-" + tag, "2", "KG", "", "")
+                .build();
+
+        DataImportBatchResponse batch = service.upload(new MockMultipartFile("file", "bom.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file),
+                DataImportKind.BOMS, company.getCompanyId(), null, null);
+        assertThat(batch.status()).isEqualTo("READY");
+        assertThat(batch.bomCount()).isEqualTo(2);
+        assertThat(bomCount()).isZero();
+
+        // The database fails while writing the LAST group, after the first BOM was already flushed.
+        doAnswer(invocation -> {
+            throw new DataIntegrityViolationException("injected failure on the last BOM");
+        }).when(bomService).saveDraft(eq(company.getCompanyId()),
+                argThat(request -> request != null && ("BOM2-" + tag).equals(request.bomCode())));
+        assertThatThrownBy(() -> service.commit(batch.id(), batch.version(), null))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(bomCount()).isZero();
+        assertThat(status(batch.id())).isEqualTo(ImportRunStatus.READY);
+
+        doCallRealMethod().when(bomService).saveDraft(any(), any());
+        DataImportBatchResponse committed = service.commit(batch.id(), batch.version(), null);
+
+        assertThat(committed.status()).isEqualTo("COMMITTED");
+        assertThat(committed.createdIds()).hasSize(2);
+        assertThat(bomCount()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM bom_headers WHERE company_id = ? AND status = 'DRAFT'"
+                + " AND output_quantity = 10 AND bom_code = ?", Long.class, company.getCompanyId(), "BOM1-" + tag))
+                .isEqualTo(1L);
+        assertThat(jdbc.queryForObject("SELECT quantity_per FROM bom_lines l JOIN bom_headers b ON b.bom_id = l.bom_id"
+                + " WHERE b.bom_code = ?", java.math.BigDecimal.class, "BOM1-" + tag)).isEqualByComparingTo("2.5");
+    }
+
+    private long bomCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM bom_headers WHERE company_id = ?", Long.class,
+                company.getCompanyId());
     }
 
     private DataImportBatchResponse upload(byte[] bytes) {

@@ -43,6 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code ScheduleAdjustmentServiceMethodSecurityTest} (rule R2).
  */
 @WebMvcTest(controllers = CapacityController.class)
+@org.springframework.context.annotation.Import(com.erp.manufacturing.common.web.PlantContextResolver.class)
 @AutoConfigureMockMvc(addFilters = false)
 @DisplayName("CapacityController – response envelope contract")
 class CapacityControllerTest {
@@ -52,6 +53,7 @@ class CapacityControllerTest {
 
     @MockBean CapacityBoardService capacityBoardService;
     @MockBean ScheduleAdjustmentService scheduleAdjustmentService;
+    @MockBean com.erp.manufacturing.module.workorder.service.query.CapacityPreviewService capacityPreviewService;
 
     // Unused directly by these tests – required only so the auto-detected security filters
     // can be constructed by the @WebMvcTest slice, even with addFilters = false.
@@ -75,7 +77,7 @@ class CapacityControllerTest {
                 start, start.plusSeconds(3600),
                 new BigDecimal("10"), new BigDecimal("5"), new BigDecimal("60"),
                 new BigDecimal("480"), new BigDecimal("120"), new BigDecimal("25.00"),
-                false, false, 0L);
+                false, false, 0L, new BigDecimal("60"));
     }
 
     @Test
@@ -181,5 +183,83 @@ class CapacityControllerTest {
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("reason"))
                 .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    // ── G5 ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("POST capacity/preview answers 200 and passes the body through")
+    void preview_returns200() throws Exception {
+        UUID routingId = UUID.randomUUID();
+        when(capacityPreviewService.preview(eq(PLANT_ID), any())).thenReturn(
+                new com.erp.manufacturing.module.workorder.dto.capacity.CapacityPreviewResponse(PLANT_ID,
+                        "Asia/Ho_Chi_Minh", LocalDate.of(2026, 10, 13), LocalDate.of(2026, 10, 13),
+                        new BigDecimal("500"), Instant.parse("2026-10-13T01:00:00Z"), java.util.List.of(),
+                        java.util.List.of(), null, Instant.parse("2026-10-13T01:00:00Z")));
+
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/capacity/preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"routingId":"%s","quantity":500,"requestedStart":"2026-10-13T01:00:00Z",
+                                 "periodStart":"2026-10-13","periodEnd":"2026-10-13"}
+                                """.formatted(routingId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.timezone").value("Asia/Ho_Chi_Minh"));
+    }
+
+    @Test
+    @DisplayName("POST capacity/preview with a mismatching X-Plant-Id is 409 and never reaches the service")
+    void preview_plantHeaderMismatch_returns409() throws Exception {
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/capacity/preview")
+                        .header("X-Plant-Id", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"routingId":"%s","quantity":500,"requestedStart":"2026-10-13T01:00:00Z",
+                                 "periodStart":"2026-10-13","periodEnd":"2026-10-13"}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+        org.mockito.Mockito.verifyNoInteractions(capacityPreviewService);
+    }
+
+    @Test
+    @DisplayName("POST capacity/preview with quantity 0 is 400")
+    void preview_zeroQuantity_returns400() throws Exception {
+        mockMvc.perform(post("/v1/plants/" + PLANT_ID + "/capacity/preview")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"routingId":"%s","quantity":0,"requestedStart":"2026-10-13T01:00:00Z",
+                                 "periodStart":"2026-10-13","periodEnd":"2026-10-13"}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("quantity"));
+    }
+
+    @Test
+    @DisplayName("GET capacity/loads answers 200")
+    void periodLoads_returns200() throws Exception {
+        when(capacityBoardService.getPeriodLoads(eq(PLANT_ID), eq(LocalDate.of(2026, 10, 13)),
+                eq(LocalDate.of(2026, 10, 19)), org.mockito.ArgumentMatchers.isNull())).thenReturn(
+                new com.erp.manufacturing.module.workorder.dto.capacity.CapacityPeriodResponse(PLANT_ID,
+                        "Asia/Ho_Chi_Minh", LocalDate.of(2026, 10, 13), LocalDate.of(2026, 10, 19),
+                        Instant.parse("2026-10-13T01:00:00Z"), java.util.List.of()));
+
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/capacity/loads")
+                        .param("periodStart", "2026-10-13").param("periodEnd", "2026-10-19"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.periodEnd").value("2026-10-19"));
+    }
+
+    @Test
+    @DisplayName("schedule-adjustments: a reason shorter than 5 characters is 400 (FE §1.3)")
+    void adjustSchedule_reasonTooShort_returns400() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + OPERATION_ID + "/schedule-adjustments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"plannedStartAt":"2026-01-05T08:00:00Z","reason":"abc","expectedVersion":0}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("reason"));
+        org.mockito.Mockito.verifyNoInteractions(scheduleAdjustmentService);
     }
 }

@@ -17,6 +17,7 @@ import com.erp.manufacturing.module.shift.dto.ShiftResponse;
 import com.erp.manufacturing.module.shift.dto.ShiftUpdateRequest;
 import com.erp.manufacturing.module.shift.mapper.ShiftMapper;
 import com.erp.manufacturing.module.shift.repository.ShiftRepository;
+import com.erp.manufacturing.module.shift.repository.WorkCalendarRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,6 +41,7 @@ import java.util.UUID;
 public class ShiftService {
 
     private final ShiftRepository shiftRepository;
+    private final WorkCalendarRepository workCalendarRepository;
     private final OrganizationLookupService organizationLookupService;
     private final ShiftMapper mapper;
 
@@ -74,8 +76,9 @@ public class ShiftService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SHIFT_READ', 'PLANT', #plantId)")
-    public PageResult<ShiftResponse> list(UUID plantId, OrganizationStatus status, Pageable pageable) {
-        return PageResult.from(shiftRepository.search(plantId, status, pageable).map(mapper::toResponse));
+    public PageResult<ShiftResponse> list(UUID plantId, OrganizationStatus status, String search, Pageable pageable) {
+        return PageResult.from(shiftRepository.search(plantId, status,
+                StringUtils.hasText(search) ? search.trim() : null, pageable).map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -90,6 +93,10 @@ public class ShiftService {
                plantId = "#result?.plantId()")
     public ShiftResponse update(UUID shiftId, ShiftUpdateRequest request) {
         Shift shift = findShift(shiftId);
+        if (request.expectedVersion() != null && !request.expectedVersion().equals(shift.getVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Shift was modified by another request; reload it");
+        }
         if (request.name() != null) {
             shift.setName(requireText(request.name(), "Shift name"));
         }
@@ -123,9 +130,9 @@ public class ShiftService {
     }
 
     /**
-     * Also the handler behind {@code DELETE /shifts/{shiftId}} (rule C6), and deliberately does NOT
-     * check whether a {@code WorkCalendarWeeklyShift} still references this shift — same accepted
-     * decision as {@code WorkCenterService.deactivate} (B_wc3 in module/workcenter/CLAUDE.md).
+     * Also the handler behind {@code DELETE /shifts/{shiftId}} (rule C6). G5 (FE A23): refused with
+     * {@code REFERENCE_IN_USE} while an ACTIVE work calendar still schedules this shift — the calendar
+     * would keep producing working time from a shift nobody can see as usable any more.
      */
     @Transactional
     @PreAuthorize("@shiftPermissionGuard.hasShiftAccess(authentication, 'PERM_SHIFT_MANAGE', #shiftId)")
@@ -133,6 +140,10 @@ public class ShiftService {
                plantId = "#result?.plantId()")
     public ShiftResponse deactivate(UUID shiftId) {
         Shift shift = findShift(shiftId);
+        if (shift.isActive() && workCalendarRepository.existsActiveCalendarUsingShift(shiftId)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.REFERENCE_IN_USE,
+                    "Shift " + shift.getCode() + " is still scheduled on an ACTIVE work calendar");
+        }
         shift.deactivate();
         return mapper.toResponse(shiftRepository.save(shift));
     }
@@ -152,6 +163,22 @@ public class ShiftService {
      * status-machine conflict (error-handling.md §5.3).
      */
     private void ensureAllBreaksWithinWindow(LocalTime shiftStart, LocalTime shiftEnd, List<ShiftBreak> breaks) {
+        // G5 (FE A20): a zero-length shift and overlapping breaks used to be accepted; both make the
+        // net working time meaningless (the second subtracts the same minutes twice).
+        if (shiftStart.equals(shiftEnd)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Shift start and end must differ; a shift cannot be zero minutes long");
+        }
+        for (int first = 0; first < breaks.size(); first++) {
+            for (int second = first + 1; second < breaks.size(); second++) {
+                if (overlap(shiftStart, breaks.get(first), breaks.get(second))) {
+                    throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                            "Breaks " + breaks.get(first).getStartTime() + "-" + breaks.get(first).getEndTime()
+                                    + " and " + breaks.get(second).getStartTime() + "-"
+                                    + breaks.get(second).getEndTime() + " overlap");
+                }
+            }
+        }
         for (ShiftBreak shiftBreak : breaks) {
             if (!ShiftTimeWindow.containsInterval(shiftStart, shiftEnd, shiftBreak.getStartTime(), shiftBreak.getEndTime())) {
                 throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
@@ -159,6 +186,23 @@ public class ShiftService {
                                 + " is not within the shift window " + shiftStart + "-" + shiftEnd);
             }
         }
+        int net = ShiftTimeWindow.durationMinutes(shiftStart, shiftEnd);
+        for (ShiftBreak shiftBreak : breaks) {
+            net -= ShiftTimeWindow.durationMinutes(shiftBreak.getStartTime(), shiftBreak.getEndTime());
+        }
+        if (net <= 0) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Breaks leave no working time in the shift");
+        }
+    }
+
+    /** Both breaks measured as offsets from the shift start, so an overnight shift needs no special case. */
+    private boolean overlap(LocalTime shiftStart, ShiftBreak a, ShiftBreak b) {
+        int aStart = ShiftTimeWindow.durationMinutes(shiftStart, a.getStartTime());
+        int aEnd = aStart + ShiftTimeWindow.durationMinutes(a.getStartTime(), a.getEndTime());
+        int bStart = ShiftTimeWindow.durationMinutes(shiftStart, b.getStartTime());
+        int bEnd = bStart + ShiftTimeWindow.durationMinutes(b.getStartTime(), b.getEndTime());
+        return aStart < bEnd && bStart < aEnd;
     }
 
     private List<ShiftBreakRequest> breaksOrEmpty(List<ShiftBreakRequest> breaks) {

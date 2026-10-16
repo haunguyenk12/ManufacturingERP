@@ -41,3 +41,11 @@
    ô**, không phải một exception chung từ service.
 4. `version` trên wire là `@Version` của JPA: **0** ngay sau upload (không phải 1 như ví dụ FE).
 5. Supplier `phone` ≤ **60** (cột `V20`), customer ≤ 255 — template FE ghi 255 cho cả hai.
+
+## 4. G5 — Nhập BOM (`kind=bom`, `omniplant-bom-v1`) (2026-10-16)
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B168 | BOM **không** đăng ký `ImportTargetHandler` (đường mapped-profile không gom nhóm được ⇒ trả "import target not found"). `BomImportHandler` riêng: validator gọi nó **thay** `flagRepeatedCodes` + luật handler; committer gọi `apply` theo nhóm, mỗi nhóm một `BomService.saveDraft` **trong cùng transaction** của batch. `createdIds` **distinct** (một id mỗi BOM); `bomCount` = số mã BOM | `BomImportHandlerTest.apply_*`, `DataImportBatchIT.bomBatch_*` |
+| B169 | Luật nhóm: B/C/D/I lặp y hệt dòng đầu (`GROUP_MISMATCH`); trùng thành phần, một sản phẩm hai mã ⇒ `DUPLICATE_IN_FILE`; mã BOM đã có, sản phẩm đã có BOM **bất kỳ trạng thái** ⇒ `ALREADY_EXISTS` (create-only); đơn vị phải là đơn vị của vật tư; thương C÷F và % ÷ 100 phải vừa 6 số lẻ. Một dòng lỗi ⇒ mọi dòng còn lại của nhóm nhận `RULE_VIOLATION` | `BomImportHandlerTest.validate_*` |
+| B170 | Đọc mẫu: sheet `BOM`, metadata `_meta` dạng key/value (A1 `version`, A2 `locale`). Ô **số** ở cột lượng/% được đọc theo **giá trị** (`BigDecimal.valueOf(double)`), không theo định dạng hiển thị; % trống = 0 | `BomImportHandlerTest.reader_*` |

@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,11 +64,11 @@ public class FixedTemplateReader {
     public FixedTemplateWorkbook read(byte[] bytes, DataImportKind kind, int maxRows) {
         inspectArchive(bytes);
         try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-            Metadata metadata = readMetadata(workbook, kind);
-            Sheet sheet = workbook.getSheet(FixedTemplateSchema.dataSheetName(metadata.locale()));
+            Metadata metadata = kind == DataImportKind.BOMS ? readBomMetadata(workbook) : readMetadata(workbook, kind);
+            String sheetName = FixedTemplateSchema.dataSheetName(kind, metadata.locale());
+            Sheet sheet = workbook.getSheet(sheetName);
             if (sheet == null) {
-                throw template("Workbook has no sheet named '"
-                        + FixedTemplateSchema.dataSheetName(metadata.locale()) + "'");
+                throw template("Workbook has no sheet named '" + sheetName + "'");
             }
             List<Column> columns = FixedTemplateSchema.columns(kind);
             checkHeaders(sheet, columns, metadata.locale());
@@ -146,6 +147,32 @@ public class FixedTemplateReader {
         }
         if (!kind.wireValue().equals(fileKind)) {
             throw template("Template is for '" + fileKind + "', not '" + kind.wireValue() + "'");
+        }
+        if (!FixedTemplateSchema.isSupportedLocale(locale)) {
+            throw template("Template locale '" + locale + "' is not supported");
+        }
+        return new Metadata(version, locale);
+    }
+
+    /**
+     * G5: the {@code omniplant-bom-v1} metadata is a two-row key/value sheet ({@code _meta}: A1
+     * {@code version} / B1 version, A2 {@code locale} / B2 locale), unlike the one-row sheet of
+     * {@code omniplant-import-v1}. The kind is implied by the version.
+     */
+    private Metadata readBomMetadata(Workbook workbook) {
+        Sheet sheet = workbook.getSheet(FixedTemplateSchema.BOM_METADATA_SHEET);
+        Row versionRow = sheet == null ? null : sheet.getRow(0);
+        Row localeRow = sheet == null ? null : sheet.getRow(1);
+        if (versionRow == null || localeRow == null
+                || !"version".equalsIgnoreCase(plainText(versionRow.getCell(0)))
+                || !"locale".equalsIgnoreCase(plainText(localeRow.getCell(0)))) {
+            throw template("Workbook has no BOM template metadata; download a new template");
+        }
+        String version = plainText(versionRow.getCell(1));
+        String locale = plainText(localeRow.getCell(1)).toLowerCase(Locale.ROOT);
+        if (!FixedTemplateSchema.BOM_TEMPLATE_VERSION.equals(version)) {
+            throw template("Template version '" + version + "' is not supported; expected "
+                    + FixedTemplateSchema.BOM_TEMPLATE_VERSION);
         }
         if (!FixedTemplateSchema.isSupportedLocale(locale)) {
             throw template("Template locale '" + locale + "' is not supported");
@@ -244,7 +271,13 @@ public class FixedTemplateReader {
                             "Cell is a number; format the column as Text so leading zeros are kept"));
                     return "";
                 }
-                text = formatter.formatCellValue(cell);
+                if (column.valueKind() == ValueKind.QUANTITY || column.valueKind() == ValueKind.PERCENT) {
+                    // The stored value, not the displayed one: a cell formatted "0" would otherwise turn
+                    // 2.5 into "3" without anyone seeing it.
+                    text = BigDecimal.valueOf(cell.getNumericCellValue()).stripTrailingZeros().toPlainString();
+                } else {
+                    text = formatter.formatCellValue(cell);
+                }
             }
             default -> {
                 issues.add(ImportCellError.of(letter, column.field(), ImportErrorCode.CELL_TYPE,

@@ -251,7 +251,7 @@ class DataImportBatchServiceTest {
     private DataImportBatchService service(DataImportProperties properties) {
         ImportTargetRegistry registry = new ImportTargetRegistry(List.of(handler));
         return new DataImportBatchService(runRepository, rowRepository, new FixedTemplateReader(),
-                new FixedTemplateValidator(registry), committer, mock(DataImportBatchPermissionGuard.class),
+                new FixedTemplateValidator(registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class)), committer, mock(DataImportBatchPermissionGuard.class),
                 organizationLookupService, new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
                 properties, new DataImportMapper(), () -> Optional.of(OWNER),
                 mock(jakarta.persistence.EntityManager.class));
@@ -272,7 +272,7 @@ class DataImportBatchServiceTest {
     private DataImportBatchResponse response(UUID batchId, String status) {
         return new DataImportBatchResponse(batchId, OWNER, COMPANY_ID, null, DataImportKind.CUSTOMERS, "en",
                 "omniplant-import-v1", "customers.xlsx", 1, status, 1, Instant.now(), null, 1, 0, 1, 0,
-                List.of(), List.of());
+                List.of(), List.of(), null);
     }
 
     private static void assertCode(org.assertj.core.api.ThrowableAssert.ThrowingCallable call, ErrorCode code) {

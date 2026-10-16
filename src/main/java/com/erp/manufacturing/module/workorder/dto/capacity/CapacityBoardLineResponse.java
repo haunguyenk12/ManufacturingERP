@@ -32,5 +32,7 @@ public record CapacityBoardLineResponse(
         BigDecimal utilizationPercent,
         boolean overload,
         boolean calendarExceptionApplies,
-        Long version
+        Long version,
+        /** G5 (D9): this operation's minutes allocated inside {@code [from, to]}, by working-time overlap. */
+        BigDecimal inPeriodMinutes
 ) {}

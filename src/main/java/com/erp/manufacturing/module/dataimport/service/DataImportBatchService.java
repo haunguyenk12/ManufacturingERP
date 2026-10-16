@@ -190,7 +190,7 @@ public class DataImportBatchService {
         }
         Page<ImportRun> page = runRepository.searchBatches(currentUser(), companyId, plantId,
                 allowed.contains(DataImportKind.ITEMS), allowed.contains(DataImportKind.SUPPLIERS),
-                allowed.contains(DataImportKind.CUSTOMERS), status,
+                allowed.contains(DataImportKind.CUSTOMERS), allowed.contains(DataImportKind.BOMS), status,
                 StringUtils.hasText(search) ? search.trim() : null, pageable);
         return PageResult.from(page.map(mapper::toBatchSummary));
     }

@@ -10,7 +10,9 @@ import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.shift.domain.WorkCalendar;
+import com.erp.manufacturing.module.routing.service.RoutingLookupService;
 import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
+import com.erp.manufacturing.module.workorder.service.query.WorkCenterLoadLookupService;
 import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterCreateRequest;
 import com.erp.manufacturing.module.workcenter.dto.WorkCenterResponse;
@@ -40,6 +42,8 @@ public class WorkCenterService {
     private final WorkCenterRepository workCenterRepository;
     private final OrganizationLookupService organizationLookupService;
     private final WorkCalendarLookupService workCalendarLookupService;
+    private final RoutingLookupService routingLookupService;
+    private final WorkCenterLoadLookupService workCenterLoadLookupService;
     private final WorkCenterMapper mapper;
 
     @Transactional
@@ -73,8 +77,10 @@ public class WorkCenterService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_WORK_CENTER_READ', 'PLANT', #plantId)")
-    public PageResult<WorkCenterResponse> list(UUID plantId, OrganizationStatus status, Pageable pageable) {
-        return PageResult.from(workCenterRepository.search(plantId, status, pageable).map(mapper::toResponse));
+    public PageResult<WorkCenterResponse> list(UUID plantId, OrganizationStatus status, String search,
+                                               Pageable pageable) {
+        return PageResult.from(workCenterRepository.search(plantId, status,
+                StringUtils.hasText(search) ? search.trim() : null, pageable).map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -89,6 +95,10 @@ public class WorkCenterService {
                plantId = "#result?.plantId()")
     public WorkCenterResponse update(UUID workCenterId, WorkCenterUpdateRequest request) {
         WorkCenter workCenter = findWorkCenter(workCenterId);
+        if (request.expectedVersion() != null && !request.expectedVersion().equals(workCenter.getVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Work center was modified by another request; reload it");
+        }
         if (request.name() != null) {
             workCenter.setName(requireText(request.name(), "Work center name"));
         }
@@ -122,11 +132,9 @@ public class WorkCenterService {
      * Also the handler behind {@code DELETE /work-centers/{workCenterId}} (rule C6): the plan's
      * decision #4 is that DELETE and this method are the same command, not two behaviors.
      *
-     * <p>Deliberately does NOT check whether a {@code RoutingOperation} still references this work
-     * center (NEXT_PHASE_PLAN.md C2-6 §Phần A #4): deactivating doesn't delete data, only flips
-     * status, and {@code RoutingOperation} keeps its FK regardless — same as Warehouse {@code
-     * INACTIVE} still holding {@code stock_balances} rows. Adding that check now would be scope
-     * creep; it belongs to a future phase if FE asks for it.
+     * <p>G5 (FE Q9/A23) — the future phase the C2-6 note deferred this to: refused with
+     * {@code REFERENCE_IN_USE} while an ACTIVE routing sends operations here, or a work order that is
+     * not finished still has an operation planned on it. Inactive or finished references do not block.
      */
     @Transactional
     @PreAuthorize("@workCenterPermissionGuard.hasWorkCenterAccess(authentication, 'PERM_WORK_CENTER_MANAGE', #workCenterId)")
@@ -134,6 +142,14 @@ public class WorkCenterService {
                plantId = "#result?.plantId()")
     public WorkCenterResponse deactivate(UUID workCenterId) {
         WorkCenter workCenter = findWorkCenter(workCenterId);
+        if (workCenter.isActive() && routingLookupService.isWorkCenterUsedByActiveRouting(workCenterId)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.REFERENCE_IN_USE,
+                    "Work center " + workCenter.getCode() + " is still used by an ACTIVE routing");
+        }
+        if (workCenter.isActive() && workCenterLoadLookupService.hasOpenWorkOrderLoad(workCenterId)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.REFERENCE_IN_USE,
+                    "Work center " + workCenter.getCode() + " still has operations of unfinished work orders");
+        }
         workCenter.deactivate();
         return mapper.toResponse(workCenterRepository.save(workCenter));
     }

@@ -66,7 +66,7 @@ class WorkCenterControllerTest {
 
     private WorkCenterResponse sampleResponse(String status) {
         return new WorkCenterResponse(WORK_CENTER_ID, PLANT_ID, "WC-01", "Line 1", "Main line",
-                "LINE", 2, status, 0L, Instant.now(), Instant.now(), null);
+                "LINE", 2, status, 0L, Instant.now(), Instant.now(), null, null, null);
     }
 
     @Test
@@ -180,7 +180,7 @@ class WorkCenterControllerTest {
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/totalPages/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
+        when(workCenterService.list(eq(PLANT_ID), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-centers"))
@@ -194,13 +194,13 @@ class WorkCenterControllerTest {
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
 
-        verify(workCenterService).list(eq(PLANT_ID), isNull(), any());
+        verify(workCenterService).list(eq(PLANT_ID), isNull(), isNull(), any());
     }
 
     @Test
     @DisplayName("list: size above max is clamped to 100 (A4)")
     void list_sizeAboveMax_isClampedToHundred() throws Exception {
-        when(workCenterService.list(eq(PLANT_ID), isNull(), any()))
+        when(workCenterService.list(eq(PLANT_ID), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-centers").param("size", "500"))

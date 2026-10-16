@@ -83,3 +83,14 @@ giữa entity và DTO là **có chủ đích**, không "thống nhất" lại.
 message code cùng loại (`BLOCKED`, không cho tạo WO) nhưng §8.2 không xếp code nào cho chúng.
 `F4` chọn 409 cho `MISSING_ROUTING` theo họ `STATE_CONFLICT`; **không** đổi `MISSING_BOM` vì đó là
 breaking change ngoài phạm vi. Ghi thành nợ #14 (`CLAUDE.md §0.4`), xử lý ở `F5`.
+
+### 7. G5 — Công đoạn trước, lưu cả đồ thị, phiên bản (2026-10-16, `V73`)
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B159 | `predecessors` (`routing_operation_predecessors`) chỉ trỏ tới công đoạn **cùng routing** có `sequence` **nhỏ hơn** — điều kiện đó tự loại vòng, không cần kiểm vòng riêng. Kiểm hình đồ thị **trước** mọi tra cứu (C9), lỗi theo field `operations[i].…`. `Set`, không `List` (bag thứ hai = MultipleBagFetchException). **Không** chụp sang snapshot WO; xếp lịch vẫn tuần tự theo `sequence` (FE Q17) | `RoutingDraftServiceTest.saveDraft_predecessor*`, `RoutingDraftIT.saveDraft_reSaveSwapping*` |
+| B160 | Lưu lại đồ thị: công đoạn gửi `routingOperationId` giữ id; công đoạn bỏ bị xoá (xoá mọi liên kết trước). Công đoạn giữ lại "đỗ" ở `sequence ≥ 1 000 000` + flush trước khi đánh số cuối (`uk_routing_operations_sequence`, CHECK `sequence > 0` nên không dùng số âm như BOM). `code` + `itemId` bất biến khi lưu lại | `RoutingDraftIT` (mutation bỏ bước đỗ ⇒ đỏ) |
+| B161 | **Một nháp mở mỗi sản phẩm** (FE Q18): lưu nháp mới / sao chép khi đã có DRAFT ⇒ **409 `OPEN_DRAFT_EXISTS`** (API `POST /companies/{C}/routings` cũ không áp). Mã routing là **họ**: dùng mã của sản phẩm khác ⇒ 409. Activate: khoá item (như B156), `effectiveFrom` tương lai ⇒ 409, trung tâm ngừng ⇒ 422 | `RoutingDraftServiceTest.saveDraft_createWhileTheProductHasAnOpenDraft_isRefused`, `.copy_*`, `.activate_futureEffectiveDate_isRefused` |
+
+Phạm vi vẫn **Công ty** (D5). Lọc `plantId`/`workCenterId` là `exists` trên công đoạn (`RoutingDraftIT.search_*`). Response:
+`version` = **nhãn**, `lockVersion` = khoá concurrency (mục 5).

@@ -34,6 +34,12 @@ public record DataImportBatchResponse(
         int errorRowCount,
         int createdCount,
         List<DataImportBatchRowResponse> rows,
-        List<UUID> createdIds
+        List<UUID> createdIds,
+        /**
+         * G5, BOM batches only: number of BOM groups (distinct BOM codes) in the file — what a commit
+         * creates. {@code createdIds} then holds one id per BOM, not one per row. {@code null} for
+         * every other kind.
+         */
+        Integer bomCount
 ) {
 }

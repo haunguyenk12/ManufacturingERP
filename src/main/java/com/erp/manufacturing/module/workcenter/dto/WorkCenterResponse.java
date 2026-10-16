@@ -20,5 +20,7 @@ public record WorkCenterResponse(
         Long version,
         Instant createdAt,
         Instant updatedAt,
-        UUID workCalendarId
+        UUID workCalendarId,
+        String workCalendarCode,
+        String workCalendarName
 ) {}

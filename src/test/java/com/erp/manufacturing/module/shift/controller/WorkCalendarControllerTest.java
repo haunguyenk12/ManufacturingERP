@@ -178,7 +178,7 @@ class WorkCalendarControllerTest {
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/totalPages/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(workCalendarService.list(eq(PLANT_ID), isNull(), any()))
+        when(workCalendarService.list(eq(PLANT_ID), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-calendars"))
@@ -192,6 +192,6 @@ class WorkCalendarControllerTest {
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
 
-        verify(workCalendarService).list(eq(PLANT_ID), isNull(), any());
+        verify(workCalendarService).list(eq(PLANT_ID), isNull(), isNull(), any());
     }
 }

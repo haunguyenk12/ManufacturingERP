@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.routing.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 public record RoutingOperationResponse(
@@ -10,5 +11,7 @@ public record RoutingOperationResponse(
         UUID workCenterId,
         String workCenterCode,
         BigDecimal setupMinutes,
-        BigDecimal runMinutesPerUnit
+        BigDecimal runMinutesPerUnit,
+        String workCenterName,
+        List<UUID> predecessorOperationIds
 ) {}

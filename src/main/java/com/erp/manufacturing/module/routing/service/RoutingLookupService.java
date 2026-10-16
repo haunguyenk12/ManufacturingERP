@@ -72,6 +72,27 @@ public class RoutingLookupService {
     }
 
     /**
+     * A routing with its operations, work centers and predecessors, for the capacity preview (G5).
+     * Status and effective date are the caller's to judge — it reports them as specific errors.
+     */
+    @Transactional(readOnly = true)
+    public Optional<RoutingHeader> findRoutingWithOperations(UUID routingId) {
+        Optional<RoutingHeader> routing = routingHeaderRepository.findWithOperationsByRoutingId(routingId);
+        routing.ifPresent(found -> found.getOperations().forEach(operation -> {
+            if (operation.getWorkCenter() != null) {
+                operation.getWorkCenter().getCode();
+            }
+        }));
+        return routing;
+    }
+
+    /** G5 (FE Q9): whether deactivating this work center would strand an ACTIVE routing. */
+    @Transactional(readOnly = true)
+    public boolean isWorkCenterUsedByActiveRouting(UUID workCenterId) {
+        return routingHeaderRepository.existsActiveRoutingUsingWorkCenter(workCenterId);
+    }
+
+    /**
      * What a consumer outside {@code routing} needs from an ACTIVE routing header. Deliberately not
      * the entity: {@code version} here is {@code RoutingHeader.routingVersion} (a String business
      * version), never {@code BaseEntity.version} (the optimistic-locking counter).

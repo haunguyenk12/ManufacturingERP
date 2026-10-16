@@ -239,6 +239,6 @@ class DataImportBatchControllerTest {
         return new DataImportBatchResponse(BATCH_ID, UUID.randomUUID(), COMPANY_ID, PLANT_ID, DataImportKind.ITEMS,
                 "vi", "omniplant-import-v1", "items-vi.xlsx", 18200, status, 0, Instant.now(), null,
                 1, issues.isEmpty() ? 1 : 0, issues.isEmpty() ? 0 : 1, 0,
-                List.of(new DataImportBatchRowResponse(2, Map.of("code", "GD3-RM-0001"), issues)), List.of());
+                List.of(new DataImportBatchRowResponse(2, Map.of("code", "GD3-RM-0001"), issues)), List.of(), null);
     }
 }

@@ -6,6 +6,7 @@ import com.erp.manufacturing.module.organization.domain.Company;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -47,6 +48,18 @@ public class RoutingHeader extends BaseEntity {
      */
     @Column(name = "routing_version", nullable = false, length = 40)
     private String routingVersion;
+
+    /** Server-assigned, 1..n per company + product in creation order (G5). {@link #routingVersion} stays the label. */
+    @Column(name = "version_number", nullable = false)
+    private Integer versionNumber;
+
+    /** Display name (G5). Nullable: routings created before V73 never had one. */
+    @Column(name = "name", length = 255)
+    private String name;
+
+    /** {@code null}: activatable now. A later instant blocks activation until then (G5, same rule as BOM). */
+    @Column(name = "effective_from")
+    private Instant effectiveFrom;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)

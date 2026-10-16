@@ -233,14 +233,17 @@ class RoutingServiceTest {
         RoutingHeader previous = routing(company, item, "RT-FG100", "V1", RoutingStatus.ACTIVE);
         RoutingHeader candidate = routing(company, item, "RT-FG100", "V2", RoutingStatus.DRAFT);
 
+        // G5: the family lock is taken by product before the routing is read.
+        when(routingHeaderRepository.findItemIdByRoutingId(candidate.getRoutingId()))
+                .thenReturn(Optional.of(item.getItemId()));
         when(routingHeaderRepository.findWithOperationsByRoutingId(candidate.getRoutingId()))
                 .thenReturn(Optional.of(candidate));
         when(routingHeaderRepository.findByCompanyCompanyIdAndItemItemIdAndStatus(
                 company.getCompanyId(), item.getItemId(), RoutingStatus.ACTIVE))
                 .thenReturn(Optional.of(previous));
-        when(routingHeaderRepository.save(any(RoutingHeader.class))).thenAnswer(returnFirstArgument());
+        when(routingHeaderRepository.saveAndFlush(any(RoutingHeader.class))).thenAnswer(returnFirstArgument());
 
-        RoutingResponse response = service.activate(candidate.getRoutingId());
+        RoutingResponse response = service.activate(candidate.getRoutingId(), null);
 
         assertThat(response.status()).isEqualTo(RoutingStatus.ACTIVE.name());
         assertThat(previous.getStatus()).isEqualTo(RoutingStatus.INACTIVE);
@@ -253,17 +256,22 @@ class RoutingServiceTest {
         Item item = item(UUID.randomUUID(), company, ItemType.FINISHED_GOOD);
         RoutingHeader candidate = routing(company, item, "RT-FG100", "V1", RoutingStatus.DRAFT);
 
+        // G5: the family lock is taken by product before the routing is read.
+        when(routingHeaderRepository.findItemIdByRoutingId(candidate.getRoutingId()))
+                .thenReturn(Optional.of(item.getItemId()));
         when(routingHeaderRepository.findWithOperationsByRoutingId(candidate.getRoutingId()))
                 .thenReturn(Optional.of(candidate));
         when(routingHeaderRepository.findByCompanyCompanyIdAndItemItemIdAndStatus(
                 company.getCompanyId(), item.getItemId(), RoutingStatus.ACTIVE))
                 .thenReturn(Optional.empty());
-        when(routingHeaderRepository.save(any(RoutingHeader.class))).thenAnswer(returnFirstArgument());
+        when(routingHeaderRepository.saveAndFlush(any(RoutingHeader.class))).thenAnswer(returnFirstArgument());
 
-        assertThat(service.activate(candidate.getRoutingId()).status())
+        assertThat(service.activate(candidate.getRoutingId(), null).status())
                 .isEqualTo(RoutingStatus.ACTIVE.name());
 
-        verify(routingHeaderRepository, never()).saveAndFlush(any());
+        // Only the candidate itself is written (saveAndFlush since G5); no previous version is touched.
+        verify(routingHeaderRepository, times(1)).saveAndFlush(any());
+        verify(routingHeaderRepository).saveAndFlush(candidate);
     }
 
     @Test
@@ -272,10 +280,13 @@ class RoutingServiceTest {
         Item item = item(UUID.randomUUID(), company, ItemType.FINISHED_GOOD);
         RoutingHeader routing = routing(company, item, "RT-FG100", "V1", RoutingStatus.ACTIVE);
 
+        // G5: the family lock is taken by product before the routing is read.
+        when(routingHeaderRepository.findItemIdByRoutingId(routing.getRoutingId()))
+                .thenReturn(Optional.of(item.getItemId()));
         when(routingHeaderRepository.findWithOperationsByRoutingId(routing.getRoutingId()))
                 .thenReturn(Optional.of(routing));
 
-        assertThatThrownBy(() -> service.activate(routing.getRoutingId()))
+        assertThatThrownBy(() -> service.activate(routing.getRoutingId(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -291,10 +302,13 @@ class RoutingServiceTest {
         RoutingHeader candidate = routing(company, item, "RT-FG100", "V1", RoutingStatus.DRAFT);
         candidate.getOperations().clear();
 
+        // G5: the family lock is taken by product before the routing is read.
+        when(routingHeaderRepository.findItemIdByRoutingId(candidate.getRoutingId()))
+                .thenReturn(Optional.of(item.getItemId()));
         when(routingHeaderRepository.findWithOperationsByRoutingId(candidate.getRoutingId()))
                 .thenReturn(Optional.of(candidate));
 
-        assertThatThrownBy(() -> service.activate(candidate.getRoutingId()))
+        assertThatThrownBy(() -> service.activate(candidate.getRoutingId(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.DOCUMENT_HAS_NO_LINES));
@@ -305,9 +319,9 @@ class RoutingServiceTest {
     @Test
     void activate_unknownRouting_throwsNotFound() {
         UUID routingId = UUID.randomUUID();
-        when(routingHeaderRepository.findWithOperationsByRoutingId(routingId)).thenReturn(Optional.empty());
+        when(routingHeaderRepository.findItemIdByRoutingId(routingId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.activate(routingId))
+        assertThatThrownBy(() -> service.activate(routingId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));

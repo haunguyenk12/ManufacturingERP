@@ -1301,6 +1301,28 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### BOM, quy trình, ca/lịch/trung tâm, công suất — FE giai đoạn 5 *(`G5`, 2026-10-16)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Lưu nháp BOM một lần | `PUT /v1/companies/{companyId}/bom-drafts` — body `{bomId?, expectedVersion?, bomCode, parentItemId, revision?, outputQuantity, effectiveFrom?, description?, lines:[{lineNo, componentItemId, componentQuantity, scrapRate}]}` | **200**. Không `bomId` ⇒ nháp version mới; có `bomId` ⇒ thay toàn bộ nháp (`expectedVersion` bắt buộc). `componentQuantity` theo **lô** `outputQuantity`; server lưu `quantityPer = componentQuantity / outputQuantity`, cần > 6 số lẻ ⇒ `400`. Giữ `lineId` theo thành phần |
+| Sao chép / version / ngừng BOM | `POST /v1/boms/{id}/copy {bomCode, revision?, effectiveFrom?, description?}` (**201**) · `GET /v1/boms/{id}/versions` · `POST /v1/boms/{id}/deactivate {expectedVersion}` | |
+| Activate BOM | `POST /v1/boms/{id}/activate` body `{expectedVersion}` **tuỳ chọn** | `effectiveFrom` tương lai ⇒ `409 EFFECTIVE_DATE_FUTURE`; vật tư ngừng ⇒ `422 RESOURCE_INACTIVE` |
+| List BOM | `GET /v1/companies/{companyId}/boms?search=&latestOnly=` | Field mới: `bomCode`, `versionNumber`, `outputQuantity`, `outputUomCode`, `effectiveFrom`, `version`; dòng có `componentQuantity`, `componentUomCode` |
+| Lưu nháp quy trình cả đồ thị | `PUT /v1/companies/{companyId}/routing-drafts` — `{routingId?, expectedVersion?, code, name?, itemId, version?, effectiveFrom?, note?, operations:[{routingOperationId?, clientKey, sequence, name, workCenterId, setupMinutes, runMinutesPerUnit>0, predecessorClientKeys[]}]}` | Công đoạn trước phải có `sequence` nhỏ hơn. Một nháp mở/sản phẩm (`409 OPEN_DRAFT_EXISTS`). Khoá concurrency là `lockVersion` (`version` là nhãn) |
+| Quy trình khác | `POST /v1/routings/{id}/copy` · `GET .../versions` · `POST .../deactivate {expectedVersion}` · list `?plantId=&workCenterId=&search=` | Quy trình vẫn theo **Công ty** |
+| Ca / Lịch / Trung tâm | như cũ + `?search=` trên list, `expectedVersion?` trên PATCH | Ca trả `workingMinutes`. Ngừng khi còn tham chiếu `ACTIVE` ⇒ `422 REFERENCE_IN_USE` |
+| Tải theo kỳ | `GET /v1/plants/{plantId}/capacity/loads?periodStart=&periodEnd=&workCenterId=` | Tối đa 90 ngày tính cả hai đầu. `availableMinutes = phút làm việc × capacityUnits` |
+| Xem trước lịch | `POST /v1/plants/{plantId}/capacity/preview {routingId, quantity, requestedStart, periodStart, periodEnd}` | **Không ghi gì**. Tuần tự theo `sequence`, `elapsed = required / capacityUnits`. Không lịch ⇒ `409 SCHEDULING_UNAVAILABLE` |
+| Điều chỉnh công đoạn | `POST /v1/work-orders/{woId}/operations/{opId}/schedule-adjustments {plannedStartAt, plannedEndAt?, reason (≥5), expectedVersion}` | Chồng công đoạn trước/sau ⇒ `409 OPERATION_SEQUENCE_CONFLICT`; WO không `RELEASED`/`IN_PROGRESS` hoặc công đoạn đã báo sản lượng ⇒ `409 STATE_CONFLICT` |
+| Nhập BOM Excel | `POST /v1/data-import/batches` multipart `kind=bom` | Mẫu `omniplant-bom-v1`; `bomCount`; `createdIds` = một id mỗi BOM |
+
+> 🔴 **Bảng công suất đổi số liệu:** tải chia theo phần giờ làm việc của công đoạn rơi vào từng ngày (trước đây dồn
+> vào ngày bắt đầu); công đoạn bắt đầu trước `from` nay có mặt; đuôi ca đêm tính cho ngày nó chạy. Mỗi dòng thêm
+> `inPeriodMinutes`.
+> 🔴 Ca là **một** khung + giờ nghỉ (không có `workingIntervals[]`, không có hiệu lực — hiệu lực ở lịch); trung tâm
+> **không** có `shiftIds[]`. Bảng ánh xạ đầy đủ: `BE_RESPONSE_GD_05_2026-10-16.md §2`.
+
 ---
 
 ## 6. Tham chiếu DTO
@@ -1465,6 +1487,11 @@ File nhập vượt 5 MiB (giới hạn của đường nhập mẫu cố địn
 | `MISSING_BOM` / `MISSING_ROUTING` | Thiếu master data `ACTIVE` |
 | `IDEMPOTENCY_CONFLICT` | Cùng `Idempotency-Key` nhưng payload khác |
 | `NO_CHANGE` 🆕 `G4` | Kiểm đếm bằng đúng số hiện tại / đổi lô sang trạng thái nó đang có — **không ghi gì** |
+| `EFFECTIVE_DATE_FUTURE` 🆕 `G5` (409) | Activate BOM/quy trình có `effectiveFrom` ở tương lai |
+| `OPEN_DRAFT_EXISTS` 🆕 `G5` (409) | Sản phẩm đã có nháp quy trình — mở nháp đó |
+| `REFERENCE_IN_USE` 🆕 `G5` (**422**) | Ngừng ca/lịch/trung tâm còn được bản ghi `ACTIVE` dùng |
+| `OPERATION_SEQUENCE_CONFLICT` 🆕 `G5` (409) | Điều chỉnh làm công đoạn chồng công đoạn trước/sau — không ghi gì |
+| `SCHEDULING_UNAVAILABLE` 🆕 `G5` (409) | Xem trước không xếp được: trung tâm không có lịch `ACTIVE` hoặc hết giờ làm trong 180 ngày sau kỳ |
 | `RESERVED_STOCK` 🆕 `G4` | Đổi trạng thái lô còn reservation, hoặc đếm xuống dưới lượng đã giữ cho WO — giải phóng reservation trước |
 | **`IMPORT_REVALIDATION_FAILED`** 🆕 `G3` | Commit batch nhập mà dữ liệu đã đổi kể từ lúc kiểm tra. **Có `result`** = batch đã `INVALID` kèm lỗi mới. Không tạo master nào |
 | **`DEFAULT_CONFLICT`** 🆕 | Lưu thiết lập kho với `replaceDefaults=false` khi kho khác đang giữ vai trò default. Không có gì được ghi — hỏi người dùng rồi gửi lại với `replaceDefaults=true` |

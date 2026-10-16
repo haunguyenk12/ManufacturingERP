@@ -667,6 +667,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         BomHeader bom = BomHeader.builder()
                 .company(company).parentItem(finishedGood).revision("A")
+                .bomCode("BOM-" + java.util.UUID.randomUUID()).versionNumber(1)
                 .status(BomStatus.ACTIVE).description("E2E BOM").build();
         bom.getLines().add(BomLine.builder()
                 .bom(bom).componentItem(component).lineNo(1)
@@ -679,7 +680,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .status(OrganizationStatus.ACTIVE).build());
 
         RoutingHeader routing = RoutingHeader.builder()
-                .company(company).item(finishedGood).code("RT-" + suffix).routingVersion("1")
+                .company(company).item(finishedGood).code("RT-" + suffix).routingVersion("1").versionNumber(1)
                 .status(RoutingStatus.ACTIVE).build();
         routing.getOperations().add(RoutingOperation.builder()
                 .routing(routing).sequence(10).name("Assemble").workCenter(workCenter)
@@ -716,6 +717,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         BomHeader bom = BomHeader.builder()
                 .company(company).parentItem(finishedGood).revision("A")
+                .bomCode("BOM-" + java.util.UUID.randomUUID()).versionNumber(1)
                 .status(BomStatus.ACTIVE).description("E2E BOM (no lot)").build();
         bom.getLines().add(BomLine.builder()
                 .bom(bom).componentItem(component).lineNo(1)
@@ -728,7 +730,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .status(OrganizationStatus.ACTIVE).build());
 
         RoutingHeader routing = RoutingHeader.builder()
-                .company(company).item(finishedGood).code("RTN-" + fixture.suffix).routingVersion("1")
+                .company(company).item(finishedGood).code("RTN-" + fixture.suffix).routingVersion("1").versionNumber(1)
                 .status(RoutingStatus.ACTIVE).build();
         routing.getOperations().add(RoutingOperation.builder()
                 .routing(routing).sequence(10).name("Assemble").workCenter(workCenter)

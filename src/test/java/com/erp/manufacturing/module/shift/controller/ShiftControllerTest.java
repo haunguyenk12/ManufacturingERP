@@ -65,7 +65,7 @@ class ShiftControllerTest {
 
     private ShiftResponse sampleResponse(String status) {
         return new ShiftResponse(SHIFT_ID, PLANT_ID, "SH-01", "Day Shift",
-                LocalTime.of(8, 0), LocalTime.of(17, 0), status, List.of(), 0L, Instant.now(), Instant.now());
+                LocalTime.of(8, 0), LocalTime.of(17, 0), status, List.of(), 0L, Instant.now(), Instant.now(), 540);
     }
 
     @Test
@@ -178,7 +178,7 @@ class ShiftControllerTest {
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/totalPages/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(shiftService.list(eq(PLANT_ID), isNull(), any()))
+        when(shiftService.list(eq(PLANT_ID), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("ACTIVE")), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/shifts"))
@@ -192,6 +192,6 @@ class ShiftControllerTest {
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
 
-        verify(shiftService).list(eq(PLANT_ID), isNull(), any());
+        verify(shiftService).list(eq(PLANT_ID), isNull(), isNull(), any());
     }
 }

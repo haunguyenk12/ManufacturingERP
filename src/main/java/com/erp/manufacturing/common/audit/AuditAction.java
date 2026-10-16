@@ -63,9 +63,17 @@ public enum AuditAction {
     BOM_UPDATED,
     BOM_DELETED,
     BOM_ACTIVATED,
+    /** G5: atomic save of a BOM draft — header and every line in one command (create or full replace). */
+    BOM_DRAFT_SAVED,
+    /** G5: a BOM version copied into a new DRAFT of the same product. */
+    BOM_COPIED,
     ROUTING_CREATED,
     ROUTING_ACTIVATED,
     ROUTING_DEACTIVATED,
+    /** G5: atomic save of a routing draft — header and the whole operation graph in one command. */
+    ROUTING_DRAFT_SAVED,
+    /** G5: a routing version copied into a new DRAFT of the same product. */
+    ROUTING_COPIED,
     WORK_ORDER_CREATED,
     WORK_ORDER_UPDATED,
     WORK_ORDER_RELEASED,

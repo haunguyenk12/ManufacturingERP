@@ -43,13 +43,14 @@ class CapacityBoardServiceMethodSecurityTest {
     @Autowired CapacityBoardService capacityBoardService;
     @Autowired PermissionGuard permissionGuard;
     @Autowired WorkOrderOperationRepository workOrderOperationRepository;
+    @Autowired com.erp.manufacturing.module.organization.service.OrganizationLookupService organizationLookupService;
 
     private static final UUID PLANT_ID = UUID.randomUUID();
     private static final LocalDate DAY = LocalDate.of(2026, 1, 5);
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, workOrderOperationRepository);
+        reset(permissionGuard, workOrderOperationRepository, organizationLookupService);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, List.of()));
     }
@@ -78,11 +79,42 @@ class CapacityBoardServiceMethodSecurityTest {
                 any(), eq("PERM_CAPACITY_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(true);
         when(workOrderOperationRepository.searchCapacityBoard(eq(PLANT_ID), any(), any(), any(), any(), any()))
                 .thenReturn(Page.empty());
-        when(workOrderOperationRepository.aggregateExistingLoad(eq(PLANT_ID), any(), any(), any()))
+        when(workOrderOperationRepository.findScheduledOverlapping(eq(PLANT_ID), any(), any(), any()))
                 .thenReturn(List.of());
+        stubPlant();
 
         assertThatCode(() -> capacityBoardService.getBoard(PLANT_ID, DAY, DAY, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void getPeriodLoads_deniedWhenPlantReadScopeMissing() {
+        when(permissionGuard.hasResourceAccess(
+                any(), eq("PERM_CAPACITY_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(false);
+
+        assertThatThrownBy(() -> capacityBoardService.getPeriodLoads(PLANT_ID, DAY, DAY, null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(workOrderOperationRepository);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_CAPACITY_READ"), eq("PLANT"), eq(PLANT_ID));
+    }
+
+    @Test
+    void getPeriodLoads_allowedWhenPlantReadScopePresent() {
+        when(permissionGuard.hasResourceAccess(
+                any(), eq("PERM_CAPACITY_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(true);
+        when(workOrderOperationRepository.findScheduledOverlapping(eq(PLANT_ID), any(), any(), any()))
+                .thenReturn(List.of());
+        stubPlant();
+
+        assertThatCode(() -> capacityBoardService.getPeriodLoads(PLANT_ID, DAY, DAY, null))
+                .doesNotThrowAnyException();
+    }
+
+    private void stubPlant() {
+        when(organizationLookupService.getPlant(PLANT_ID)).thenReturn(
+                com.erp.manufacturing.module.organization.domain.Plant.builder().plantId(PLANT_ID)
+                        .timezone("Asia/Ho_Chi_Minh").build());
     }
 
     @Configuration
@@ -91,8 +123,16 @@ class CapacityBoardServiceMethodSecurityTest {
 
         @Bean
         CapacityBoardService capacityBoardService(WorkOrderOperationRepository workOrderOperationRepository,
-                                                   WorkCalendarLookupService workCalendarLookupService) {
-            return new CapacityBoardService(workOrderOperationRepository, workCalendarLookupService);
+                                                   WorkCalendarLookupService workCalendarLookupService,
+                                                   com.erp.manufacturing.module.organization.service.OrganizationLookupService organizationLookupService) {
+            return new CapacityBoardService(workOrderOperationRepository, workCalendarLookupService,
+                    new CapacityLoadCalculator(workOrderOperationRepository, workCalendarLookupService),
+                    organizationLookupService,
+                    mock(com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService.class));
+        }
+
+        @Bean com.erp.manufacturing.module.organization.service.OrganizationLookupService organizationLookupService() {
+            return mock(com.erp.manufacturing.module.organization.service.OrganizationLookupService.class);
         }
 
         @Bean(name = "permissionGuard")

@@ -11,5 +11,8 @@ public record BomLineResponse(
         String componentItemCode,
         String componentItemName,
         BigDecimal quantityPer,
-        BigDecimal scrapRate
+        BigDecimal scrapRate,
+        /** {@code quantityPer × outputQuantity} of the BOM — the batch figure the form was entered in (G5, D1). */
+        BigDecimal componentQuantity,
+        String componentUomCode
 ) {}

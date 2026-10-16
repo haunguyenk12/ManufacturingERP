@@ -20,6 +20,8 @@ public class WorkCenterMapper {
                 workCenter.getVersion(),
                 workCenter.getCreatedAt(),
                 workCenter.getUpdatedAt(),
-                workCenter.getWorkCalendar() == null ? null : workCenter.getWorkCalendar().getWorkCalendarId());
+                workCenter.getWorkCalendar() == null ? null : workCenter.getWorkCalendar().getWorkCalendarId(),
+                workCenter.getWorkCalendar() == null ? null : workCenter.getWorkCalendar().getCode(),
+                workCenter.getWorkCalendar() == null ? null : workCenter.getWorkCalendar().getName());
     }
 }

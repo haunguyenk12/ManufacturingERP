@@ -41,6 +41,20 @@ public class ItemLookupService {
     }
 
     /**
+     * {@code SELECT … FOR UPDATE} on the item row, held until the caller's transaction ends.
+     *
+     * <p>Serialises writes that read "the other rows of this item" before deciding — the BOM and
+     * routing version families of G5, numbered and activated per product. A unique index alone does
+     * not do it: two concurrent activations both read the old ACTIVE version, and the loser fails on
+     * the index instead of standing the winner down (same lesson as {@code B137}).
+     */
+    @Transactional
+    public Item lockItem(UUID itemId) {
+        return itemRepository.lockByItemId(itemId)
+                .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Item", itemId));
+    }
+
+    /**
      * Resolves many item codes at once, in a single query (rule C14).
      *
      * <p>Entry point for callers that hold a list of codes rather than identifiers — the spreadsheet

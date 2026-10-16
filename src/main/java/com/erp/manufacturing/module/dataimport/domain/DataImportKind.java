@@ -26,7 +26,10 @@ public enum DataImportKind {
 
     SUPPLIERS("suppliers", ImportTargetType.SUPPLIER, "PERM_SUPPLIER_READ", "PERM_SUPPLIER_MANAGE", false),
 
-    CUSTOMERS("customers", ImportTargetType.CUSTOMER, "PERM_CUSTOMER_READ", "PERM_CUSTOMER_MANAGE", false);
+    CUSTOMERS("customers", ImportTargetType.CUSTOMER, "PERM_CUSTOMER_READ", "PERM_CUSTOMER_MANAGE", false),
+
+    /** G5: BOM drafts from the {@code omniplant-bom-v1} workbook; company-scoped like the BOM itself. */
+    BOMS("bom", ImportTargetType.BOM, "PERM_BOM_READ", "PERM_BOM_MANAGE", false);
 
     private final String wireValue;
     private final ImportTargetType targetType;
@@ -64,7 +67,7 @@ public enum DataImportKind {
         return plantScoped;
     }
 
-    /** Lower-case wire value only ({@code items}, {@code suppliers}, {@code customers}). */
+    /** Lower-case wire value only ({@code items}, {@code suppliers}, {@code customers}, {@code bom}). */
     public static Optional<DataImportKind> fromWire(String value) {
         if (value == null) {
             return Optional.empty();

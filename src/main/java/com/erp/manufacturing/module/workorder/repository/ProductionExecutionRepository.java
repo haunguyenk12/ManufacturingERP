@@ -33,4 +33,7 @@ public interface ProductionExecutionRepository extends JpaRepository<ProductionE
      * given receipt ({@code sourceWipTraceIds}, spec §6.4).
      */
     List<ProductionExecution> findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(UUID workOrderId);
+
+    /** G5 (FE Q16): output was already reported against this operation, i.e. it has started. */
+    boolean existsByOperationWorkOrderOperationId(UUID workOrderOperationId);
 }

@@ -1,5 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
+> **`G5` — FE handoff Giai đoạn 5** (`FE_HANDOFF_GD_05_2026-10-13.md`): ✅ **BE xong + nghiệm thu
+> 2026-10-16** — `G5-1`..`G5-6` hoàn tất, file trả lời **`BE_RESPONSE_GD_05_2026-10-16.md`** (**user tự gửi qua
+> Zalo**). Migration **`V73`**. Phase chỉ đóng khi **FE** báo A01–A36 đạt. **1548 case unit / 179 class + 215 case IT /
+> 32 class IT · failures = 0, errors = 0**. Bản ghi `CLAUDE.md §0.53`, chi tiết **§12**.
+>
 > **`G2` — FE handoff Giai đoạn 2** (`FE_HANDOFF_GD_02_2026-10-12.md`): ✅ **BE xong + nghiệm thu
 > 2026-10-14** — `G2-1`..`G2-5` hoàn tất, file trả lời **`BE_RESPONSE_GD_02_2026-10-14_v2.md`** (thay v1,
 > **user tự gửi qua Zalo**). Lỗi `leadTimeDays: 1.5` bị cắt thành `1` **đã sửa cho toàn hệ thống** (§9.6).
@@ -90,7 +95,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 |---|---|
 | **Đang chạy** | **`G4` — FE handoff Giai đoạn 4: tồn kho, lô, chuyển kho** (`FE_HANDOFF_GD_04_2026-10-12.md`, P1) — ✅ **BE xong 2026-10-15**, chờ **FE** nghiệm thu A01–A26 — xem **§11**, bản ghi `CLAUDE.md §0.52`, trả lời FE `BE_RESPONSE_GD_04_2026-10-15.md` |
 | **Chờ FE** | `G2` (§9), `G3` (§10) — ✅ BE xong 2026-10-14, chờ FE nghiệm thu |
-| **Ứng viên kế tiếp** | Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
+| **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
 
 ---
@@ -110,6 +115,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 9 | **`G2` — FE handoff Giai đoạn 2 (tổ chức + danh mục nền)** | ✅ **BE xong (2026-10-14)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_02_2026-10-12.md`, P1. Chi tiết **§9**, bản ghi `CLAUDE.md §0.50` |
 | 10 | **`G3` — FE handoff Giai đoạn 3 (nhập Excel dữ liệu nền)** | ✅ **BE xong — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_03_2026-10-12.md`, P1. Phụ thuộc `G2` (Customer/Supplier master) — đã xong. Chi tiết **§10** |
 | 11 | **`G4` — FE handoff Giai đoạn 4 (tồn kho, lô, chuyển kho)** | ✅ **BE xong (2026-10-15)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_04_2026-10-12.md`, P1. Quyết định lớn nhất: có làm định giá tồn kho (moving average) hay không — đụng vùng `P7` (D1). Chi tiết **§11** |
+| 12 | **`G5` — FE handoff Giai đoạn 5 (định mức, quy trình, công suất)** | 📝 **Đã lập kế hoạch — chờ chốt §12.2** | Nguồn `FE_HANDOFF_GD_05_2026-10-13.md`, P1. File FE đề xuất **đảo ngược 4 quyết định thiết kế đã chốt** ở `F4`/`C2-7`/`C2-8`/`F10` — phải chốt từng cái trước khi viết dòng nào. Chi tiết **§12** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -609,6 +615,128 @@ Chuyển khác Plant, in-transit, sửa/huỷ/đảo phiếu đã post, chuyển
 
 ---
 
+## 12. `G5` — FE handoff Giai đoạn 5: Định mức, quy trình và công suất ✅ BE XONG (2026-10-16) — chờ FE nghiệm thu
+
+> **Kết quả (2026-10-16):** D1–D12 đã chốt — D1 giữ `quantityPer`, D2/D4/D6/D11 theo khuyến nghị, D3 `effectiveFrom` là
+> Instant, **D5/D7/D8 giữ thiết kế cũ**, D9 chia theo ngày, **D10 chặn 409**, D12 làm trong G5. Mọi gói `G5-0`..`G5-6` xong
+> trong **một** commit (một migration `V73` cho cả BOM và routing). Lệch so với kế hoạch: (1) tải theo kỳ là endpoint mới
+> `GET /plants/{P}/capacity/loads` cạnh `capacity-board` cũ; (2) điều chỉnh cho cả `IN_PROGRESS` (công đoạn chưa báo sản lượng);
+> (3) đường mới từ chối thành phần FINISHED_GOOD; (4) release vẫn **không** chia `capacityUnits` (xem trước có chia). Bản ghi
+> đầy đủ: `CLAUDE.md §0.53`; trả lời FE: `BE_RESPONSE_GD_05_2026-10-16.md`.
+
+Nguồn: `FE_HANDOFF_GD_05_2026-10-13.md` (v1, P1, 541 dòng). FE/mock đã xong BOM (form rộng, phiên bản, cây, sao chép), **nhập BOM Excel**, quy trình có phiên bản, Ca/Lịch/Trung tâm, bảng công suất + **xem trước lịch công đoạn** + điều chỉnh. BE phải (1) trả lời Q1–Q19 §5, (2) đối chiếu R01–R15 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_05_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào; mọi path/DTO/mã lỗi là **[Đề xuất BE]**.
+
+> 🔴 **Đây là handoff khác hẳn ba lần trước.** `G2`–`G4` chủ yếu là "thêm thứ còn thiếu". `G5` đề xuất **đảo ngược 4 quyết định thiết kế đã chốt có lý do** trong repo: routing company-scoped (`F4`), ca một khung giờ (`C2-7`), work center không có `shiftIds[]` (`C2-7`), điều chỉnh lịch chỉ cảnh báo chứ không chặn (`C2-8`, `B90`) — cộng `outputQuantity` của BOM mà `F10` đã **loại khỏi phạm vi có chủ đích** (nợ `E`). Mỗi cái là một quyết định của user, **không** suy ra từ việc FE đã làm mock theo hướng khác. Đây cũng là lý do số quyết định ở §12.2 lớn hơn mọi phase trước.
+>
+> 🔴 **Bảng câu hỏi, không phải danh sách việc** (`BETaskDeliveryRules.md §5` lỗi #1). FE tự ghi: "nếu server đã có chức năng tương đương, trả contract/mapping thay vì tạo API trùng".
+
+### 12.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-15 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: cột của `BomHeader`/`BomLine`/`RoutingHeader`/`RoutingOperation`/`Shift`/`WorkCalendar`/`WorkCalendarException`/`WorkCenter`; mapping của `BomController`, `RoutingController`, `ShiftController`, `WorkCalendarController`, `WorkCenterController`, `CapacityController`; `CapacityUnitType`; `ImportTargetType`. **Chưa rà:** có `expectedVersion` trên PATCH master nào không; guard deactivate ca/lịch đang được tham chiếu; check vòng BOM có chạy lúc activate không (`B8`); `CapacityBoardService` chia tải theo ngày; `ScheduleAdjustmentRequest`; `WorkingWindowCalculator` với ca qua đêm + ngày nghỉ (FE A21).
+
+| Nhóm | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| **BOM** header | `bomCode`, `versionNumber`, `outputQuantity`, `outputUom`, `effectiveFrom`, `lockVersion` | Chỉ `revision` (string 40), `status`, `description`. **Không** có code, lượng đầu ra, ngày hiệu lực, số phiên bản | 🔴 **Quyết định** (D1–D3) |
+| BOM dòng | `componentQuantity` theo lô đầu ra; `quantityPer` = projection; `scrapRate` scale 8 | `quantity_per NUMERIC(19,6)` per-unit; `scrap_rate NUMERIC(9,6)` | Theo D1, D11 |
+| BOM ghi | **Một** `PUT bom-drafts` lưu header + mọi dòng atomic | 11 endpoint cũ, header và từng dòng là **request riêng** — không atomic ở mức "một lần lưu form" | **CODE** (D4) |
+| BOM vòng đời | copy → DRAFT mới, `/versions`, `POST /deactivate`, chỉ DRAFT sửa được | Có `activate`, `DELETE` (deactivate), `ensureDraft` (`B73`). **Không** có copy, versions, POST deactivate | **CODE** |
+| BOM vòng | `CIRCULAR_BOM` lúc activate | `B8` ghi có check vòng — chưa rà nó chạy ở `activate` hay ở thêm dòng | Rà ở `G5-0` |
+| **Routing** phạm vi | `/plants/{plantId}/routings`, version theo **Plant + sản phẩm** | 🔴 **Company-scoped** (`/companies/{companyId}/routings`, cột `company_id`), 1 `ACTIVE`/item **trong company** (`F4`) | 🔴 **Quyết định** (D5) |
+| Routing công đoạn trước | `predecessorOperationIds` | **Không có** — đây đúng là nợ B, `C2-8` đã tách sang `C2-8b` chưa làm | **CODE** nếu D6 = làm |
+| Routing ghi/phiên bản | `PUT routing-drafts` cả graph, copy, `/versions`, `effectiveFrom`, `versionNumber` | Chỉ create + activate + `DELETE`; **không** có PATCH, copy, versions, `effectiveFrom`; `routing_version` string | **CODE** |
+| **Ca** | `workingIntervals[]` (nhiều khung), `effectiveFrom/To`, `workingMinutes` server tính | 🔴 **Một** khung `start_time`/`end_time` + `breaks[]` — quyết định có chủ đích của `C2-7`. **Không** có hiệu lực trên ca | 🔴 **Quyết định** (D7) |
+| Lịch | 7 weekday, ngày nghỉ có tên, hiệu lực | **Đã có** (`effective_from/to`, `WorkCalendarException.reason`) | Trả lời + mapping |
+| **Trung tâm** | `capacityUnitType` MACHINE/LINE/LABOR_TEAM, `capacityUnits` 1..999, `calendarId`, **`shiftIds[]`** | **Đã có** loại + số đơn vị + `work_calendar_id`. 🔴 **Không** có `shiftIds[]` — `C2-7` chốt "chỉ một cột `work_calendar_id`" | 🔴 **Quyết định** (D8) |
+| Master lifecycle | `POST /{id}/status` + `expectedVersion` | Có `/activate` + `/deactivate` + `DELETE` riêng | Trả lời — mapping, **không** thêm endpoint `/status` trùng |
+| **Bảng công suất** | Kỳ `[from, to]`, tải tính theo **phần giao nhau với kỳ** (segment) | `GET /plants/{id}/capacity-board?from&to` có. 🔴 `C2-8` §0.30 #4: **toàn bộ** thời lượng gán cho ngày bắt đầu — đúng thứ FE R11 gọi là sai ("không gán toàn tải vào mọi tuần") | 🔴 **Quyết định** (D9) |
+| Xem trước lịch | `POST /plants/{id}/capacity/preview` — không ghi gì | **Không tồn tại**. `WorkCalendarLookupService.computeEndInstant` (`C2-8`) là lõi tái dùng được | **CODE** |
+| Điều chỉnh | Đè lên công đoạn trước/sau ⇒ **từ chối** | 🔴 `B90`: **không chặn**, chỉ trả cờ `sequenceConflict` — quyết định có chủ đích của `C2-8` | 🔴 **Quyết định** (D10) |
+| **Nhập BOM Excel** | Mẫu `omniplant-bom-v1`, gom dòng theo mã BOM, tạo N BOM `DRAFT` atomic | Hạ tầng batch của `G3` (`ImportTargetType` = `ITEM`/`SUPPLIER`/`CUSTOMER`, commit một transaction, lịch sử theo owner) **tái dùng được**; mẫu khác (nhóm nhiều dòng thành một BOM) | **CODE** — phụ thuộc D1 (lượng đầu ra) |
+| Decimal | Chuỗi trên wire | Toàn repo trả JSON number (`G2` Q12, `G4` D9) | Trả lời — **không đổi** |
+
+### 12.2 Quyết định phải chốt với user trước khi code
+
+| # | Quyết định | Khuyến nghị BE | Lý do | Chặn |
+|---|---|---|---|---|
+| **D1** | BOM có `outputQuantity` + `componentQuantity` theo lô, `quantityPer` thành projection (Q1, Q2, Q6)? | **Có, nhưng lưu `quantityPer` như hiện nay** — `outputQuantity` là cột mới mặc định `1` cho mọi BOM cũ; `componentQuantity = quantityPer × outputQuantity` tính lúc đọc | Nợ `E` bị `F10` loại vì "đổi công thức nổ BOM, đổi số MRP lẫn component line của mọi WO". Lưu `quantityPer` làm nguồn giữ MRP, WO snapshot, costing roll-up, tree **không đổi một chữ số nào** — chỉ thêm cách nhập/hiển thị theo lô. Hướng ngược lại (lưu theo lô, chia ra khi đọc) đụng làm tròn ở **mọi** consumer | `G5-1`, `G5-5` |
+| **D2** | `bomCode` + `versionNumber` (server cấp, tăng theo Company + sản phẩm) cạnh `revision` (Q3) | **Có** — migration backfill `versionNumber` theo `created_at` từng family, `bomCode` sinh từ mã item + revision cho dữ liệu cũ; `revision` giữ là nhãn | Không parse `revision` cũ thành số (FE cũng nghiêng về vậy) | `G5-1` |
+| **D3** | `effectiveFrom` trên BOM; `null` = không trì hoãn; ngày tính theo timezone nào (Q4, Q5) | **Có, `null` = hiệu lực ngay**; ngày so theo timezone **Company**… nhưng `companies` **không có cột timezone** (chỉ `plants` có) ⇒ đề xuất so theo **UTC** hoặc thêm cột — hỏi user | FE giả định có timezone Company; repo không có | `G5-1` |
+| **D4** | Atomic SAVE `PUT /companies/{C}/bom-drafts` cạnh 11 endpoint cũ (Q7) | **Có, song song** — giữ nguyên API cũ (cùng tiền lệ `G2` D1, `G3` D1) | Đổi tại chỗ là breaking cho seed script và FE adapter cũ | `G5-1` |
+| **D5** | Routing chuyển sang **Plant-scoped** | 🔴 **Không đổi phạm vi** — giữ company-scoped, thêm filter `plantId` suy từ work center của công đoạn nếu FE cần lọc | Đổi `company_id` → `plant_id` là migration phá dữ liệu (routing cũ không có plant; `B_wc2` chỉ khoá một routing vào **một** plant qua work center), đổi `F4` B48–B52, đổi `RoutingLookupService` mà MRP/WO đang gọi. Lợi ích FE (lọc theo nhà máy) đạt được bằng filter | `G5-2` |
+| **D6** | Làm `predecessorOperationIds` (nợ B / `C2-8b`) | **Có** — bảng nối `routing_operation_predecessors`, kiểm "trước phải có `sequence` nhỏ hơn", không vòng | Đây là nợ đã ghi tên sẵn, FE là consumer đầu tiên. Preview vẫn tuần tự theo `sequence` (Q17) nên **không** đụng `WorkOrderService.scheduleOperations` | `G5-2` |
+| **D7** | Ca có **nhiều** khung làm việc + hiệu lực | 🔴 **Không** — giữ một khung + `breaks[]` (`C2-7`); ca "08–12 và 13–17" biểu diễn bằng một khung 08–17 có nghỉ 12–13. Hiệu lực đã nằm ở **lịch** | Đổi sang nhiều khung viết lại `ShiftTimeWindow.containsInterval` + `WorkingWindowCalculator` — chính chỗ `§0.29` #2 cảnh báo sửa là ảnh hưởng mọi tính toán giờ làm. FE A20/A21 đều biểu diễn được bằng mô hình hiện tại. Trả FE mapping | `G5-3` |
+| **D8** | Trung tâm có `shiftIds[]` (tập con ca của lịch) | 🔴 **Không** — trung tâm làm theo **mọi** ca của lịch gán cho nó (`C2-7`); cần tập ca khác thì tạo lịch khác | Thêm `shiftIds[]` tạo hai nguồn sự thật cho "trung tâm làm giờ nào" và mọi chỗ đọc lịch phải lọc thêm | `G5-3` |
+| **D9** | Bảng công suất tính tải theo **phần giao nhau với kỳ** thay vì gán cả công đoạn cho ngày bắt đầu (R11) | **Có** — đây là chỗ FE đúng: một công đoạn 3 ngày đang bị dồn cả vào ngày đầu, báo quá tải giả ngày 1 và trống giả ngày 2–3. `C2-8` ghi rõ đó là đơn giản hoá có chủ đích, không phải đúng | Đổi số trên một endpoint đang chạy ⇒ **breaking về số liệu**, cần ghi rõ cho FE | `G5-4` |
+| **D10** | Điều chỉnh đè công đoạn trước/sau ⇒ **từ chối** (đảo `B90`) | **Hỏi user — hai phương án hợp lý.** (a) Theo FE: chặn `409`. (b) Giữ `B90`: cho lưu + cờ `sequenceConflict` (đã có trên response) | `B90` chọn "manager tự xử lý" có chủ đích; FE chọn chặn. Không có đúng/sai kỹ thuật — là chính sách | `G5-4` |
+| **D11** | `scrapRate` scale 8 (Q19) | **Không** — giữ scale 6 (`NUMERIC(9,6)`), từ chối input > 6 số lẻ bằng `@Digits` (cùng tinh thần `G4` R08) | `0.000001%` không phải nhu cầu nghiệp vụ thật; đổi scale đụng MRP gross formula + cột snapshot WO | `G5-1` |
+| **D12** | Nhập BOM Excel trong `G5` hay tách phase (FE ghi "Mới") | **Trong `G5`**, nhưng **sau** `G5-1` (cần `outputQuantity` + atomic save) | Hạ tầng `G3` làm phần khó (batch, commit atomic, owner, idempotency); phần mới là gom nhóm dòng + validate theo nhóm | `G5-5` |
+
+> Các câu FE còn lại trả lời bằng hành vi có sẵn hoặc theo hướng FE nghiêng: Q8 (lịch nằm trong hiệu lực ca — **mất nghĩa nếu D7 = không**, ca không có hiệu lực), Q9 (trung tâm còn routing `ACTIVE` ⇒ chặn deactivate — **có**), Q10 (sửa ca/lịch không tự dời WO đã lên lịch — **đúng hành vi hiện tại**, lịch chỉ sinh lúc `release()`, `B89`), Q11 (90 ngày inclusive), Q12 (chỉ timezone không DST lượt đầu), Q13 (đọc lịch sử nhập chỉ cần READ — giống `G3`), Q14 (retention theo `G3`), Q15 (ngưỡng 85%), Q16 (chỉ PLANNED/RELEASED chưa bắt đầu), Q17 (preview tuần tự theo `sequence`), Q18 (một nháp mở/routing family; BOM nhiều nháp).
+
+### 12.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+> Migration tiếp theo là **`V73`** (`V69`–`V72` đã dùng ở `G2`–`G4`). ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` lại phải đánh số lại thêm một lần.
+
+#### `G5-0` — Đọc nốt + baseline + trả lời §5 *(không code `src/main`)*
+
+1. Đọc phần "chưa rà" §12.1 — ưu tiên: check vòng BOM chạy ở đâu (A08), `CapacityBoardService` chia tải (D9), `WorkingWindowCalculator` với ca qua đêm + ngày nghỉ theo ngày bắt đầu ca (A21), guard deactivate ca/lịch đang được dùng (A23).
+2. `mvn -o clean verify` với Docker ⇒ baseline thật (số cuối đã ghi: **1461 unit + 202 IT**, `G4` — **đo lại**).
+3. Chạy live các endpoint FE liệt kê ở §3.2 + capacity-board trên DB dùng-một-lần để có request/response **thật** (`B2`).
+4. Chốt D1–D12 với user.
+
+#### `G5-1` — BOM: lượng đầu ra, phiên bản, atomic save, copy *(chặn bởi D1–D4, D11)*
+
+- Migration: `bom_headers` + `bom_code`, `version_number`, `output_quantity` (DEFAULT 1), `effective_from`; backfill theo D2; `UNIQUE (company_id, bom_code)` và `(company_id, parent_item_id, version_number)`.
+- `PUT /v1/companies/{C}/bom-drafts` (header + mọi dòng một transaction; `expectedVersion` khi cập nhật), `POST /v1/boms/{id}/copy`, `GET /v1/boms/{id}/versions`, `POST /v1/boms/{id}/deactivate`; list thêm `search` + `latestOnly`.
+- Activate: kiểm `effectiveFrom`, vòng (`B8`), khoá family để **hai activate đồng thời không để lại hai `ACTIVE`** (bài học `G2` #1 — đừng tin constraint/trigger một mình ở `READ COMMITTED`).
+- **Test:** `*IT` concurrency activate (`NOT_SUPPORTED` + `TransactionTemplate`), rollback khi dòng cuối lỗi, `FlywayMigrationIT` backfill. 🔴 **Regression:** MRP/WO snapshot/costing cho BOM cũ phải ra **đúng số cũ** (D1) — assert literal trên fixture có sẵn.
+
+#### `G5-2` — Routing: công đoạn trước, ghi cả graph, phiên bản *(chặn bởi D5, D6)*
+
+- Migration: bảng `routing_operation_predecessors`; `routing_headers` + `version_number`, `effective_from`.
+- `PUT .../routing-drafts` (graph theo `clientKey`), copy, versions, `POST /deactivate`; một nháp mở/family (Q18).
+- 🔴 `WorkOrderService.snapshotRouting` **không** chụp predecessor ở lượt này trừ khi user yêu cầu — snapshot WO là bất biến `B49`/`B56`.
+
+#### `G5-3` — Ca / Lịch / Trung tâm *(chặn bởi D7, D8)*
+
+- Theo khuyến nghị D7/D8: **không** đổi mô hình; thêm `workingMinutes` (server tính) trên response ca, `expectedVersion` trên PATCH nếu `G5-0` thấy thiếu, guard deactivate khi còn tham chiếu `ACTIVE` (A23) + chặn deactivate trung tâm còn routing `ACTIVE` (Q9).
+- Nếu user chọn đổi mô hình ⇒ gói này phình to, phải viết kế hoạch riêng trước.
+
+#### `G5-4` — Công suất: phân bổ theo kỳ + xem trước + điều chỉnh *(chặn bởi D9, D10)*
+
+- `CapacityBoardService`: tải = phần giao nhau với kỳ (segments). 🔴 JPQL bucket theo ngày (`function('timezone', …)`, `§0.30` #1) sẽ phải đổi — `WorkOrderOperationRepositoryIT` là guard có sẵn.
+- `POST /v1/plants/{P}/capacity/preview` — chỉ đọc; tái dùng `WorkCalendarLookupService`; trả `segments[]`, `sourceVersions`; **không** ghi WO/reservation/movement (A30 đo delta = 0).
+- Điều chỉnh theo D10.
+- **Test:** ví dụ số của FE (A27: `required 1030 / in 960 / after 70 / demand 1130 / overload 170`) làm fixture literal; ca qua đêm A21 (`450` / `330`).
+
+#### `G5-5` — Nhập BOM Excel *(chặn bởi D12; sau `G5-1`)*
+
+- `ImportTargetType.BOM` + handler; mẫu `omniplant-bom-v1` (gom theo cột A, kiểm nhất quán B/C/D/I trong nhóm, không trùng component, sản phẩm đã có bất kỳ BOM nào ⇒ chặn); commit tạo N BOM `DRAFT` qua đúng service của `G5-1` (không INSERT thẳng — bài học `§0.45` #4).
+- Tái dùng nguyên `DataImportBatchCommitter`/guard owner của `G3`; 🔴 cẩn thận bẫy `flush()` trong `try` (`§0.51` #2): va chạm ở **nhóm cuối** mới lộ.
+
+#### `G5-6` — Nghiệm thu + bàn giao
+
+- `mvn -o clean verify`; số case **≥ baseline** (`R10`).
+- Nghiệm thu mutation, ưu tiên chỗ mock không thấy: bỏ khoá family khi activate (IT concurrency phải đỏ), bỏ transaction chung của atomic save, preview vô tình ghi một dòng, tải theo kỳ quay về "gán ngày bắt đầu".
+- Smoke HTTP thật A01–A36 phần thuộc BE.
+- Docs: `BE_RESPONSE_GD_05_*.md`, `CLAUDE.md §0`, `module/bom|routing|shift|workcenter|workorder|dataimport/CLAUDE.md` (bất biến mới), `docs/api-guide-for-frontend.md`.
+
+### 12.4 Breaking change dự kiến
+
+| Thay đổi | Breaking? |
+|---|---|
+| Field mới trên BOM/Routing, endpoint atomic/copy/versions/preview, `ImportTargetType.BOM` | **Không** (additive) |
+| Bảng công suất tính theo phần giao nhau với kỳ (D9) | **Có — về số liệu**: cùng request, con số tải/quá tải theo ngày khác trước (sửa sai) |
+| Điều chỉnh đè công đoạn ⇒ 409 (nếu D10 = chặn) | **Có** — request trước đây 200 + cờ nay bị từ chối |
+| Deactivate ca/lịch/trung tâm còn tham chiếu `ACTIVE` ⇒ chặn | **Có** — chặn mới |
+| Routing đổi phạm vi Plant (nếu D5 = đổi) | **Có, lớn** — đổi path + migration dữ liệu |
+
+### 12.5 Ngoài phạm vi *(theo FE §1.2 + quyết định BE)*
+
+Gantt kéo-thả, optimizer, phân máy/người cụ thể, xử lý va chạm nhiều WO, tự release/reserve, sửa snapshot WO, tồn kho/WIP/giá thành khi kích hoạt BOM, MES, serial, import Routing/Ca/Lịch/Trung tâm, partial import/upsert/kích hoạt BOM qua file, tự kích hoạt phiên bản tương lai, decimal-as-string, timezone có DST (Q12).
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -710,6 +838,16 @@ Chuyển khác Plant, in-transit, sửa/huỷ/đảo phiếu đã post, chuyển
   - [x] `G4-3` kiểm đếm tuyệt đối `POST /inventory/counts` + `version` trên balance
   - [x] `G4-4` read model: movement actor/trace + detail, aggregate `search` + `heldLotQuantity`/expired, reservations, receive `expiresAt`, `@Digits(6)`
   - [x] `G4-5` `mvn -o clean verify` (1461 + 202) + mutation 7/7 + smoke 4 lượt + `BE_RESPONSE_GD_04_2026-10-15.md` + docs
+  - [ ] FE nghiệm thu
+- [ ] **`G5`** — FE handoff Giai đoạn 5: định mức, quy trình, công suất *(đã lập kế hoạch 2026-10-15, §12)*
+  - [ ] `G5-0` đọc nốt phần "chưa rà" §12.1 + baseline đo thật + chạy live BOM/capacity hiện có
+  - [ ] Chốt 12 quyết định §12.2 (D1–D12) với user — **D5/D7/D8/D10 là đảo ngược thiết kế đã chốt**
+  - [ ] `G5-1` BOM: `outputQuantity`/`bomCode`/`versionNumber`/`effectiveFrom`, atomic save, copy, versions, khoá activate
+  - [ ] `G5-2` Routing: công đoạn trước (nợ B), ghi cả graph, copy, versions
+  - [ ] `G5-3` Ca/Lịch/Trung tâm: `workingMinutes`, `expectedVersion`, guard tham chiếu
+  - [ ] `G5-4` Công suất: tải theo phần giao nhau với kỳ, preview chỉ đọc, điều chỉnh theo D10
+  - [ ] `G5-5` Nhập BOM Excel (`ImportTargetType.BOM`, mẫu `omniplant-bom-v1`)
+  - [ ] `G5-6` `mvn -o clean verify` + mutation + smoke A01–A36 + `BE_RESPONSE_GD_05_*.md` + docs
   - [ ] FE nghiệm thu
 
 ---

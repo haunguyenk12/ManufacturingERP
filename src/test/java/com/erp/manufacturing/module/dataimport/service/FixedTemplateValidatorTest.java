@@ -60,7 +60,7 @@ class FixedTemplateValidatorTest {
                 new ItemImportTargetHandler(mock(ItemService.class), itemLookup, uomLookup),
                 new SupplierImportTargetHandler(mock(SupplierService.class), supplierLookup),
                 new CustomerImportTargetHandler(mock(CustomerService.class), customerLookup)));
-        validator = new FixedTemplateValidator(registry);
+        validator = new FixedTemplateValidator(registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class));
         when(itemLookup.findItemsByCode(any(), anyCollection())).thenReturn(Map.of());
         when(supplierLookup.findSuppliersByCode(any(), anyCollection())).thenReturn(Map.of());
         when(customerLookup.findCustomersByCode(any(), anyCollection())).thenReturn(Map.of());

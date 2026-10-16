@@ -6,6 +6,8 @@ import com.erp.manufacturing.module.bom.dto.BomLineResponse;
 import com.erp.manufacturing.module.bom.dto.BomResponse;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Comparator;
 import java.util.List;
 
@@ -31,7 +33,13 @@ public class BomMapper {
                 bom.getDescription(),
                 bom.getCreatedAt(),
                 bom.getUpdatedAt(),
-                lines);
+                lines,
+                bom.getBomCode(),
+                bom.getVersionNumber(),
+                bom.getOutputQuantity(),
+                bom.getParentItem().getUnit(),
+                bom.getEffectiveFrom(),
+                bom.getVersion());
     }
 
     public BomLineResponse toResponse(BomLine line) {
@@ -43,6 +51,18 @@ public class BomMapper {
                 line.getComponentItem().getCode(),
                 line.getComponentItem().getName(),
                 line.getQuantityPer(),
-                line.getScrapRate());
+                line.getScrapRate(),
+                componentQuantity(line.getQuantityPer(), line.getBom().getOutputQuantity()),
+                line.getComponentItem().getUnit());
+    }
+
+    /**
+     * {@code quantityPer × outputQuantity} at the column scale. Exact for every line the atomic save
+     * wrote (it refuses a quotient that needs more than 6 decimals), so the figure a user typed comes
+     * back unchanged; HALF_UP only ever matters for a line written per unit through the old endpoints.
+     */
+    public static BigDecimal componentQuantity(BigDecimal quantityPer, BigDecimal outputQuantity) {
+        BigDecimal output = outputQuantity == null ? BigDecimal.ONE : outputQuantity;
+        return quantityPer.multiply(output).setScale(6, RoundingMode.HALF_UP);
     }
 }

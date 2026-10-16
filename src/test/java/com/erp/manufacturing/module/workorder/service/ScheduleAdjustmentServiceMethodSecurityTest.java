@@ -106,9 +106,10 @@ class ScheduleAdjustmentServiceMethodSecurityTest {
                 .thenReturn(Optional.of(operation));
         when(workOrderOperationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(WORK_ORDER_ID))
                 .thenReturn(List.of(operation));
-        when(workOrderOperationRepository.save(operation)).thenReturn(operation);
+        when(workOrderOperationRepository.saveAndFlush(operation)).thenReturn(operation);
         when(capacityBoardService.buildDayContext(any(), any(), any(), any()))
-                .thenReturn(new CapacityBoardService.DayContext(Map.of(), Map.of(), Map.of()));
+                .thenReturn(new CapacityBoardService.DayContext(java.time.ZoneId.of("UTC"), java.time.LocalDate.of(2026, 1, 5),
+                        java.time.LocalDate.of(2026, 1, 5), Map.of(), Map.of(), Map.of()));
 
         assertThatCode(() -> scheduleAdjustmentService.adjust(WORK_ORDER_ID, OPERATION_ID,
                 new ScheduleAdjustmentRequest(START, END.plusSeconds(1800), "Reason", 0L)))
@@ -122,7 +123,10 @@ class ScheduleAdjustmentServiceMethodSecurityTest {
         @Bean
         ScheduleAdjustmentService scheduleAdjustmentService(WorkOrderOperationRepository workOrderOperationRepository,
                                                               CapacityBoardService capacityBoardService) {
-            return new ScheduleAdjustmentService(workOrderOperationRepository, capacityBoardService);
+            return new ScheduleAdjustmentService(workOrderOperationRepository,
+                    mock(com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository.class),
+                    capacityBoardService,
+                    mock(com.erp.manufacturing.module.shift.service.WorkCalendarLookupService.class));
         }
 
         @Bean(name = "workOrderPermissionGuard")

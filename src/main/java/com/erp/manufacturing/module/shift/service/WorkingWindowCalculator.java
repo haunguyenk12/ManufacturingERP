@@ -119,6 +119,19 @@ public final class WorkingWindowCalculator {
 
     private static final int MAX_HORIZON_DAYS = 3650;
 
+    /**
+     * Net minutes of one occurrence of the shift: its window minus every break (G5, FE A20 — 08:00-17:00
+     * with a 12:00-13:00 break is 480). Breaks are validated to sit inside the window and not overlap,
+     * so a plain subtraction is exact.
+     */
+    public static int workingMinutes(Shift shift) {
+        int minutes = ShiftTimeWindow.durationMinutes(shift.getStartTime(), shift.getEndTime());
+        for (ShiftBreak shiftBreak : shift.getBreaks()) {
+            minutes -= ShiftTimeWindow.durationMinutes(shiftBreak.getStartTime(), shiftBreak.getEndTime());
+        }
+        return minutes;
+    }
+
     private static List<WorkingInterval> subtract(List<WorkingInterval> pieces, LocalDateTime breakStart, LocalDateTime breakEnd) {
         List<WorkingInterval> result = new ArrayList<>();
         for (WorkingInterval piece : pieces) {

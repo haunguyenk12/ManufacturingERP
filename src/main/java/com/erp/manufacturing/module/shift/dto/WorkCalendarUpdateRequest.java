@@ -19,5 +19,7 @@ public record WorkCalendarUpdateRequest(
         LocalDate effectiveFrom,
         LocalDate effectiveTo,
         List<@Valid WorkCalendarWeeklyShiftRequest> weeklyShifts,
-        List<@Valid WorkCalendarExceptionRequest> exceptions
+        List<@Valid WorkCalendarExceptionRequest> exceptions,
+        /** Optional (G5): when sent, a stale value is 409 CONCURRENT_MODIFICATION and nothing changes. */
+        Long expectedVersion
 ) {}

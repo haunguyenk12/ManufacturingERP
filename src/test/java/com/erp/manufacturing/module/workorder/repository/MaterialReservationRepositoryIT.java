@@ -191,6 +191,7 @@ class MaterialReservationRepositoryIT extends AbstractPostgresIntegrationTest {
         component = entityManager.persistFlushFind(component);
 
         BomHeader bom = BomHeader.builder().company(company).parentItem(product).revision("R1")
+                .bomCode("BOM-R1").versionNumber(1)
                 .status(BomStatus.ACTIVE).build();
         bom.setCreatedAt(now);
         bom.setUpdatedAt(now);

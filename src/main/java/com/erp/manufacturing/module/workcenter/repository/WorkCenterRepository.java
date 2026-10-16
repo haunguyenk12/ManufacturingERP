@@ -4,6 +4,7 @@ import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -18,6 +19,9 @@ public interface WorkCenterRepository extends JpaRepository<WorkCenter, UUID> {
 
     List<WorkCenter> findByPlantPlantIdAndCodeIn(UUID plantId, Collection<String> codes);
 
+    @EntityGraph(attributePaths = {"workCalendar"})
+    List<WorkCenter> findWithCalendarByPlantPlantIdAndStatus(UUID plantId, OrganizationStatus status);
+
     /**
      * No {@code cast(... as string)} here, unlike {@code UomRepository.search}: the "lower(bytea)"
      * hazard (CLAUDE.md §0.24) is specific to a {@code null} String parameter flowing into
@@ -31,8 +35,15 @@ public interface WorkCenterRepository extends JpaRepository<WorkCenter, UUID> {
             from WorkCenter w
             where w.plant.plantId = :plantId
               and (:status is null or w.status = :status)
+              and (:search is null
+                   or lower(w.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.name) like lower(concat('%', cast(:search as string), '%')))
             """)
     Page<WorkCenter> search(@Param("plantId") UUID plantId,
                             @Param("status") OrganizationStatus status,
+                            @Param("search") String search,
                             Pageable pageable);
+
+    /** G5 (FE A23): an ACTIVE work center still runs on this calendar. */
+    boolean existsByWorkCalendarWorkCalendarIdAndStatus(UUID workCalendarId, OrganizationStatus status);
 }

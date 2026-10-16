@@ -49,5 +49,10 @@ public enum ImportErrorCode {
     TEXT_REQUIRED,
 
     /** Fixed template (G3): date, boolean or error cell where text is expected. */
-    CELL_TYPE
+    CELL_TYPE,
+    /**
+     * BOM template (G5): a row disagrees with the first row of its BOM group on a column that must be
+     * repeated identically (product, output quantity, output UOM, notes).
+     */
+    GROUP_MISMATCH
 }

@@ -16,5 +16,7 @@ public record ShiftUpdateRequest(
         @Size(max = 255) String name,
         LocalTime startTime,
         LocalTime endTime,
-        List<@Valid ShiftBreakRequest> breaks
+        List<@Valid ShiftBreakRequest> breaks,
+        /** Optional (G5): when sent, a stale value is 409 CONCURRENT_MODIFICATION and nothing changes. */
+        Long expectedVersion
 ) {}

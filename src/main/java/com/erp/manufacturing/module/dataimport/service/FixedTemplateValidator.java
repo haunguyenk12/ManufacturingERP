@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.dataimport.service;
 import com.erp.manufacturing.module.dataimport.domain.DataImportKind;
 import com.erp.manufacturing.module.dataimport.domain.ImportCellError;
 import com.erp.manufacturing.module.dataimport.domain.ImportErrorCode;
+import com.erp.manufacturing.module.dataimport.target.BomImportHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetRegistry;
 import com.erp.manufacturing.module.dataimport.target.PartnerImportTargetHandler;
@@ -11,6 +12,7 @@ import com.erp.manufacturing.module.dataimport.template.FixedTemplateSchema.Colu
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -38,8 +40,12 @@ import java.util.regex.Pattern;
 public class FixedTemplateValidator {
 
     private static final Pattern CODE_PATTERN = Pattern.compile("^[A-Z0-9._-]+$");
+    /** G5: plain decimal, no sign, no exponent, at most 13 integer digits and 6 decimals. */
+    private static final Pattern DECIMAL_PATTERN = Pattern.compile("^\\d{1,13}(\\.\\d{1,6})?$");
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private final ImportTargetRegistry registry;
+    private final BomImportHandler bomImportHandler;
 
     /** One row going in: the values read or stored, plus issues already found while reading cells. */
     public record RowInput(int line, Map<String, String> values, List<ImportCellError> issues) {
@@ -64,6 +70,12 @@ public class FixedTemplateValidator {
             }
             results.add(new RowResult(row.line(), values, issues));
         }
+        if (kind == DataImportKind.BOMS) {
+            // A BOM spans several rows, so "the same code twice" is the format, not an error: the group
+            // rules and every database rule live in the BOM handler (G5).
+            bomImportHandler.validate(companyId, results);
+            return results;
+        }
         flagRepeatedCodes(kind, results);
         applyHandlerRules(kind, companyId, results);
         return results;
@@ -77,6 +89,10 @@ public class FixedTemplateValidator {
         }
         String value = values.getOrDefault(field, "");
         values.put(field, value);
+        if (value.isBlank() && column.valueKind() == FixedTemplateSchema.ValueKind.PERCENT) {
+            values.put(field, "0");
+            return;
+        }
         if (value.isBlank()) {
             if (column.required()) {
                 issues.add(ImportCellError.of(letter, field, ImportErrorCode.REQUIRED_MISSING,
@@ -110,6 +126,18 @@ public class FixedTemplateValidator {
             }
             case PHONE, UPPER_TEXT -> {
                 // Length is the only rule; the cell type was checked while reading.
+            }
+            case QUANTITY -> {
+                if (!DECIMAL_PATTERN.matcher(value).matches() || new BigDecimal(value).signum() <= 0) {
+                    issues.add(ImportCellError.of(letter, field, ImportErrorCode.INVALID_FORMAT,
+                            "Column " + letter + " must be a number greater than 0 with at most 6 decimals"));
+                }
+            }
+            case PERCENT -> {
+                if (!DECIMAL_PATTERN.matcher(value).matches() || new BigDecimal(value).compareTo(HUNDRED) >= 0) {
+                    issues.add(ImportCellError.of(letter, field, ImportErrorCode.INVALID_FORMAT,
+                            "Column " + letter + " must be a percentage from 0 to below 100"));
+                }
             }
         }
     }

@@ -103,7 +103,7 @@ class WorkCenterMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_WORK_CENTER_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(false);
 
-        assertThatThrownBy(() -> workCenterService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> workCenterService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCenterRepository);
@@ -115,9 +115,9 @@ class WorkCenterMethodSecurityTest {
     void list_allowedWhenPlantReadScopePresent() {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_WORK_CENTER_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(true);
-        when(workCenterRepository.search(eq(PLANT_ID), any(), any())).thenReturn(Page.empty());
+        when(workCenterRepository.search(eq(PLANT_ID), any(), any(), any())).thenReturn(Page.empty());
 
-        assertThatCode(() -> workCenterService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatCode(() -> workCenterService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -139,7 +139,7 @@ class WorkCenterMethodSecurityTest {
                 any(), eq("PERM_WORK_CENTER_MANAGE"), eq(WORK_CENTER_ID))).thenReturn(false);
 
         assertThatThrownBy(() -> workCenterService.update(WORK_CENTER_ID,
-                new WorkCenterUpdateRequest("New name", null, null, null, null)))
+                new WorkCenterUpdateRequest("New name", null, null, null, null, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCenterRepository);
@@ -179,7 +179,9 @@ class WorkCenterMethodSecurityTest {
                                             OrganizationLookupService organizationLookupService,
                                             WorkCalendarLookupService workCalendarLookupService,
                                             WorkCenterMapper mapper) {
-            return new WorkCenterService(workCenterRepository, organizationLookupService, workCalendarLookupService, mapper);
+            return new WorkCenterService(workCenterRepository, organizationLookupService, workCalendarLookupService,
+                    mock(com.erp.manufacturing.module.routing.service.RoutingLookupService.class),
+                    mock(com.erp.manufacturing.module.workorder.service.query.WorkCenterLoadLookupService.class), mapper);
         }
 
         @Bean WorkCenterMapper workCenterMapper() { return new WorkCenterMapper(); }

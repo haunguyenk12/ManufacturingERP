@@ -25,8 +25,12 @@ public interface ShiftRepository extends JpaRepository<Shift, UUID> {
             from Shift s
             where s.plant.plantId = :plantId
               and (:status is null or s.status = :status)
+              and (:search is null
+                   or lower(s.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(s.name) like lower(concat('%', cast(:search as string), '%')))
             """)
     Page<Shift> search(@Param("plantId") UUID plantId,
                         @Param("status") OrganizationStatus status,
+                        @Param("search") String search,
                         Pageable pageable);
 }

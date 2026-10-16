@@ -234,6 +234,21 @@ Còn lại của bảng mã FE đề xuất ánh xạ vào mã **sẵn có**: `S
 
 Timezone sai ở Plant **không** có mã riêng: dùng `VALIDATION_ERROR` + `errors[{field:"timezone"}]` (tương đương `INVALID_TIMEZONE` FE đề xuất, xem bất biến `B140`).
 
+**Constant thêm ở `G5` (2026-10-16)** — BOM / quy trình / công suất:
+
+| `code` | HTTP | Khi nào | Vì sao không tái dùng mã có sẵn |
+|---|---|---|---|
+| `EFFECTIVE_DATE_FUTURE` | 409 | activate BOM/routing có `effectiveFrom` > giờ server | cách xử lý (chờ / đổi ngày) khác `STATE_CONFLICT`; không bao giờ tự activate khi tới ngày |
+| `OPEN_DRAFT_EXISTS` | 409 | lưu nháp mới / sao chép routing khi sản phẩm đã có `DRAFT` | FE mở nháp có sẵn thay vì tải lại |
+| `REFERENCE_IN_USE` | **422** | ngừng ca (trên lịch `ACTIVE`), lịch (trung tâm `ACTIVE`), trung tâm (routing `ACTIVE` / WO chưa xong) | luật master data như `ACTIVE_CHILDREN_EXIST` (422), FE đề xuất 409; khác hướng (được tham chiếu, không phải có con) |
+| `OPERATION_SEQUENCE_CONFLICT` | 409 | điều chỉnh lịch chồng công đoạn trước/sau (D10, thay `B90`) | FE giữ form và báo xung đột chuỗi, không tải lại |
+| `SCHEDULING_UNAVAILABLE` | 409 | xem trước: trung tâm không có lịch `ACTIVE` / không có giờ làm trong 180 ngày sau kỳ | phân biệt "không xếp được" với dữ liệu sai |
+
+Còn lại của bảng mã FE ánh xạ vào mã **sẵn có**: `CIRCULAR_BOM` → `BOM_CIRCULAR_REFERENCE` (422); `INVALID_STATE` →
+`STATE_CONFLICT`; `DUPLICATE_CODE`/`BOM_OUTPUT_EXISTS` → `RESOURCE_ALREADY_EXISTS` (API) hoặc `ALREADY_EXISTS` (lỗi dòng nhập);
+`VERSION_CONFLICT` → `CONCURRENT_MODIFICATION`; `DUPLICATE_COMPONENT` → `VALIDATION_ERROR` + `errors[{field}]`;
+`REFERENCE_UNAVAILABLE` → `RESOURCE_INACTIVE`/`ENTITY_NOT_FOUND`; `IMPORT_*` → mã của `G3`.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

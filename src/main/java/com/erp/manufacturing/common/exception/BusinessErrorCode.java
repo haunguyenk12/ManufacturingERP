@@ -60,6 +60,24 @@ public enum BusinessErrorCode implements ErrorCode {
      * {@link #STATE_CONFLICT} so the client can say "nothing to record" instead of "refresh and retry".
      */
     NO_CHANGE                 ("NO_CHANGE",                 "The request would not change anything",         HttpStatus.CONFLICT),
+    /**
+     * G5: activating a BOM/routing version whose {@code effectiveFrom} is still in the future. Not a
+     * plain STATE_CONFLICT because the remedy differs — wait, or change the date — and nothing is
+     * ever activated automatically when the date arrives (FE §1.2).
+     */
+    EFFECTIVE_DATE_FUTURE     ("EFFECTIVE_DATE_FUTURE",     "The version is not effective yet",              HttpStatus.CONFLICT),
+    /** G5 (FE Q18): a routing product already has a DRAFT version; open that one instead of a second. */
+    OPEN_DRAFT_EXISTS         ("OPEN_DRAFT_EXISTS",         "An open draft already exists for this product", HttpStatus.CONFLICT),
+    /**
+     * G5: deactivating master data that ACTIVE records still use (a shift on an ACTIVE calendar, a
+     * calendar on an ACTIVE work center, a work center on an ACTIVE routing or an open work order).
+     * 422 like {@link #ACTIVE_CHILDREN_EXIST}: a master-data rule, not a document state conflict.
+     */
+    REFERENCE_IN_USE          ("REFERENCE_IN_USE",          "Record is still used by active records",        HttpStatus.UNPROCESSABLE_ENTITY),
+    /** G5 (D10, reverses B90): a manual schedule would overlap the previous or next operation. */
+    OPERATION_SEQUENCE_CONFLICT("OPERATION_SEQUENCE_CONFLICT", "Schedule overlaps the previous or next operation", HttpStatus.CONFLICT),
+    /** G5: the calendar has no working time to place the request in (no calendar, or none within the horizon). */
+    SCHEDULING_UNAVAILABLE    ("SCHEDULING_UNAVAILABLE",    "No working time is available to schedule this", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */

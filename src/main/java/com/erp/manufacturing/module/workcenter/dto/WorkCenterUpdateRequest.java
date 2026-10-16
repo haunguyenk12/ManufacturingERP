@@ -19,5 +19,7 @@ public record WorkCenterUpdateRequest(
         String description,
         CapacityUnitType capacityUnitType,
         @Positive Integer capacityUnits,
-        UUID workCalendarId
+        UUID workCalendarId,
+        /** Optional (G5): when sent, a stale value is 409 CONCURRENT_MODIFICATION and nothing changes. */
+        Long expectedVersion
 ) {}

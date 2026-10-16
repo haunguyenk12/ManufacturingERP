@@ -40,8 +40,10 @@ class WorkCalendarServiceTest {
     private final WorkCalendarRepository repository = mock(WorkCalendarRepository.class);
     private final ShiftRepository shiftRepository = mock(ShiftRepository.class);
     private final OrganizationLookupService organizationLookupService = mock(OrganizationLookupService.class);
+    private final com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService workCenterLookupService =
+            mock(com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService.class);
     private final WorkCalendarService service = new WorkCalendarService(
-            repository, shiftRepository, organizationLookupService, new WorkCalendarMapper());
+            repository, shiftRepository, workCenterLookupService, organizationLookupService, new WorkCalendarMapper());
 
     private static final UUID PLANT_ID = UUID.randomUUID();
     private static final UUID CALENDAR_ID = UUID.randomUUID();
@@ -185,7 +187,7 @@ class WorkCalendarServiceTest {
         WorkCalendar existing = existingCalendar();
         when(repository.findWithWeeklyShiftsByWorkCalendarId(CALENDAR_ID)).thenReturn(Optional.of(existing));
 
-        var response = service.update(CALENDAR_ID, new WorkCalendarUpdateRequest("New name", null, null, null, null));
+        var response = service.update(CALENDAR_ID, new WorkCalendarUpdateRequest("New name", null, null, null, null, null));
 
         assertThat(response.name()).isEqualTo("New name");
     }
@@ -198,7 +200,7 @@ class WorkCalendarServiceTest {
                 .workCalendar(existing).exceptionDate(LocalDate.of(2026, 2, 1)).reason("Tet").build());
         when(repository.findWithWeeklyShiftsByWorkCalendarId(CALENDAR_ID)).thenReturn(Optional.of(existing));
 
-        var response = service.update(CALENDAR_ID, new WorkCalendarUpdateRequest(null, null, null, null, List.of()));
+        var response = service.update(CALENDAR_ID, new WorkCalendarUpdateRequest(null, null, null, null, List.of(), null));
 
         assertThat(response.exceptions()).isEmpty();
     }
@@ -234,12 +236,46 @@ class WorkCalendarServiceTest {
     @DisplayName("list: passes the plantId and status straight through to the repository")
     void list_passesFiltersThrough() {
         when(repository.search(org.mockito.ArgumentMatchers.eq(PLANT_ID),
-                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), any()))
+                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any()))
                 .thenReturn(org.springframework.data.domain.Page.empty());
 
-        service.list(PLANT_ID, OrganizationStatus.ACTIVE, org.springframework.data.domain.PageRequest.of(0, 20));
+        service.list(PLANT_ID, OrganizationStatus.ACTIVE, null, org.springframework.data.domain.PageRequest.of(0, 20));
 
         verify(repository).search(org.mockito.ArgumentMatchers.eq(PLANT_ID),
-                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), any());
+                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any());
+    }
+
+    // ── G5 ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("G5 A23: a calendar an ACTIVE work center runs on cannot be deactivated")
+    void deactivate_calendarOfAnActiveWorkCenter_isReferenceInUse() {
+        WorkCalendar calendar = existingCalendar();
+        when(repository.findById(CALENDAR_ID)).thenReturn(Optional.of(calendar));
+        when(workCenterLookupService.isCalendarUsedByActiveWorkCenter(CALENDAR_ID)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deactivate(CALENDAR_ID))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.REFERENCE_IN_USE));
+        assertThat(calendar.isActive()).isTrue();
+    }
+
+    @Test
+    @DisplayName("G5: an INACTIVE shift cannot be scheduled on a calendar")
+    void create_inactiveShift_isRefused() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+        com.erp.manufacturing.module.shift.domain.Shift retired = com.erp.manufacturing.module.shift.domain.Shift.builder()
+                .shiftId(UUID.randomUUID()).plant(activePlant(PLANT_ID)).code("OLD").name("Old")
+                .startTime(java.time.LocalTime.of(8, 0)).endTime(java.time.LocalTime.of(17, 0))
+                .status(OrganizationStatus.INACTIVE).build();
+        when(shiftRepository.findAllById(any())).thenReturn(List.of(retired));
+
+        assertThatThrownBy(() -> service.create(PLANT_ID, new WorkCalendarCreateRequest("CAL-X", "X",
+                LocalDate.of(2026, 1, 1), null,
+                List.of(new WorkCalendarWeeklyShiftRequest(Weekday.MONDAY, retired.getShiftId())), null)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.RESOURCE_INACTIVE));
     }
 }

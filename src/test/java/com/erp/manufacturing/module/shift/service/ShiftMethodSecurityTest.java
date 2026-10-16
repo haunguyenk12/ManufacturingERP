@@ -99,7 +99,7 @@ class ShiftMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_SHIFT_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(false);
 
-        assertThatThrownBy(() -> shiftService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> shiftService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(shiftRepository);
@@ -110,9 +110,9 @@ class ShiftMethodSecurityTest {
     void list_allowedWhenPlantReadScopePresent() {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_SHIFT_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(true);
-        when(shiftRepository.search(eq(PLANT_ID), any(), any())).thenReturn(Page.empty());
+        when(shiftRepository.search(eq(PLANT_ID), any(), any(), any())).thenReturn(Page.empty());
 
-        assertThatCode(() -> shiftService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatCode(() -> shiftService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -132,7 +132,7 @@ class ShiftMethodSecurityTest {
         when(shiftPermissionGuard.hasShiftAccess(any(), eq("PERM_SHIFT_MANAGE"), eq(SHIFT_ID))).thenReturn(false);
 
         assertThatThrownBy(() -> shiftService.update(SHIFT_ID,
-                new ShiftUpdateRequest("New name", null, null, null)))
+                new ShiftUpdateRequest("New name", null, null, null, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(shiftRepository);
@@ -167,9 +167,14 @@ class ShiftMethodSecurityTest {
 
         @Bean
         ShiftService shiftService(ShiftRepository shiftRepository,
+                                   com.erp.manufacturing.module.shift.repository.WorkCalendarRepository workCalendarRepository,
                                    OrganizationLookupService organizationLookupService,
                                    ShiftMapper mapper) {
-            return new ShiftService(shiftRepository, organizationLookupService, mapper);
+            return new ShiftService(shiftRepository, workCalendarRepository, organizationLookupService, mapper);
+        }
+
+        @Bean com.erp.manufacturing.module.shift.repository.WorkCalendarRepository workCalendarRepository() {
+            return mock(com.erp.manufacturing.module.shift.repository.WorkCalendarRepository.class);
         }
 
         @Bean ShiftMapper shiftMapper() { return new ShiftMapper(); }

@@ -45,16 +45,20 @@ class ScheduleAdjustmentServiceTest {
     private static final Instant HOUR_3 = Instant.parse("2026-01-05T11:00:00Z");
 
     private static final CapacityBoardService.DayContext EMPTY_CONTEXT =
-            new CapacityBoardService.DayContext(Map.of(), Map.of(), Map.of());
+            new CapacityBoardService.DayContext(java.time.ZoneId.of("UTC"), java.time.LocalDate.of(2026, 1, 5),
+                    java.time.LocalDate.of(2026, 1, 5), Map.of(), Map.of(), Map.of());
 
     @Mock WorkOrderOperationRepository workOrderOperationRepository;
     @Mock CapacityBoardService capacityBoardService;
+    @Mock com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository productionExecutionRepository;
+    @Mock com.erp.manufacturing.module.shift.service.WorkCalendarLookupService workCalendarLookupService;
 
     ScheduleAdjustmentService service;
 
     @BeforeEach
     void setUp() {
-        service = new ScheduleAdjustmentService(workOrderOperationRepository, capacityBoardService);
+        service = new ScheduleAdjustmentService(workOrderOperationRepository, productionExecutionRepository,
+                capacityBoardService, workCalendarLookupService);
     }
 
     @Test
@@ -81,7 +85,7 @@ class ScheduleAdjustmentServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
-        verify(workOrderOperationRepository, never()).save(any());
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -96,7 +100,7 @@ class ScheduleAdjustmentServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
-        verify(workOrderOperationRepository, never()).save(any());
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -112,7 +116,7 @@ class ScheduleAdjustmentServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
-        verify(workOrderOperationRepository, never()).save(any());
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -127,7 +131,7 @@ class ScheduleAdjustmentServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.INVALID_INPUT));
-        verify(workOrderOperationRepository, never()).save(any());
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
     }
 
     /**
@@ -144,7 +148,7 @@ class ScheduleAdjustmentServiceTest {
         stubFind(workOrder, target);
         stubSiblings(workOrder, predecessor, target, successor);
         when(capacityBoardService.buildDayContext(any(), any(), any(), any())).thenReturn(EMPTY_CONTEXT);
-        when(workOrderOperationRepository.save(target)).thenReturn(target);
+        when(workOrderOperationRepository.saveAndFlush(target)).thenReturn(target);
 
         ScheduleAdjustmentResponse response = service.adjust(workOrder.getWorkOrderId(),
                 target.getWorkOrderOperationId(), request(HOUR_1, HOUR_1.plusSeconds(1800), 0L));
@@ -154,31 +158,99 @@ class ScheduleAdjustmentServiceTest {
         assertThat(response.plannedEndAt()).isEqualTo(HOUR_1.plusSeconds(1800));
         assertThat(response.scheduleAdjustmentReason()).isEqualTo("Reason");
         assertThat(target.getPlannedStartAt()).isEqualTo(HOUR_1);
-        verify(workOrderOperationRepository).save(target);
+        verify(workOrderOperationRepository).saveAndFlush(target);
     }
 
     /**
-     * A window that starts before the predecessor's own planned end is still persisted (decision #3
-     * — no auto-shift, no hard block) but is reported as a conflict for the manager to see.
+     * G5 (D10) reverses the C2-8 behaviour this case used to pin ("still persisted, flagged"): a window
+     * that starts before the predecessor's planned end is now refused, and nothing is written.
      */
     @Test
-    void adjust_windowStartingBeforePredecessorEnds_stillPersistsButFlagsSequenceConflict() {
+    void adjust_windowStartingBeforePredecessorEnds_isRefusedAndNothingIsWritten() {
         WorkOrder workOrder = workOrder();
         WorkCenter workCenter = workCenter();
         WorkOrderOperation predecessor = operation(workOrder, workCenter, 1, HOUR_0, HOUR_1);
         WorkOrderOperation target = operation(workOrder, workCenter, 2, HOUR_1, HOUR_2);
         stubFind(workOrder, target);
         stubSiblings(workOrder, predecessor, target);
-        when(capacityBoardService.buildDayContext(any(), any(), any(), any())).thenReturn(EMPTY_CONTEXT);
-        when(workOrderOperationRepository.save(target)).thenReturn(target);
 
         Instant newStart = HOUR_1.minusSeconds(1800); // 30 min before predecessor's planned end
-        ScheduleAdjustmentResponse response = service.adjust(workOrder.getWorkOrderId(),
-                target.getWorkOrderOperationId(), request(newStart, HOUR_2, 0L));
+        assertThatThrownBy(() -> service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), request(newStart, HOUR_2, 0L)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_SEQUENCE_CONFLICT));
 
-        assertThat(response.sequenceConflict()).isTrue();
-        assertThat(target.getPlannedStartAt()).isEqualTo(newStart);
-        verify(workOrderOperationRepository).save(target);
+        assertThat(target.getPlannedStartAt()).isEqualTo(HOUR_1);
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void adjust_windowEndingAfterSuccessorStarts_isRefusedAndNothingIsWritten() {
+        WorkOrder workOrder = workOrder();
+        WorkCenter workCenter = workCenter();
+        WorkOrderOperation target = operation(workOrder, workCenter, 1, HOUR_0, HOUR_1);
+        WorkOrderOperation successor = operation(workOrder, workCenter, 2, HOUR_1, HOUR_2);
+        stubFind(workOrder, target);
+        stubSiblings(workOrder, target, successor);
+
+        assertThatThrownBy(() -> service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), request(HOUR_0, HOUR_1.plusSeconds(60), 0L)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.OPERATION_SEQUENCE_CONFLICT));
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
+    }
+
+    /** FE Q16: a finished work order is history; its schedule is not moved any more. */
+    @Test
+    void adjust_completedWorkOrder_isRefusedAsStateConflict() {
+        WorkOrder workOrder = workOrder();
+        workOrder.setStatus(WorkOrderStatus.COMPLETED);
+        WorkOrderOperation target = operation(workOrder, workCenter(), 1, HOUR_0, HOUR_1);
+        stubFind(workOrder, target);
+
+        assertThatThrownBy(() -> service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), request(HOUR_1, HOUR_2, 0L)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
+    }
+
+    /** FE Q16: once output was reported against the operation, it has started and stays where it ran. */
+    @Test
+    void adjust_operationAlreadyStarted_isRefusedAsStateConflict() {
+        WorkOrder workOrder = workOrder();
+        WorkOrderOperation target = operation(workOrder, workCenter(), 1, HOUR_0, HOUR_1);
+        stubFind(workOrder, target);
+        when(productionExecutionRepository.existsByOperationWorkOrderOperationId(target.getWorkOrderOperationId()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), request(HOUR_1, HOUR_2, 0L)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verify(workOrderOperationRepository, never()).saveAndFlush(any());
+    }
+
+    /** Without plannedEndAt the server derives it like release does: setup 30 min on no calendar ⇒ +30 min. */
+    @Test
+    void adjust_withoutPlannedEnd_computesItFromTheOperationMinutes() {
+        WorkOrder workOrder = workOrder();
+        WorkOrderOperation target = operation(workOrder, workCenter(), 1, HOUR_0, HOUR_1);
+        target.setSetupMinutes(new BigDecimal("30"));
+        stubFind(workOrder, target);
+        stubSiblings(workOrder, target);
+        when(capacityBoardService.buildDayContext(any(), any(), any(), any())).thenReturn(EMPTY_CONTEXT);
+        when(workOrderOperationRepository.saveAndFlush(target)).thenReturn(target);
+
+        ScheduleAdjustmentResponse response = service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), new ScheduleAdjustmentRequest(HOUR_2, null, "Reason", 0L));
+
+        assertThat(response.plannedStartAt()).isEqualTo(HOUR_2);
+        assertThat(response.plannedEndAt()).isEqualTo(HOUR_2.plusSeconds(1800));
     }
 
     private void stubFind(WorkOrder workOrder, WorkOrderOperation operation) {

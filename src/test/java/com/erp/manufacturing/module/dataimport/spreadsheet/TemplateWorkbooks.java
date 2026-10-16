@@ -29,7 +29,15 @@ public final class TemplateWorkbooks {
     public static final List<String> PARTNER_HEADERS_EN =
             List.of("Code", "Name", "Contact person", "Email", "Phone", "Address", "Notes");
 
+    /** G5: {@code omniplant-bom-v1} headers (FE_HANDOFF_GD_05 §3.4). */
+    public static final List<String> BOM_HEADERS_VI = List.of("Mã định mức", "Mã sản phẩm", "Lượng đầu ra",
+            "Đơn vị đầu ra", "Mã thành phần", "Lượng thành phần", "Đơn vị thành phần", "Hao hụt (%)", "Ghi chú");
+    public static final List<String> BOM_HEADERS_EN = List.of("BOM code", "Product code", "Output quantity",
+            "Output UOM", "Component code", "Component quantity", "Component UOM", "Scrap (%)", "Notes");
+
     private String version = "omniplant-import-v1";
+    /** G5: sheet {@code BOM} and a two-row {@code _meta} key/value sheet instead of {@code _OmniPlant}. */
+    private boolean bomLayout;
     private String kind;
     private String locale;
     private List<String> headers;
@@ -48,6 +56,13 @@ public final class TemplateWorkbooks {
 
     public static TemplateWorkbooks partners(String kind, String locale) {
         return new TemplateWorkbooks(kind, locale, "vi".equals(locale) ? PARTNER_HEADERS_VI : PARTNER_HEADERS_EN);
+    }
+
+    public static TemplateWorkbooks boms(String locale) {
+        TemplateWorkbooks workbook = new TemplateWorkbooks("bom", locale, "vi".equals(locale) ? BOM_HEADERS_VI : BOM_HEADERS_EN);
+        workbook.bomLayout = true;
+        workbook.version = "omniplant-bom-v1";
+        return workbook;
     }
 
     public TemplateWorkbooks version(String value) {
@@ -122,12 +137,21 @@ public final class TemplateWorkbooks {
 
     public byte[] build() {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            Sheet data = workbook.createSheet("vi".equals(locale) ? "Dữ liệu" : "Data");
+            Sheet data = workbook.createSheet(bomLayout ? "BOM" : "vi".equals(locale) ? "Dữ liệu" : "Data");
             Row header = data.createRow(0);
             for (int index = 0; index < headers.size(); index++) {
                 header.createCell(index).setCellValue(headers.get(index));
             }
-            if (metadata) {
+            if (metadata && bomLayout) {
+                Sheet meta = workbook.createSheet("_meta");
+                Row versionRow = meta.createRow(0);
+                versionRow.createCell(0).setCellValue("version");
+                versionRow.createCell(1).setCellValue(version);
+                Row localeRow = meta.createRow(1);
+                localeRow.createCell(0).setCellValue("locale");
+                localeRow.createCell(1).setCellValue(locale);
+                workbook.setSheetVisibility(workbook.getSheetIndex(meta), SheetVisibility.VERY_HIDDEN);
+            } else if (metadata) {
                 Sheet meta = workbook.createSheet("_OmniPlant");
                 Row row = meta.createRow(0);
                 row.createCell(0).setCellValue(version);

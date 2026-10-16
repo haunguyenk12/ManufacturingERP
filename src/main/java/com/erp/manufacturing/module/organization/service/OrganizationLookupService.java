@@ -47,6 +47,14 @@ public class OrganizationLookupService {
         return company;
     }
 
+    /** Any status — for reads that must keep working on a plant that was deactivated (G5 capacity board). */
+    @Transactional(readOnly = true)
+    public Plant getPlant(UUID plantId) {
+        return plantRepository.findById(plantId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Plant", plantId));
+    }
+
     @Transactional(readOnly = true)
     public Plant getActivePlant(UUID plantId) {
         Plant plant = plantRepository.findById(plantId)

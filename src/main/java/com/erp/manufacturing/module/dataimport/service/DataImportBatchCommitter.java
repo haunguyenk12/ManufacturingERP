@@ -17,6 +17,7 @@ import com.erp.manufacturing.module.dataimport.dto.DataImportBatchResponse;
 import com.erp.manufacturing.module.dataimport.mapper.DataImportMapper;
 import com.erp.manufacturing.module.dataimport.repository.ImportRowRepository;
 import com.erp.manufacturing.module.dataimport.repository.ImportRunRepository;
+import com.erp.manufacturing.module.dataimport.target.BomImportHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetRegistry;
 import com.erp.manufacturing.module.dataimport.template.FixedTemplateSchema;
@@ -49,6 +50,7 @@ public class DataImportBatchCommitter {
     private final ImportRunRepository runRepository;
     private final ImportRowRepository rowRepository;
     private final ImportTargetRegistry registry;
+    private final BomImportHandler bomImportHandler;
     private final FixedTemplateValidator validator;
     private final IdempotencySupport idempotency;
     private final DataImportMapper mapper;
@@ -116,11 +118,20 @@ public class DataImportBatchCommitter {
                     "Import batch is no longer valid; nothing was created");
         }
 
-        ImportTargetHandler handler = registry.handlerFor(kind.targetType());
         try {
-            for (ImportRow row : rows) {
-                row.markApplied(handler.apply(companyId,
-                        FixedTemplateSchema.toHandlerValues(kind, row.getMappedValues())));
+            if (kind == DataImportKind.BOMS) {
+                // One BOM per group; every row of the group records the BOM it became (G5).
+                List<UUID> created = bomImportHandler.apply(companyId,
+                        rows.stream().map(ImportRow::getMappedValues).toList());
+                for (int index = 0; index < rows.size(); index++) {
+                    rows.get(index).markApplied(created.get(index));
+                }
+            } else {
+                ImportTargetHandler handler = registry.handlerFor(kind.targetType());
+                for (ImportRow row : rows) {
+                    row.markApplied(handler.apply(companyId,
+                            FixedTemplateSchema.toHandlerValues(kind, row.getMappedValues())));
+                }
             }
             // Surfaces a unique-index violation here, inside the try, instead of at commit time where
             // it could no longer be told apart from any other failure of the transaction.

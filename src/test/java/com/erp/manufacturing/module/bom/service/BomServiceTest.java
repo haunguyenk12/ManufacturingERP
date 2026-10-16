@@ -186,19 +186,22 @@ class BomServiceTest {
         candidate.getLines().add(line(UUID.randomUUID(), candidate, component, 10));
         BomHeader oldActive = activeBom(oldActiveId, parent);
 
+        // G5: the family lock is taken by product before the BOM is read.
+        when(bomHeaderRepository.findParentItemIdByBomId(candidateId)).thenReturn(Optional.of(parent.getItemId()));
         when(bomHeaderRepository.findWithLinesByBomId(candidateId)).thenReturn(Optional.of(candidate));
         when(bomHeaderRepository.findWithLinesByCompanyCompanyIdAndParentItemItemIdAndStatus(
                 companyId, componentId, BomStatus.ACTIVE)).thenReturn(Optional.empty());
         when(bomHeaderRepository.findByCompanyCompanyIdAndParentItemItemIdAndStatus(
                 companyId, parentItemId, BomStatus.ACTIVE)).thenReturn(Optional.of(oldActive));
-        when(bomHeaderRepository.save(candidate)).thenReturn(candidate);
+        when(bomHeaderRepository.saveAndFlush(any(BomHeader.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.activateBom(candidateId);
+        service.activateBom(candidateId, null);
 
         assertThat(oldActive.getStatus()).isEqualTo(BomStatus.INACTIVE);
         assertThat(candidate.getStatus()).isEqualTo(BomStatus.ACTIVE);
         verify(bomHeaderRepository).saveAndFlush(oldActive);
-        verify(bomHeaderRepository).save(candidate);
+        verify(bomHeaderRepository).saveAndFlush(candidate);
+        verify(itemLookupService).lockItem(parentItemId);
     }
 
     /**
@@ -216,9 +219,11 @@ class BomServiceTest {
         UUID candidateId = UUID.randomUUID();
         Item parent = item(UUID.randomUUID(), companyId, "FG-100", ItemType.FINISHED_GOOD, ItemStatus.ACTIVE);
         BomHeader candidate = draftBom(candidateId, parent);   // no lines added on purpose
+        // G5: the family lock is taken by product before the BOM is read.
+        when(bomHeaderRepository.findParentItemIdByBomId(candidateId)).thenReturn(Optional.of(parent.getItemId()));
         when(bomHeaderRepository.findWithLinesByBomId(candidateId)).thenReturn(Optional.of(candidate));
 
-        assertThatThrownBy(() -> service.activateBom(candidateId))
+        assertThatThrownBy(() -> service.activateBom(candidateId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.DOCUMENT_HAS_NO_LINES));
@@ -240,11 +245,13 @@ class BomServiceTest {
         BomHeader childActive = activeBom(UUID.randomUUID(), component);
         childActive.getLines().add(line(UUID.randomUUID(), childActive, parent, 10));
 
+        // G5: the family lock is taken by product before the BOM is read.
+        when(bomHeaderRepository.findParentItemIdByBomId(candidateId)).thenReturn(Optional.of(parent.getItemId()));
         when(bomHeaderRepository.findWithLinesByBomId(candidateId)).thenReturn(Optional.of(candidate));
         when(bomHeaderRepository.findWithLinesByCompanyCompanyIdAndParentItemItemIdAndStatus(
                 companyId, componentId, BomStatus.ACTIVE)).thenReturn(Optional.of(childActive));
 
-        assertThatThrownBy(() -> service.activateBom(candidateId))
+        assertThatThrownBy(() -> service.activateBom(candidateId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.BOM_CIRCULAR_REFERENCE));

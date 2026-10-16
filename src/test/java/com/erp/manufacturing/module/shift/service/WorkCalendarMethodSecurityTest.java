@@ -97,7 +97,7 @@ class WorkCalendarMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_WORK_CALENDAR_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(false);
 
-        assertThatThrownBy(() -> workCalendarService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> workCalendarService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCalendarRepository);
@@ -108,9 +108,9 @@ class WorkCalendarMethodSecurityTest {
     void list_allowedWhenPlantReadScopePresent() {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_WORK_CALENDAR_READ"), eq("PLANT"), eq(PLANT_ID))).thenReturn(true);
-        when(workCalendarRepository.search(eq(PLANT_ID), any(), any())).thenReturn(Page.empty());
+        when(workCalendarRepository.search(eq(PLANT_ID), any(), any(), any())).thenReturn(Page.empty());
 
-        assertThatCode(() -> workCalendarService.list(PLANT_ID, null, PageRequest.of(0, 20)))
+        assertThatCode(() -> workCalendarService.list(PLANT_ID, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -132,7 +132,7 @@ class WorkCalendarMethodSecurityTest {
                 any(), eq("PERM_WORK_CALENDAR_MANAGE"), eq(CALENDAR_ID))).thenReturn(false);
 
         assertThatThrownBy(() -> workCalendarService.update(CALENDAR_ID,
-                new WorkCalendarUpdateRequest("New name", null, null, null, null)))
+                new WorkCalendarUpdateRequest("New name", null, null, null, null, null)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(workCalendarRepository);
@@ -172,7 +172,9 @@ class WorkCalendarMethodSecurityTest {
                                                   ShiftRepository shiftRepository,
                                                   OrganizationLookupService organizationLookupService,
                                                   WorkCalendarMapper mapper) {
-            return new WorkCalendarService(workCalendarRepository, shiftRepository, organizationLookupService, mapper);
+            return new WorkCalendarService(workCalendarRepository, shiftRepository,
+                    mock(com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService.class),
+                    organizationLookupService, mapper);
         }
 
         @Bean WorkCalendarMapper workCalendarMapper() { return new WorkCalendarMapper(); }

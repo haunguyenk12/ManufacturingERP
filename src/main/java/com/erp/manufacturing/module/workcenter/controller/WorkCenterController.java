@@ -45,12 +45,13 @@ public class WorkCenterController {
     public ResponseEntity<ApiResponse<PageResult<WorkCenterResponse>>> list(
             @PathVariable UUID plantId,
             @RequestParam(required = false) OrganizationStatus status,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "code") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(workCenterService.list(
-                plantId, status, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, status, search, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     @GetMapping("/v1/work-centers/{workCenterId}")

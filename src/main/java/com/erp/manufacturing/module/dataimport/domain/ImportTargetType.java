@@ -17,5 +17,13 @@ public enum ImportTargetType {
     SUPPLIER,
 
     /** Customer master ({@code customers}), created through {@code CustomerService.create} (G3). */
-    CUSTOMER
+    CUSTOMER,
+
+    /**
+     * BOM drafts (G5), created through {@code BomService.saveDraft} — one BOM per group of rows. Only
+     * the fixed-template path ({@code omniplant-bom-v1}) imports it: a BOM spans several rows, which the
+     * mapped-profile path's one-row-one-record handlers cannot express, so no {@code ImportTargetHandler}
+     * is registered and that path answers "import target not found" for it.
+     */
+    BOM
 }

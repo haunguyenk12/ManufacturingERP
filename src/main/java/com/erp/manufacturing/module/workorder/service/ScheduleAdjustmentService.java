@@ -5,10 +5,14 @@ import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
+import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
+import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
+import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import com.erp.manufacturing.module.workorder.dto.capacity.ScheduleAdjustmentRequest;
 import com.erp.manufacturing.module.workorder.dto.capacity.ScheduleAdjustmentResponse;
+import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
 import com.erp.manufacturing.module.workorder.service.query.CapacityBoardService;
 import lombok.RequiredArgsConstructor;
@@ -17,21 +21,35 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Manual schedule override on a single {@link WorkOrderOperation} (C2-8, gap doc §3.6). Never
- * auto-shifts sibling operations (decision #3, {@code NEXT_PHASE_PLAN.md}) — conflicts are surfaced
- * as advisory flags on {@link ScheduleAdjustmentResponse}, not reasons to reject the request.
+ * auto-shifts sibling operations (decision #3, {@code NEXT_PHASE_PLAN.md}).
+ *
+ * <p>G5 (D10) reverses one half of B90: overlapping the previous or next operation of the same work
+ * order is now refused with {@code OPERATION_SEQUENCE_CONFLICT} (409) and nothing is written — the
+ * user decided the board must not hold a sequence it knows to be impossible. Calendar and capacity
+ * problems stay advisory flags: those are about other work orders, which this command never touches.
  */
 @Service
 @RequiredArgsConstructor
 public class ScheduleAdjustmentService {
 
+    /** FE Q16: only a work order that is running or about to run, and only an operation not yet started. */
+    private static final List<WorkOrderStatus> ADJUSTABLE_STATUSES =
+            List.of(WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS);
+
     private final WorkOrderOperationRepository workOrderOperationRepository;
+    private final ProductionExecutionRepository productionExecutionRepository;
     private final CapacityBoardService capacityBoardService;
+    private final WorkCalendarLookupService workCalendarLookupService;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_CAPACITY_MANAGE', #workOrderId)")
@@ -42,10 +60,9 @@ public class ScheduleAdjustmentService {
                 .findByWorkOrderOperationIdAndWorkOrderWorkOrderId(operationId, workOrderId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Work order operation", operationId));
+        WorkOrder workOrder = operation.getWorkOrder();
 
-        // Fail fast (rule C9), before touching anything: no work center / never scheduled / stale
-        // version / nonsensical window are all reasons to refuse outright, unlike sequence/calendar/
-        // capacity below which are informational only.
+        // Fail fast (rule C9), before touching anything.
         if (operation.getWorkCenter() == null) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
                     "Operation has no work center to schedule against");
@@ -58,22 +75,33 @@ public class ScheduleAdjustmentService {
             throw ExceptionFactory.businessRule(BusinessErrorCode.CONCURRENT_MODIFICATION,
                     "Work order operation was modified by another request");
         }
-        if (!request.plannedEndAt().isAfter(request.plannedStartAt())) {
+        if (!ADJUSTABLE_STATUSES.contains(workOrder.getStatus())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Only a RELEASED or IN_PROGRESS work order can be rescheduled; this one is "
+                            + workOrder.getStatus());
+        }
+        if (productionExecutionRepository.existsByOperationWorkOrderOperationId(operationId)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Output was already reported for this operation; it can no longer be rescheduled");
+        }
+        Instant plannedEndAt = request.plannedEndAt() != null
+                ? request.plannedEndAt()
+                : computeEnd(operation, request.plannedStartAt());
+        if (!plannedEndAt.isAfter(request.plannedStartAt())) {
             throw ExceptionFactory.custom(ValidationErrorCode.INVALID_INPUT,
                     "plannedEndAt must be after plannedStartAt");
         }
-
-        boolean sequenceConflict = hasSequenceConflict(operation, request);
+        ensureNoSequenceConflict(operation, request.plannedStartAt(), plannedEndAt);
 
         operation.setPlannedStartAt(request.plannedStartAt());
-        operation.setPlannedEndAt(request.plannedEndAt());
+        operation.setPlannedEndAt(plannedEndAt);
         operation.setScheduleAdjustmentReason(request.reason().trim());
-        WorkOrderOperation saved = workOrderOperationRepository.save(operation);
+        // saveAndFlush: the response carries the bumped version (lesson of CLAUDE.md §0.39).
+        WorkOrderOperation saved = workOrderOperationRepository.saveAndFlush(operation);
 
-        WorkOrder workOrder = saved.getWorkOrder();
         LocalDate day = CapacityBoardService.attributedDay(saved, workOrder);
-        // Recomputed AFTER persisting: the load aggregate reads current state, so it already
-        // reflects this operation's new window — no need to simulate "what if" before writing.
+        // Recomputed AFTER persisting: the load query reads current state, so it already reflects this
+        // operation's new window — no need to simulate "what if" before writing.
         CapacityBoardService.DayContext context = capacityBoardService.buildDayContext(
                 workOrder.getPlant().getPlantId(), day, day, List.of(saved));
         BigDecimal capacityMinutes = CapacityBoardService.dayCapacityMinutes(context, saved.getWorkCenter(), day);
@@ -89,7 +117,8 @@ public class ScheduleAdjustmentService {
                 saved.getPlannedEndAt(),
                 saved.getScheduleAdjustmentReason(),
                 saved.getVersion(),
-                sequenceConflict,
+                // Always false since G5: a conflicting window is refused before anything is written.
+                false,
                 calendarConflict,
                 capacityOverload,
                 capacityMinutes,
@@ -98,10 +127,29 @@ public class ScheduleAdjustmentService {
     }
 
     /**
-     * Advisory only (decision #3) — does not block the write. Only compares against siblings that
-     * already carry a schedule of their own; an unscheduled sibling has nothing to conflict with.
+     * Same rule release uses ({@code WorkOrderService.scheduleOperations}): the operation's own minutes,
+     * walked over its work center's calendar when there is one, continuous time otherwise.
      */
-    private boolean hasSequenceConflict(WorkOrderOperation operation, ScheduleAdjustmentRequest request) {
+    private Instant computeEnd(WorkOrderOperation operation, Instant start) {
+        long durationMinutes = operation.getSetupMinutes()
+                .add(operation.getRunMinutesPerUnit().multiply(operation.getWorkOrder().getPlannedQuantity()))
+                .setScale(0, RoundingMode.CEILING)
+                .longValueExact();
+        WorkCenter workCenter = operation.getWorkCenter();
+        if (workCenter.getWorkCalendar() == null) {
+            return start.plus(durationMinutes, ChronoUnit.MINUTES);
+        }
+        ZoneId zone = ZoneId.of(operation.getWorkOrder().getPlant().getTimezone());
+        return workCalendarLookupService.computeEndInstant(
+                workCenter.getWorkCalendar().getWorkCalendarId(), start, zone, durationMinutes);
+    }
+
+    /**
+     * G5 (D10): the new window may not start before the previous operation ends, nor end after the next
+     * one starts. Only siblings that carry a schedule count; an unscheduled sibling has nothing to
+     * conflict with.
+     */
+    private void ensureNoSequenceConflict(WorkOrderOperation operation, Instant start, Instant end) {
         List<WorkOrderOperation> siblings = workOrderOperationRepository
                 .findByWorkOrderWorkOrderIdOrderBySequenceAsc(operation.getWorkOrder().getWorkOrderId());
         WorkOrderOperation predecessor = null;
@@ -120,10 +168,15 @@ public class ScheduleAdjustmentService {
                 successor = sibling;
             }
         }
-        boolean beforePredecessor = predecessor != null
-                && request.plannedStartAt().isBefore(predecessor.getPlannedEndAt());
-        boolean afterSuccessor = successor != null
-                && request.plannedEndAt().isAfter(successor.getPlannedStartAt());
-        return beforePredecessor || afterSuccessor;
+        if (predecessor != null && start.isBefore(predecessor.getPlannedEndAt())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.OPERATION_SEQUENCE_CONFLICT,
+                    "Operation would start at " + start + ", before operation " + predecessor.getSequence()
+                            + " ends at " + predecessor.getPlannedEndAt());
+        }
+        if (successor != null && end.isAfter(successor.getPlannedStartAt())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.OPERATION_SEQUENCE_CONFLICT,
+                    "Operation would end at " + end + ", after operation " + successor.getSequence()
+                            + " starts at " + successor.getPlannedStartAt());
+        }
     }
 }

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -38,6 +39,20 @@ public class WorkCenterLookupService {
                     "Inactive work center cannot be used: " + workCenterId);
         }
         return workCenter;
+    }
+
+    /** ACTIVE work centers of a plant, with their calendars (G5 capacity period loads). */
+    @Transactional(readOnly = true)
+    public List<WorkCenter> findActiveWorkCenters(UUID plantId) {
+        return workCenterRepository.findWithCalendarByPlantPlantIdAndStatus(
+                plantId, com.erp.manufacturing.module.organization.domain.OrganizationStatus.ACTIVE);
+    }
+
+    /** G5 (FE A23): whether deactivating this calendar would leave an ACTIVE work center without one. */
+    @Transactional(readOnly = true)
+    public boolean isCalendarUsedByActiveWorkCenter(UUID workCalendarId) {
+        return workCenterRepository.existsByWorkCalendarWorkCalendarIdAndStatus(
+                workCalendarId, com.erp.manufacturing.module.organization.domain.OrganizationStatus.ACTIVE);
     }
 
     @Transactional(readOnly = true)

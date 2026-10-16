@@ -35,6 +35,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String SERIAL_TRACKING_SCHEMA = "v52_serial_tracking_check";
     private static final String RUN_IDEMPOTENCY_SCHEMA = "v58_run_idempotency_check";
     private static final String AUDIT_PIPELINE_SCHEMA = "v67_audit_pipeline_check";
+    private static final String VERSION_BACKFILL_SCHEMA = "v73_version_backfill_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -49,7 +50,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("72");
+        assertThat(current.getVersion().getVersion()).isEqualTo("73");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -666,6 +667,111 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                 names.add(rs.getString(1));
             }
             assertThat(names).hasSize(4);
+        }
+    }
+
+    /**
+     * G5 / {@code V73}: BOM and routing versions that existed before the migration get version numbers
+     * 1..n per product in creation order, every BOM gets a code ("product-revision", case-insensitively
+     * unique per company — a collision gets its version appended) and an output quantity of 1, which
+     * reproduces exactly what its per-unit lines meant. The revision label is never parsed.
+     */
+    @Test
+    void migrate_v73_backfillsVersionNumbersBomCodesAndOutputQuantity() throws Exception {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(VERSION_BACKFILL_SCHEMA)
+                .target("72")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111111111";
+        String itemAb = "33333333-3333-4333-8333-333333333331";
+        String itemA = "33333333-3333-4333-8333-333333333332";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + VERSION_BACKFILL_SCHEMA);
+            statement.execute("INSERT INTO companies (company_id, code, name) VALUES ('%s', 'V73_CO', 'V73')"
+                    .formatted(company));
+            statement.execute(("INSERT INTO items (item_id, company_id, code, name, type, unit) VALUES "
+                    + "('%s', '%s', 'A-B', 'A-B', 'FINISHED_GOOD', 'EA'), ('%s', '%s', 'A', 'A', 'FINISHED_GOOD', 'EA')")
+                    .formatted(itemAb, company, itemA, company));
+            // Item A-B: revision "R2" (older) and "r1" (newer). Item A, revision "B-R2", spells A-B-R2 too.
+            String bom = "INSERT INTO bom_headers (bom_id, company_id, parent_item_id, revision, status, created_at)"
+                    + " VALUES ('%s', '%s', '%s', '%s', '%s', '%s')";
+            statement.execute(bom.formatted("55555555-5555-4555-8555-555555555551", company, itemAb, "R2", "INACTIVE", "2026-01-01T00:00:00Z"));
+            statement.execute(bom.formatted("55555555-5555-4555-8555-555555555552", company, itemAb, "r1", "ACTIVE", "2026-02-01T00:00:00Z"));
+            statement.execute(bom.formatted("55555555-5555-4555-8555-555555555553", company, itemA, "B-R2", "DRAFT", "2026-03-01T00:00:00Z"));
+            String routing = "INSERT INTO routings (routing_id, company_id, item_id, code, routing_version, status, created_at)"
+                    + " VALUES ('%s', '%s', '%s', 'RT', '%s', '%s', '%s')";
+            statement.execute(routing.formatted("77777777-7777-4777-8777-777777777771", company, itemAb, "V9", "INACTIVE", "2026-01-01T00:00:00Z"));
+            statement.execute(routing.formatted("77777777-7777-4777-8777-777777777772", company, itemAb, "V10", "ACTIVE", "2026-02-01T00:00:00Z"));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(VERSION_BACKFILL_SCHEMA)
+                .target("73")
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + VERSION_BACKFILL_SCHEMA);
+            java.util.Map<String, String> codes = new java.util.HashMap<>();
+            java.util.Map<String, Integer> versions = new java.util.HashMap<>();
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT bom_id, bom_code, version_number, output_quantity FROM bom_headers")) {
+                while (rs.next()) {
+                    codes.put(rs.getString("bom_id"), rs.getString("bom_code"));
+                    versions.put(rs.getString("bom_id"), rs.getInt("version_number"));
+                    assertThat(rs.getBigDecimal("output_quantity")).isEqualByComparingTo("1");
+                }
+            }
+            assertThat(versions.get("55555555-5555-4555-8555-555555555551")).isEqualTo(1);
+            assertThat(versions.get("55555555-5555-4555-8555-555555555552")).isEqualTo(2);
+            assertThat(versions.get("55555555-5555-4555-8555-555555555553")).isEqualTo(1);
+            assertThat(codes.get("55555555-5555-4555-8555-555555555551")).isEqualTo("A-B-R2");
+            assertThat(codes.get("55555555-5555-4555-8555-555555555552")).isEqualTo("A-B-R1");
+            // the later row of the "A-B-R2" collision gets its version number appended
+            assertThat(codes.get("55555555-5555-4555-8555-555555555553")).isEqualTo("A-B-R2-V1");
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT routing_version, version_number FROM routings ORDER BY created_at")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).isEqualTo("V9");
+                assertThat(rs.getInt(2)).isEqualTo(1);
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).isEqualTo("V10");
+                assertThat(rs.getInt(2)).isEqualTo(2);
+            }
+            assertThatThrownBy(() -> statement.execute(("INSERT INTO bom_headers (company_id, parent_item_id, revision,"
+                    + " bom_code, version_number) VALUES ('%s', '%s', 'X', 'a-b-r1', 9)").formatted(company, itemA)))
+                    .hasMessageContaining("uk_bom_headers_company_bom_code");
+            assertThatThrownBy(() -> statement.execute(("INSERT INTO bom_headers (company_id, parent_item_id, revision,"
+                    + " bom_code, version_number, output_quantity) VALUES ('%s', '%s', 'Y', 'NEW', 5, 0)")
+                    .formatted(company, itemA)))
+                    .hasMessageContaining("chk_bom_headers_output_quantity");
+        }
+    }
+
+    /** G5 / {@code V73}: a predecessor link can never point an operation at itself. */
+    @Test
+    void migrate_v73_predecessorTableRefusesASelfLink() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("""
+                     SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                     WHERE conname = 'chk_routing_operation_predecessors_not_self'
+                     """)) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getString(1)).contains("routing_operation_id <> predecessor_operation_id");
         }
     }
 

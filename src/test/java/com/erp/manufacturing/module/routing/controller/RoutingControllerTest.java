@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -74,7 +75,7 @@ class RoutingControllerTest {
     private RoutingResponse sampleResponse(String statusValue) {
         return new RoutingResponse(
                 ROUTING_ID, COMPANY_ID, ITEM_ID, "FG-100", "Widget",
-                "RT-001", "1", statusValue, null, Instant.now(), Instant.now(), List.of());
+                "RT-001", "1", statusValue, null, Instant.now(), Instant.now(), List.of(), null, 1, null, null, java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO, 0L);
     }
 
     @Test
@@ -100,7 +101,7 @@ class RoutingControllerTest {
     @Test
     @DisplayName("activate: routing that is not DRAFT returns 409 STATE_CONFLICT")
     void activate_routingNotDraft_returns409StateConflict() throws Exception {
-        when(routingService.activate(ROUTING_ID))
+        when(routingService.activate(eq(ROUTING_ID), isNull()))
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only DRAFT routings can be activated"));
 
@@ -113,7 +114,7 @@ class RoutingControllerTest {
     @DisplayName("activate: routing without operations stays 422 OPERATION_NOT_ALLOWED (§5.3 — "
             + "incomplete content is not a status conflict)")
     void activate_routingWithoutOperations_returns422DocumentHasNoLines() throws Exception {
-        when(routingService.activate(ROUTING_ID))
+        when(routingService.activate(eq(ROUTING_ID), isNull()))
                 .thenThrow(new AppException(BusinessErrorCode.DOCUMENT_HAS_NO_LINES,
                         "Cannot activate routing without operations"));
 
@@ -131,5 +132,52 @@ class RoutingControllerTest {
                 .andExpect(jsonPath("$.result").doesNotExist());
 
         verify(routingService).deactivate(ROUTING_ID);
+    }
+
+    // ── G5 ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("PUT routing-drafts answers 200 with the saved graph")
+    void saveDraft_returns200() throws Exception {
+        when(routingService.saveDraft(eq(COMPANY_ID), any())).thenReturn(sampleResponse("DRAFT"));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/v1/companies/" + COMPANY_ID + "/routing-drafts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"ROUTE-DEMO","itemId":"%s","operations":[{"clientKey":"assembly","sequence":1,
+                                 "name":"Lắp ráp","workCenterId":"%s","setupMinutes":30,"runMinutesPerUnit":2,
+                                 "predecessorClientKeys":[]}]}
+                                """.formatted(ITEM_ID, java.util.UUID.randomUUID())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("DRAFT"))
+                .andExpect(jsonPath("$.result.versionNumber").value(1));
+    }
+
+    @Test
+    @DisplayName("PUT routing-drafts: runMinutesPerUnit 0 is 400 (must be positive on the new path)")
+    void saveDraft_zeroRunMinutes_returns400() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/v1/companies/" + COMPANY_ID + "/routing-drafts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"ROUTE-DEMO","itemId":"%s","operations":[{"clientKey":"a","sequence":1,
+                                 "name":"A","workCenterId":"%s","setupMinutes":0,"runMinutesPerUnit":0}]}
+                                """.formatted(ITEM_ID, java.util.UUID.randomUUID())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("operations[0].runMinutesPerUnit"));
+        org.mockito.Mockito.verifyNoInteractions(routingService);
+    }
+
+    @Test
+    @DisplayName("POST copy while a draft is open is 409 OPEN_DRAFT_EXISTS")
+    void copy_openDraftExists_returns409() throws Exception {
+        when(routingService.copy(eq(ROUTING_ID), any()))
+                .thenThrow(new AppException(BusinessErrorCode.OPEN_DRAFT_EXISTS, "open draft"));
+
+        mockMvc.perform(post("/v1/routings/" + ROUTING_ID + "/copy")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.OPEN_DRAFT_EXISTS.code()));
     }
 }

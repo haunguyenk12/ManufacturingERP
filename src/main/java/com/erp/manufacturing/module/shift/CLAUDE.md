@@ -97,3 +97,11 @@ C7 bảo vệ. `WorkCenter` (module khác) validate `workCalendarId` **qua** `Wo
 `WORKING_OVERRIDE` (làm bù) và `shiftIds[]` riêng trên `WorkCenter` bị loại có chủ đích (quyết định
 §1.2/§1.3), không phải thiếu sót. Còn lại ngoài phạm vi module này: `predecessorOperationIds`/
 sequence-dependency validation (`C2-8b`, xem `module/workcenter/CLAUDE.md` mục 7).
+
+### 8. G5 — Giờ làm thực, chặn tham chiếu, khung làm việc theo Instant (2026-10-16)
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B162 | Ca: khung ≠ 0 phút, giờ nghỉ **không chồng nhau** (đo bằng offset từ đầu ca — qua đêm không cần nhánh riêng), giờ nghỉ không ăn hết ca ⇒ 422 `OPERATION_NOT_ALLOWED`. `workingMinutes` = khung − Σ nghỉ (A20 480, A21 450), server tính | `ShiftServiceTest.create_*WorkingMinutes`, `.create_overlappingBreaks_areRefused`, `.create_zeroLengthShift_isRefused` |
+| B163 | Ngừng ca còn trên lịch `ACTIVE` / ngừng lịch còn trung tâm `ACTIVE` dùng ⇒ **422 `REFERENCE_IN_USE`** (áp cả `DELETE`). Lịch không nhận ca đã ngừng (422 `RESOURCE_INACTIVE`). `expectedVersion` tuỳ chọn trên PATCH | `ShiftServiceTest.deactivate_shiftOnAnActiveCalendar_*`, `WorkCalendarServiceTest.deactivate_*`, `ShiftCalendarReferenceIT` |
+| B164 | `WorkCalendarLookupService.computeWorkingIntervals(calendar, from, to, zone)`: đánh giá **từ ngày trước `from`** để đếm đuôi ca đêm (A21: 330), ngày nghỉ/hiệu lực vẫn theo **ngày ca bắt đầu**, các khung chồng nhau được **gộp**. Đây là nguồn duy nhất của "phút làm việc" cho bảng công suất và xem trước | `WorkCalendarLookupServiceTest` (5) |

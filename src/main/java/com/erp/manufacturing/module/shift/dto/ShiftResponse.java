@@ -16,5 +16,7 @@ public record ShiftResponse(
         List<ShiftBreakResponse> breaks,
         Long version,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        /** Window minus breaks, per occurrence (G5). Server-computed, never accepted from a client. */
+        Integer workingMinutes
 ) {}

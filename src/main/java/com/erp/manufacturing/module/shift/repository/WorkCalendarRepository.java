@@ -21,10 +21,23 @@ public interface WorkCalendarRepository extends JpaRepository<WorkCalendar, UUID
             from WorkCalendar c
             where c.plant.plantId = :plantId
               and (:status is null or c.status = :status)
+              and (:search is null
+                   or lower(c.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(c.name) like lower(concat('%', cast(:search as string), '%')))
             """)
     Page<WorkCalendar> search(@Param("plantId") UUID plantId,
                               @Param("status") OrganizationStatus status,
+                              @Param("search") String search,
                               Pageable pageable);
+
+    /** G5 (FE A23): an ACTIVE calendar still schedules this shift on some weekday. */
+    @Query("""
+            select count(w) > 0
+            from WorkCalendarWeeklyShift w
+            where w.shift.shiftId = :shiftId
+              and w.workCalendar.status = com.erp.manufacturing.module.organization.domain.OrganizationStatus.ACTIVE
+            """)
+    boolean existsActiveCalendarUsingShift(@Param("shiftId") UUID shiftId);
 
     /**
      * Fetches {@code weeklyShifts} and the {@code Shift} each row points at, deliberately leaving

@@ -32,13 +32,12 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Runs the two Capacity Board (C2-8) JPQL queries against a real Postgres Testcontainer.
+ * Runs the Capacity Board JPQL queries against a real Postgres Testcontainer.
  *
- * <p>Both use {@code function('timezone', plant.timezone, plannedStartAt)} — the first use of this
- * escape hatch anywhere in the repo (no native query precedent existed before C2-8) — to bucket by
- * the plant's <em>local</em> calendar date, not the UTC date the {@code Instant} column stores. A
- * mocked repository cannot prove this conversion actually runs in the right direction; only Postgres
- * can (rule R7, same lesson as the {@code lower(bytea)} hazard in CLAUDE.md §0.24).
+ * <p>C2-8 bucketed by {@code function('timezone', plant.timezone, plannedStartAt)} in SQL. G5 (D9)
+ * moved the day split to Java — an operation is now allocated across every day it overlaps — so the
+ * queries take the plant-local period as instants and only select by overlap. The timezone case
+ * below still guards the local-date boundary, now on the caller's side of the conversion (rule R7).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -121,39 +120,65 @@ class WorkOrderOperationRepositoryIT extends AbstractPostgresIntegrationTest {
                 .containsExactly(wanted.getWorkOrderOperationId());
     }
 
+    /**
+     * G5 replaced {@code aggregateExistingLoad} (sum grouped by start day) with this query: the
+     * operations themselves, so the calculator can split each one by working time (D9). Two
+     * load-carrying operations in the window are both returned.
+     */
     @Test
-    void aggregateExistingLoad_sumsMinutesGroupedByWorkCenterAndPlantLocalDay() {
+    void findScheduledOverlapping_returnsEveryLoadCarryingOperationInTheWindow() {
         Fixture fixture = persistFixture("UTC");
         Instant day = Instant.parse("2026-01-05T08:00:00Z");
-        // setup=10, run=5/unit, plannedQuantity=10 (persistWorkOrder default) => 10 + 5*10 = 60 min each
-        persistOperation(fixture, WorkOrderStatus.RELEASED, day);
-        persistOperation(fixture, WorkOrderStatus.IN_PROGRESS, day);
+        WorkOrderOperation released = persistOperation(fixture, WorkOrderStatus.RELEASED, day);
+        WorkOrderOperation inProgress = persistOperation(fixture, WorkOrderStatus.IN_PROGRESS, day);
 
-        List<CapacityLoadProjection> load = repository.aggregateExistingLoad(
-                fixture.plant.getPlantId(), LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 5), LOAD_STATUSES);
+        List<WorkOrderOperation> load = repository.findScheduledOverlapping(fixture.plant.getPlantId(),
+                Instant.parse("2026-01-05T00:00:00Z"), Instant.parse("2026-01-06T00:00:00Z"), LOAD_STATUSES);
 
-        assertThat(load).hasSize(1);
-        assertThat(load.get(0).getWorkCenterId()).isEqualTo(fixture.workCenter.getWorkCenterId());
-        assertThat(load.get(0).getDay()).isEqualTo(LocalDate.of(2026, 1, 5));
-        assertThat(load.get(0).getLoadMinutes()).isEqualByComparingTo("120.000000");
+        assertThat(load).extracting(WorkOrderOperation::getWorkOrderOperationId)
+                .containsExactlyInAnyOrder(released.getWorkOrderOperationId(), inProgress.getWorkOrderOperationId());
     }
 
     /** {@code CANCELLED} schedules no longer represent real load — CapacityBoardService's contract. */
     @Test
-    void aggregateExistingLoad_excludesCancelledWorkOrders() {
+    void findScheduledOverlapping_excludesCancelledWorkOrders() {
         Fixture fixture = persistFixture("UTC");
         persistOperation(fixture, WorkOrderStatus.CANCELLED, Instant.parse("2026-01-05T08:00:00Z"));
 
-        List<CapacityLoadProjection> load = repository.aggregateExistingLoad(
-                fixture.plant.getPlantId(), LocalDate.of(2026, 1, 5), LocalDate.of(2026, 1, 5), LOAD_STATUSES);
+        assertThat(repository.findScheduledOverlapping(fixture.plant.getPlantId(),
+                Instant.parse("2026-01-05T00:00:00Z"), Instant.parse("2026-01-06T00:00:00Z"), LOAD_STATUSES))
+                .isEmpty();
+    }
 
-        assertThat(load).isEmpty();
+    /**
+     * 🔴 G5 (D9): the C2-8 query kept only operations that STARTED inside the range, so an operation
+     * running from Monday into Tuesday was missing from Tuesday's load entirely. Overlap is the rule
+     * now; an operation that ends exactly where the window starts does not overlap it.
+     */
+    @Test
+    void findScheduledOverlapping_includesOperationsThatStartedBeforeTheWindow_excludesOnesEndingAtItsStart() {
+        Fixture fixture = persistFixture("UTC");
+        WorkOrderOperation spanning = persistOperation(fixture, WorkOrderStatus.RELEASED,
+                Instant.parse("2026-01-05T23:30:00Z"));                       // ends 2026-01-06T00:30Z
+        persistOperation(fixture, WorkOrderStatus.RELEASED, Instant.parse("2026-01-05T23:00:00Z")); // ends 00:00Z
+
+        List<WorkOrderOperation> tuesday = repository.findScheduledOverlapping(fixture.plant.getPlantId(),
+                Instant.parse("2026-01-06T00:00:00Z"), Instant.parse("2026-01-07T00:00:00Z"), LOAD_STATUSES);
+
+        assertThat(tuesday).extracting(WorkOrderOperation::getWorkOrderOperationId)
+                .containsExactly(spanning.getWorkOrderOperationId());
+        assertThat(pageOf(fixture, LocalDate.of(2026, 1, 6), LocalDate.of(2026, 1, 6), null, null))
+                .extracting(WorkOrderOperation::getWorkOrderOperationId)
+                .containsExactly(spanning.getWorkOrderOperationId());
     }
 
     private List<WorkOrderOperation> pageOf(Fixture fixture, LocalDate from, LocalDate to,
                                              UUID workCenterId, WorkOrderStatus status) {
-        return repository.searchCapacityBoard(
-                fixture.plant.getPlantId(), workCenterId, status, from, to, PageRequest.of(0, 20)).getContent();
+        // The service converts the plant-local period to instants the same way (CapacityBoardService.startOf).
+        java.time.ZoneId zone = java.time.ZoneId.of(fixture.plant.getTimezone());
+        return repository.searchCapacityBoard(fixture.plant.getPlantId(), workCenterId, status,
+                from.atStartOfDay(zone).toInstant(), to.plusDays(1).atStartOfDay(zone).toInstant(),
+                PageRequest.of(0, 20)).getContent();
     }
 
     private record Fixture(Plant plant, WorkCenter workCenter, Warehouse warehouse, Item product, BomHeader bom) {}
@@ -188,6 +213,7 @@ class WorkOrderOperationRepositoryIT extends AbstractPostgresIntegrationTest {
         product = entityManager.persistFlushFind(product);
 
         BomHeader bom = BomHeader.builder().company(company).parentItem(product).revision("R1")
+                .bomCode("BOM-R1").versionNumber(1)
                 .status(BomStatus.ACTIVE).build();
         bom.setCreatedAt(now);
         bom.setUpdatedAt(now);

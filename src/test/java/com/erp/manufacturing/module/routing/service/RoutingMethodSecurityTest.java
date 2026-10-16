@@ -92,7 +92,7 @@ class RoutingMethodSecurityTest {
         when(routingPermissionGuard.hasRoutingAccess(
                 any(), eq("PERM_ROUTING_MANAGE"), eq(routingId))).thenReturn(false);
 
-        assertThatThrownBy(() -> routingService.activate(routingId))
+        assertThatThrownBy(() -> routingService.activate(routingId, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(routingHeaderRepository);
@@ -131,7 +131,7 @@ class RoutingMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_ROUTING_READ"), eq("COMPANY"), eq(companyId))).thenReturn(false);
 
-        assertThatThrownBy(() -> routingService.list(companyId, null, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> routingService.list(companyId, null, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(routingHeaderRepository);
@@ -144,10 +144,10 @@ class RoutingMethodSecurityTest {
         UUID companyId = UUID.randomUUID();
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_ROUTING_READ"), eq("COMPANY"), eq(companyId))).thenReturn(true);
-        when(routingHeaderRepository.search(eq(companyId), isNull(), isNull(), any(Pageable.class)))
+        when(routingHeaderRepository.search(eq(companyId), isNull(), isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        assertThatCode(() -> routingService.list(companyId, null, null, PageRequest.of(0, 20)))
+        assertThatCode(() -> routingService.list(companyId, null, null, null, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -158,10 +158,10 @@ class RoutingMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_ROUTING_READ"), eq("COMPANY"), eq(companyId))).thenReturn(true);
         when(routingHeaderRepository.search(
-                eq(companyId), eq(itemId), eq(RoutingStatus.ACTIVE), any(Pageable.class)))
+                eq(companyId), eq(itemId), eq(RoutingStatus.ACTIVE), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        assertThatCode(() -> routingService.list(companyId, itemId, RoutingStatus.ACTIVE, PageRequest.of(0, 20)))
+        assertThatCode(() -> routingService.list(companyId, itemId, RoutingStatus.ACTIVE, null, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 

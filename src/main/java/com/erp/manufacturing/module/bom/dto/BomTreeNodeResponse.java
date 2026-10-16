@@ -13,5 +13,9 @@ public record BomTreeNodeResponse(
         boolean hasActiveBom,
         BigDecimal quantityPer,
         BigDecimal scrapRate,
-        List<BomTreeNodeResponse> components
+        List<BomTreeNodeResponse> components,
+        /** Output quantity of this node's own BOM; {@code null} when the node has no BOM (G5, Q6). */
+        BigDecimal outputQuantity,
+        /** {@code quantityPer × outputQuantity} of the PARENT BOM; {@code null} on the root (G5, Q6). */
+        BigDecimal componentQuantity
 ) {}

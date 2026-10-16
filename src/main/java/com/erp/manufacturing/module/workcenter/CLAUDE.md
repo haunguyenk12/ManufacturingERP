@@ -75,3 +75,11 @@ cấu trúc tổ chức Company→Plant→Warehouse (`PERM_ORG_*`).
 adjustment đã xong ở `C2-8`** (`WorkOrderOperation.workCenter` FK, xem mục 4 + `CLAUDE.md §0.30`).
 Còn lại: nợ B (`predecessorOperationIds`/sequence-dependency validation) — tách `C2-8b`, xem
 `NEXT_PHASE_PLAN.md` lịch sử `C2-8` §1.
+
+### 8. G5 — Chặn ngừng khi còn tham chiếu (2026-10-16)
+
+Mục 1 cũ ghi "deactivate không kiểm routing còn tham chiếu" — **G5 đảo lại theo FE Q9**: ngừng trung tâm còn routing `ACTIVE`
+(`RoutingLookupService.isWorkCenterUsedByActiveRouting`) hoặc còn công đoạn của WO chưa xong (`DRAFT`/`PLANNED`/`BLOCKED`/
+`RELEASED`/`IN_PROGRESS`, `WorkCenterLoadLookupService`) ⇒ **422 `REFERENCE_IN_USE`** (bất biến `B163`, `module/shift`).
+Không có `shiftIds[]` (D8): trung tâm làm theo mọi ca của lịch. Response thêm `workCalendarCode`/`workCalendarName`; list có
+`search`. Test: `WorkCenterServiceTest.deactivate_*`, `RoutingDraftIT.existsActiveRoutingUsingWorkCenter_*`.

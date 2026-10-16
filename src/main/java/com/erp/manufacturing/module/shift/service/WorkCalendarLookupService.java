@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +77,50 @@ public class WorkCalendarLookupService {
         LocalDateTime localEarliestStart = LocalDateTime.ofInstant(earliestStart, zone);
         LocalDateTime localEnd = WorkingWindowCalculator.advance(calendar, localEarliestStart, durationMinutes);
         return localEnd.atZone(zone).toInstant();
+    }
+
+    /**
+     * Net working time of the calendar inside {@code [from, to)}, as absolute instants in the plant's
+     * {@code zone}, sorted and with overlaps merged (G5). Three things this adds over
+     * {@link #computeWorkingWindows}:
+     *
+     * <ul>
+     *   <li>the day before {@code from} is evaluated too, so the tail of an overnight shift that
+     *       started then is counted — FE A21: shift 22:00–06:00 with a 02:00–02:30 break gives the
+     *       next day 330 minutes;</li>
+     *   <li>holidays and the effective range still apply by the date a shift <em>starts</em>, exactly
+     *       as {@link WorkingWindowCalculator#computeDay} decides them;</li>
+     *   <li>two shifts that overlap on one calendar are merged, so the same minute never counts twice.</li>
+     * </ul>
+     */
+    @Transactional(readOnly = true)
+    public List<TimeInterval> computeWorkingIntervals(UUID workCalendarId, Instant from, Instant to, ZoneId zone) {
+        WorkCalendar calendar = loadWithExceptions(workCalendarId);
+        List<TimeInterval> raw = new ArrayList<>();
+        LocalDate first = LocalDateTime.ofInstant(from, zone).toLocalDate().minusDays(1);
+        LocalDate last = LocalDateTime.ofInstant(to, zone).toLocalDate();
+        for (LocalDate date = first; !date.isAfter(last); date = date.plusDays(1)) {
+            for (WorkingInterval interval : WorkingWindowCalculator.computeDay(calendar, date)) {
+                TimeInterval clipped = new TimeInterval(interval.start().atZone(zone).toInstant(),
+                        interval.end().atZone(zone).toInstant()).clip(from, to);
+                if (clipped != null) {
+                    raw.add(clipped);
+                }
+            }
+        }
+        raw.sort(Comparator.comparing(TimeInterval::start));
+        List<TimeInterval> merged = new ArrayList<>();
+        for (TimeInterval interval : raw) {
+            TimeInterval previous = merged.isEmpty() ? null : merged.get(merged.size() - 1);
+            if (previous != null && !interval.start().isAfter(previous.end())) {
+                if (interval.end().isAfter(previous.end())) {
+                    merged.set(merged.size() - 1, new TimeInterval(previous.start(), interval.end()));
+                }
+            } else {
+                merged.add(interval);
+            }
+        }
+        return merged;
     }
 
     /**

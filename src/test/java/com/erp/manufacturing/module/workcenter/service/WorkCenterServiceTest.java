@@ -38,8 +38,13 @@ class WorkCenterServiceTest {
     private final WorkCenterRepository repository = mock(WorkCenterRepository.class);
     private final OrganizationLookupService organizationLookupService = mock(OrganizationLookupService.class);
     private final WorkCalendarLookupService workCalendarLookupService = mock(WorkCalendarLookupService.class);
+    private final com.erp.manufacturing.module.routing.service.RoutingLookupService routingLookupService =
+            mock(com.erp.manufacturing.module.routing.service.RoutingLookupService.class);
+    private final com.erp.manufacturing.module.workorder.service.query.WorkCenterLoadLookupService workCenterLoadLookupService =
+            mock(com.erp.manufacturing.module.workorder.service.query.WorkCenterLoadLookupService.class);
     private final WorkCenterService service =
-            new WorkCenterService(repository, organizationLookupService, workCalendarLookupService, new WorkCenterMapper());
+            new WorkCenterService(repository, organizationLookupService, workCalendarLookupService,
+                    routingLookupService, workCenterLoadLookupService, new WorkCenterMapper());
 
     private static final UUID PLANT_ID = UUID.randomUUID();
     private static final UUID WORK_CENTER_ID = UUID.randomUUID();
@@ -121,7 +126,8 @@ class WorkCenterServiceTest {
     void update_hasNoCodeOrPlantIdField() {
         assertThat(WorkCenterUpdateRequest.class.getRecordComponents())
                 .extracting(RecordComponent::getName)
-                .containsExactly("name", "description", "capacityUnitType", "capacityUnits", "workCalendarId")
+                .containsExactly("name", "description", "capacityUnitType", "capacityUnits", "workCalendarId",
+                        "expectedVersion")
                 .doesNotContain("code", "plantId");
     }
 
@@ -135,7 +141,7 @@ class WorkCenterServiceTest {
         when(repository.findById(WORK_CENTER_ID)).thenReturn(Optional.of(existing));
 
         var response = service.update(WORK_CENTER_ID,
-                new WorkCenterUpdateRequest(null, "new description", null, 5, null));
+                new WorkCenterUpdateRequest(null, "new description", null, 5, null, null));
 
         assertThat(response.name()).isEqualTo("Old Name");
         assertThat(response.description()).isEqualTo("new description");
@@ -213,7 +219,7 @@ class WorkCenterServiceTest {
                 .thenReturn(activeWorkCalendar(WORK_CALENDAR_ID, otherPlantId));
 
         assertThatThrownBy(() -> service.update(WORK_CENTER_ID,
-                new WorkCenterUpdateRequest(null, null, null, null, WORK_CALENDAR_ID)))
+                new WorkCenterUpdateRequest(null, null, null, null, WORK_CALENDAR_ID, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH));
@@ -248,11 +254,46 @@ class WorkCenterServiceTest {
     @Test
     @DisplayName("list: passes the plantId and status straight through to the repository")
     void list_passesFiltersThrough() {
-        when(repository.search(eq(PLANT_ID), eq(OrganizationStatus.ACTIVE), any()))
+        when(repository.search(eq(PLANT_ID), eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any()))
                 .thenReturn(org.springframework.data.domain.Page.empty());
 
-        service.list(PLANT_ID, OrganizationStatus.ACTIVE, org.springframework.data.domain.PageRequest.of(0, 20));
+        service.list(PLANT_ID, OrganizationStatus.ACTIVE, null, org.springframework.data.domain.PageRequest.of(0, 20));
 
-        verify(repository).search(eq(PLANT_ID), eq(OrganizationStatus.ACTIVE), any());
+        verify(repository).search(eq(PLANT_ID), eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any());
+    }
+
+    // ── G5 ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("G5 Q9: a work center an ACTIVE routing still uses cannot be deactivated")
+    void deactivate_usedByAnActiveRouting_isReferenceInUse() {
+        WorkCenter workCenter = WorkCenter.builder().workCenterId(WORK_CENTER_ID).plant(activePlant(PLANT_ID))
+                .code("WC-01").name("Line").capacityUnitType(CapacityUnitType.LINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build();
+        when(repository.findById(WORK_CENTER_ID)).thenReturn(Optional.of(workCenter));
+        when(routingLookupService.isWorkCenterUsedByActiveRouting(WORK_CENTER_ID)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deactivate(WORK_CENTER_ID))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.REFERENCE_IN_USE));
+        assertThat(workCenter.isActive()).isTrue();
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("G5 A23: a work center with operations of unfinished work orders cannot be deactivated")
+    void deactivate_withOpenWorkOrderLoad_isReferenceInUse() {
+        WorkCenter workCenter = WorkCenter.builder().workCenterId(WORK_CENTER_ID).plant(activePlant(PLANT_ID))
+                .code("WC-01").name("Line").capacityUnitType(CapacityUnitType.LINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build();
+        when(repository.findById(WORK_CENTER_ID)).thenReturn(Optional.of(workCenter));
+        when(workCenterLoadLookupService.hasOpenWorkOrderLoad(WORK_CENTER_ID)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deactivate(WORK_CENTER_ID))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.REFERENCE_IN_USE));
+        verify(repository, never()).save(any());
     }
 }

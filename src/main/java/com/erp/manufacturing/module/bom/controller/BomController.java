@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -38,12 +39,15 @@ public class BomController {
             @PathVariable UUID companyId,
             @RequestParam(required = false) UUID parentItemId,
             @RequestParam(required = false) BomStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "false") boolean latestOnly,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(bomService.listBoms(
-                companyId, parentItemId, status, PageableFactory.of(page, size, sortBy, sortDir))));
+                companyId, parentItemId, status, search, latestOnly,
+                PageableFactory.of(page, size, sortBy, sortDir, "bomId"))));
     }
 
     @GetMapping("/v1/boms/{bomId}")
@@ -96,9 +100,55 @@ public class BomController {
     }
 
     @PostMapping("/v1/boms/{bomId}/activate")
-    @Operation(summary = "Activate BOM")
-    public ResponseEntity<ApiResponse<BomResponse>> activateBom(@PathVariable UUID bomId) {
-        return ResponseEntity.ok(ApiResponse.ok(bomService.activateBom(bomId)));
+    @Operation(summary = "Activate BOM",
+            description = "Body {expectedVersion} is optional; when sent, a stale value is 409 "
+                    + "CONCURRENT_MODIFICATION. A version whose effectiveFrom is in the future is 409 "
+                    + "EFFECTIVE_DATE_FUTURE. The previous ACTIVE version of the product becomes INACTIVE "
+                    + "in the same transaction.")
+    public ResponseEntity<ApiResponse<BomResponse>> activateBom(
+            @PathVariable UUID bomId,
+            @RequestBody(required = false) BomVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(bomService.activateBom(bomId,
+                request == null ? null : request.expectedVersion())));
+    }
+
+    @PostMapping("/v1/boms/{bomId}/deactivate")
+    @Operation(summary = "Deactivate BOM with an expectedVersion check (same transition as DELETE)")
+    public ResponseEntity<ApiResponse<BomResponse>> deactivateBomVersioned(
+            @PathVariable UUID bomId,
+            @Valid @RequestBody BomExpectedVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(bomService.deactivateBom(bomId, request.expectedVersion())));
+    }
+
+    @PutMapping("/v1/companies/{companyId}/bom-drafts")
+    @Operation(summary = "Save a BOM draft atomically — header and every line in one transaction",
+            description = "Without bomId: a new DRAFT version of parentItemId. With bomId + expectedVersion: "
+                    + "full replacement of that DRAFT. Lines carry componentQuantity for outputQuantity; the "
+                    + "server stores quantityPer = componentQuantity / outputQuantity.")
+    public ResponseEntity<ApiResponse<BomResponse>> saveDraft(
+            @PathVariable UUID companyId,
+            @Valid @RequestBody BomDraftSaveRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(bomService.saveDraft(companyId, request)));
+    }
+
+    @PostMapping("/v1/boms/{bomId}/copy")
+    @Operation(summary = "Copy any BOM version into a new DRAFT of the same product")
+    public ResponseEntity<ApiResponse<BomResponse>> copyBom(
+            @PathVariable UUID bomId,
+            @Valid @RequestBody BomCopyRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created(bomService.copyBom(bomId, request)));
+    }
+
+    @GetMapping("/v1/boms/{bomId}/versions")
+    @Operation(summary = "Every version of this BOM's product, newest version first")
+    public ResponseEntity<ApiResponse<PageResult<BomResponse>>> listVersions(
+            @PathVariable UUID bomId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageableFactory.of(page, size, "versionNumber", "desc");
+        return ResponseEntity.ok(ApiResponse.ok(bomService.listVersions(
+                bomId, pageable.getPageNumber(), pageable.getPageSize())));
     }
 
     @GetMapping("/v1/items/{itemId}/active-bom")

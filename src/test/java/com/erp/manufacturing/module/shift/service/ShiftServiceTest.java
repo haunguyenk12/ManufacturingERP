@@ -35,7 +35,10 @@ class ShiftServiceTest {
 
     private final ShiftRepository repository = mock(ShiftRepository.class);
     private final OrganizationLookupService organizationLookupService = mock(OrganizationLookupService.class);
-    private final ShiftService service = new ShiftService(repository, organizationLookupService, new ShiftMapper());
+    private final com.erp.manufacturing.module.shift.repository.WorkCalendarRepository workCalendarRepository =
+            mock(com.erp.manufacturing.module.shift.repository.WorkCalendarRepository.class);
+    private final ShiftService service =
+            new ShiftService(repository, workCalendarRepository, organizationLookupService, new ShiftMapper());
 
     private static final UUID PLANT_ID = UUID.randomUUID();
     private static final UUID SHIFT_ID = UUID.randomUUID();
@@ -151,7 +154,7 @@ class ShiftServiceTest {
                 .shift(existing).startTime(LocalTime.of(12, 0)).endTime(LocalTime.of(13, 0)).build());
         when(repository.findById(SHIFT_ID)).thenReturn(Optional.of(existing));
 
-        var response = service.update(SHIFT_ID, new ShiftUpdateRequest("New name", null, null, null));
+        var response = service.update(SHIFT_ID, new ShiftUpdateRequest("New name", null, null, null, null));
 
         assertThat(response.name()).isEqualTo("New name");
         assertThat(response.breaks()).hasSize(1);
@@ -168,7 +171,7 @@ class ShiftServiceTest {
                 .shift(existing).startTime(LocalTime.of(12, 0)).endTime(LocalTime.of(13, 0)).build());
         when(repository.findById(SHIFT_ID)).thenReturn(Optional.of(existing));
 
-        var response = service.update(SHIFT_ID, new ShiftUpdateRequest(null, null, null, List.of()));
+        var response = service.update(SHIFT_ID, new ShiftUpdateRequest(null, null, null, List.of(), null));
 
         assertThat(response.breaks()).isEmpty();
     }
@@ -185,7 +188,7 @@ class ShiftServiceTest {
         when(repository.findById(SHIFT_ID)).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> service.update(SHIFT_ID,
-                new ShiftUpdateRequest(null, null, LocalTime.of(15, 0), null)))
+                new ShiftUpdateRequest(null, null, LocalTime.of(15, 0), null, null)))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
@@ -221,12 +224,92 @@ class ShiftServiceTest {
     @DisplayName("list: passes the plantId and status straight through to the repository")
     void list_passesFiltersThrough() {
         when(repository.search(org.mockito.ArgumentMatchers.eq(PLANT_ID),
-                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), any()))
+                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any()))
                 .thenReturn(org.springframework.data.domain.Page.empty());
 
-        service.list(PLANT_ID, OrganizationStatus.ACTIVE, org.springframework.data.domain.PageRequest.of(0, 20));
+        service.list(PLANT_ID, OrganizationStatus.ACTIVE, null, org.springframework.data.domain.PageRequest.of(0, 20));
 
         verify(repository).search(org.mockito.ArgumentMatchers.eq(PLANT_ID),
-                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), any());
+                org.mockito.ArgumentMatchers.eq(OrganizationStatus.ACTIVE), org.mockito.ArgumentMatchers.isNull(), any());
+    }
+
+    // ── G5 ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("G5 A20: 08:00-17:00 with a 12:00-13:00 break works 480 minutes")
+    void create_dayShiftWithLunch_reportsFourHundredEightyWorkingMinutes() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+
+        var response = service.create(PLANT_ID, new ShiftCreateRequest("SH-D", "Day", LocalTime.of(8, 0),
+                LocalTime.of(17, 0), List.of(new ShiftBreakRequest(LocalTime.of(12, 0), LocalTime.of(13, 0)))));
+
+        assertThat(response.workingMinutes()).isEqualTo(480);
+    }
+
+    @Test
+    @DisplayName("G5 A21: 22:00-06:00 with a 02:00-02:30 break works 450 minutes")
+    void create_overnightShift_reportsFourHundredFiftyWorkingMinutes() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+
+        var response = service.create(PLANT_ID, new ShiftCreateRequest("SH-N", "Night", LocalTime.of(22, 0),
+                LocalTime.of(6, 0), List.of(new ShiftBreakRequest(LocalTime.of(2, 0), LocalTime.of(2, 30)))));
+
+        assertThat(response.workingMinutes()).isEqualTo(450);
+    }
+
+    @Test
+    @DisplayName("G5 A20: overlapping breaks are refused before any save")
+    void create_overlappingBreaks_areRefused() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+
+        assertThatThrownBy(() -> service.create(PLANT_ID, new ShiftCreateRequest("SH-X", "X", LocalTime.of(8, 0),
+                LocalTime.of(17, 0), List.of(new ShiftBreakRequest(LocalTime.of(12, 0), LocalTime.of(13, 0)),
+                new ShiftBreakRequest(LocalTime.of(12, 30), LocalTime.of(13, 30))))))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(com.erp.manufacturing.common.exception.BusinessErrorCode.OPERATION_NOT_ALLOWED));
+        verify(repository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    @DisplayName("G5 A20: a zero-length shift is refused")
+    void create_zeroLengthShift_isRefused() {
+        when(organizationLookupService.getActivePlant(PLANT_ID)).thenReturn(activePlant(PLANT_ID));
+
+        assertThatThrownBy(() -> service.create(PLANT_ID, new ShiftCreateRequest("SH-0", "Zero", LocalTime.of(8, 0),
+                LocalTime.of(8, 0), null)))
+                .isInstanceOf(AppException.class);
+        verify(repository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    @DisplayName("G5 A23: a shift still scheduled on an ACTIVE calendar cannot be deactivated")
+    void deactivate_shiftOnAnActiveCalendar_isReferenceInUse() {
+        Shift shift = Shift.builder().shiftId(SHIFT_ID).plant(activePlant(PLANT_ID)).code("SH-01").name("Day")
+                .startTime(LocalTime.of(8, 0)).endTime(LocalTime.of(17, 0)).build();
+        when(repository.findById(SHIFT_ID)).thenReturn(java.util.Optional.of(shift));
+        when(workCalendarRepository.existsActiveCalendarUsingShift(SHIFT_ID)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.deactivate(SHIFT_ID))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(com.erp.manufacturing.common.exception.BusinessErrorCode.REFERENCE_IN_USE));
+        assertThat(shift.isActive()).isTrue();
+        verify(repository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    @DisplayName("G5 R13: a stale expectedVersion on PATCH changes nothing")
+    void update_staleExpectedVersion_isConcurrentModification() {
+        Shift shift = Shift.builder().shiftId(SHIFT_ID).plant(activePlant(PLANT_ID)).code("SH-01").name("Day")
+                .startTime(LocalTime.of(8, 0)).endTime(LocalTime.of(17, 0)).build();
+        shift.setVersion(3L);
+        when(repository.findById(SHIFT_ID)).thenReturn(java.util.Optional.of(shift));
+
+        assertThatThrownBy(() -> service.update(SHIFT_ID, new ShiftUpdateRequest("New", null, null, null, 2L)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(com.erp.manufacturing.common.exception.BusinessErrorCode.CONCURRENT_MODIFICATION));
+        assertThat(shift.getName()).isEqualTo("Day");
     }
 }

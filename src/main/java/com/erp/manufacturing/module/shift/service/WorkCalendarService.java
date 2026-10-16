@@ -21,6 +21,7 @@ import com.erp.manufacturing.module.shift.dto.WorkCalendarWeeklyShiftRequest;
 import com.erp.manufacturing.module.shift.mapper.WorkCalendarMapper;
 import com.erp.manufacturing.module.shift.repository.ShiftRepository;
 import com.erp.manufacturing.module.shift.repository.WorkCalendarRepository;
+import com.erp.manufacturing.module.workcenter.service.WorkCenterLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -51,6 +52,7 @@ public class WorkCalendarService {
 
     private final WorkCalendarRepository workCalendarRepository;
     private final ShiftRepository shiftRepository;
+    private final WorkCenterLookupService workCenterLookupService;
     private final OrganizationLookupService organizationLookupService;
     private final WorkCalendarMapper mapper;
 
@@ -92,8 +94,10 @@ public class WorkCalendarService {
 
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_WORK_CALENDAR_READ', 'PLANT', #plantId)")
-    public PageResult<WorkCalendarResponse> list(UUID plantId, OrganizationStatus status, Pageable pageable) {
-        return PageResult.from(workCalendarRepository.search(plantId, status, pageable).map(mapper::toResponse));
+    public PageResult<WorkCalendarResponse> list(UUID plantId, OrganizationStatus status, String search,
+                                                 Pageable pageable) {
+        return PageResult.from(workCalendarRepository.search(plantId, status,
+                StringUtils.hasText(search) ? search.trim() : null, pageable).map(mapper::toResponse));
     }
 
     @Transactional(readOnly = true)
@@ -108,6 +112,10 @@ public class WorkCalendarService {
                plantId = "#result?.plantId()")
     public WorkCalendarResponse update(UUID workCalendarId, WorkCalendarUpdateRequest request) {
         WorkCalendar calendar = findCalendarWithDetails(workCalendarId);
+        if (request.expectedVersion() != null && !request.expectedVersion().equals(calendar.getVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Work calendar was modified by another request; reload it");
+        }
         if (request.name() != null) {
             calendar.setName(requireText(request.name(), "Work calendar name"));
         }
@@ -147,9 +155,8 @@ public class WorkCalendarService {
     }
 
     /**
-     * Also the handler behind {@code DELETE /work-calendars/{workCalendarId}} (rule C6). Deliberately
-     * does NOT check whether a {@code WorkCenter} still references this calendar — same accepted
-     * decision as {@code WorkCenterService.deactivate} (B_wc3).
+     * Also the handler behind {@code DELETE /work-calendars/{workCalendarId}} (rule C6). G5 (FE A23):
+     * refused with {@code REFERENCE_IN_USE} while an ACTIVE work center runs on this calendar.
      */
     @Transactional
     @PreAuthorize("@workCalendarPermissionGuard.hasWorkCalendarAccess(authentication, 'PERM_WORK_CALENDAR_MANAGE', #workCalendarId)")
@@ -157,6 +164,10 @@ public class WorkCalendarService {
                plantId = "#result?.plantId()")
     public WorkCalendarResponse deactivate(UUID workCalendarId) {
         WorkCalendar calendar = findCalendar(workCalendarId);
+        if (calendar.isActive() && workCenterLookupService.isCalendarUsedByActiveWorkCenter(workCalendarId)) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.REFERENCE_IN_USE,
+                    "Work calendar " + calendar.getCode() + " is still used by an ACTIVE work center");
+        }
         calendar.deactivate();
         return mapper.toResponse(workCalendarRepository.save(calendar));
     }
@@ -200,6 +211,11 @@ public class WorkCalendarService {
             if (!shift.getPlant().getPlantId().equals(plant.getPlantId())) {
                 throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
                         "Shift " + shiftId + " does not belong to plant " + plant.getPlantId());
+            }
+            // G5 (FE §3.5): a calendar schedules ACTIVE shifts only.
+            if (!shift.isActive()) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
+                        "Inactive shift cannot be scheduled: " + shift.getCode());
             }
         }
         return shiftsById;

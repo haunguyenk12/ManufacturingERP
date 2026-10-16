@@ -4,6 +4,7 @@ import com.erp.manufacturing.module.shift.domain.Shift;
 import com.erp.manufacturing.module.shift.domain.ShiftBreak;
 import com.erp.manufacturing.module.shift.dto.ShiftBreakResponse;
 import com.erp.manufacturing.module.shift.dto.ShiftResponse;
+import com.erp.manufacturing.module.shift.service.WorkingWindowCalculator;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
@@ -31,7 +32,8 @@ public class ShiftMapper {
                 breaks,
                 shift.getVersion(),
                 shift.getCreatedAt(),
-                shift.getUpdatedAt());
+                shift.getUpdatedAt(),
+                WorkingWindowCalculator.workingMinutes(shift));
     }
 
     private ShiftBreakResponse toResponse(ShiftBreak shiftBreak) {
