@@ -839,16 +839,16 @@ Gantt kéo-thả, optimizer, phân máy/người cụ thể, xử lý va chạm 
   - [x] `G4-4` read model: movement actor/trace + detail, aggregate `search` + `heldLotQuantity`/expired, reservations, receive `expiresAt`, `@Digits(6)`
   - [x] `G4-5` `mvn -o clean verify` (1461 + 202) + mutation 7/7 + smoke 4 lượt + `BE_RESPONSE_GD_04_2026-10-15.md` + docs
   - [ ] FE nghiệm thu
-- [ ] **`G5`** — FE handoff Giai đoạn 5: định mức, quy trình, công suất *(đã lập kế hoạch 2026-10-15, §12)*
-  - [ ] `G5-0` đọc nốt phần "chưa rà" §12.1 + baseline đo thật + chạy live BOM/capacity hiện có
-  - [ ] Chốt 12 quyết định §12.2 (D1–D12) với user — **D5/D7/D8/D10 là đảo ngược thiết kế đã chốt**
-  - [ ] `G5-1` BOM: `outputQuantity`/`bomCode`/`versionNumber`/`effectiveFrom`, atomic save, copy, versions, khoá activate
-  - [ ] `G5-2` Routing: công đoạn trước (nợ B), ghi cả graph, copy, versions
-  - [ ] `G5-3` Ca/Lịch/Trung tâm: `workingMinutes`, `expectedVersion`, guard tham chiếu
-  - [ ] `G5-4` Công suất: tải theo phần giao nhau với kỳ, preview chỉ đọc, điều chỉnh theo D10
-  - [ ] `G5-5` Nhập BOM Excel (`ImportTargetType.BOM`, mẫu `omniplant-bom-v1`)
-  - [ ] `G5-6` `mvn -o clean verify` + mutation + smoke A01–A36 + `BE_RESPONSE_GD_05_*.md` + docs
-  - [ ] FE nghiệm thu
+- [x] **`G5`** — FE handoff Giai đoạn 5: định mức, quy trình, công suất *(BE xong 2026-10-16, §12 — chờ FE nghiệm thu)*
+  - [x] `G5-0` đọc nốt phần "chưa rà" §12.1 + baseline đo thật + chạy live BOM/capacity hiện có
+  - [x] Chốt 12 quyết định §12.2 (D1–D12) với user — D1 giữ `quantityPer`, D3 Instant, **D5/D7/D8 giữ thiết kế cũ**, D9 chia theo ngày, **D10 chặn 409**, D12 làm trong G5
+  - [x] `G5-1` BOM: `outputQuantity`/`bomCode`/`versionNumber`/`effectiveFrom`, atomic save, copy, versions, khoá activate — `V73`, `B155`–`B158`
+  - [x] `G5-2` Routing: công đoạn trước (nợ B), ghi cả graph, copy, versions — `B159`–`B161`
+  - [x] `G5-3` Ca/Lịch/Trung tâm: `workingMinutes`, `expectedVersion`, guard tham chiếu (`REFERENCE_IN_USE`) — `B162`–`B164`
+  - [x] `G5-4` Công suất: tải theo phần giao nhau với kỳ, preview chỉ đọc, điều chỉnh theo D10 (409 `OPERATION_SEQUENCE_CONFLICT`) — `B165`–`B167`
+  - [x] `G5-5` Nhập BOM Excel (`ImportTargetType.BOM`, mẫu `omniplant-bom-v1`) — `B168`–`B170`
+  - [x] `G5-6` `mvn -o clean verify` (1548 unit + 215 IT, 0/0) + mutation 7/7 + smoke lượt `231527` (92 gọi) + `BE_RESPONSE_GD_05_2026-10-16.md` + docs
+  - [ ] FE nghiệm thu A01–A36
 
 ---
 
