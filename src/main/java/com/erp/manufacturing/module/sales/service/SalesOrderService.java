@@ -7,24 +7,36 @@ import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.planning.service.PlanningDemandService;
+import com.erp.manufacturing.module.sales.domain.Customer;
 import com.erp.manufacturing.module.sales.domain.SalesOrder;
 import com.erp.manufacturing.module.sales.domain.SalesOrderLine;
 import com.erp.manufacturing.module.sales.domain.SalesOrderStatus;
 import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderCancelRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
+import com.erp.manufacturing.module.sales.dto.SalesOrderDraftCreateRequest;
+import com.erp.manufacturing.module.sales.dto.SalesOrderDraftLineRequest;
+import com.erp.manufacturing.module.sales.dto.SalesOrderDraftUpdateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLineRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.mapper.SalesOrderMapper;
+import com.erp.manufacturing.module.sales.repository.CustomerRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderLineRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderPlanningDemandProjection;
 import com.erp.manufacturing.module.sales.repository.SalesOrderRepository;
+import com.erp.manufacturing.module.uom.domain.Uom;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
+import com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService;
+import com.erp.manufacturing.module.workorder.service.query.SalesOrderCoverageLookupService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -34,10 +46,14 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -53,11 +69,21 @@ public class SalesOrderService {
             SalesOrderStatus.IN_PRODUCTION,
             SalesOrderStatus.PARTIALLY_FULFILLED);
 
+    /** G6a: what can be sold through a draft — stock on hand, no BOM/routing required (FE §1.3). */
+    static final Set<ItemType> SELLABLE_TYPES = Set.of(ItemType.FINISHED_GOOD, ItemType.WIP);
+
+    private static final int MAX_ORDER_NUMBER_ATTEMPTS = 50;
+
     private final SalesOrderRepository salesOrderRepository;
     private final SalesOrderLineRepository salesOrderLineRepository;
+    private final CustomerRepository customerRepository;
     private final OrganizationLookupService organizationLookupService;
     private final ItemLookupService itemLookupService;
+    private final UomLookupService uomLookupService;
     private final PlanningDemandService planningDemandService;
+    private final SalesOrderStockReservationService stockReservationService;
+    private final SalesOrderCoverageLookupService coverageLookupService;
+    private final SalesOrderDetailAssembler detailAssembler;
     private final SalesOrderMapper mapper;
 
     @Transactional
@@ -89,6 +115,65 @@ public class SalesOrderService {
             order.getLines().add(buildLine(order, lineRequest, lineNo++));
         }
         return mapper.toResponse(salesOrderRepository.save(order), true);
+    }
+
+    /**
+     * G6a (FE R01/R02, D1/D2): a DRAFT linked to an ACTIVE customer of the same company, with an
+     * {@code orderNo} the server generates. Every line is validated before anything is written
+     * (rule C9); the customer code/name are snapshotted (FE Q18).
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_MANAGE', 'PLANT', #request.plantId())")
+    @Auditable(action = AuditAction.SALES_ORDER_CREATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
+    public SalesOrderResponse createDraft(SalesOrderDraftCreateRequest request) {
+        Company company = organizationLookupService.getActiveCompany(request.companyId());
+        Plant plant = organizationLookupService.getActivePlant(request.plantId());
+        ensurePlantBelongsToCompany(plant, company);
+        Customer customer = resolveActiveCustomer(request.customerId(), company);
+        List<Item> items = resolveDraftItems(request.orderDate(), request.lines(), company);
+
+        SalesOrder order = SalesOrder.builder()
+                .company(company)
+                .plant(plant)
+                .orderNo(nextOrderNo(company.getCompanyId()))
+                .orderDate(request.orderDate())
+                .note(trimToNull(request.note()))
+                .build();
+        applyCustomer(order, customer, request.customerReference());
+        addDraftLines(order, request.lines(), items);
+        SalesOrder saved = salesOrderRepository.saveAndFlush(order);
+        return toDetail(saved);
+    }
+
+    /**
+     * G6a full replacement of a DRAFT (FE R02). Same version guard and flush ordering as the legacy
+     * {@link #update} ({@code B87}, {@code B112}).
+     */
+    @Transactional
+    @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
+    @Auditable(action = AuditAction.SALES_ORDER_UPDATED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
+    public SalesOrderResponse updateDraft(UUID salesOrderId, SalesOrderDraftUpdateRequest request) {
+        SalesOrder order = findOrder(salesOrderId);
+        if (!order.isDraft()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
+                    "Only DRAFT sales orders can be updated");
+        }
+        ensureVersion(order, request.expectedVersion());
+        Customer customer = resolveActiveCustomer(request.customerId(), order.getCompany());
+        List<Item> items = resolveDraftItems(request.orderDate(), request.lines(), order.getCompany());
+
+        applyCustomer(order, customer, request.customerReference());
+        order.setOrderDate(request.orderDate());
+        order.setNote(trimToNull(request.note()));
+        order.getLines().clear();
+        order.setUpdatedAt(Instant.now());
+        salesOrderRepository.flush();
+        addDraftLines(order, request.lines(), items);
+        return toDetail(salesOrderRepository.saveAndFlush(order));
     }
 
     /**
@@ -145,17 +230,30 @@ public class SalesOrderService {
      * Confirms the order and, in the same transaction, creates one {@code SALES_ORDER} planning
      * demand per line — this is the point where a commercial commitment becomes something MRP can
      * plan against (spec §1).
+     *
+     * <p>G6a: {@code expectedVersion} is optional ({@code null} = legacy call, no check). An order
+     * linked to a customer re-checks that the customer and every item are still ACTIVE (FE R02);
+     * legacy free-text orders keep their old behaviour.
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
     @Auditable(action = AuditAction.SALES_ORDER_CONFIRMED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public SalesOrderResponse confirm(UUID salesOrderId) {
+    public SalesOrderResponse confirm(UUID salesOrderId, Long expectedVersion) {
         SalesOrder order = findOrder(salesOrderId);
         if (!order.isDraft()) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
                     "Only DRAFT sales orders can be confirmed");
+        }
+        if (expectedVersion != null) {
+            ensureVersion(order, expectedVersion);
+        }
+        if (order.getCustomerId() != null) {
+            resolveActiveCustomer(order.getCustomerId(), order.getCompany());
+            for (SalesOrderLine line : order.getLines()) {
+                itemLookupService.getActiveItem(line.getItem().getItemId());
+            }
         }
         order.confirm();
         for (SalesOrderLine line : order.getLines()) {
@@ -168,7 +266,7 @@ public class SalesOrderService {
                     line.getSalesOrderLineId());
         }
         // saveAndFlush: see update()'s comment — the response's `version` must reflect this write.
-        return mapper.toResponse(salesOrderRepository.saveAndFlush(order), true);
+        return toDetail(salesOrderRepository.saveAndFlush(order));
     }
 
     /**
@@ -176,58 +274,73 @@ public class SalesOrderService {
      * ({@code IN_PRODUCTION} onwards) there are work orders and possibly issued material behind the
      * order, and unwinding those is not a sales-side decision. Cancelling a confirmed order also
      * cancels the demand it generated, so MRP stops planning for it.
+     *
+     * <p>G6a: also releases every stock hold of <em>this</em> order in the same transaction (FE R06).
+     * The work-order guard is the status rule above: allocating a work order moves the order to
+     * {@code IN_PRODUCTION}, so an order with a work order behind it can never get here (FE Q24 —
+     * refuse, never cascade). {@code request} is optional; when sent, its reason is stored.
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
     @Auditable(action = AuditAction.SALES_ORDER_CANCELLED, entityType = "SalesOrder", entityIdExpression = "salesOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public SalesOrderResponse cancel(UUID salesOrderId) {
+    public SalesOrderResponse cancel(UUID salesOrderId, SalesOrderCancelRequest request) {
         SalesOrder order = findOrder(salesOrderId);
         if (!order.isDraft() && !order.isConfirmed()) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
                     "Only DRAFT or CONFIRMED sales orders can be cancelled");
         }
+        if (request != null && request.expectedVersion() != null) {
+            ensureVersion(order, request.expectedVersion());
+        }
         if (order.isConfirmed()) {
             planningDemandService.cancelOpenDemandsForSalesOrderLines(
                     order.getLines().stream().map(SalesOrderLine::getSalesOrderLineId).toList());
+            stockReservationService.cancelActiveForSalesOrder(order.getSalesOrderId());
+        }
+        if (request != null) {
+            order.setCancelReason(request.reason().trim());
         }
         order.cancel();
         // saveAndFlush: see update()'s comment — the response's `version` must reflect this write.
-        return mapper.toResponse(salesOrderRepository.saveAndFlush(order), true);
+        return toDetail(salesOrderRepository.saveAndFlush(order));
     }
 
-    @Transactional(readOnly = true)
-    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_READ', 'PLANT', #plantId)")
-    public PageResult<SalesOrderResponse> list(UUID companyId,
-                                               UUID plantId,
-                                               SalesOrderStatus status,
-                                               Pageable pageable) {
-        return list(companyId, plantId, status, null, pageable);
-    }
-
+    /**
+     * G6a list (FE R03). Every filter is optional; the due-date range applies to the order's
+     * earliest line due date (FE Q3). Two queries per page: the orders, then one batch line summary.
+     */
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_READ', 'PLANT', #plantId)")
     public PageResult<SalesOrderResponse> list(UUID companyId,
                                                UUID plantId,
                                                SalesOrderStatus status,
                                                String search,
+                                               LocalDate orderDateFrom,
+                                               LocalDate orderDateTo,
+                                               LocalDate dueDateFrom,
+                                               LocalDate dueDateTo,
                                                Pageable pageable) {
         Company company = organizationLookupService.getActiveCompany(companyId);
         Plant plant = organizationLookupService.getActivePlant(plantId);
         ensurePlantBelongsToCompany(plant, company);
-        String normalizedSearch = trimToNull(search);
-        var page = normalizedSearch == null
-                ? salesOrderRepository.search(companyId, plantId, status, pageable)
-                : salesOrderRepository.searchWithText(companyId, plantId, status, normalizedSearch, pageable);
-        return PageResult.from(page
-                .map(order -> mapper.toResponse(order, false)));
+        Page<SalesOrder> page = salesOrderRepository.searchExtended(companyId, plantId, status,
+                trimToNull(search), orderDateFrom, orderDateTo, dueDateFrom, dueDateTo, pageable);
+        List<UUID> orderIds = page.getContent().stream().map(SalesOrder::getSalesOrderId).toList();
+        Map<UUID, SalesOrderLineRepository.OrderLineSummaryProjection> summaries = orderIds.isEmpty()
+                ? Map.of()
+                : salesOrderLineRepository.summarizeByOrderIds(orderIds).stream()
+                        .collect(Collectors.toMap(
+                                SalesOrderLineRepository.OrderLineSummaryProjection::getSalesOrderId,
+                                Function.identity()));
+        return PageResult.from(page.map(order -> mapper.toListResponse(order, summaries.get(order.getSalesOrderId()))));
     }
 
     @Transactional(readOnly = true)
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_READ', #salesOrderId)")
     public SalesOrderResponse get(UUID salesOrderId) {
-        return mapper.toResponse(findOrder(salesOrderId), true);
+        return toDetail(findOrder(salesOrderId));
     }
 
     /**
@@ -235,20 +348,39 @@ public class SalesOrderService {
      * not a sales one: this is the planner's screen and spec §2.2 assigns it {@code PLANNING_RUN}
      * — {@code PERM_MRP_RUN} in this codebase.
      *
-     * <p>Two queries, never one per line (rule {@code C14}): the eligibility JPQL, then a single batch
-     * lookup that attaches the {@code planningDemandId} the run needs (debt #21).
+     * <p>Batch queries only, never one per line (rule {@code C14}): the eligibility JPQL, the
+     * {@code planningDemandId} lookup (debt #21), and — since G6a — held stock and work-order
+     * coverage. {@code uncoveredOnly} drops lines with nothing left to plan (FE R07); the default keeps
+     * the legacy list unchanged.
      */
     @Transactional(readOnly = true)
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MRP_RUN', 'PLANT', #plantId)")
-    public List<PlanningDemandLineResponse> planningDemands(UUID plantId, LocalDate horizonEnd) {
+    public List<PlanningDemandLineResponse> planningDemands(UUID plantId, LocalDate horizonEnd, boolean uncoveredOnly) {
         List<SalesOrderPlanningDemandProjection> eligible = salesOrderLineRepository
                 .findEligiblePlanningDemands(plantId, horizonEnd, PLANNING_ELIGIBLE_STATUSES);
-        Map<UUID, UUID> demandIdByLineId = planningDemandService.findOpenDemandIdsBySalesOrderLineIds(
-                eligible.stream().map(SalesOrderPlanningDemandProjection::getSalesOrderLineId).toList());
+        List<UUID> lineIds = eligible.stream().map(SalesOrderPlanningDemandProjection::getSalesOrderLineId).toList();
+        Map<UUID, UUID> demandIdByLineId = planningDemandService.findOpenDemandIdsBySalesOrderLineIds(lineIds);
+        Map<UUID, BigDecimal> held = stockReservationService.sumActiveHeldBySalesOrderLineIds(lineIds);
+        Map<UUID, BigDecimal> coverage = coverageLookupService.sumOpenCoverageBySalesOrderLineIds(lineIds);
         return eligible.stream()
                 .map(projection -> mapper.toResponse(
-                        projection, demandIdByLineId.get(projection.getSalesOrderLineId())))
+                        projection,
+                        demandIdByLineId.get(projection.getSalesOrderLineId()),
+                        held.getOrDefault(projection.getSalesOrderLineId(), BigDecimal.ZERO),
+                        coverage.getOrDefault(projection.getSalesOrderLineId(), BigDecimal.ZERO)))
+                .filter(line -> !uncoveredOnly || line.uncoveredQuantity().signum() > 0)
                 .toList();
+    }
+
+    private SalesOrderResponse toDetail(SalesOrder order) {
+        return detailAssembler.toDetail(order);
+    }
+
+    private void ensureVersion(SalesOrder order, Long expectedVersion) {
+        if (!Objects.equals(expectedVersion, order.getVersion())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Sales order was modified by another request");
+        }
     }
 
     /**
@@ -298,6 +430,90 @@ public class SalesOrderService {
                 .fulfilledQuantity(BigDecimal.ZERO)
                 .dueDate(request.dueDate())
                 .build();
+    }
+
+    /**
+     * Validates every line of a G6a draft before anything is written: due date first (a field error a
+     * form can bind, FE A03), then each item — ACTIVE, same company, sellable type, unit ACTIVE in the
+     * UOM master when it is there. Returns the items in line order.
+     */
+    private List<Item> resolveDraftItems(LocalDate orderDate, List<SalesOrderDraftLineRequest> lines, Company company) {
+        Map<String, String> dateErrors = new LinkedHashMap<>();
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).dueDate().isBefore(orderDate)) {
+                dateErrors.put("lines[" + i + "].dueDate", "must not be before orderDate");
+            }
+        }
+        if (!dateErrors.isEmpty()) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT, dateErrors);
+        }
+        List<Item> items = lines.stream().map(line -> itemLookupService.getActiveItem(line.itemId())).toList();
+        Map<String, Uom> uoms = uomLookupService.findByCode(
+                items.stream().map(Item::getUnit).filter(Objects::nonNull).distinct().toList());
+        for (Item item : items) {
+            ensureItemBelongsToCompany(item, company);
+            if (!SELLABLE_TYPES.contains(item.getType())) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                        "Only finished goods and WIP items can be sold: " + item.getCode());
+            }
+            Uom uom = uoms.get(item.getUnit());
+            if (uom != null && !uom.isActive()) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
+                        "Unit of measure is inactive: " + item.getUnit());
+            }
+        }
+        return items;
+    }
+
+    private void addDraftLines(SalesOrder order, List<SalesOrderDraftLineRequest> lines, List<Item> items) {
+        for (int i = 0; i < lines.size(); i++) {
+            SalesOrderDraftLineRequest line = lines.get(i);
+            order.getLines().add(SalesOrderLine.builder()
+                    .salesOrder(order)
+                    .item(items.get(i))
+                    .lineNo(i + 1)
+                    .orderedQuantity(line.orderedQuantity())
+                    .fulfilledQuantity(BigDecimal.ZERO)
+                    .dueDate(line.dueDate())
+                    .build());
+        }
+    }
+
+    private Customer resolveActiveCustomer(UUID customerId, Company company) {
+        Customer customer = customerRepository.findWithCompanyByCustomerId(customerId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Customer", customerId));
+        if (!customer.getCompany().getCompanyId().equals(company.getCompanyId())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
+                    "Customer must belong to the order's company");
+        }
+        if (!customer.isActive()) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,
+                    "Inactive customer cannot be used: " + customer.getCode());
+        }
+        return customer;
+    }
+
+    private void applyCustomer(SalesOrder order, Customer customer, String customerReference) {
+        order.setCustomerId(customer.getCustomerId());
+        order.setCustomerCode(customer.getCode());
+        order.setCustomerName(customer.getName());
+        order.setCustomerReference(trimToNull(customerReference));
+    }
+
+    /**
+     * {@code SO-000001}… from {@code sales_order_number_seq}. A value an older, client-chosen
+     * {@code orderNo} already took in this company is skipped, never reused.
+     */
+    private String nextOrderNo(UUID companyId) {
+        for (int attempt = 0; attempt < MAX_ORDER_NUMBER_ATTEMPTS; attempt++) {
+            String candidate = String.format("SO-%06d", salesOrderRepository.nextOrderNumber());
+            if (!salesOrderRepository.existsByCompanyCompanyIdAndOrderNo(companyId, candidate)) {
+                return candidate;
+            }
+        }
+        throw ExceptionFactory.businessRule(BusinessErrorCode.STATE_CONFLICT,
+                "Could not allocate a free sales order number; retry");
     }
 
     /**

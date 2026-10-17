@@ -38,8 +38,32 @@ public class SalesOrder extends BaseEntity {
     @Column(name = "order_no", nullable = false, length = 100)
     private String orderNo;
 
+    /**
+     * Snapshot of the customer's name when the order was last saved as a draft (FE Q18): renaming the
+     * customer later must not rewrite order history. Free text on orders created through the legacy
+     * {@code POST /v1} path, which has no {@link #customerId}.
+     */
     @Column(name = "customer_name", nullable = false, length = 255)
     private String customerName;
+
+    /**
+     * G6a. {@code null} on every order created before customers were linked (V74 does not backfill —
+     * matching free-text names against the master would be a guess, G2 §9.5) and on orders still
+     * created through the legacy path. Plain UUID, like the rest of this module's cross-aggregate links.
+     */
+    @Column(name = "customer_id")
+    private UUID customerId;
+
+    /** Snapshot of the customer code, saved alongside {@link #customerName}. */
+    @Column(name = "customer_code", length = 100)
+    private String customerCode;
+
+    /** The customer's own reference (their PO number). Free text, not unique, not an idempotency key. */
+    @Column(name = "customer_reference", length = 255)
+    private String customerReference;
+
+    @Column(name = "cancel_reason", columnDefinition = "TEXT")
+    private String cancelReason;
 
     @Column(name = "order_date", nullable = false)
     private LocalDate orderDate;

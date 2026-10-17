@@ -73,4 +73,23 @@ public interface SalesOrderLineRepository extends JpaRepository<SalesOrderLine, 
             where l.salesOrderLineId in :salesOrderLineIds
             """)
     List<UUID> findOrderIdsByLineIds(@Param("salesOrderLineIds") Collection<UUID> salesOrderLineIds);
+
+    interface OrderLineSummaryProjection {
+        UUID getSalesOrderId();
+        LocalDate getEarliestDueDate();
+        LocalDate getLatestDueDate();
+        Long getLineCount();
+    }
+
+    /** List summary of a page of orders in one query (G6a, FE R03 — no detail call per row). */
+    @Query("""
+            select l.salesOrder.salesOrderId as salesOrderId,
+                   min(l.dueDate)            as earliestDueDate,
+                   max(l.dueDate)            as latestDueDate,
+                   count(l)                  as lineCount
+            from SalesOrderLine l
+            where l.salesOrder.salesOrderId in :salesOrderIds
+            group by l.salesOrder.salesOrderId
+            """)
+    List<OrderLineSummaryProjection> summarizeByOrderIds(@Param("salesOrderIds") Collection<UUID> salesOrderIds);
 }

@@ -78,7 +78,8 @@ class InventoryReservationQueryServiceMethodSecurityTest {
 
         @Bean
         InventoryReservationQueryService inventoryReservationQueryService(MaterialReservationRepository repository) {
-            return new InventoryReservationQueryService(repository);
+            return new InventoryReservationQueryService(repository,
+                    mock(com.erp.manufacturing.module.sales.service.SalesOrderFulfillmentService.class));
         }
 
         @Bean(name = "permissionGuard")

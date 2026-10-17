@@ -249,6 +249,10 @@ Còn lại của bảng mã FE ánh xạ vào mã **sẵn có**: `CIRCULAR_BOM` 
 `VERSION_CONFLICT` → `CONCURRENT_MODIFICATION`; `DUPLICATE_COMPONENT` → `VALIDATION_ERROR` + `errors[{field}]`;
 `REFERENCE_UNAVAILABLE` → `RESOURCE_INACTIVE`/`ENTITY_NOT_FOUND`; `IMPORT_*` → mã của `G3`.
 
+**`G6a` (2026-10-17) — không thêm mã mới.** Đơn bán/giữ tồn dùng mã sẵn có: vượt phần chưa phủ ⇒ `PLANNED_QUANTITY_EXCEEDED`
+(FE đề xuất `DEMAND_QUANTITY_EXCEEDED`); có lệnh SX ⇒ `STATE_CONFLICT` (FE đề xuất `DOWNSTREAM_DOCUMENT_EXISTS`); khách/vật tư ngừng
+⇒ `RESOURCE_INACTIVE`; `RESERVED_STOCK` nay gồm cả tồn đơn bán đang giữ.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

@@ -24,6 +24,10 @@ import com.erp.manufacturing.module.sales.mapper.SalesOrderMapper;
 import com.erp.manufacturing.module.sales.repository.SalesOrderLineRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderPlanningDemandProjection;
 import com.erp.manufacturing.module.sales.repository.SalesOrderRepository;
+import com.erp.manufacturing.module.sales.repository.CustomerRepository;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
+import com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService;
+import com.erp.manufacturing.module.workorder.service.query.SalesOrderCoverageLookupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,18 +61,28 @@ class SalesOrderServiceTest {
     @Mock OrganizationLookupService organizationLookupService;
     @Mock ItemLookupService itemLookupService;
     @Mock PlanningDemandService planningDemandService;
+    @Mock CustomerRepository customerRepository;
+    @Mock UomLookupService uomLookupService;
+    @Mock SalesOrderStockReservationService stockReservationService;
+    @Mock SalesOrderCoverageLookupService coverageLookupService;
 
     SalesOrderService service;
 
     @BeforeEach
     void setUp() {
+        SalesOrderMapper mapper = new SalesOrderMapper();
         service = new SalesOrderService(
                 salesOrderRepository,
                 salesOrderLineRepository,
+                customerRepository,
                 organizationLookupService,
                 itemLookupService,
+                uomLookupService,
                 planningDemandService,
-                new SalesOrderMapper());
+                stockReservationService,
+                coverageLookupService,
+                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper),
+                mapper);
     }
 
     // ── create ─────────────────────────────────────────────────────────────
@@ -330,7 +344,7 @@ class SalesOrderServiceTest {
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
         when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
-        SalesOrderResponse response = service.confirm(salesOrderId);
+        SalesOrderResponse response = service.confirm(salesOrderId, null);
 
         assertThat(response.status()).isEqualTo(SalesOrderStatus.CONFIRMED.name());
         SalesOrderLine first = order.getLines().get(0);
@@ -353,7 +367,7 @@ class SalesOrderServiceTest {
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> service.confirm(salesOrderId))
+        assertThatThrownBy(() -> service.confirm(salesOrderId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -373,7 +387,7 @@ class SalesOrderServiceTest {
         when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
         when(planningDemandService.cancelOpenDemandsForSalesOrderLines(anyCollection())).thenReturn(2);
 
-        SalesOrderResponse response = service.cancel(salesOrderId);
+        SalesOrderResponse response = service.cancel(salesOrderId, null);
 
         assertThat(response.status()).isEqualTo(SalesOrderStatus.CANCELLED.name());
         verify(planningDemandService).cancelOpenDemandsForSalesOrderLines(List.of(
@@ -388,7 +402,7 @@ class SalesOrderServiceTest {
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
         when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
 
-        assertThat(service.cancel(salesOrderId).status()).isEqualTo(SalesOrderStatus.CANCELLED.name());
+        assertThat(service.cancel(salesOrderId, null).status()).isEqualTo(SalesOrderStatus.CANCELLED.name());
 
         verifyNoInteractions(planningDemandService);
     }
@@ -400,7 +414,7 @@ class SalesOrderServiceTest {
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
 
-        assertThatThrownBy(() -> service.cancel(salesOrderId))
+        assertThatThrownBy(() -> service.cancel(salesOrderId, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -438,7 +452,7 @@ class SalesOrderServiceTest {
         when(planningDemandService.findOpenDemandIdsBySalesOrderLineIds(List.of(salesOrderLineId)))
                 .thenReturn(Map.of(salesOrderLineId, planningDemandId));
 
-        List<PlanningDemandLineResponse> demands = service.planningDemands(plantId, horizonEnd);
+        List<PlanningDemandLineResponse> demands = service.planningDemands(plantId, horizonEnd, false);
 
         assertThat(demands).hasSize(1);
         PlanningDemandLineResponse demand = demands.get(0);
@@ -509,7 +523,7 @@ class SalesOrderServiceTest {
      * still returning a plausible-looking page.
      */
     @Test
-    void list_withoutASearchTerm_usesThePlainScopedQuery() {
+    void list_blankSearchTerm_isForwardedAsNoSearchAtAll() {
         UUID companyId = UUID.randomUUID();
         UUID plantId = UUID.randomUUID();
         Company company = company(companyId);
@@ -517,33 +531,51 @@ class SalesOrderServiceTest {
 
         when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
         when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
-        when(salesOrderRepository.search(eq(companyId), eq(plantId), isNull(), any()))
+        when(salesOrderRepository.searchExtended(eq(companyId), eq(plantId), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(Page.empty());
 
-        service.list(companyId, plantId, null, "   ", PageRequest.of(0, 20));
+        service.list(companyId, plantId, null, "   ", null, null, null, null, PageRequest.of(0, 20));
 
-        verify(salesOrderRepository).search(eq(companyId), eq(plantId), isNull(), any());
-        verify(salesOrderRepository, never()).searchWithText(any(), any(), any(), any(), any());
+        verify(salesOrderRepository).searchExtended(eq(companyId), eq(plantId), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), any());
+        verifyNoInteractions(salesOrderLineRepository);
     }
 
     @Test
-    void list_withASearchTerm_forwardsTheTrimmedTermAndKeepsTheStatusFilter() {
+    void list_forwardsTheTrimmedTermStatusAndDateRanges_andSummarisesThePageInOneQuery() {
         UUID companyId = UUID.randomUUID();
         UUID plantId = UUID.randomUUID();
         Company company = company(companyId);
         Plant plant = plant(plantId, company);
+        SalesOrder order = draftOrderWithTwoLines();
+        LocalDate from = ORDER_DATE;
+        LocalDate to = ORDER_DATE.plusDays(30);
 
         when(organizationLookupService.getActiveCompany(companyId)).thenReturn(company);
         when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
-        when(salesOrderRepository.searchWithText(
-                eq(companyId), eq(plantId), eq(SalesOrderStatus.CONFIRMED), eq("acme"), any()))
-                .thenReturn(Page.empty());
+        when(salesOrderRepository.searchExtended(eq(companyId), eq(plantId), eq(SalesOrderStatus.CONFIRMED),
+                eq("acme"), eq(from), eq(to), eq(from), eq(to), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(order)));
+        SalesOrderLineRepository.OrderLineSummaryProjection summary =
+                mock(SalesOrderLineRepository.OrderLineSummaryProjection.class);
+        when(summary.getSalesOrderId()).thenReturn(order.getSalesOrderId());
+        when(summary.getEarliestDueDate()).thenReturn(ORDER_DATE.plusDays(5));
+        when(summary.getLatestDueDate()).thenReturn(ORDER_DATE.plusDays(9));
+        when(summary.getLineCount()).thenReturn(2L);
+        when(salesOrderLineRepository.summarizeByOrderIds(List.of(order.getSalesOrderId())))
+                .thenReturn(List.of(summary));
 
-        service.list(companyId, plantId, SalesOrderStatus.CONFIRMED, "  acme  ", PageRequest.of(0, 20));
+        var page = service.list(companyId, plantId, SalesOrderStatus.CONFIRMED, "  acme  ",
+                from, to, from, to, PageRequest.of(0, 20));
 
-        verify(salesOrderRepository).searchWithText(
-                eq(companyId), eq(plantId), eq(SalesOrderStatus.CONFIRMED), eq("acme"), any());
-        verify(salesOrderRepository, never()).search(any(), any(), any(), any());
+        assertThat(page.content()).hasSize(1);
+        SalesOrderResponse row = page.content().get(0);
+        assertThat(row.earliestDueDate()).isEqualTo(ORDER_DATE.plusDays(5));
+        assertThat(row.latestDueDate()).isEqualTo(ORDER_DATE.plusDays(9));
+        assertThat(row.lineCount()).isEqualTo(2);
+        assertThat(row.lines()).isEmpty();
+        verify(salesOrderLineRepository, times(1)).summarizeByOrderIds(anyCollection());
     }
 
     private Company company(UUID companyId) {

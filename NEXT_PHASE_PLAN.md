@@ -1,5 +1,10 @@
 # Next Phase Plan — Roadmap toàn bộ phase còn lại
 
+> **`G6` — FE handoff Giai đoạn 6** (`FE_HANDOFF_GD_06_2026-10-14.md`): **đang chạy** — user chốt tách 3 phần làm liền.
+> ✅ **`G6a` xong 2026-10-17** (đơn bán hàng nối khách, giữ tồn cho đơn, `V74`, `BE_RESPONSE_GD_06_2026-10-17.md` v1;
+> **1583 unit / 184 class + 224 IT / 33 class**, 0/0; bản ghi `CLAUDE.md §0.54`). Đang làm **`G6b`** (hoạch định + chuyển đổi),
+> sau đó **`G6c`** (nhập Excel). Chi tiết **§13**.
+>
 > **`G5` — FE handoff Giai đoạn 5** (`FE_HANDOFF_GD_05_2026-10-13.md`): ✅ **BE xong + nghiệm thu
 > 2026-10-16** — `G5-1`..`G5-6` hoàn tất, file trả lời **`BE_RESPONSE_GD_05_2026-10-16.md`** (**user tự gửi qua
 > Zalo**). Migration **`V73`**. Phase chỉ đóng khi **FE** báo A01–A36 đạt. **1548 case unit / 179 class + 215 case IT /
@@ -93,8 +98,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G4` — FE handoff Giai đoạn 4: tồn kho, lô, chuyển kho** (`FE_HANDOFF_GD_04_2026-10-12.md`, P1) — ✅ **BE xong 2026-10-15**, chờ **FE** nghiệm thu A01–A26 — xem **§11**, bản ghi `CLAUDE.md §0.52`, trả lời FE `BE_RESPONSE_GD_04_2026-10-15.md` |
-| **Chờ FE** | `G2` (§9), `G3` (§10) — ✅ BE xong 2026-10-14, chờ FE nghiệm thu |
+| **Đang chạy** | **`G6` — FE handoff Giai đoạn 6: đơn bán hàng + hoạch định vật tư** (`FE_HANDOFF_GD_06_2026-10-14.md`, P1) — 📝 **đã lập kế hoạch 2026-10-16, chờ user chốt 13 quyết định (§13.2) trước khi code** — xem **§13**. 🔴 Đây là handoff **lớn nhất** tới nay (28 câu hỏi, 18 yêu cầu, 38 ca nghiệm thu); `D0` là quyết định **có tách phase hay không** |
+| **Chờ FE** | `G5` (§12) — ✅ BE xong 2026-10-16, bản ghi `CLAUDE.md §0.53`. `G4` (§11) — ✅ BE xong 2026-10-15. `G2` (§9), `G3` (§10) — ✅ BE xong 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
 
@@ -116,6 +121,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 10 | **`G3` — FE handoff Giai đoạn 3 (nhập Excel dữ liệu nền)** | ✅ **BE xong — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_03_2026-10-12.md`, P1. Phụ thuộc `G2` (Customer/Supplier master) — đã xong. Chi tiết **§10** |
 | 11 | **`G4` — FE handoff Giai đoạn 4 (tồn kho, lô, chuyển kho)** | ✅ **BE xong (2026-10-15)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_04_2026-10-12.md`, P1. Quyết định lớn nhất: có làm định giá tồn kho (moving average) hay không — đụng vùng `P7` (D1). Chi tiết **§11** |
 | 12 | **`G5` — FE handoff Giai đoạn 5 (định mức, quy trình, công suất)** | 📝 **Đã lập kế hoạch — chờ chốt §12.2** | Nguồn `FE_HANDOFF_GD_05_2026-10-13.md`, P1. File FE đề xuất **đảo ngược 4 quyết định thiết kế đã chốt** ở `F4`/`C2-7`/`C2-8`/`F10` — phải chốt từng cái trước khi viết dòng nào. Chi tiết **§12** |
+| 13 | **`G6` — FE handoff Giai đoạn 6 (đơn bán hàng + hoạch định vật tư)** | 📝 **Đã lập kế hoạch — chờ chốt §13.2** | Nguồn `FE_HANDOFF_GD_06_2026-10-14.md`, P1. Mở lại hai thứ đã **cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5`) và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc WO). Chi tiết **§13** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -737,6 +743,111 @@ Gantt kéo-thả, optimizer, phân máy/người cụ thể, xử lý va chạm 
 
 ---
 
+## 13. `G6` — FE handoff Giai đoạn 6: Đơn bán hàng và hoạch định vật tư 🔄 ĐANG CHẠY — `G6a` ✅ 2026-10-17, `G6b`/`G6c` đang làm
+
+Nguồn: `FE_HANDOFF_GD_06_2026-10-14.md` (v1, P1, 605 dòng). FE/mock đã xong: đơn bán hàng nối Customer, **giữ tồn cho đơn**, 6 con số tiến độ theo từng dòng, chạy MRP thương mại, chi tiết nhu cầu, **chuyển đề xuất thành lệnh sản xuất / đơn mua nháp (một phần, nhiều lần)**, và **nhập đơn bán hàng Excel**. BE phải (1) trả lời Q1–Q28 §5, (2) đối chiếu R01–R18 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_06_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào.
+
+> 🔴 **Đây là handoff lớn nhất tới nay** — 28 câu hỏi, 18 yêu cầu, 38 ca nghiệm thu, và phạm vi xấp xỉ `G2`+`G3`+`G4` gộp lại. Nó cũng **mở lại hai thứ repo đã cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5` ghi rõ "ngoài phạm vi") và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc lệnh sản xuất, `work_order_id NOT NULL`). Vì vậy `D0` — **có tách phase hay không** — phải chốt trước mọi quyết định khác.
+>
+> 🔴 **Hai thứ FE hỏi mà code đã trả lời được, không cần code gì:** `fulfilledQuantity` của API cũ **đúng là QC accepted** (Q26 — `ProductionReceiptService` QC `AVAILABLE` → `WorkOrderDemandAllocationService.fulfill`, đúng thiết kế `F6`/`§0.11`), và **không có** entity Shipment/Delivery nào trong repo ⇒ `deliveredQuantity` **chưa có nguồn dữ liệu nào** cho tới GĐ10. Đừng ánh xạ `fulfilled` thành "đã giao".
+
+### 13.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-16 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: cột của `SalesOrder`/`SalesOrderLine`/`MaterialReservation`/`SupplySuggestion`/`MrpRequirementLine`/`WorkOrderDemandAllocation`; mapping của `SalesOrderController`, `CustomerController`, `PlanningRunController`, `PlanningDemandController`, `PurchaseOrderController`, `PurchaseRequisitionController`; `MrpRunCreateRequest`; `SalesOrderLine.openQuantity()`; call site của `fulfill`; grep toàn repo cho `class Shipment`/`class Delivery`. **Chưa rà:** `SalesOrderService.list` có `search`/date range chưa; `MrpCalculationService` chi tiết (pool, carry, safety, scrap — cần cho D8); `MaterialReservationService.reserveAutomatically` (FEFO) có tái dùng được cho đơn bán không; `PlanningDemandService` coverage; `IdempotencySupport` trên `sales`.
+
+| Nhóm | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| **SO** ↔ Customer | `customerId` trỏ Customer `ACTIVE` cùng công ty; `customerCode`/`customerName` là snapshot | 🔴 `sales_orders.customer_name` là **text tự do** (`length 255`). Customer master **đã có** từ `G2` nhưng **chưa nối** — `G2 §9.5` loại có chủ đích. Không có `customer_reference` | 🔴 **Quyết định** (D1) |
+| SO mã đơn | server sinh `orderNo` | Client gửi `orderNo` trong body; `UNIQUE` theo công ty | **CODE** (D2) |
+| SO lưu nháp | **một** `PUT`/`POST` lưu header + 1–500 dòng atomic, `expectedVersion` | `POST /v1` + `PATCH /v1/{id}` (full replace dòng, có `expectedVersion`) — **đã atomic** từ `§0.40`/`C2-4` | Trả lời + mapping |
+| SO 6 con số tiến độ | ordered / held / WO coverage / produced / QC / delivered, mỗi số có `metricsEvidence` | 🔴 Chỉ `ordered_quantity` + `fulfilled_quantity`; `openQuantity()` = ordered − fulfilled. `WorkOrderDemandAllocation` có `allocated`/`fulfilled` (nền cho "WO coverage") | **CODE** (D3) |
+| `fulfilledQuantity` nghĩa gì (Q26/Q27) | FE đoán là QC accepted | ✅ **Đúng** — tăng ở QC disposition `AVAILABLE` (`F6`). **Không có** Shipment/Delivery ⇒ `delivered` phải là `null` + `UNKNOWN` | Trả lời |
+| **Giữ tồn cho đơn** | reservation thuộc `salesOrderId`/`salesOrderLineId`, dùng chung pool tồn, `On Hand` không đổi | 🔴 `MaterialReservation.work_order_id` **NOT NULL** ⇒ reservation hiện **chỉ** thuộc WO. Không có đường giữ tồn cho đơn bán | 🔴 **Quyết định** (D4) |
+| Hủy đơn | bắt buộc lý do, giải phóng reservation của **chính nó**, chặn khi có chứng từ con | `POST /{id}/cancel` có `reason`, huỷ demand `OPEN`; **không** có reservation của đơn để giải phóng, **không** gate chứng từ con | **CODE** (sau D4) |
+| **MRP** input | `salesOrderLineIds` + `itemWarehouseMappings[]` (theo từng vật tư) + `includeRop` | `MrpRunCreateRequest` có `demandLineIds` (**là `planningDemandId`**, không phải SO line) + **một** `demandWarehouseId`. Không có mapping theo vật tư, không `includeRop` | **CODE** (D6) |
+| Nhu cầu nhiều nguồn | `parentRequirementLineIds[]`, `sourceSalesOrderLineIds[]`, `sourceKind` SALES/COMPONENT/ROP | 🔴 `parentRequirementLine` là `@ManyToOne` — **một** parent; không `sourceKind`; không mảng nguồn SO | **CODE** (D7) |
+| Snapshot bất biến + `sourceVersion` + cờ cũ/mới | đọc lại run cũ được, nhưng chuyển đổi phải chặn khi nguồn đã đổi | Requirement/suggestion đã persist (bất biến trên thực tế). **Không** có `sourceVersion`/`currentSourceState` | **CODE** |
+| **Chuyển một phần / nhiều lần** | `entries[{requirementLineId, quantity}]`, ledger lượng đã chuyển, `remainingConvertible` | 🔴 `SupplySuggestion` có **một** cặp `converted_reference_type`/`_id` ⇒ chuyển xong là đánh dấu hết, không có lượng, không ledger | **CODE** — bảng mới (D5) |
+| BUY ⇒ đơn mua nháp | `POST .../conversions` tạo **PO DRAFT** trực tiếp, một nhà cung cấp/phiếu | Hiện là `convert-to-purchase-requisition` (**PR**, không phải PO). `POST /v1/purchase-orders` có nhưng **không** nối MRP | **CODE** (D9) |
+| Duyệt đề xuất | FE muốn chuyển trực tiếp, không cần duyệt riêng (Q14) | `approve`/`reject` + `ensureDraft` gate (`D11`, `B74`) — convert **đòi** `APPROVED` | **Quyết định** (D10) |
+| Làm tròn đa cấp (Q28) | chốt net MAKE `ceiling 6` **trước** khi nổ cấp con | Cần rà `MrpCalculationService`. 🔴 Nếu đổi ⇒ **đổi số MRP**, cùng loại rủi ro `§0.12` #1 | 🔴 **Quyết định** (D8) |
+| **Nhập SO Excel** | `kind=so`, gom nhóm, tạo N đơn `DRAFT` atomic | Hạ tầng batch của `G3` tái dùng được; `ImportTargetType` chưa có `SALES_ORDER` | **CODE** (D11) |
+| Decimal là **chuỗi** trên wire | FE đòi chuỗi cho mọi lượng | Toàn repo trả JSON number (`G2` Q12, `G4` D9, `G5`) | Trả lời — **không đổi** (D12) |
+| `search` + khoảng ngày trên danh sách SO | `search`, `orderDateFrom/To`, `dueDateFrom/To`, `earliestDueDate`/`lineCount` | Chưa rà — xem `G6-0` | Rà rồi quyết |
+
+### 13.2 Quyết định phải chốt với user trước khi code
+
+| # | Quyết định | Khuyến nghị BE | Lý do | Chặn |
+|---|---|---|---|---|
+| **D0** | **Làm cả `G6` một lượt, hay tách?** | 🔴 **Tách ba: `G6a` (đơn bán hàng) → `G6b` (hoạch định + chuyển đổi) → `G6c` (nhập Excel).** Mỗi phần một commit + một lượt trả lời FE (`_v2`/`_v3` cùng task) | Phạm vi này xấp xỉ `G2`+`G3`+`G4` gộp: 2 bảng mới, ~5 cột mới trên `sales_orders`/`_lines`, đổi khoá ngoại `MaterialReservation`, mở rộng MRP input/graph, và có thể **đổi số MRP** (D8). `G5` đã là phase lớn nhất từng làm và nó chỉ bằng một phần ba việc ở đây. Tách ra thì mỗi lượt nghiệm thu mutation + smoke live còn đo được; gộp lại thì "xanh" không còn nói gì | **Toàn bộ** |
+| **D1** | Nối `SalesOrder` → `Customer` (`customerId`) + `customerReference` | **Có, additive:** thêm `customer_id` **nullable** (FK) + `customer_code`/`customer_reference`; **giữ** `customer_name` làm snapshot (`NOT NULL`, như hiện nay). Đơn mới **bắt buộc** `customerId`; đơn cũ `NULL` = "tạo trước G6", **không backfill** bằng cách so tên | `G2 §9.5` hoãn đúng vì so tên là mơ hồ; FE cũng nói "không join theo tên mơ hồ". `customer_name` phải ở lại: đổi tên khách trong danh mục **không** được viết lại lịch sử đơn (Q18) | `G6a` |
+| **D2** | `orderNo` do server sinh (Q1) | **Thêm đường mới sinh mã** (`POST .../drafts`), **giữ** đường cũ nhận `orderNo` từ client | Tiền lệ `G2` D1 / `G3` D1 / `G4`: thêm song song, không đổi tại chỗ. Seed script `D26-`/`VIETBIKE` đang gửi `orderNo` tường minh | `G6a` |
+| **D3** | 6 con số tiến độ + `metricsEvidence` | **Có, nhưng `delivered` luôn `null` + `UNKNOWN`** cho tới GĐ10 (không có Shipment). `qcAccepted` = `fulfilled_quantity` hiện có. `workOrderCovered` suy từ `WorkOrderDemandAllocation` (batch, `C14`). `produced` cần rà có trace WO→SO line theo **sản lượng** hay không; nếu không ⇒ `null` + `UNKNOWN`, **không** suy từ `plannedQuantity` | FE nói thẳng: "legacy thiếu bằng chứng phải hiện chưa có bằng chứng, không tự gán 0 hoặc FULFILLED". Trả `0` cho `delivered` là **nói dối** có hệ thống | `G6a` |
+| **D4** | Giữ tồn cho đơn bán: nới `MaterialReservation` hay **bảng riêng**? | **Nới bảng hiện có:** `work_order_id` thành nullable + thêm `sales_order_id`/`sales_order_line_id` + `CHECK` **đúng một** chủ sở hữu. **Không** tạo bảng thứ hai | Hai bảng reservation ⇒ mọi chỗ tính tồn khả dụng (`StockBalanceRepository.aggregate*`, `B3`, 3 gate ghi tồn kho, MRP) phải cộng **hai** nguồn — đúng loại "một hệ thống hai con số" mà `§0.44` đã trả giá. ⚠️ Rủi ro: `work_order_id NOT NULL` đang là bảo đảm ngầm ở nhiều query; phải rà hết `MaterialReservationRepository` trước | `G6a` |
+| **D5** | Chuyển đổi một phần/nhiều lần: ledger | **Bảng mới** `supply_suggestion_conversions` (`suggestion_id`, `quantity`, `target_type`, `target_id`, `idempotency_key` + `UNIQUE`); `remainingConvertible = suggestedQuantity − Σ`. **Giữ** `converted_reference_*` làm "lần chuyển đầu tiên" cho client cũ | Một cặp cột không biểu diễn được "đã chuyển 40/70". Không có ledger thì retry/split đều không kiểm được (FE A27–A30) | `G6b` |
+| **D6** | MRP input: `salesOrderLineIds` + mapping theo vật tư + `includeRop` (Q7, Q9) | **Endpoint mới** `POST /v1/planning-runs/commercial`, **giữ** `POST /v1/planning-runs` nguyên nghĩa (`demandLineIds` = `planningDemandId`) | FE tự đề nghị giữ nghĩa cũ. Nhồi 3 field mới vào request cũ thì `demandLineIds` và `salesOrderLineIds` sống cạnh nhau trong một DTO — chỗ dễ gửi sai nhất | `G6b` |
+| **D7** | Nhu cầu nhiều parent + nhiều SO line nguồn + `sourceKind` (Q10) | **Có**, nhưng là **bảng nối** `mrp_requirement_sources` (`requirement_line_id`, `kind`, `sales_order_line_id?`, `parent_requirement_line_id?`, `quantity`), **giữ** `parent_requirement_line_id` hiện có cho client cũ | Q10 là điều kiện để "chỉ phần gốc mới cover đúng đơn" — gộp bucket mà mất nguồn thì coverage gắn sai đơn. Một cột `@ManyToOne` không mang được nhiều nguồn | `G6b` |
+| **D8** | 🔴 Chốt net MAKE `ceiling 6` **trước** khi nổ cấp con (Q28) | **Hỏi user.** Nếu làm ⇒ **số MRP đổi** cho BOM nhiều cấp có tỷ lệ lớn; phải đo A/B trên bộ `D26-` và ghi rõ cho FE, đúng cách `§0.12` #1 đã làm | FE nói rõ chưa có bằng chứng live, và chỉ suy luận toán học (WIP `1.0000001` → WO `1.000001` ⇒ RAW cần `100.0001` chứ không phải `100.00001`). Lập luận **đúng về nghiệp vụ** (cấp con không được thiếu so với WO thật) nhưng đây là đổi kết quả hoạch định ⇒ quyết định của user, không phải chi tiết triển khai | `G6b` |
+| **D9** | BUY ⇒ `PO DRAFT` trực tiếp hay giữ `PR` | **Thêm đường PO DRAFT** từ `/conversions`, **giữ** `convert-to-purchase-requisition`. Quyền: tái dùng `PERM_SUPPLY_SUGGESTION_MANAGE` + guard công ty/nhà máy, **chưa** thêm quyền PO riêng (Q5 — để GĐ7) | Luồng PR→PO là nghiệp vụ mua hàng thật của repo (`B72`), không bỏ. FE chỉ cần một nháp để GĐ7 nối tiếp | `G6b` |
+| **D10** | Chuyển trực tiếp không cần `approve` (Q14) | **Có** cho đường `/conversions` mới; **giữ** gate `APPROVED` của `convert-to-work-order` cũ (`B74`) | Hai đường, hai hợp đồng — không nới gate của đường cũ (nới là mất một bước kiểm soát mà `D11` đặt ra có lý do) | `G6b` |
+| **D11** | Nhập SO Excel trong `G6` hay tách | **`G6c`, sau `G6a`** (cần `customerId` + đường sinh `orderNo`) | Hạ tầng `G3` làm phần khó rồi; phần mới là gom nhóm + kiểm nhất quán trong nhóm. ⚠️ Bẫy `flush()` trong `try` (`§0.51` #2) áp dụng y nguyên | `G6c` |
+| **D12** | Decimal là chuỗi trên wire (Q13 của FE §3.3) | **Không** — giữ JSON number | Đổi riêng vài endpoint = hai hợp đồng số trong một API; đổi toàn hệ thống là ngoài phạm vi (cùng lý do `G2` Q12, `G4` D9) | — |
+
+> Các câu còn lại trả lời bằng hành vi có sẵn hoặc theo hướng FE nghiêng: Q2 (coverage **gồm** WO `DRAFT`), Q3 (lọc theo `earliestDueDate`), Q4 (`PERM_SALES_ORDER_MANAGE` cho giữ tồn — **không** dùng quyền reservation của WO), Q6 (bộ đọc tham chiếu tối thiểu — rà xem `hasResourceAccess` hiện có đủ chưa), Q8 (net dùng available **đã trừ** reservation + carry — rà `MrpCalculationService` rồi trả lời bằng công thức thật, đừng hứa trước), Q11/Q12 (nguồn cung `WO BLOCKED`/đã earmark — rà `WorkOrderSupplyService`), Q15 (`999999999` + scale 6 ⇒ `@Digits(13,6)` như `G4`), Q16 (kho đầu ra MAKE = kho tính nhu cầu), Q17 (lead time theo ngày lịch, quá hạn ⇒ cảnh báo, **không** tự kẹp ngày), Q18 (giữ snapshot tên khách — xem D1), Q19 (ngày ISO + Excel Date thật), Q20 (retention theo `G3`), Q21 (**không** tự hoàn quota khi huỷ nháp), Q22 (đọc lịch sử nhập chỉ cần `READ` + owner — giống `G3` D7), Q23 (kiểm nguồn cũ **trong cùng** transaction chuyển đổi), Q24 (huỷ đơn có chứng từ con ⇒ **chặn**, không cascade), Q25 (bỏ `lotId` ⇒ server tự chọn lô FEFO — **rà** `reserveAutomatically` có tái dùng được không), Q26/Q27 (đã trả lời ở §13.1).
+
+### 13.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+> Migration tiếp theo là **`V74`** (`V69`–`V73` đã dùng ở `G2`–`G5`). ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` phải đánh số lại thêm một lần nữa.
+
+#### `G6-0` — Đọc nốt + baseline + trả lời §5 *(không code `src/main`)*
+
+1. Đọc phần "chưa rà" §13.1 — ưu tiên theo thứ tự rủi ro: (a) `MaterialReservationRepository` + mọi chỗ đọc `work_order_id` (quyết định D4 có khả thi không); (b) `MrpCalculationService` pool/carry/safety/scrap + chỗ làm tròn (D8, Q8); (c) `WorkOrderSupplyService` (Q11/Q12); (d) `SalesOrderService.list` (`search`/date range); (e) `MaterialReservationService.reserveAutomatically` (Q25); (f) `WorkOrderDemandAllocation` có trace sản lượng theo dòng đơn hay không (D3 `produced`).
+2. `mvn -o clean verify` trên `git worktree` **sạch** ⇒ baseline thật (số cuối đã ghi: **1548 unit + 215 IT**, `§0.53` — **đo lại**; bẫy VS Code Java LS ở `§0.52` #10a).
+3. Chạy live các endpoint SO/MRP/suggestion hiện có trên DB dùng-một-lần để có request/response **thật** cho file trả lời (`B2`).
+4. Chốt D0–D12 với user. **D0 trước**, vì nó quyết định `G6` là một phase hay ba.
+
+#### `G6a` — Đơn bán hàng *(chặn bởi D1–D4)*
+
+- **Migration `V74`:** `sales_orders` + `customer_id` (FK, nullable)/`customer_code`/`customer_reference`; `sales_order_lines` + cột cho các số tiến độ **chỉ khi** không suy được lúc đọc (ưu tiên suy — xem D3); `material_reservations` `work_order_id` → nullable + `sales_order_id`/`sales_order_line_id` + `CHECK` đúng một chủ sở hữu + index. **Không backfill.**
+- Endpoint: `POST /v1/sales-orders/v1/drafts` (sinh `orderNo`), `PATCH .../{id}/draft`, `GET .../{id}/reservations`, `GET .../{id}/lines/{lineId}/allocation-candidates`, `POST .../{id}/reservations`, `POST .../reservations/{rid}/release`; mở rộng `GET /v1` (`search` + 4 khoảng ngày + `earliestDueDate`/`lineCount`), `GET /v1/{id}` (6 số + `metricsEvidence` + `linkedDocuments[]`).
+- Huỷ đơn: giải phóng reservation **của chính đơn** trong cùng transaction + chặn khi có chứng từ con.
+- 🔴 **Test bắt buộc:** `*IT` cho tồn khả dụng khi có **cả hai** loại reservation (WO + SO) trên cùng vị thế — đây là chỗ D4 sai thì sai âm thầm; `*IT` concurrency hai request giữ tồn tranh phần cuối (khuôn `ItemWarehouseSettingConcurrencyIT`/`StockTransferIT`); regression: tồn khả dụng/MRP/dashboard cho dữ liệu **chỉ có WO reservation** phải ra **đúng số cũ**.
+
+#### `G6b` — Hoạch định + chuyển đổi *(chặn bởi D5–D10)*
+
+- Migration: bảng `supply_suggestion_conversions` + `mrp_requirement_sources`; cột `source_version`/`source_kind` nếu cần.
+- `POST /v1/planning-runs/commercial`; `GET .../requirements/{id}`; `POST .../{id}/conversions` (một transaction, `expectedSourceVersion` kiểm **trong** transaction — Q23, chống TOCTOU); `GET .../{id}/conversions`.
+- MAKE ⇒ `WorkOrderService.createFromMrp` (đường canonical sẵn có, **không** tạo WO store thứ hai); BUY ⇒ PO `DRAFT`.
+- 🔴 **Nếu D8 = làm:** đo A/B số MRP trên bộ `D26-` **trước và sau**, ghi vào file trả lời FE như một breaking change về số liệu (khuôn `§0.52` #2).
+
+#### `G6c` — Nhập đơn bán hàng Excel *(chặn bởi D11; sau `G6a`)*
+
+- `ImportTargetType`/`kind` + `SALES_ORDER`, mẫu `omniplant-so-v1` (gom theo `Group code`, kiểm nhất quán khách/ngày/tham chiếu trong nhóm), commit tạo N đơn `DRAFT` qua **đúng** service của `G6a`.
+- Tái dùng nguyên `DataImportBatchCommitter`/guard owner của `G3`; 🔴 bẫy `flush()` trong `try` (`§0.51` #2) — va chạm ở **nhóm cuối** mới lộ.
+
+#### `G6-9` — Nghiệm thu + bàn giao *(mỗi gói tự nghiệm thu nếu D0 = tách)*
+
+- `mvn -o clean verify`; số case **≥ baseline** (`R10`).
+- Nghiệm thu mutation, ưu tiên chỗ mock không thấy: bỏ reservation của đơn khỏi phép tính tồn khả dụng, bỏ `CHECK` một-chủ-sở-hữu, bỏ ledger lượng đã chuyển (chuyển hai lần vượt nhu cầu), bỏ kiểm nguồn cũ trong transaction, đổi mã lỗi sang mã khác **cùng HTTP status**.
+- Smoke HTTP thật A01–A38 phần thuộc BE; **A24 cần luồng mua hàng thật của GĐ7** ⇒ ghi "ngoài phạm vi" nếu chưa có.
+- Docs: `BE_RESPONSE_GD_06_*.md`, `CLAUDE.md §0`, `module/sales|planning|workorder|inventory|purchasing|dataimport/CLAUDE.md` (bất biến tiếp từ `B170`), `docs/api-guide-for-frontend.md`.
+
+### 13.4 Breaking change dự kiến
+
+| Thay đổi | Breaking? |
+|---|---|
+| Cột/endpoint/field mới (customer link, 6 số, reservation của đơn, conversions, `kind=so`) | **Không** (additive) nếu theo D1/D2/D5/D6/D9 |
+| Tồn khả dụng nay trừ **cả** reservation của đơn bán | **Có — về số liệu**: cùng request, tồn khả dụng/MRP/dashboard đổi khi có đơn giữ tồn (đúng ý định, nhưng phải báo FE) |
+| Số MRP đổi do làm tròn đa cấp (D8) | **Có — về số liệu**, nếu D8 = làm |
+| Huỷ đơn có chứng từ con ⇒ 409 | **Có** — request trước đây 200 |
+| Decimal thành chuỗi | **Không làm** (D12) |
+
+### 13.5 Ngoài phạm vi *(theo FE §1.2 + quyết định BE)*
+
+Xác nhận/nhận một phần/QC đơn mua đầy đủ (GĐ7); sẵn sàng vật tư/phát hành WO/xuất vật tư/thực thi/WIP (GĐ8); phiếu nhập sản xuất/QC (GĐ9); giao hàng/hoá đơn/thanh toán (GĐ10) ⇒ **`deliveredQuantity` chưa có nguồn, phải là `UNKNOWN`**. Cũng ngoài phạm vi: PR/RFQ/trả hàng, MPS/dự báo, optimizer/Gantt, cấp hàng xuyên nhà máy, số sê-ri, tự chuyển kho để bù chênh kho, nhập một phần/ghi đè đơn từ Excel, sửa snapshot WO đã có, đổi Auth/quyền GĐ1, decimal-as-string.
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -849,6 +960,15 @@ Gantt kéo-thả, optimizer, phân máy/người cụ thể, xử lý va chạm 
   - [x] `G5-5` Nhập BOM Excel (`ImportTargetType.BOM`, mẫu `omniplant-bom-v1`) — `B168`–`B170`
   - [x] `G5-6` `mvn -o clean verify` (1548 unit + 215 IT, 0/0) + mutation 7/7 + smoke lượt `231527` (92 gọi) + `BE_RESPONSE_GD_05_2026-10-16.md` + docs
   - [ ] FE nghiệm thu A01–A36
+- [ ] **`G6`** — FE handoff Giai đoạn 6: đơn bán hàng + hoạch định vật tư *(đã lập kế hoạch 2026-10-16, §13)*
+  - [x] `G6-0` đọc nốt phần "chưa rà" §13.1 (ưu tiên `MaterialReservationRepository` + `MrpCalculationService`) + baseline trên worktree sạch + chạy live SO/MRP hiện có
+  - [x] **Chốt `D0` — tách `G6a`/`G6b`/`G6c` hay làm một lượt** — user: **tách 3, làm liền cả 3**
+  - [x] Chốt 12 quyết định còn lại §13.2 (D1–D12) — D4 mở rộng `material_reservations`; D8 + safety stock một lần: **làm, cho cả đường cũ và mới**; còn lại theo khuyến nghị
+  - [x] `G6a` Đơn bán hàng: nối Customer, sinh `orderNo`, 6 số tiến độ, giữ tồn cho đơn, huỷ đơn (`V74`) — `B171`–`B177`; 1583 + 224, mutation 7/7, smoke `142411`, `BE_RESPONSE_GD_06_2026-10-17.md` v1
+  - [ ] `G6b` Hoạch định: run thương mại, nguồn nhu cầu nhiều chiều, ledger chuyển đổi, PO nháp
+  - [ ] `G6c` Nhập đơn bán hàng Excel (`omniplant-so-v1`)
+  - [ ] `G6-9` `mvn -o clean verify` + mutation + smoke A01–A38 + `BE_RESPONSE_GD_06_*.md` + docs
+  - [ ] FE nghiệm thu A01–A38
 
 ---
 

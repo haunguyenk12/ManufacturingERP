@@ -83,7 +83,7 @@ public enum BusinessErrorCode implements ErrorCode {
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */
     INSUFFICIENT_STOCK        ("INSUFFICIENT_AVAILABLE_STOCK", "Insufficient stock for this operation",      HttpStatus.CONFLICT),
     /**
-     * G4: the command would break stock that is reserved for a work order — changing the status of a
+     * G4: the command would break stock that is reserved (for a work order, or since G6a a sales order) — changing the status of a
      * lot with an ACTIVE reservation, or counting a position below its reserved quantity. The remedy
      * is to release the reservation at its source first, which is why this is not
      * {@link #INSUFFICIENT_STOCK}.

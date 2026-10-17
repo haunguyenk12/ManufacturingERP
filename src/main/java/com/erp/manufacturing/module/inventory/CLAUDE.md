@@ -200,3 +200,9 @@ Nguồn: `live-data-audit.md` (FE) — lot `HOLD` hiển thị `available = 2` t
 issue, adjust, count). Cắt µs trong service là **no-op** vì `@CreatedDate` ghi đè lúc persist (đã thử,
 gỡ). Sửa đúng chỗ là `DateTimeProvider` của auditing — thay đổi toàn hệ thống, cần quyết định riêng.
 Lot code vẫn **phân biệt hoa/thường** (`L1` ≠ `l1`), FE A05 kỳ vọng ngược lại — chưa đổi.
+
+## G6a — Giữ tồn cho đơn bán (2026-10-17)
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B177 | `StockBalanceRepository.findReservableBalancesFefo` (chỉ dùng bởi giữ tồn đơn bán, `module/workorder`): lô `AVAILABLE` **và** `expiresAt` null hoặc > `now`, `quantity − reserved − qualityHold > 0`, thứ tự FEFO (`expiresAt` nulls last, `receivedAt`, `balanceId` tie-break). **Không** thay `findIssuableBalancesFefo` của WO (B154: WO vẫn không xét hạn). Lượng đơn giữ cộng vào `reserved_quantity` như WO ⇒ `availableQuantity()` và mọi aggregate tự trừ; `RESERVED_STOCK` khi đổi trạng thái lô nay gồm cả dòng giữ của đơn bán | `SalesOrderReservationIT.reserveWithoutALot_*` (mutation bỏ điều kiện hạn ⇒ đỏ), `SalesOrderStockReservationServiceTest` |

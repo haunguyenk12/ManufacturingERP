@@ -211,6 +211,38 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
                                                 @Param("availableStatus") LotStatus availableStatus);
 
     /**
+     * Positions stock can be held from for a sales order line (G6a): free quantity above zero, lot
+     * {@code AVAILABLE} <b>and not expired</b> — unlike {@link #findIssuableBalancesFefo}, which work
+     * orders use and which deliberately does not look at expiry (G4 kept the expiry gate to manual
+     * inventory flows so MRP numbers did not move). Same FEFO order, with a stable id tie-break so
+     * pages do not shuffle. Same load-bearing {@code left join} on the lot as every query here.
+     */
+    @Query(value = """
+            select b
+            from StockBalance b
+            join fetch b.warehouse w
+            left join fetch b.lot l
+            where b.item.itemId = :itemId
+              and w.warehouseId in :warehouseIds
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
+              and b.quantity - b.reservedQuantity - b.qualityHoldQuantity > 0
+            order by l.expiresAt asc nulls last, l.receivedAt asc nulls last, b.createdAt asc, b.balanceId asc
+            """, countQuery = """
+            select count(b)
+            from StockBalance b
+            left join b.lot l
+            where b.item.itemId = :itemId
+              and b.warehouse.warehouseId in :warehouseIds
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
+              and b.quantity - b.reservedQuantity - b.qualityHoldQuantity > 0
+            """)
+    Page<StockBalance> findReservableBalancesFefo(@Param("itemId") UUID itemId,
+                                                  @Param("warehouseIds") Collection<UUID> warehouseIds,
+                                                  @Param("availableStatus") LotStatus availableStatus,
+                                                  @Param("now") Instant now,
+                                                  Pageable pageable);
+
+    /**
      * The {@code left join b.lot l} is load-bearing: dereferencing {@code b.lot.status} as a path
      * expression makes Hibernate emit an INNER JOIN, which drops every non-lot-tracked balance
      * ({@code lot_id IS NULL}) before the {@code l is null} branch can match it — violating B3.

@@ -50,7 +50,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("73");
+        assertThat(current.getVersion().getVersion()).isEqualTo("74");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -772,6 +772,44 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                      """)) {
             assertThat(rs.next()).isTrue();
             assertThat(rs.getString(1)).contains("routing_operation_id <> predecessor_operation_id");
+        }
+    }
+
+    /**
+     * G6a: a reservation now has exactly one owner — a work order component line or a sales order
+     * line — and the order-number sequence exists. Adding the CHECK validates every historical row,
+     * so a clean migration is itself the proof that existing work-order reservations still satisfy it.
+     */
+    @Test
+    void migrate_v74_reservationsHaveExactlyOneOwner_andOrderNumbersComeFromASequence() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                    WHERE conname = 'chk_material_reservations_single_owner'
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).contains("work_order_id IS NOT NULL").contains("sales_order_line_id IS NOT NULL");
+            }
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT is_nullable FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'material_reservations'
+                      AND column_name IN ('work_order_id', 'component_line_id')
+                    """)) {
+                int columns = 0;
+                while (rs.next()) {
+                    assertThat(rs.getString(1)).isEqualTo("YES");
+                    columns++;
+                }
+                assertThat(columns).isEqualTo(2);
+            }
+            try (ResultSet rs = statement.executeQuery("SELECT nextval('sales_order_number_seq')")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getLong(1)).isPositive();
+            }
         }
     }
 

@@ -110,7 +110,7 @@ public class InventoryLotService {
         }
         if (!replay && balanceRepository.existsByLotLotIdAndReservedQuantityGreaterThan(lotId, BigDecimal.ZERO)) {
             throw ExceptionFactory.custom(BusinessErrorCode.RESERVED_STOCK,
-                    "Lot has stock reserved for a work order; release the reservation first");
+                    "Lot has reserved stock (work order or sales order); release the reservation first");
         }
 
         StockBalance balance = balanceRepository

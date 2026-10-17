@@ -10,6 +10,10 @@ import com.erp.manufacturing.module.planning.service.PlanningDemandService;
 import com.erp.manufacturing.module.sales.mapper.SalesOrderMapper;
 import com.erp.manufacturing.module.sales.repository.SalesOrderLineRepository;
 import com.erp.manufacturing.module.sales.repository.SalesOrderRepository;
+import com.erp.manufacturing.module.sales.repository.CustomerRepository;
+import com.erp.manufacturing.module.uom.service.UomLookupService;
+import com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService;
+import com.erp.manufacturing.module.workorder.service.query.SalesOrderCoverageLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -94,7 +98,7 @@ class SalesOrderMethodSecurityTest {
         when(salesPermissionGuard.hasOrderAccess(
                 any(), eq("PERM_SALES_ORDER_MANAGE"), eq(salesOrderId))).thenReturn(false);
 
-        assertThatThrownBy(() -> salesOrderService.confirm(salesOrderId))
+        assertThatThrownBy(() -> salesOrderService.confirm(salesOrderId, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(salesOrderRepository, planningDemandService);
@@ -107,7 +111,7 @@ class SalesOrderMethodSecurityTest {
         when(salesPermissionGuard.hasOrderAccess(
                 any(), eq("PERM_SALES_ORDER_MANAGE"), eq(salesOrderId))).thenReturn(false);
 
-        assertThatThrownBy(() -> salesOrderService.cancel(salesOrderId))
+        assertThatThrownBy(() -> salesOrderService.cancel(salesOrderId, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(salesOrderRepository, planningDemandService);
@@ -136,7 +140,7 @@ class SalesOrderMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_MRP_RUN"), eq("PLANT"), eq(plantId))).thenReturn(false);
 
-        assertThatThrownBy(() -> salesOrderService.planningDemands(plantId, LocalDate.now()))
+        assertThatThrownBy(() -> salesOrderService.planningDemands(plantId, LocalDate.now(), false))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(salesOrderLineRepository);
@@ -152,7 +156,7 @@ class SalesOrderMethodSecurityTest {
         when(salesOrderLineRepository.findEligiblePlanningDemands(
                 eq(plantId), eq(horizonEnd), anyCollection())).thenReturn(List.of());
 
-        assertThatCode(() -> salesOrderService.planningDemands(plantId, horizonEnd))
+        assertThatCode(() -> salesOrderService.planningDemands(plantId, horizonEnd, false))
                 .doesNotThrowAnyException();
     }
 
@@ -168,10 +172,12 @@ class SalesOrderMethodSecurityTest {
         when(organizationLookupService.getActivePlant(plantId)).thenReturn(Plant.builder()
                 .plantId(plantId).company(company).code("P1").name("Plant 1")
                 .status(OrganizationStatus.ACTIVE).build());
-        when(salesOrderRepository.search(eq(companyId), eq(plantId), isNull(), any(Pageable.class)))
+        when(salesOrderRepository.searchExtended(eq(companyId), eq(plantId), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        assertThatCode(() -> salesOrderService.list(companyId, plantId, null, PageRequest.of(0, 20)))
+        assertThatCode(() -> salesOrderService.list(companyId, plantId, null, null, null, null, null, null,
+                PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
     }
 
@@ -186,8 +192,14 @@ class SalesOrderMethodSecurityTest {
                                             ItemLookupService itemLookupService,
                                             PlanningDemandService planningDemandService,
                                             SalesOrderMapper mapper) {
+            SalesOrderStockReservationService stockReservationService = mock(SalesOrderStockReservationService.class);
+            SalesOrderCoverageLookupService coverageLookupService = mock(SalesOrderCoverageLookupService.class);
             return new SalesOrderService(salesOrderRepository, salesOrderLineRepository,
-                    organizationLookupService, itemLookupService, planningDemandService, mapper);
+                    mock(CustomerRepository.class), organizationLookupService, itemLookupService,
+                    mock(UomLookupService.class), planningDemandService, stockReservationService,
+                    coverageLookupService,
+                    new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper),
+                    mapper);
         }
 
         @Bean SalesOrderMapper salesOrderMapper() { return new SalesOrderMapper(); }

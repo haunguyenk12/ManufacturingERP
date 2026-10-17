@@ -61,7 +61,9 @@ import static org.mockito.Mockito.when;
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({SalesOrderService.class, SalesOrderMapper.class,
+@Import({SalesOrderService.class, SalesOrderMapper.class, SalesOrderDetailAssembler.class,
+        com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService.class,
+        com.erp.manufacturing.module.workorder.service.query.SalesOrderCoverageLookupService.class,
         SalesOrderUpdateLinesIT.AuditingConfig.class})
 class SalesOrderUpdateLinesIT extends AbstractPostgresIntegrationTest {
 
@@ -99,6 +101,9 @@ class SalesOrderUpdateLinesIT extends AbstractPostgresIntegrationTest {
 
     @MockBean
     PlanningDemandService planningDemandService;
+
+    @MockBean
+    com.erp.manufacturing.module.uom.service.UomLookupService uomLookupService;
 
     private Plant plant;
     private Item item;

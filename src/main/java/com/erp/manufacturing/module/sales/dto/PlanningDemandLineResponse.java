@@ -20,6 +20,11 @@ import java.util.UUID;
  * (added in D9/D10, debt #21). Without it this screen listed lines the planner could pick but gave no
  * id the run could resolve, so the two endpoints could not be connected at all. It is never
  * {@code null} here: a line only appears in this list while its demand is still {@code OPEN}.
+ *
+ * <p>G6a appends the coverage figures of the sales order detail (same definitions):
+ * {@code heldStockQuantity}, {@code workOrderCoveredQuantity} and
+ * {@code uncoveredQuantity = max(0, quantity − heldStock − workOrderCovered)}. {@code quantity} keeps
+ * its legacy meaning, so an existing client sees no change.
  */
 public record PlanningDemandLineResponse(
         UUID salesOrderId,
@@ -32,5 +37,8 @@ public record PlanningDemandLineResponse(
         String itemName,
         String uom,
         BigDecimal quantity,
-        LocalDate dueDate
+        LocalDate dueDate,
+        BigDecimal heldStockQuantity,
+        BigDecimal workOrderCoveredQuantity,
+        BigDecimal uncoveredQuantity
 ) {}

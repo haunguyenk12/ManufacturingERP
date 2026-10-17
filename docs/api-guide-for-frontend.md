@@ -1301,6 +1301,22 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Đơn bán hàng nối khách + giữ tồn cho đơn — FE giai đoạn 6 phần 1 *(`G6a`, 2026-10-17)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Tạo nháp (server cấp mã) | `POST /sales-orders/v1/drafts` — `{companyId, plantId, customerId, customerReference?, orderDate, note?, lines[1..500]{itemId, orderedQuantity, dueDate}}` | **201**, `orderNo` = `SO-000001`…; khách ACTIVE cùng Công ty; chỉ `FINISHED_GOOD`/`WIP`; tối đa 6 số lẻ; lỗi ngày ở `lines[i].dueDate` |
+| Sửa nháp | `PATCH /sales-orders/v1/{id}/draft` — `{expectedVersion, customerId, customerReference?, orderDate, note?, lines[]}` | **Thay toàn bộ**: field vắng = xoá (khác `PATCH /{id}` cũ) |
+| Xác nhận / huỷ | `POST .../{id}/confirm` body tuỳ chọn `{expectedVersion}` · `POST .../{id}/cancel` body tuỳ chọn `{expectedVersion?, reason}` | Huỷ trả hết tồn đơn đang giữ; gửi body thì `reason` bắt buộc |
+| Danh sách | `GET /sales-orders/v1?…&search=&orderDateFrom/To=&dueDateFrom/To=` | `search` gồm mã đơn, tên/mã khách, tham chiếu; khoảng ngày cần theo **ngày cần sớm nhất**; mỗi dòng có `earliestDueDate`/`latestDueDate`/`lineCount` |
+| Chi tiết | `GET /sales-orders/v1/{id}` | Mỗi dòng: `heldStockQuantity`, `workOrderCoveredQuantity`, `producedQuantity` (**null**), `qcAcceptedQuantity`, `deliveredQuantity` (**null**), `uncoveredQuantity`, `metricsEvidence`; `linkedDocuments[]` (lệnh SX) |
+| Giữ tồn | `GET .../{id}/lines/{lineId}/allocation-candidates?warehouseId=` · `POST .../{id}/reservations {expectedVersion, salesOrderLineId, warehouseId, lotId?, quantity}` · `POST .../{id}/reservations/{rid}/release {expectedVersion, reason?}` · `GET .../{id}/reservations` | Bỏ `lotId` ⇒ FEFO; response giữ/bỏ giữ trả `{reservations[], salesOrder}` (version mới); vượt phần chưa phủ ⇒ `409 PLANNED_QUANTITY_EXCEEDED` |
+| Nhu cầu hoạch định | `GET /sales-orders/v1/planning-demands?…&uncoveredOnly=true` | Thêm `heldStockQuantity`, `workOrderCoveredQuantity`, `uncoveredQuantity` |
+
+> 🔴 `uncoveredQuantity = max(0, ordered − qcAccepted − heldStock − workOrderCovered)`. `fulfilledQuantity` = QC chấp nhận, **không** phải đã giao.
+> 🔴 Tồn khả dụng ở mọi màn hình nay trừ cả phần đơn bán đang giữ; `GET /v1/inventory/reservations` có dòng `ownerType = "SALES_ORDER"` (field lệnh SX `null`).
+> Đổi trạng thái lô đang bị đơn giữ ⇒ `409 RESERVED_STOCK` — bỏ giữ trước.
+
 ### BOM, quy trình, ca/lịch/trung tâm, công suất — FE giai đoạn 5 *(`G5`, 2026-10-16)*
 
 | Việc | Endpoint | Ghi chú |

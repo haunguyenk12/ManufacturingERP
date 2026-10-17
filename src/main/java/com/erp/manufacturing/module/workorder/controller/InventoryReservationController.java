@@ -24,7 +24,7 @@ public class InventoryReservationController {
     private final InventoryReservationQueryService reservationQueryService;
 
     @GetMapping("/v1/inventory/reservations")
-    @Operation(summary = "List work-order reservations held in a warehouse")
+    @Operation(summary = "List reservations held in a warehouse (work orders and, since G6a, sales orders)")
     public ResponseEntity<ApiResponse<PageResult<InventoryReservationResponse>>> list(
             @RequestParam UUID warehouseId,
             @RequestParam(required = false) UUID itemId,

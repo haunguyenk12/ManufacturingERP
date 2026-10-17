@@ -177,7 +177,9 @@ public class MaterialReservationService {
         MaterialReservation reservation = reservationRepository.findWithDetailsByReservationId(reservationId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Material reservation", reservationId));
-        if (!reservation.getWorkOrder().getWorkOrderId().equals(workOrderId)) {
+        // A sales-order reservation (G6a) has no work order at all; it is "not this work order's".
+        if (reservation.getWorkOrder() == null
+                || !reservation.getWorkOrder().getWorkOrderId().equals(workOrderId)) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Reservation does not belong to the work order");
         }

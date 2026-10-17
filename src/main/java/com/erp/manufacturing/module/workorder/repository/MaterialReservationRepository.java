@@ -36,12 +36,14 @@ public interface MaterialReservationRepository extends JpaRepository<MaterialRes
      * Reservations held in one warehouse (G4-4, the "Giữ cho sản xuất" tab). Every fetch is to-one, so
      * pagination stays in SQL (C13). {@code lot} must stay a <b>left</b> join: an inner one would drop
      * every reservation of a non-lot-tracked item (same trap as {@code findRecentByWarehouseIds}).
+     * 🔴 Since G6a {@code workOrder}/{@code componentLine} must be left joins too — a sales-order
+     * reservation has neither, and an inner join would silently hide it from the warehouse view.
      */
     @Query(value = """
             select r
             from MaterialReservation r
-            join fetch r.workOrder w
-            join fetch r.componentLine c
+            left join fetch r.workOrder w
+            left join fetch r.componentLine c
             join fetch r.item i
             left join fetch r.lot l
             where r.warehouse.warehouseId = :warehouseId
@@ -62,6 +64,57 @@ public interface MaterialReservationRepository extends JpaRepository<MaterialRes
                                                 @Param("lotId") UUID lotId,
                                                 @Param("status") MaterialReservationStatus status,
                                                 Pageable pageable);
+
+    // ── Sales-order reservations (G6a) ─────────────────────────────────────
+
+    @EntityGraph(attributePaths = {"item", "warehouse", "lot"})
+    List<MaterialReservation> findBySalesOrderIdAndStatus(UUID salesOrderId, MaterialReservationStatus status);
+
+    /**
+     * One sales order's reservations, optionally narrowed to a line/status. Every fetch is to-one so
+     * pagination stays in SQL (C13); {@code lot} stays a left join for non-lot-tracked items.
+     */
+    @Query(value = """
+            select r
+            from MaterialReservation r
+            join fetch r.item i
+            join fetch r.warehouse w
+            left join fetch r.lot l
+            where r.salesOrderId = :salesOrderId
+              and (:salesOrderLineId is null or r.salesOrderLineId = :salesOrderLineId)
+              and (:status is null or r.status = :status)
+            """, countQuery = """
+            select count(r)
+            from MaterialReservation r
+            where r.salesOrderId = :salesOrderId
+              and (:salesOrderLineId is null or r.salesOrderLineId = :salesOrderLineId)
+              and (:status is null or r.status = :status)
+            """)
+    Page<MaterialReservation> searchBySalesOrder(@Param("salesOrderId") UUID salesOrderId,
+                                                 @Param("salesOrderLineId") UUID salesOrderLineId,
+                                                 @Param("status") MaterialReservationStatus status,
+                                                 Pageable pageable);
+
+    interface SalesLineQuantityProjection {
+        UUID getSalesOrderLineId();
+        BigDecimal getQuantity();
+    }
+
+    /**
+     * Remaining {@code ACTIVE} quantity held per sales order line. 🔴 The {@code status = ACTIVE}
+     * predicate is the part a mocked repository cannot check — released/cancelled rows counted here
+     * would report stock as held for the customer that is free again (rule R7).
+     */
+    @Query("""
+            select r.salesOrderLineId as salesOrderLineId,
+                   coalesce(sum(r.quantity - r.consumedQuantity), 0) as quantity
+            from MaterialReservation r
+            where r.salesOrderLineId in :salesOrderLineIds
+              and r.status = com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus.ACTIVE
+            group by r.salesOrderLineId
+            """)
+    List<SalesLineQuantityProjection> sumActiveRemainingBySalesOrderLineIds(
+            @Param("salesOrderLineIds") Collection<UUID> salesOrderLineIds);
 
     @Query("""
             select coalesce(sum(r.quantity - r.consumedQuantity), 0)

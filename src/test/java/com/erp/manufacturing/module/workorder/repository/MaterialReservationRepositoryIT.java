@@ -292,4 +292,127 @@ class MaterialReservationRepositoryIT extends AbstractPostgresIntegrationTest {
         });
         assertThat(otherLot.getTotalElements()).isZero();
     }
+
+    // ── G6a: sales-order reservations share the table ──────────────────────
+
+    /**
+     * 🔴 A sales-order reservation has no work order and no component line. The warehouse list used to
+     * inner-join both, which would hide every stock hold made for a customer from the very screen that
+     * answers "why is this stock not free".
+     */
+    @Test
+    void searchByWarehouse_returnsSalesOrderReservationsNextToWorkOrderOnes() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        persistReservation(workOrder, workOrder.getComponentLines().get(0), fixture,
+                MaterialReservationStatus.ACTIVE, new BigDecimal("2.000000"), BigDecimal.ZERO);
+        SalesLine sales = persistSalesOrderLine(fixture);
+        persistSalesReservation(sales, fixture, MaterialReservationStatus.ACTIVE, new BigDecimal("3.000000"));
+        entityManager.clear();
+
+        var page = repository.searchByWarehouse(fixture.warehouse.getWarehouseId(), null, null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(2);
+        assertThat(page.getContent()).filteredOn(MaterialReservation::isForSalesOrder).singleElement()
+                .satisfies(r -> {
+                    assertThat(r.getWorkOrder()).isNull();
+                    assertThat(r.getSalesOrderLineId()).isEqualTo(sales.lineId());
+                });
+    }
+
+    @Test
+    void sumActiveRemainingBySalesOrderLineIds_countsActiveHoldsOnly() {
+        Fixture fixture = persistFixture();
+        SalesLine sales = persistSalesOrderLine(fixture);
+        persistSalesReservation(sales, fixture, MaterialReservationStatus.ACTIVE, new BigDecimal("3.000000"));
+        persistSalesReservation(sales, fixture, MaterialReservationStatus.ACTIVE, new BigDecimal("1.500000"));
+        persistSalesReservation(sales, fixture, MaterialReservationStatus.RELEASED, new BigDecimal("9.000000"));
+        persistSalesReservation(sales, fixture, MaterialReservationStatus.CANCELLED, new BigDecimal("7.000000"));
+
+        var rows = repository.sumActiveRemainingBySalesOrderLineIds(List.of(sales.lineId()));
+
+        assertThat(rows).singleElement().satisfies(row -> {
+            assertThat(row.getSalesOrderLineId()).isEqualTo(sales.lineId());
+            assertThat(row.getQuantity()).isEqualByComparingTo("4.5");
+        });
+    }
+
+    /** V74 {@code chk_material_reservations_single_owner}: a row cannot belong to both owners. */
+    @Test
+    void singleOwnerCheck_refusesARowWithBothOwners() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        SalesLine sales = persistSalesOrderLine(fixture);
+        MaterialReservation both = reservationRow(fixture)
+                .workOrder(workOrder).componentLine(workOrder.getComponentLines().get(0))
+                .salesOrderId(sales.orderId()).salesOrderLineId(sales.lineId()).build();
+        stamp(both);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> entityManager.persistAndFlush(both))
+                .rootCause().hasMessageContaining("chk_material_reservations_single_owner");
+    }
+
+    /** …and cannot belong to nobody (both nullable since V74). */
+    @Test
+    void singleOwnerCheck_refusesARowWithNoOwner() {
+        Fixture fixture = persistFixture();
+        MaterialReservation none = reservationRow(fixture).build();
+        stamp(none);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> entityManager.persistAndFlush(none))
+                .rootCause().hasMessageContaining("chk_material_reservations_single_owner");
+    }
+
+    private MaterialReservation.MaterialReservationBuilder reservationRow(Fixture fixture) {
+        return MaterialReservation.builder()
+                .item(fixture.component).warehouse(fixture.warehouse)
+                .quantity(BigDecimal.ONE).consumedQuantity(BigDecimal.ZERO)
+                .status(MaterialReservationStatus.ACTIVE);
+    }
+
+    private static void stamp(MaterialReservation reservation) {
+        Instant now = Instant.now();
+        reservation.setCreatedAt(now);
+        reservation.setUpdatedAt(now);
+    }
+
+    private record SalesLine(UUID orderId, UUID lineId) {}
+
+    private SalesLine persistSalesOrderLine(Fixture fixture) {
+        Instant now = Instant.now();
+        var order = com.erp.manufacturing.module.sales.domain.SalesOrder.builder()
+                .company(fixture.plant.getCompany()).plant(fixture.plant)
+                .orderNo("SO-" + UUID.randomUUID()).customerName("ACME")
+                .orderDate(java.time.LocalDate.of(2026, 10, 1))
+                .status(com.erp.manufacturing.module.sales.domain.SalesOrderStatus.CONFIRMED).build();
+        order.setCreatedAt(now);
+        order.setUpdatedAt(now);
+        var line = com.erp.manufacturing.module.sales.domain.SalesOrderLine.builder()
+                .salesOrder(order).item(fixture.product).lineNo(1)
+                .orderedQuantity(new BigDecimal("10.000000")).fulfilledQuantity(BigDecimal.ZERO)
+                .dueDate(java.time.LocalDate.of(2026, 10, 20)).build();
+        line.setCreatedAt(now);
+        line.setUpdatedAt(now);
+        order.getLines().add(line);
+        order = entityManager.persistFlushFind(order);
+        return new SalesLine(order.getSalesOrderId(), order.getLines().get(0).getSalesOrderLineId());
+    }
+
+    private void persistSalesReservation(SalesLine sales, Fixture fixture,
+                                         MaterialReservationStatus status, BigDecimal quantity) {
+        Instant now = Instant.now();
+        MaterialReservation reservation = MaterialReservation.builder()
+                .salesOrderId(sales.orderId())
+                .salesOrderLineId(sales.lineId())
+                .item(fixture.product)
+                .warehouse(fixture.warehouse)
+                .quantity(quantity)
+                .consumedQuantity(BigDecimal.ZERO)
+                .status(status)
+                .build();
+        reservation.setCreatedAt(now);
+        reservation.setUpdatedAt(now);
+        entityManager.persistAndFlush(reservation);
+    }
 }

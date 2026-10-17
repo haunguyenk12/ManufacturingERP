@@ -26,6 +26,13 @@ public final class PageableFactory {
         return PageRequest.of(safePage, safeSize, sort);
     }
 
+    /** Bounds only — for queries whose own {@code ORDER BY} is part of their contract (e.g. FEFO). */
+    public static Pageable unsorted(int page, int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = size < 1 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
+        return PageRequest.of(safePage, safeSize);
+    }
+
     public static Pageable of(int page, int size, String sortBy, String sortDir, String tieBreaker) {
         int safePage = Math.max(page, 0);
         int safeSize = size < 1 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);

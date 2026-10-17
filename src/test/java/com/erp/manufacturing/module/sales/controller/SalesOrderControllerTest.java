@@ -63,6 +63,9 @@ class SalesOrderControllerTest {
     @MockBean
     SalesOrderService salesOrderService;
 
+    @MockBean
+    com.erp.manufacturing.module.sales.service.SalesOrderReservationService reservationService;
+
     // Unused directly by these tests – required only so the auto-detected security filters
     // can be constructed by the @WebMvcTest slice, even with addFilters = false.
     @MockBean
@@ -90,7 +93,8 @@ class SalesOrderControllerTest {
         return new SalesOrderResponse(
                 SALES_ORDER_ID, COMPANY_ID, "COMP-01", PLANT_ID, "PLANT-01",
                 "SO-001", "ACME Corp", LocalDate.of(2026, 7, 1), statusValue, null,
-                Instant.now(), Instant.now(), version, List.of());
+                Instant.now(), Instant.now(), version, List.of(),
+                null, null, null, null, null, null, null, List.of());
     }
 
     private String createBody(UUID plantId) {
@@ -182,7 +186,7 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("confirm: order in a non-confirmable status returns 409 STATE_CONFLICT")
     void confirm_wrongStatus_returns409StateConflict() throws Exception {
-        when(salesOrderService.confirm(SALES_ORDER_ID))
+        when(salesOrderService.confirm(SALES_ORDER_ID, null))
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Only DRAFT sales orders can be confirmed"));
 
@@ -206,7 +210,8 @@ class SalesOrderControllerTest {
     @Test
     @DisplayName("list: PageResult envelope (page/size/totalElements/first/last) is part of the contract")
     void list_returns200WithFullPageEnvelope() throws Exception {
-        when(salesOrderService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), any()))
+        when(salesOrderService.list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), eq(null),
+                eq(null), eq(null), eq(null), eq(null), any()))
                 .thenReturn(new PageResult<>(List.of(sampleResponse("CONFIRMED")), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/sales-orders/v1")
@@ -222,6 +227,89 @@ class SalesOrderControllerTest {
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
 
-        verify(salesOrderService).list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), any());
+        verify(salesOrderService).list(eq(COMPANY_ID), eq(PLANT_ID), eq(null), eq(null),
+                eq(null), eq(null), eq(null), eq(null), any());
+    }
+
+    // ── G6a ────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("createDraft: 201, and X-Plant-Id is cross-checked against the body plantId")
+    void createDraft_returns201_andHonoursThePlantHeader() throws Exception {
+        when(salesOrderService.createDraft(any(com.erp.manufacturing.module.sales.dto.SalesOrderDraftCreateRequest.class)))
+                .thenReturn(sampleResponse("DRAFT", 0L));
+        String body = """
+                {"companyId":"%s","plantId":"%s","customerId":"%s","orderDate":"2026-10-14",
+                 "lines":[{"itemId":"%s","orderedQuantity":"0.1","dueDate":"2026-10-28"}]}
+                """.formatted(COMPANY_ID, PLANT_ID, UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(post("/sales-orders/v1/drafts").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+        mockMvc.perform(post("/sales-orders/v1/drafts")
+                        .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
+    }
+
+    @Test
+    @DisplayName("createDraft: a seventh decimal is a 400 naming the line field, never a silent round (FE A03)")
+    void createDraft_sevenDecimals_returns400NamingTheLineField() throws Exception {
+        String body = """
+                {"companyId":"%s","plantId":"%s","customerId":"%s","orderDate":"2026-10-14",
+                 "lines":[{"itemId":"%s","orderedQuantity":1.1234567,"dueDate":"2026-10-28"}]}
+                """.formatted(COMPANY_ID, PLANT_ID, UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(post("/sales-orders/v1/drafts").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[?(@.field == 'lines[0].orderedQuantity')]").exists());
+        verifyNoInteractions(salesOrderService);
+    }
+
+    @Test
+    @DisplayName("confirm: an optional body forwards expectedVersion; no body keeps the legacy call")
+    void confirm_withAndWithoutBody_forwardsTheExpectedVersion() throws Exception {
+        when(salesOrderService.confirm(eq(SALES_ORDER_ID), any())).thenReturn(sampleResponse("CONFIRMED", 1L));
+
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/confirm")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":4}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/confirm"))
+                .andExpect(status().isOk());
+
+        verify(salesOrderService).confirm(SALES_ORDER_ID, 4L);
+        verify(salesOrderService).confirm(SALES_ORDER_ID, null);
+    }
+
+    @Test
+    @DisplayName("cancel: a body without a reason is a 400")
+    void cancel_bodyWithoutReason_returns400() throws Exception {
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/cancel")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[?(@.field == 'reason')]").exists());
+        verifyNoInteractions(salesOrderService);
+    }
+
+    @Test
+    @DisplayName("reserve: 201 with the touched holds; exceeding what is uncovered is a 409")
+    void reserve_returns201_andOverCoverageIs409() throws Exception {
+        UUID lineId = UUID.randomUUID();
+        String body = """
+                {"expectedVersion":1,"salesOrderLineId":"%s","warehouseId":"%s","quantity":"30"}
+                """.formatted(lineId, UUID.randomUUID());
+        when(reservationService.reserve(eq(SALES_ORDER_ID), any()))
+                .thenReturn(new com.erp.manufacturing.module.sales.dto.SalesOrderReservationResult(
+                        List.of(), sampleResponse("CONFIRMED", 2L)))
+                .thenThrow(new AppException(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED, "too much"));
+
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/reservations")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.result.salesOrder.version").value(2));
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/reservations")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED.code()));
     }
 }

@@ -103,6 +103,10 @@ public enum AuditAction {
     SALES_ORDER_UPDATED,
     SALES_ORDER_CONFIRMED,
     SALES_ORDER_CANCELLED,
+    /** G6a: stock held for a sales order line (moves free stock to reserved, no on-hand change). */
+    SALES_ORDER_STOCK_RESERVED,
+    /** G6a: a sales order hold released back to free stock. */
+    SALES_ORDER_STOCK_RELEASED,
     MRP_RUN,
     PLANNING_DEMAND_CREATED,
     PLANNING_DEMAND_CANCELLED,
