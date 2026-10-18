@@ -24,6 +24,8 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.text.Normalizer;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,7 +66,9 @@ public class FixedTemplateReader {
     public FixedTemplateWorkbook read(byte[] bytes, DataImportKind kind, int maxRows) {
         inspectArchive(bytes);
         try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
-            Metadata metadata = kind == DataImportKind.BOMS ? readBomMetadata(workbook) : readMetadata(workbook, kind);
+            Metadata metadata = FixedTemplateSchema.usesKeyValueMetadata(kind)
+                    ? readKeyValueMetadata(workbook, FixedTemplateSchema.templateVersion(kind))
+                    : readMetadata(workbook, kind);
             String sheetName = FixedTemplateSchema.dataSheetName(kind, metadata.locale());
             Sheet sheet = workbook.getSheet(sheetName);
             if (sheet == null) {
@@ -157,22 +161,22 @@ public class FixedTemplateReader {
     /**
      * G5: the {@code omniplant-bom-v1} metadata is a two-row key/value sheet ({@code _meta}: A1
      * {@code version} / B1 version, A2 {@code locale} / B2 locale), unlike the one-row sheet of
-     * {@code omniplant-import-v1}. The kind is implied by the version.
+     * {@code omniplant-import-v1}. The kind is implied by the version. G6c's {@code omniplant-so-v1}
+     * uses the same layout.
      */
-    private Metadata readBomMetadata(Workbook workbook) {
+    private Metadata readKeyValueMetadata(Workbook workbook, String expectedVersion) {
         Sheet sheet = workbook.getSheet(FixedTemplateSchema.BOM_METADATA_SHEET);
         Row versionRow = sheet == null ? null : sheet.getRow(0);
         Row localeRow = sheet == null ? null : sheet.getRow(1);
         if (versionRow == null || localeRow == null
                 || !"version".equalsIgnoreCase(plainText(versionRow.getCell(0)))
                 || !"locale".equalsIgnoreCase(plainText(localeRow.getCell(0)))) {
-            throw template("Workbook has no BOM template metadata; download a new template");
+            throw template("Workbook has no template metadata; download a new template");
         }
         String version = plainText(versionRow.getCell(1));
         String locale = plainText(localeRow.getCell(1)).toLowerCase(Locale.ROOT);
-        if (!FixedTemplateSchema.BOM_TEMPLATE_VERSION.equals(version)) {
-            throw template("Template version '" + version + "' is not supported; expected "
-                    + FixedTemplateSchema.BOM_TEMPLATE_VERSION);
+        if (!expectedVersion.equals(version)) {
+            throw template("Template version '" + version + "' is not supported; expected " + expectedVersion);
         }
         if (!FixedTemplateSchema.isSupportedLocale(locale)) {
             throw template("Template locale '" + locale + "' is not supported");
@@ -261,6 +265,9 @@ public class FixedTemplateReader {
                 return "";
             }
             case NUMERIC -> {
+                if (column.valueKind() == ValueKind.DATE) {
+                    return readDateCell(cell, column, letter, issues);
+                }
                 if (DateUtil.isCellDateFormatted(cell)) {
                     issues.add(ImportCellError.of(letter, column.field(), ImportErrorCode.CELL_TYPE,
                             "Cell is a date; this column expects text"));
@@ -289,6 +296,27 @@ public class FixedTemplateReader {
         return column.valueKind() == ValueKind.CODE || column.valueKind() == ValueKind.UPPER_TEXT
                 ? normalised.toUpperCase(Locale.ROOT)
                 : normalised;
+    }
+
+    /**
+     * G6c (FE Q19): a real Excel date becomes {@code yyyy-MM-dd}. POI converts the serial with the
+     * workbook's own date system (1900 or 1904) into a {@code LocalDateTime}, so neither the server's
+     * nor the uploader's time zone can move the day. A time of day is refused rather than dropped, and
+     * a plain number (a serial typed without a date format) is refused rather than guessed.
+     */
+    private String readDateCell(Cell cell, Column column, String letter, List<ImportCellError> issues) {
+        if (!DateUtil.isCellDateFormatted(cell)) {
+            issues.add(ImportCellError.of(letter, column.field(), ImportErrorCode.CELL_TYPE,
+                    "Cell is a number, not a date; enter yyyy-MM-dd or format the cell as a date"));
+            return "";
+        }
+        LocalDateTime value = cell.getLocalDateTimeCellValue();
+        if (!value.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            issues.add(ImportCellError.of(letter, column.field(), ImportErrorCode.CELL_TYPE,
+                    "Cell has a time of day; enter the date only"));
+            return "";
+        }
+        return value.toLocalDate().toString();
     }
 
     /** Metadata and header cells: plain text only, anything else reads as empty. */

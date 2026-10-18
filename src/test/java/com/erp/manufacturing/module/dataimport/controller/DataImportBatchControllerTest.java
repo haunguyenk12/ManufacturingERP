@@ -130,6 +130,27 @@ class DataImportBatchControllerTest {
         verifyNoInteractions(service);
     }
 
+    /** G6c: sales orders are plant-scoped like items — no plant is a 400 naming it; with one it is forwarded. */
+    @Test
+    void upload_salesOrders_requireAndForwardThePlant() throws Exception {
+        mockMvc.perform(multipart("/v1/data-import/batches").file(FILE)
+                        .param("kind", "so")
+                        .param("companyId", COMPANY_ID.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("plantId"))
+                .andExpect(jsonPath("$.errors[0].message").value("is required when kind is so"));
+        verifyNoInteractions(service);
+
+        when(service.upload(any(), eq(DataImportKind.SALES_ORDERS), eq(COMPANY_ID), eq(PLANT_ID), isNull()))
+                .thenReturn(batch("READY", List.of()));
+        mockMvc.perform(multipart("/v1/data-import/batches").file(FILE)
+                        .param("kind", "so")
+                        .param("companyId", COMPANY_ID.toString())
+                        .param("plantId", PLANT_ID.toString()))
+                .andExpect(status().isCreated());
+        verify(service).upload(any(), eq(DataImportKind.SALES_ORDERS), eq(COMPANY_ID), eq(PLANT_ID), isNull());
+    }
+
     @Test
     void upload_plantHeaderDisagreesWithTheRequest_returns409StateConflict() throws Exception {
         mockMvc.perform(multipart("/v1/data-import/batches").file(FILE)
@@ -239,6 +260,6 @@ class DataImportBatchControllerTest {
         return new DataImportBatchResponse(BATCH_ID, UUID.randomUUID(), COMPANY_ID, PLANT_ID, DataImportKind.ITEMS,
                 "vi", "omniplant-import-v1", "items-vi.xlsx", 18200, status, 0, Instant.now(), null,
                 1, issues.isEmpty() ? 1 : 0, issues.isEmpty() ? 0 : 1, 0,
-                List.of(new DataImportBatchRowResponse(2, Map.of("code", "GD3-RM-0001"), issues)), List.of(), null);
+                List.of(new DataImportBatchRowResponse(2, Map.of("code", "GD3-RM-0001"), issues)), List.of(), null, null);
     }
 }

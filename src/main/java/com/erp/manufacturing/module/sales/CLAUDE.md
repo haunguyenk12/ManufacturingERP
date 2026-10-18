@@ -119,3 +119,9 @@ Theo tiền lệ `F2`. Lưu ý phân biệt trong chính service này: lỗi **d
 `SalesOrderPlanningSourceService.findSources(lineIds)` (không `@PreAuthorize`, 3 batch query): mỗi dòng đơn kèm Công ty/nhà máy, đơn còn
 hoạch định được, held, WO coverage, `uncovered` — **cùng** công thức B172 (`SalesOrderMapper.uncovered`). Caller: run thương mại, tính
 phiên bản nguồn, chuyển đổi (cap phần gắn đơn).
+
+### G6c — người gọi mới của `createDraft`
+
+`dataimport.SalesOrderImportHandler` tạo đơn nhập từ Excel qua **đúng** `SalesOrderService.createDraft` (một lần mỗi nhóm, trong transaction
+của batch) — mọi luật, mã `SO-…` và audit của G6a áp nguyên. Hướng phụ thuộc mới `dataimport → sales` (cùng kiểu `dataimport → bom`).
+Bất biến: `module/dataimport/CLAUDE.md` `B184`–`B186`.

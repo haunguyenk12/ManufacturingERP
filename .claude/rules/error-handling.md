@@ -258,6 +258,12 @@ phải của run, hoặc nguồn (dòng đơn / tồn đơn giữ / BOM, routing
 Tách khỏi `STATE_CONFLICT` vì cách xử lý là **chạy run mới**, không phải tải lại rồi thử lại. Còn lại dùng mã sẵn có: vượt phần còn lại ⇒
 `PLANNED_QUANTITY_EXCEEDED`; version chuyển đổi lệch ⇒ `CONCURRENT_MODIFICATION`; đề xuất bị chặn ⇒ đúng mã đã chặn (`MISSING_BOM`…, B58).
 
+**`G6c` (2026-10-18) — không thêm mã mới.** Nhập đơn bán Excel (`kind=so`) dùng nguyên mã file-level của `G3` (`FILE_FORMAT`,
+`FILE_SIZE` 413, `TEMPLATE`, `EMPTY_FILE`, `ROW_LIMIT`, `IMPORT_REVALIDATION_FAILED`) và lỗi dòng `ImportErrorCode` sẵn có. Mã FE đề xuất ánh
+xạ: `INVALID_FILE` → `FILE_FORMAT`; `FILE_TOO_LARGE` → `FILE_SIZE`; `INVALID_TEMPLATE` → `TEMPLATE`; `IMPORT_ROW_LIMIT_EXCEEDED` → `ROW_LIMIT`;
+`IMPORT_BATCH_INVALID` → `STATE_CONFLICT`; `IMPORT_SOURCE_STALE` → `IMPORT_REVALIDATION_FAILED`; `IMPORT_GROUP_INVALID` (lỗi dòng) →
+`RULE_VIOLATION` ở field `groupCode`. `IMPORT_BATCH_EXPIRED` không có — batch không hết hạn.
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

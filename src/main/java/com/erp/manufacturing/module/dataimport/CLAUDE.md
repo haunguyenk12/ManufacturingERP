@@ -49,3 +49,22 @@
 | B168 | BOM **không** đăng ký `ImportTargetHandler` (đường mapped-profile không gom nhóm được ⇒ trả "import target not found"). `BomImportHandler` riêng: validator gọi nó **thay** `flagRepeatedCodes` + luật handler; committer gọi `apply` theo nhóm, mỗi nhóm một `BomService.saveDraft` **trong cùng transaction** của batch. `createdIds` **distinct** (một id mỗi BOM); `bomCount` = số mã BOM | `BomImportHandlerTest.apply_*`, `DataImportBatchIT.bomBatch_*` |
 | B169 | Luật nhóm: B/C/D/I lặp y hệt dòng đầu (`GROUP_MISMATCH`); trùng thành phần, một sản phẩm hai mã ⇒ `DUPLICATE_IN_FILE`; mã BOM đã có, sản phẩm đã có BOM **bất kỳ trạng thái** ⇒ `ALREADY_EXISTS` (create-only); đơn vị phải là đơn vị của vật tư; thương C÷F và % ÷ 100 phải vừa 6 số lẻ. Một dòng lỗi ⇒ mọi dòng còn lại của nhóm nhận `RULE_VIOLATION` | `BomImportHandlerTest.validate_*` |
 | B170 | Đọc mẫu: sheet `BOM`, metadata `_meta` dạng key/value (A1 `version`, A2 `locale`). Ô **số** ở cột lượng/% được đọc theo **giá trị** (`BigDecimal.valueOf(double)`), không theo định dạng hiển thị; % trống = 0 | `BomImportHandlerTest.reader_*` |
+
+## 5. G6c — Nhập đơn bán hàng (`kind=so`, `omniplant-so-v1`) (2026-10-18)
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B184 | Đơn bán **không** đăng ký `ImportTargetHandler` (cùng lý do BOM, `B168`). `SalesOrderImportHandler`: validator gọi nó thay luật trùng mã; committer gọi `apply` — **một `SalesOrderService.createDraft` mỗi nhóm**, trong transaction của batch, ở **nhà máy của batch**. Mã nhóm chỉ để gom dòng: **không** phải `orderNo` (server cấp `SO-…`), **không** phải khoá upsert — tải lại cùng file rồi commit là thêm một bộ nháp mới. `createdIds` = một id mỗi đơn; `salesOrderCount` = số mã nhóm | `SalesOrderImportHandlerTest.apply_*`, `DataImportBatchIT.soBatch_lastGroupFailure…` (nhóm **cuối** lỗi ⇒ 0 đơn, batch giữ `READY`) |
+| B185 | Luật nhóm: B/C/D lặp y hệt dòng đầu (`GROUP_MISMATCH`; tham chiếu trống ≠ tham chiếu có giá trị); khách phải có + `ACTIVE`; vật tư phải có + `ACTIVE` + `FINISHED_GOOD`/`WIP` + đơn vị không ngừng; `dueDate ≥ orderDate`. Cùng vật tư hai dòng trong một nhóm **được phép** (khác ngày cần). Một dòng lỗi ⇒ dòng còn lại của nhóm nhận `RULE_VIOLATION` ở `groupCode`, dòng lỗi **giữ nguyên** lỗi gốc của nó | `SalesOrderImportHandlerTest.validate_*`, `DataImportBatchIT.soBatch_oneBadGroup…` |
+| B186 | Ngày (FE Q19): ô chữ phải đúng `yyyy-MM-dd` (pattern **và** `LocalDate.parse` — pattern chặn năm có dấu `+12026-…` mà `parse` vẫn nhận, `parse` chặn `2026-02-30`); ô **ngày thật** của Excel đọc qua `getLocalDateTimeCellValue()` ⇒ dùng **hệ ngày của chính workbook** (1900/1904), không múi giờ nào chen vào; ô ngày **có giờ** và ô **số trơn** (serial không định dạng) ⇒ `CELL_TYPE`, không đoán | `SalesOrderImportHandlerTest.reader_*`, `.validate_dateAndQuantityShape` |
+
+**Quyết định cần nhớ:**
+
+1. Plant-scoped như item (`kind.plantScoped() = true`): upload/list bắt buộc `plantId` (400 nêu field), cross-check `X-Plant-Id`; list
+   không có `plantId` không bao giờ trả batch đơn bán (`searchBatches`, vế `p.plantId = :plantId`). Quyền = `PERM_SALES_ORDER_READ` +
+   `_MANAGE` trên **nhà máy** — đọc lịch sử cũng cần cả cặp (FE Q22 đề xuất chỉ READ — **không** làm, giữ một luật cho mọi loại, `B146`).
+2. 🔴 Bẫy `flush()` trong `try` (`B143`) **không** tái diễn ở đây vì `createDraft` tự `saveAndFlush` mỗi đơn — nhưng `flush()` của
+   committer vẫn giữ, đừng gỡ vì "đơn bán không cần".
+3. Mỗi đơn tạo ra có audit `SALES_ORDER_CREATED` riêng (do `createDraft`), cộng **một** `IMPORT_BATCH_COMMITTED` cho batch.
+4. 🔴 Bẫy fixture test: `TemplateWorkbooks.date1904()` phải sửa `workbookPr` **có sẵn** — `addNewWorkbookPr()` thêm phần tử thứ hai mà
+   POI không đọc, và test 1904 đầu tiên đỏ vì đúng lý do đó (không phải vì reader sai).

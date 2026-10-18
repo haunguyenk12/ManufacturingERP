@@ -35,9 +35,20 @@ public final class TemplateWorkbooks {
     public static final List<String> BOM_HEADERS_EN = List.of("BOM code", "Product code", "Output quantity",
             "Output UOM", "Component code", "Component quantity", "Component UOM", "Scrap (%)", "Notes");
 
+    /** G6c: {@code omniplant-so-v1} headers (FE_HANDOFF_GD_06 §3.5). */
+    public static final List<String> SO_HEADERS_VI = List.of("Mã nhóm đơn", "Mã khách hàng", "Ngày đặt",
+            "Tham chiếu khách hàng", "Mã sản phẩm", "Số lượng", "Ngày cần");
+    public static final List<String> SO_HEADERS_EN = List.of("Group code", "Customer code", "Order date",
+            "Customer reference", "Item code", "Quantity", "Due date");
+
     private String version = "omniplant-import-v1";
-    /** G5: sheet {@code BOM} and a two-row {@code _meta} key/value sheet instead of {@code _OmniPlant}. */
+    /**
+     * G5: sheet {@code BOM} and a two-row {@code _meta} key/value sheet instead of {@code _OmniPlant}.
+     * G6c reuses the layout with sheet {@code Sales orders}.
+     */
     private boolean bomLayout;
+    private String keyValueSheet = "BOM";
+    private boolean date1904;
     private String kind;
     private String locale;
     private List<String> headers;
@@ -63,6 +74,20 @@ public final class TemplateWorkbooks {
         workbook.bomLayout = true;
         workbook.version = "omniplant-bom-v1";
         return workbook;
+    }
+
+    public static TemplateWorkbooks salesOrders(String locale) {
+        TemplateWorkbooks workbook = new TemplateWorkbooks("so", locale, "vi".equals(locale) ? SO_HEADERS_VI : SO_HEADERS_EN);
+        workbook.bomLayout = true;
+        workbook.keyValueSheet = "Sales orders";
+        workbook.version = "omniplant-so-v1";
+        return workbook;
+    }
+
+    /** The workbook uses the 1904 date system (Excel for Mac legacy) — serials are 1462 days smaller. */
+    public TemplateWorkbooks date1904() {
+        date1904 = true;
+        return this;
     }
 
     public TemplateWorkbooks version(String value) {
@@ -124,6 +149,18 @@ public final class TemplateWorkbooks {
         return this;
     }
 
+    /** A raw serial with a date format — what Excel stores; read with the workbook's date system. */
+    public TemplateWorkbooks dateSerialCell(int line, int column, double serial, String format) {
+        edits.add(sheet -> {
+            CellStyle style = sheet.getWorkbook().createCellStyle();
+            style.setDataFormat(sheet.getWorkbook().createDataFormat().getFormat(format));
+            Cell cell = rowAt(sheet, line).createCell(column);
+            cell.setCellValue(serial);
+            cell.setCellStyle(style);
+        });
+        return this;
+    }
+
     /** An empty but styled row — what the FE blank template has down to row 501. */
     public TemplateWorkbooks styledEmptyRow(int line) {
         edits.add(sheet -> {
@@ -137,7 +174,12 @@ public final class TemplateWorkbooks {
 
     public byte[] build() {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            Sheet data = workbook.createSheet(bomLayout ? "BOM" : "vi".equals(locale) ? "Dữ liệu" : "Data");
+            if (date1904) {
+                // A new workbook already has a <workbookPr>; adding a second one would be ignored.
+                var properties = workbook.getCTWorkbook().getWorkbookPr();
+                (properties == null ? workbook.getCTWorkbook().addNewWorkbookPr() : properties).setDate1904(true);
+            }
+            Sheet data = workbook.createSheet(bomLayout ? keyValueSheet : "vi".equals(locale) ? "Dữ liệu" : "Data");
             Row header = data.createRow(0);
             for (int index = 0; index < headers.size(); index++) {
                 header.createCell(index).setCellValue(headers.get(index));

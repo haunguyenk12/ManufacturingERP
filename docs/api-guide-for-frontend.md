@@ -1301,6 +1301,18 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Nhập đơn bán hàng Excel — FE giai đoạn 6 phần 3 *(`G6c`, 2026-10-18)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Tải + kiểm tra | `POST /v1/data-import/batches` multipart `file`, `kind=so`, `companyId`, **`plantId`** · `Idempotency-Key` tuỳ chọn | **201** `READY`/`INVALID`, **0 đơn**. Mẫu `omniplant-so-v1`: sheet `Sales orders`, `_meta` A1 `version`/B1 `omniplant-so-v1`, A2 `locale`/B2 `en` hoặc `vi`\|`vi`; 7 cột `Group code, Customer code, Order date, Customer reference, Item code, Quantity, Due date` (tiếng Việt: `Mã nhóm đơn, Mã khách hàng, Ngày đặt, Tham chiếu khách hàng, Mã sản phẩm, Số lượng, Ngày cần`). ≤ 5 MiB, ≤ 500 dòng |
+| Xác nhận | `POST /v1/data-import/batches/{id}/commit {expectedVersion}` · `Idempotency-Key` tuỳ chọn | Tạo **N đơn `DRAFT`** (N = `salesOrderCount`) trong một transaction hoặc 0. Gửi lại ⇒ cùng `createdIds`. Dữ liệu đổi ⇒ `409 IMPORT_REVALIDATION_FAILED` kèm batch `INVALID` |
+| Lịch sử / chi tiết | `GET /v1/data-import/batches?companyId=&plantId=&kind=so` · `GET /v1/data-import/batches/{id}` | Của **chính** người tải, đúng nhà máy. Lỗi theo dòng ở `rows[].issues[]` (`field`, `column`, `code`, `message`) |
+
+> 🔴 Ngày: chữ `yyyy-MM-dd` hoặc ô ngày thật của Excel (đọc theo hệ ngày của workbook). `20/10/2026`, ô có giờ, ô số trơn ⇒ lỗi dòng.
+> 🔴 Mã nhóm **không** phải mã đơn và **không** phải khoá chống trùng: tải cùng file hai lần rồi commit cả hai là hai bộ nháp.
+> Đường riêng `/sales-orders/v1/imports/*` FE đề xuất **không** có — dùng đường batch chung như item/BOM.
+
 ### Hoạch định theo dòng đơn + chuyển đổi một phần — FE giai đoạn 6 phần 2 *(`G6b`, 2026-10-18)*
 
 | Việc | Endpoint | Ghi chú |

@@ -29,7 +29,13 @@ public enum DataImportKind {
     CUSTOMERS("customers", ImportTargetType.CUSTOMER, "PERM_CUSTOMER_READ", "PERM_CUSTOMER_MANAGE", false),
 
     /** G5: BOM drafts from the {@code omniplant-bom-v1} workbook; company-scoped like the BOM itself. */
-    BOMS("bom", ImportTargetType.BOM, "PERM_BOM_READ", "PERM_BOM_MANAGE", false);
+    BOMS("bom", ImportTargetType.BOM, "PERM_BOM_READ", "PERM_BOM_MANAGE", false),
+
+    /**
+     * G6c: sales order drafts from the {@code omniplant-so-v1} workbook. Plant-scoped like the order
+     * itself — every order of the file is created in the batch's plant (FE §1.4).
+     */
+    SALES_ORDERS("so", ImportTargetType.SALES_ORDER, "PERM_SALES_ORDER_READ", "PERM_SALES_ORDER_MANAGE", true);
 
     private final String wireValue;
     private final ImportTargetType targetType;
@@ -67,7 +73,7 @@ public enum DataImportKind {
         return plantScoped;
     }
 
-    /** Lower-case wire value only ({@code items}, {@code suppliers}, {@code customers}, {@code bom}). */
+    /** Lower-case wire value only ({@code items}, {@code suppliers}, {@code customers}, {@code bom}, {@code so}). */
     public static Optional<DataImportKind> fromWire(String value) {
         if (value == null) {
             return Optional.empty();

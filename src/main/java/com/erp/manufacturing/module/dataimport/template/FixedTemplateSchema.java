@@ -32,6 +32,9 @@ public final class FixedTemplateSchema {
     public static final String BOM_TEMPLATE_VERSION = "omniplant-bom-v1";
     public static final String BOM_DATA_SHEET = "BOM";
     public static final String BOM_METADATA_SHEET = "_meta";
+    /** G6c: sales order workbook (FE_HANDOFF_GD_06 §3.5); same {@code _meta} key/value layout as BOM. */
+    public static final String SO_TEMPLATE_VERSION = "omniplant-so-v1";
+    public static final String SO_DATA_SHEET = "Sales orders";
     public static final String METADATA_SHEET = "_OmniPlant";
     public static final String LOCALE_VI = "vi";
     public static final String LOCALE_EN = "en";
@@ -62,6 +65,14 @@ public final class FixedTemplateSchema {
     public static final String COMPONENT_UOM = "componentUom";
     public static final String SCRAP_PERCENT = "scrapPercent";
 
+    public static final String GROUP_CODE = "groupCode";
+    public static final String CUSTOMER_CODE = "customerCode";
+    public static final String ORDER_DATE = "orderDate";
+    public static final String CUSTOMER_REFERENCE = "customerReference";
+    public static final String ITEM_CODE = "itemCode";
+    public static final String QUANTITY = "quantity";
+    public static final String DUE_DATE = "dueDate";
+
     public static final String TRACKING_NONE = "NONE";
     public static final String TRACKING_LOT = "LOT";
 
@@ -85,7 +96,13 @@ public final class FixedTemplateSchema {
          */
         QUANTITY,
         /** G5: like {@link #QUANTITY} but 0 ≤ x &lt; 100, blank means 0. 5 means 5 %. */
-        PERCENT
+        PERCENT,
+        /**
+         * G6c (FE Q19): {@code yyyy-MM-dd} text, or a real Excel date cell read through the workbook's own
+         * date system (1900 or 1904) with no time zone involved. A date cell with a time of day, a plain
+         * number and any other text ({@code 20/10/2026}) are refused, never guessed.
+         */
+        DATE
     }
 
     /**
@@ -132,6 +149,16 @@ public final class FixedTemplateSchema {
             new Column(SCRAP_PERCENT, "Hao hụt (%)", "Scrap (%)", ValueKind.PERCENT, false, null),
             new Column(NOTES, "Ghi chú", "Notes", ValueKind.TEXT, false, 1000));
 
+    /** G6c (FE §3.5): one row per order line; columns A–D repeat identically within an order group. */
+    private static final List<Column> SALES_ORDER_COLUMNS = List.of(
+            new Column(GROUP_CODE, "Mã nhóm đơn", "Group code", ValueKind.CODE, true, 100),
+            new Column(CUSTOMER_CODE, "Mã khách hàng", "Customer code", ValueKind.CODE, true, 100),
+            new Column(ORDER_DATE, "Ngày đặt", "Order date", ValueKind.DATE, true, null),
+            new Column(CUSTOMER_REFERENCE, "Tham chiếu khách hàng", "Customer reference", ValueKind.TEXT, false, 255),
+            new Column(ITEM_CODE, "Mã sản phẩm", "Item code", ValueKind.CODE, true, 100),
+            new Column(QUANTITY, "Số lượng", "Quantity", ValueKind.QUANTITY, true, null),
+            new Column(DUE_DATE, "Ngày cần", "Due date", ValueKind.DATE, true, null));
+
     private static final List<Column> SUPPLIER_COLUMNS =
             partnerColumns(SupplierImportTargetHandler.PHONE_MAX_LENGTH);
     private static final List<Column> CUSTOMER_COLUMNS =
@@ -165,15 +192,29 @@ public final class FixedTemplateSchema {
             case SUPPLIERS -> SUPPLIER_COLUMNS;
             case CUSTOMERS -> CUSTOMER_COLUMNS;
             case BOMS -> BOM_COLUMNS;
+            case SALES_ORDERS -> SALES_ORDER_COLUMNS;
         };
     }
 
     public static String templateVersion(DataImportKind kind) {
-        return kind == DataImportKind.BOMS ? BOM_TEMPLATE_VERSION : TEMPLATE_VERSION;
+        return switch (kind) {
+            case BOMS -> BOM_TEMPLATE_VERSION;
+            case SALES_ORDERS -> SO_TEMPLATE_VERSION;
+            default -> TEMPLATE_VERSION;
+        };
+    }
+
+    /** {@code true} for the workbooks whose {@code _meta} sheet is two key/value rows (BOM, sales orders). */
+    public static boolean usesKeyValueMetadata(DataImportKind kind) {
+        return kind == DataImportKind.BOMS || kind == DataImportKind.SALES_ORDERS;
     }
 
     public static String dataSheetName(DataImportKind kind, String locale) {
-        return kind == DataImportKind.BOMS ? BOM_DATA_SHEET : dataSheetName(locale);
+        return switch (kind) {
+            case BOMS -> BOM_DATA_SHEET;
+            case SALES_ORDERS -> SO_DATA_SHEET;
+            default -> dataSheetName(locale);
+        };
     }
 
     public static String dataSheetName(String locale) {

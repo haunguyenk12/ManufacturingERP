@@ -91,6 +91,13 @@ import static org.mockito.Mockito.eq;
         com.erp.manufacturing.module.bom.service.BomLookupService.class,
         com.erp.manufacturing.module.bom.mapper.BomMapper.class,
         com.erp.manufacturing.module.inventory.service.ItemLookupService.class,
+        com.erp.manufacturing.module.dataimport.target.SalesOrderImportHandler.class,
+        com.erp.manufacturing.module.sales.service.SalesOrderService.class,
+        com.erp.manufacturing.module.sales.service.SalesOrderDetailAssembler.class,
+        com.erp.manufacturing.module.sales.mapper.SalesOrderMapper.class,
+        com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService.class,
+        com.erp.manufacturing.module.workorder.service.query.SalesOrderCoverageLookupService.class,
+        com.erp.manufacturing.module.uom.service.UomLookupService.class,
         DataImportBatchIT.Config.class})
 class DataImportBatchIT extends AbstractPostgresIntegrationTest {
 
@@ -124,6 +131,8 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
     @SpyBean CustomerService customerService;
     @SpyBean com.erp.manufacturing.module.bom.service.BomService bomService;
     @MockBean DataImportBatchPermissionGuard batchGuard;
+    @SpyBean com.erp.manufacturing.module.sales.service.SalesOrderService salesOrderService;
+    @MockBean com.erp.manufacturing.module.planning.service.PlanningDemandService planningDemandService;
 
     private UUID owner;
     private Company company;
@@ -255,14 +264,20 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
         batch(owner, other, null, ImportTargetType.CUSTOMER, "khach-hang-cong-ty-khac.xlsx");
         PageRequest page = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt", "importRunId"));
 
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), null, false, true, true, false,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), null, false, true, true, false, false,
                 null, null, page)).extracting(ImportRun::getImportRunId).containsExactly(mineCustomers.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false, false,
                 null, "KHACH", page)).extracting(ImportRun::getImportRunId).containsExactly(mineCustomers.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, false, false, false,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, false, false, false, false,
                 null, null, page)).extracting(ImportRun::getImportRunId).containsExactly(mineItems.getImportRunId());
-        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false,
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), true, true, true, false, false,
                 ImportRunStatus.COMMITTED, null, page)).isEmpty();
+        // G6c: a sales order batch is plant-scoped like items — listed for its plant, never without one.
+        ImportRun mineOrders = batch(owner, company, plant, ImportTargetType.SALES_ORDER, "don-ban.xlsx");
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), plant.getPlantId(), false, false, false, false, true,
+                null, null, page)).extracting(ImportRun::getImportRunId).containsExactly(mineOrders.getImportRunId());
+        assertThat(runRepository.searchBatches(owner, company.getCompanyId(), null, false, false, false, false, true,
+                null, null, page)).isEmpty();
     }
 
     /**
@@ -312,6 +327,131 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
                 .isEqualTo(1L);
         assertThat(jdbc.queryForObject("SELECT quantity_per FROM bom_lines l JOIN bom_headers b ON b.bom_id = l.bom_id"
                 + " WHERE b.bom_code = ?", java.math.BigDecimal.class, "BOM1-" + tag)).isEqualByComparingTo("2.5");
+    }
+
+    /**
+     * G6c FE A33 + A36: a sales order workbook of two groups (2 + 1 rows, one date as a real Excel date)
+     * validates READY without creating an order; when the LAST group fails at the database the first
+     * order is rolled back with it and the batch stays READY; the retry creates exactly two DRAFTs with
+     * server order numbers, and reading the batch back returns the same ids.
+     */
+    @Test
+    void soBatch_lastGroupFailureLeavesNothing_retryCreatesOneDraftPerGroup_withServerOrderNumbers() {
+        Plant plant = soFixture();
+        byte[] file = TemplateWorkbooks.salesOrders("en")
+                .row(2, "a", "cus-g6c", "2026-10-20", "PO-77", "fg-g6c", "2.5", "2026-10-30")
+                .row(3, "A", "CUS-G6C", "2026-10-20", "PO-77", "WIP-G6C", "0.000001", null)
+                .dateCell(3, 6, java.time.LocalDate.of(2026, 11, 5))
+                .row(4, "B", "CUS-G6C", "2026-10-21", "PO-88", "FG-G6C", "5", "2026-10-21")
+                .build();
+
+        DataImportBatchResponse batch = uploadSo(file, plant);
+        assertThat(batch.status()).isEqualTo("READY");
+        assertThat(batch.salesOrderCount()).isEqualTo(2);
+        assertThat(batch.bomCount()).isNull();
+        assertThat(salesOrderCount()).isZero();
+
+        doAnswer(invocation -> {
+            throw new DataIntegrityViolationException("injected failure on the last order");
+        }).when(salesOrderService).createDraft(argThat(request -> request != null
+                && "PO-88".equals(request.customerReference())));
+        assertThatThrownBy(() -> service.commit(batch.id(), batch.version(), null))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(salesOrderCount()).isZero();
+        assertThat(status(batch.id())).isEqualTo(ImportRunStatus.READY);
+
+        doCallRealMethod().when(salesOrderService).createDraft(any());
+        DataImportBatchResponse committed = service.commit(batch.id(), batch.version(), null);
+
+        assertThat(committed.status()).isEqualTo("COMMITTED");
+        assertThat(committed.createdIds()).hasSize(2).doesNotHaveDuplicates();
+        assertThat(salesOrderCount()).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT order_no FROM sales_orders WHERE company_id = ? AND status = 'DRAFT'"
+                + " AND plant_id = ? AND customer_code = 'CUS-G6C'", String.class, company.getCompanyId(), plant.getPlantId()))
+                .hasSize(2).allMatch(orderNo -> orderNo.matches("SO-\\d{6,}"));
+        assertThat(jdbc.queryForList("SELECT l.ordered_quantity FROM sales_order_lines l JOIN sales_orders o"
+                + " ON o.sales_order_id = l.sales_order_id WHERE o.sales_order_id = ? ORDER BY l.line_no",
+                java.math.BigDecimal.class, committed.createdIds().get(0)))
+                .usingElementComparator(java.math.BigDecimal::compareTo)
+                .containsExactly(new java.math.BigDecimal("2.5"), new java.math.BigDecimal("0.000001"));
+        assertThat(jdbc.queryForObject("SELECT l.due_date FROM sales_order_lines l WHERE l.sales_order_id = ?"
+                + " AND l.line_no = 2", java.time.LocalDate.class, committed.createdIds().get(0)))
+                .isEqualTo(java.time.LocalDate.of(2026, 11, 5));
+        assertThat(service.get(batch.id()).createdIds()).isEqualTo(committed.createdIds());
+        // FE A33 retry: committing the committed batch again is its receipt, not two more orders.
+        assertThat(service.commit(batch.id(), committed.version(), null).createdIds()).isEqualTo(committed.createdIds());
+        assertThat(salesOrderCount()).isEqualTo(2);
+    }
+
+    /** G6c FE A34: one bad row in group A ⇒ batch INVALID, and a commit creates nothing — not even group B. */
+    @Test
+    void soBatch_oneBadGroup_makesTheWholeBatchInvalid_andNothingCanBeCommitted() {
+        Plant plant = soFixture();
+        byte[] file = TemplateWorkbooks.salesOrders("vi")
+                .row(2, "A", "CUS-G6C", "2026-10-20", "", "FG-G6C", "0", "2026-10-30")
+                .row(3, "A", "CUS-G6C", "2026-10-20", "", "FG-G6C", "3", "2026-10-30")
+                .row(4, "B", "CUS-G6C", "2026-10-20", "", "FG-G6C", "3", "2026-10-30")
+                .build();
+
+        DataImportBatchResponse batch = uploadSo(file, plant);
+
+        assertThat(batch.status()).isEqualTo("INVALID");
+        assertThat(batch.errorRowCount()).isEqualTo(2);
+        assertThat(batch.rows().get(1).issues()).singleElement()
+                .satisfies(issue -> assertThat(issue.field()).isEqualTo("groupCode"));
+        assertThat(batch.rows().get(2).issues()).isEmpty();
+        assertThatThrownBy(() -> service.commit(batch.id(), batch.version(), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        assertThat(salesOrderCount()).isZero();
+    }
+
+    /** G6c FE A36: the customer is deactivated after READY ⇒ commit 409 with the batch INVALID, no order. */
+    @Test
+    void soBatch_customerDeactivatedAfterValidation_commitFailsStale_andCreatesNothing() {
+        Plant plant = soFixture();
+        byte[] file = TemplateWorkbooks.salesOrders("en")
+                .row(2, "A", "CUS-G6C", "2026-10-20", "", "FG-G6C", "1", "2026-10-30")
+                .build();
+        DataImportBatchResponse batch = uploadSo(file, plant);
+        assertThat(batch.status()).isEqualTo("READY");
+        jdbc.update("UPDATE customers SET status = 'INACTIVE' WHERE company_id = ?", company.getCompanyId());
+
+        assertThatThrownBy(() -> service.commit(batch.id(), batch.version(), null))
+                .isInstanceOf(ResultCarryingException.class)
+                .satisfies(ex -> {
+                    ResultCarryingException failure = (ResultCarryingException) ex;
+                    assertThat(failure.getErrorCode()).isEqualTo(BusinessErrorCode.IMPORT_REVALIDATION_FAILED);
+                    DataImportBatchResponse invalid = (DataImportBatchResponse) failure.getResult();
+                    assertThat(invalid.status()).isEqualTo("INVALID");
+                    assertThat(invalid.rows().get(0).issues()).extracting(issue -> issue.field())
+                            .contains("customerCode");
+                });
+        assertThat(salesOrderCount()).isZero();
+    }
+
+    /** One plant, one ACTIVE customer and one sellable item of each type in the test's own company. */
+    private Plant soFixture() {
+        Plant plant = plantRepository.save(Plant.builder().company(company).code("P-" + UUID.randomUUID())
+                .name("Plant").timezone("Asia/Ho_Chi_Minh").status(OrganizationStatus.ACTIVE).build());
+        customerService.create(company.getCompanyId(),
+                new CustomerCreateRequest("CUS-G6C", "Khách G6c", null, null, null, null, null));
+        jdbc.update("INSERT INTO items (item_id, company_id, code, name, type, unit) VALUES (gen_random_uuid(), ?,"
+                + " 'FG-G6C', 'FG', 'FINISHED_GOOD', 'PCS')", company.getCompanyId());
+        jdbc.update("INSERT INTO items (item_id, company_id, code, name, type, unit) VALUES (gen_random_uuid(), ?,"
+                + " 'WIP-G6C', 'WIP', 'WIP', 'PCS')", company.getCompanyId());
+        return plant;
+    }
+
+    private DataImportBatchResponse uploadSo(byte[] file, Plant plant) {
+        return service.upload(new MockMultipartFile("file", "don-ban.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file),
+                DataImportKind.SALES_ORDERS, company.getCompanyId(), plant.getPlantId(), null);
+    }
+
+    private long salesOrderCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM sales_orders WHERE company_id = ?", Long.class,
+                company.getCompanyId());
     }
 
     private long bomCount() {

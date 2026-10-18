@@ -25,5 +25,11 @@ public enum ImportTargetType {
      * mapped-profile path's one-row-one-record handlers cannot express, so no {@code ImportTargetHandler}
      * is registered and that path answers "import target not found" for it.
      */
-    BOM
+    BOM,
+
+    /**
+     * Sales order drafts (G6c), created through {@code SalesOrderService.createDraft} — one order per
+     * group of rows ({@code omniplant-so-v1}). Fixed-template path only, for the same reason as {@link #BOM}.
+     */
+    SALES_ORDER
 }

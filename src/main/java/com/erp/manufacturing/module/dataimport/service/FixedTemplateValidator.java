@@ -7,12 +7,15 @@ import com.erp.manufacturing.module.dataimport.target.BomImportHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetRegistry;
 import com.erp.manufacturing.module.dataimport.target.PartnerImportTargetHandler;
+import com.erp.manufacturing.module.dataimport.target.SalesOrderImportHandler;
 import com.erp.manufacturing.module.dataimport.template.FixedTemplateSchema;
 import com.erp.manufacturing.module.dataimport.template.FixedTemplateSchema.Column;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -43,9 +46,12 @@ public class FixedTemplateValidator {
     /** G5: plain decimal, no sign, no exponent, at most 13 integer digits and 6 decimals. */
     private static final Pattern DECIMAL_PATTERN = Pattern.compile("^\\d{1,13}(\\.\\d{1,6})?$");
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+    /** G6c: the only date text accepted; {@code LocalDate.parse} is strict, so 2026-02-30 is refused too. */
+    private static final Pattern DATE_PATTERN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
 
     private final ImportTargetRegistry registry;
     private final BomImportHandler bomImportHandler;
+    private final SalesOrderImportHandler salesOrderImportHandler;
 
     /** One row going in: the values read or stored, plus issues already found while reading cells. */
     public record RowInput(int line, Map<String, String> values, List<ImportCellError> issues) {
@@ -74,6 +80,11 @@ public class FixedTemplateValidator {
             // A BOM spans several rows, so "the same code twice" is the format, not an error: the group
             // rules and every database rule live in the BOM handler (G5).
             bomImportHandler.validate(companyId, results);
+            return results;
+        }
+        if (kind == DataImportKind.SALES_ORDERS) {
+            // Same shape as BOM: rows grouped by group code, so the group rules live in the handler (G6c).
+            salesOrderImportHandler.validate(companyId, results);
             return results;
         }
         flagRepeatedCodes(kind, results);
@@ -133,12 +144,30 @@ public class FixedTemplateValidator {
                             "Column " + letter + " must be a number greater than 0 with at most 6 decimals"));
                 }
             }
+            case DATE -> {
+                if (!isIsoDate(value)) {
+                    issues.add(ImportCellError.of(letter, field, ImportErrorCode.INVALID_FORMAT,
+                            "Column " + letter + " must be a date written yyyy-MM-dd"));
+                }
+            }
             case PERCENT -> {
                 if (!DECIMAL_PATTERN.matcher(value).matches() || new BigDecimal(value).compareTo(HUNDRED) >= 0) {
                     issues.add(ImportCellError.of(letter, field, ImportErrorCode.INVALID_FORMAT,
                             "Column " + letter + " must be a percentage from 0 to below 100"));
                 }
             }
+        }
+    }
+
+    private boolean isIsoDate(String value) {
+        if (!DATE_PATTERN.matcher(value).matches()) {
+            return false;
+        }
+        try {
+            LocalDate.parse(value);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 

@@ -90,9 +90,9 @@ public class DataImportBatchController {
             @RequestParam(defaultValue = "20") int size,
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader) {
         DataImportKind importKind = kind == null || kind.isBlank() ? null : parseKind(kind);
-        if (importKind == DataImportKind.ITEMS && plantId == null) {
+        if (importKind != null && importKind.plantScoped() && plantId == null) {
             throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
-                    Map.of("plantId", "is required when kind is items"));
+                    Map.of("plantId", "is required when kind is " + importKind.wireValue()));
         }
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(service.list(companyId, plantId, importKind,
@@ -106,14 +106,14 @@ public class DataImportBatchController {
         return ResponseEntity.ok(ApiResponse.ok(service.get(batchId)));
     }
 
-    /** Items need a plant; partner batches ignore one, so a plant switcher in the UI is harmless. */
+    /** Items and sales orders need a plant; partner/BOM batches ignore one, so a plant switcher in the UI is harmless. */
     private UUID plantFor(DataImportKind kind, UUID plantId, String plantHeader) {
         if (!kind.plantScoped()) {
             return null;
         }
         if (plantId == null) {
             throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
-                    Map.of("plantId", "is required when kind is items"));
+                    Map.of("plantId", "is required when kind is " + kind.wireValue()));
         }
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return plantId;

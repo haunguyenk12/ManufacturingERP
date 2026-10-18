@@ -106,7 +106,10 @@ public interface ImportRunRepository extends JpaRepository<ImportRun, UUID> {
                 or (:includeCustomers = true
                     and r.targetType = com.erp.manufacturing.module.dataimport.domain.ImportTargetType.CUSTOMER)
                 or (:includeBoms = true
-                    and r.targetType = com.erp.manufacturing.module.dataimport.domain.ImportTargetType.BOM))
+                    and r.targetType = com.erp.manufacturing.module.dataimport.domain.ImportTargetType.BOM)
+                or (:includeSalesOrders = true
+                    and r.targetType = com.erp.manufacturing.module.dataimport.domain.ImportTargetType.SALES_ORDER
+                    and p.plantId = :plantId))
               and (:status is null or r.status = :status)
               and (cast(:search as string) is null
                    or lower(r.originalFilename) like lower(concat('%', cast(:search as string), '%')))
@@ -118,6 +121,7 @@ public interface ImportRunRepository extends JpaRepository<ImportRun, UUID> {
                                   @Param("includeSuppliers") boolean includeSuppliers,
                                   @Param("includeCustomers") boolean includeCustomers,
                                   @Param("includeBoms") boolean includeBoms,
+                                  @Param("includeSalesOrders") boolean includeSalesOrders,
                                   @Param("status") ImportRunStatus status,
                                   @Param("search") String search,
                                   Pageable pageable);

@@ -68,8 +68,8 @@ class DataImportBatchCommitterTest {
         when(handler.targetType()).thenReturn(ImportTargetType.CUSTOMER);
         when(handler.validateBatch(any(), anyList())).thenReturn(Map.of());
         ImportTargetRegistry registry = new ImportTargetRegistry(List.of(handler));
-        committer = new DataImportBatchCommitter(runRepository, rowRepository, registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class),
-                new FixedTemplateValidator(registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class)), idempotency, new DataImportMapper(), entityManager);
+        committer = new DataImportBatchCommitter(runRepository, rowRepository, registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class), org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.SalesOrderImportHandler.class),
+                new FixedTemplateValidator(registry, org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.BomImportHandler.class), org.mockito.Mockito.mock(com.erp.manufacturing.module.dataimport.target.SalesOrderImportHandler.class)), idempotency, new DataImportMapper(), entityManager);
         batchId = UUID.randomUUID();
         when(runRepository.saveAndFlush(any())).then(returnsFirstArg());
         when(runRepository.findByIdempotencyKey(any())).thenReturn(Optional.empty());

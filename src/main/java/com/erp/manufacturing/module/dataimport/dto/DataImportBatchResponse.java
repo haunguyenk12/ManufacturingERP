@@ -40,6 +40,12 @@ public record DataImportBatchResponse(
          * creates. {@code createdIds} then holds one id per BOM, not one per row. {@code null} for
          * every other kind.
          */
-        Integer bomCount
+        Integer bomCount,
+        /**
+         * G6c, sales order batches only: number of order groups (distinct group codes) in the file — the
+         * number of DRAFT orders a commit creates. {@code createdIds} then holds one id per order.
+         * {@code null} for every other kind.
+         */
+        Integer salesOrderCount
 ) {
 }

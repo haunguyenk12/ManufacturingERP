@@ -20,6 +20,7 @@ import com.erp.manufacturing.module.dataimport.repository.ImportRunRepository;
 import com.erp.manufacturing.module.dataimport.target.BomImportHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetHandler;
 import com.erp.manufacturing.module.dataimport.target.ImportTargetRegistry;
+import com.erp.manufacturing.module.dataimport.target.SalesOrderImportHandler;
 import com.erp.manufacturing.module.dataimport.template.FixedTemplateSchema;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +52,7 @@ public class DataImportBatchCommitter {
     private final ImportRowRepository rowRepository;
     private final ImportTargetRegistry registry;
     private final BomImportHandler bomImportHandler;
+    private final SalesOrderImportHandler salesOrderImportHandler;
     private final FixedTemplateValidator validator;
     private final IdempotencySupport idempotency;
     private final DataImportMapper mapper;
@@ -122,6 +124,13 @@ public class DataImportBatchCommitter {
             if (kind == DataImportKind.BOMS) {
                 // One BOM per group; every row of the group records the BOM it became (G5).
                 List<UUID> created = bomImportHandler.apply(companyId,
+                        rows.stream().map(ImportRow::getMappedValues).toList());
+                for (int index = 0; index < rows.size(); index++) {
+                    rows.get(index).markApplied(created.get(index));
+                }
+            } else if (kind == DataImportKind.SALES_ORDERS) {
+                // One DRAFT per group, in the batch's plant; every row records the order it became (G6c).
+                List<UUID> created = salesOrderImportHandler.apply(companyId, batch.getPlant().getPlantId(),
                         rows.stream().map(ImportRow::getMappedValues).toList());
                 for (int index = 0; index < rows.size(); index++) {
                     rows.get(index).markApplied(created.get(index));

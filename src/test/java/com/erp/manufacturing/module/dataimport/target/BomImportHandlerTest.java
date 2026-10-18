@@ -57,7 +57,8 @@ class BomImportHandlerTest {
     private final BomService bomService = mock(BomService.class);
     private final BomImportHandler handler = new BomImportHandler(itemLookupService, bomLookupService, bomService);
     private final FixedTemplateValidator validator =
-            new FixedTemplateValidator(new ImportTargetRegistry(List.of()), handler);
+            new FixedTemplateValidator(new ImportTargetRegistry(List.of()), handler,
+                    mock(SalesOrderImportHandler.class));
     private final Map<String, Item> items = new HashMap<>();
 
     @BeforeEach

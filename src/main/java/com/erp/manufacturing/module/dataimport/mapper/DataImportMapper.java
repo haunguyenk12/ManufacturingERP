@@ -66,7 +66,8 @@ public class DataImportMapper {
     /** @param rows every row of the batch, in Excel row order */
     public DataImportBatchResponse toBatchResponse(ImportRun run, List<ImportRow> rows) {
         List<UUID> createdIds = run.getStatus() == ImportRunStatus.COMMITTED
-                // distinct: every row of a BOM group carries the id of the one BOM it became (G5)
+                // distinct: every row of a BOM / sales order group carries the id of the one record it
+                // became (G5, G6c)
                 ? rows.stream().map(ImportRow::getCreatedEntityId).filter(Objects::nonNull).distinct().toList()
                 : List.of();
         return new DataImportBatchResponse(
@@ -76,7 +77,9 @@ public class DataImportMapper {
                 run.getOriginalFilename(), run.getFileSizeBytes(), run.getStatus().name(),
                 versionOf(run), run.getCreatedAt(), run.getCommittedAt(),
                 run.getTotalRows(), run.getValidRows(), run.getErrorRows(), createdCount(run),
-                rows.stream().map(this::toBatchRow).toList(), createdIds, bomCount(run, rows));
+                rows.stream().map(this::toBatchRow).toList(), createdIds,
+                groupCount(run, rows, DataImportKind.BOMS, FixedTemplateSchema.BOM_CODE),
+                groupCount(run, rows, DataImportKind.SALES_ORDERS, FixedTemplateSchema.GROUP_CODE));
     }
 
     public DataImportBatchSummaryResponse toBatchSummary(ImportRun run) {
@@ -103,12 +106,13 @@ public class DataImportMapper {
                 .orElseThrow(() -> new IllegalStateException("No import kind for " + run.getTargetType()));
     }
 
-    private Integer bomCount(ImportRun run, List<ImportRow> rows) {
-        if (kindOf(run) != DataImportKind.BOMS) {
+    /** Distinct non-blank values of {@code field} — what a commit of a grouped kind creates; else {@code null}. */
+    private Integer groupCount(ImportRun run, List<ImportRow> rows, DataImportKind groupedKind, String field) {
+        if (kindOf(run) != groupedKind) {
             return null;
         }
         return (int) rows.stream()
-                .map(row -> row.getMappedValues() == null ? null : row.getMappedValues().get(FixedTemplateSchema.BOM_CODE))
+                .map(row -> row.getMappedValues() == null ? null : row.getMappedValues().get(field))
                 .filter(code -> code != null && !code.isBlank())
                 .distinct()
                 .count();
