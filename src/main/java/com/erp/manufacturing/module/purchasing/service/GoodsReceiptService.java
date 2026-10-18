@@ -10,21 +10,26 @@ import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementResult;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
-import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.AuditorAware;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,13 +38,16 @@ import java.util.stream.Collectors;
 public class GoodsReceiptService {
 
     private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 120;
-    private static final String REFERENCE_TYPE_GOODS_RECEIPT = "GOODS_RECEIPT";
 
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final InventoryMovementService inventoryMovementService;
     private final PurchasingMapper mapper;
     private final IdempotencySupport idempotency;
+    private final GoodsReceiptPoster poster;
+    private final PurchasingPermissionGuard purchasingPermissionGuard;
+    private final AuditorAware<UUID> auditorAware;
+    private final PurchasingIdempotency idempotencyRecords;
 
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasOrderAccess(authentication, 'PERM_GOODS_RECEIPT_POST', #purchaseOrderId)")
@@ -54,69 +62,60 @@ public class GoodsReceiptService {
             return mapper.toResponse(existing.get(), true);
         }
 
-        PurchaseOrder order = findOrder(purchaseOrderId);
+        // G7b (D11): lock the order before its lines are read, so concurrent receipts against the
+        // same open quantity serialise instead of both passing the check.
+        PurchaseOrder order = poster.lockOrder(purchaseOrderId);
+        order = findOrder(purchaseOrderId);
         if (!order.canReceive()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only CONFIRMED or PARTIALLY_RECEIVED purchase orders can receive goods");
         }
         Map<UUID, PurchaseOrderLine> orderLines = order.getLines().stream()
                 .collect(Collectors.toMap(PurchaseOrderLine::getPurchaseOrderLineId, line -> line));
-        GoodsReceipt receipt = GoodsReceipt.builder()
-                .purchaseOrder(order)
-                .warehouse(order.getWarehouse())
-                .receiptNo(normalizeCode(request.receiptNo(), "Goods receipt number"))
-                .status(GoodsReceiptStatus.POSTED)
-                .postedAt(Instant.now())
-                .idempotencyKey(normalizedKey)
-                .payloadHash(idempotency.payloadHash(request))
-                .note(trimToNull(request.note()))
-                .build();
-        receipt = goodsReceiptRepository.save(receipt);
-
-        int lineIndex = 0;
-        for (GoodsReceiptLineRequest lineRequest : request.lines()) {
-            lineIndex++;
+        List<GoodsReceiptPoster.Line> lines = new ArrayList<>();
+        for (int i = 0; i < request.lines().size(); i++) {
+            GoodsReceiptLineRequest lineRequest = request.lines().get(i);
             PurchaseOrderLine orderLine = orderLines.get(lineRequest.purchaseOrderLineId());
             if (orderLine == null) {
                 throw ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Purchase order line", lineRequest.purchaseOrderLineId());
             }
-            BigDecimal receivedQuantity = requirePositive(lineRequest.receivedQuantity(), "Received quantity");
-            if (receivedQuantity.compareTo(orderLine.remainingQuantity()) > 0) {
-                // B27 – over-receipt is a quantity-vs-document conflict (409), the purchasing analog
-                // of ProductionReceiptService's PLANNED_QUANTITY_EXCEEDED. Retagged in D7.
-                throw ExceptionFactory.custom(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
-                        "Received quantity cannot exceed remaining ordered quantity");
-            }
+            lines.add(new GoodsReceiptPoster.Line(i, orderLine,
+                    requirePositive(lineRequest.receivedQuantity(), "Received quantity"),
+                    lineRequest.lotId(), lineRequest.lotCode(), null));
+        }
+        LocalDate today = LocalDate.now(ZoneId.of(order.getPlant().getTimezone()));
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        GoodsReceipt receipt = goodsReceiptRepository.save(GoodsReceipt.builder()
+                .purchaseOrder(order)
+                .warehouse(order.getWarehouse())
+                .receiptNo(normalizeCode(request.receiptNo(), "Goods receipt number"))
+                .status(GoodsReceiptStatus.DRAFT)
+                .receivedDate(today)
+                .idempotencyKey(normalizedKey)
+                .payloadHash(idempotency.payloadHash(request))
+                .note(trimToNull(request.note()))
+                .build());
 
-            InventoryMovementResult movementResult = inventoryMovementService.receive(
-                    new InventoryReceiveCommand(
-                            orderLine.getItem().getItemId(),
-                            order.getWarehouse().getWarehouseId(),
-                            lineRequest.lotId(),
-                            lineRequest.lotCode(),
-                            receivedQuantity,
-                            request.note(),
-                            REFERENCE_TYPE_GOODS_RECEIPT,
-                            receipt.getGoodsReceiptId().toString(), null, null, null),
-                    childIdempotencyKey(normalizedKey, lineIndex));
-            StockMovement movement = movementResult.movement();
-            orderLine.receive(receivedQuantity);
-            GoodsReceiptLine receiptLine = GoodsReceiptLine.builder()
+        // D4: the legacy path now also receives on hold — one rule for both, no second number.
+        List<InventoryMovementResult> results = poster.post(order, lines, false, normalizedKey, request.note(),
+                receipt.getGoodsReceiptId().toString(), today, now);
+        for (int i = 0; i < lines.size(); i++) {
+            StockMovement movement = results.get(i).movement();
+            receipt.getLines().add(GoodsReceiptLine.builder()
                     .goodsReceipt(receipt)
-                    .purchaseOrderLine(orderLine)
-                    .item(orderLine.getItem())
+                    .purchaseOrderLine(lines.get(i).orderLine())
+                    .item(lines.get(i).orderLine().getItem())
                     .lot(movement.getLot())
                     .lotCode(movement.getLot() == null ? null : movement.getLot().getLotCode())
-                    .receivedQuantity(receivedQuantity)
+                    .receivedQuantity(lines.get(i).quantity())
                     .stockMovement(movement)
-                    .build();
-            receipt.getLines().add(receiptLine);
+                    .build());
         }
-
-        order.refreshReceiptStatus();
-        purchaseOrderRepository.save(order);
-        return mapper.toResponse(goodsReceiptRepository.save(receipt), true);
+        receipt.markPosted(now, auditorAware.getCurrentAuditor().orElse(null));
+        // saveAndFlush: the response carries version (G7b), which Hibernate only bumps at flush (§0.39).
+        purchaseOrderRepository.saveAndFlush(order);
+        return mapper.toResponse(goodsReceiptRepository.saveAndFlush(receipt), true);
     }
 
     @Transactional(readOnly = true)
@@ -127,7 +126,8 @@ public class GoodsReceiptService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_READ', #goodsReceiptId)")
+    @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_GOODS_RECEIPT_READ', #goodsReceiptId)"
+            + " or @purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_READ', #goodsReceiptId)")
     public GoodsReceiptResponse get(UUID goodsReceiptId) {
         return mapper.toResponse(goodsReceiptRepository.findWithDetailsByGoodsReceiptId(goodsReceiptId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
@@ -135,20 +135,61 @@ public class GoodsReceiptService {
     }
 
     /**
-     * Cancels a POSTED goods receipt.
-     * Creates a REVERSAL movement for every receipt line to restore stock balance.
-     * Decrements receivedQuantity on each PurchaseOrderLine.
-     * Refreshes PO status (FULLY_RECEIVED → PARTIALLY_RECEIVED / CONFIRMED if quantities roll back).
+     * Cancels a goods receipt — one endpoint, two meanings by status (G7b, D3):
+     * <ul>
+     *   <li>DRAFT: becomes CANCELLED; no stock ever moved, nothing to reverse. Needs
+     *       {@code PERM_GOODS_RECEIPT_MANAGE} or {@code PERM_PURCHASE_ORDER_MANAGE}.</li>
+     *   <li>POSTED (legacy): a REVERSAL movement per line, received quantities and PO status roll back.
+     *       Still needs {@code PERM_PURCHASE_ORDER_MANAGE} — checked here once the status is known.
+     *       A receipt posted on hold first releases the quality hold it created for stock without a
+     *       lot, so on-hand never drops below the held quantity.</li>
+     * </ul>
+     * {@code expectedVersion} is optional (legacy callers send none).
      */
     @Transactional
-    @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #goodsReceiptId)")
+    @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #goodsReceiptId)"
+            + " or @purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_GOODS_RECEIPT_MANAGE', #goodsReceiptId)")
     @Auditable(action = AuditAction.GOODS_RECEIPT_CANCELLED, entityType = "GoodsReceipt",
             entityIdExpression = "#goodsReceiptId.toString()",
                warehouseId = "#result?.warehouseId()")
     public GoodsReceiptResponse cancel(UUID goodsReceiptId, GoodsReceiptCancelRequest request) {
+        return cancel(goodsReceiptId, request, null);
+    }
+
+    /** As {@link #cancel(UUID, GoodsReceiptCancelRequest)}, with an optional {@code Idempotency-Key} (G7b). */
+    @Transactional
+    @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #goodsReceiptId)"
+            + " or @purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_GOODS_RECEIPT_MANAGE', #goodsReceiptId)")
+    @Auditable(action = AuditAction.GOODS_RECEIPT_CANCELLED, entityType = "GoodsReceipt",
+            entityIdExpression = "#goodsReceiptId.toString()",
+               warehouseId = "#result?.warehouseId()")
+    public GoodsReceiptResponse cancel(UUID goodsReceiptId, GoodsReceiptCancelRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        PurchasingIdempotency.Fingerprint fingerprint = new PurchasingIdempotency.Fingerprint(goodsReceiptId, request);
         GoodsReceipt receipt = goodsReceiptRepository.findWithDetailsByGoodsReceiptId(goodsReceiptId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Goods receipt", goodsReceiptId));
+        if (idempotencyRecords.replay(key, PurchasingCommand.GOODS_RECEIPT_CANCEL, fingerprint).isPresent()) {
+            return mapper.toResponse(receipt, true);
+        }
+        if (request != null && request.expectedVersion() != null
+                && !Objects.equals(request.expectedVersion(), receipt.getVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION,
+                    "Goods receipt version is " + receipt.getVersion() + ", not " + request.expectedVersion() + "; reload it");
+        }
+        UUID actor = auditorAware.getCurrentAuditor().orElse(null);
+        if (receipt.isDraft() || receipt.isPosted()) {
+            idempotencyRecords.record(key, PurchasingCommand.GOODS_RECEIPT_CANCEL, goodsReceiptId, fingerprint);
+        }
+        if (receipt.isDraft()) {
+            receipt.cancel(request == null ? null : trimToNull(request.cancelNote()),
+                    Instant.now().truncatedTo(ChronoUnit.MICROS), actor);
+            return mapper.toResponse(goodsReceiptRepository.saveAndFlush(receipt), true);
+        }
+        if (receipt.isPosted() && !purchasingPermissionGuard.hasReceiptAccess(
+                SecurityContextHolder.getContext().getAuthentication(), "PERM_PURCHASE_ORDER_MANAGE", goodsReceiptId)) {
+            throw new AccessDeniedException("Reversing a posted goods receipt needs PERM_PURCHASE_ORDER_MANAGE");
+        }
 
         if (!receipt.isPosted()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
@@ -181,6 +222,10 @@ public class GoodsReceiptService {
             UUID warehouseId = receipt.getWarehouse().getWarehouseId();
             UUID lotId = line.getLot() == null ? null : line.getLot().getLotId();
 
+            if (receipt.isQualityHeld() && line.getLot() == null) {
+                inventoryMovementService.releaseQualityHold(line.getItem().getItemId(), warehouseId,
+                        line.getReceivedQuantity());
+            }
             inventoryMovementService.reverseReceive(
                     line.getItem().getItemId(),
                     warehouseId,
@@ -199,10 +244,11 @@ public class GoodsReceiptService {
 
         // Refresh PO status after rolling back quantities (FULLY_RECEIVED → PARTIALLY_RECEIVED → CONFIRMED)
         orderWithLines.refreshReceiptStatus();
-        purchaseOrderRepository.save(orderWithLines);
+        purchaseOrderRepository.saveAndFlush(orderWithLines);
 
-        receipt.cancel(request == null ? null : request.cancelNote());
-        return mapper.toResponse(goodsReceiptRepository.save(receipt), true);
+        receipt.cancel(request == null ? null : request.cancelNote(),
+                Instant.now().truncatedTo(ChronoUnit.MICROS), actor);
+        return mapper.toResponse(goodsReceiptRepository.saveAndFlush(receipt), true);
     }
 
     private String buildCancelLineIdempotencyKey(String base, int lineIndex) {
@@ -225,14 +271,6 @@ public class GoodsReceiptService {
                     fieldName + " must be greater than zero");
         }
         return quantity;
-    }
-
-    private String childIdempotencyKey(String idempotencyKey, int lineIndex) {
-        String suffix = ":L" + lineIndex;
-        if (idempotencyKey.length() + suffix.length() <= IDEMPOTENCY_KEY_MAX_LENGTH) {
-            return idempotencyKey + suffix;
-        }
-        return idempotencyKey.substring(0, IDEMPOTENCY_KEY_MAX_LENGTH - suffix.length()) + suffix;
     }
 
     private String normalizeIdempotencyKey(String idempotencyKey) {

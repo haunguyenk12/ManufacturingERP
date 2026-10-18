@@ -243,14 +243,18 @@ Start from approved purchase suggestion
           [Send Purchase Order to Supplier]
           │
           ▼
-          [Post Goods Receipt (GR)]
+          [Save Goods Receipt DRAFT]   (G7b — không đụng tồn kho; DRAFT → CANCELLED được)
+          │
+          ▼
+          [Post Goods Receipt (GR)]    (khoá dòng PO, kiểm lại lượng mở)
           │
           ▼
           ◇ Goods receipt valid?
             ├── No  → [Reject Goods Receipt] → End
             └── Yes ▼
                     [Inventory RECEIVE movement]     ─┐
-                    [Increase Raw Material Stock]      │── ► Flow 5: Inventory
+                    [Stock vào HOLD — lô HOLD / qualityHold]  │── ► Flow 5: Inventory
+                    [Chờ QC mua hàng (G7c) mới khả dụng]
                     │
                     ▼
                     [Update received quantity & PO status]

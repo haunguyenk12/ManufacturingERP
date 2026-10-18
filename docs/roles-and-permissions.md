@@ -303,7 +303,9 @@ OPERATOR **không** phê duyệt, **không** cấu hình hệ thống.
 ### Purchasing Execution
 | Quyền | Mô tả |
 |-------|-------|
-| `GR_POST` | Đăng nhận hàng (Goods Receipt) → tự động cập nhật tồn kho |
+| `GR_POST` | Đăng nhận hàng (Goods Receipt) → tự động cập nhật tồn kho. **[G7b]** Cũng là quyền post phiếu nhận nháp (`POST /v1/goods-receipts/{id}/post`); hàng vào **vùng chờ kiểm (HOLD)**, chưa dùng được |
+| `PERM_GOODS_RECEIPT_READ` | **[G7b, `V77`]** Xem phiếu nhận: danh sách toàn nhà máy, ứng viên PO, chi tiết (chi tiết cũng mở bằng `PERM_PURCHASE_ORDER_READ` như trước). ADMIN + MANAGER |
+| `PERM_GOODS_RECEIPT_MANAGE` | **[G7b, `V77`]** Tạo / sửa / huỷ phiếu nhận **nháp** (không đụng tồn kho). Huỷ phiếu **đã post** (đảo nhập `REVERSAL`) vẫn chỉ `PERM_PURCHASE_ORDER_MANAGE`. ADMIN + MANAGER — OPERATOR chưa được cấp |
 
 ### Manufacturing Execution
 | Quyền | Mô tả |

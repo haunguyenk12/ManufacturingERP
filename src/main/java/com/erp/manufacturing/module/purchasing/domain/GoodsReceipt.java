@@ -6,6 +6,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -42,11 +43,34 @@ public class GoodsReceipt extends BaseEntity {
     @Builder.Default
     private GoodsReceiptStatus status = GoodsReceiptStatus.POSTED;
 
-    @Column(name = "posted_at", nullable = false)
+    /** {@code null} while DRAFT (V77); always set once POSTED ({@code chk_goods_receipts_posted_at}). */
+    @Column(name = "posted_at")
     private Instant postedAt;
 
-    @Column(name = "idempotency_key", nullable = false, length = 120)
+    /** The legacy create-and-post path requires it; a draft created through G7b may have none. */
+    @Column(name = "idempotency_key", length = 120)
     private String idempotencyKey;
+
+    /** G7b: business date of the delivery in the plant's time zone (not {@code postedAt}). */
+    @Column(name = "received_date", nullable = false)
+    private LocalDate receivedDate;
+
+    @Column(name = "reference", length = 200)
+    private String reference;
+
+    @Column(name = "posted_by")
+    private UUID postedBy;
+
+    @Column(name = "cancelled_by")
+    private UUID cancelledBy;
+
+    /**
+     * G7b (D4): posted on hold — stock without a lot sits in {@code qualityHoldQuantity}. Receipts
+     * posted before G7b went to free stock; reversing one must not release a hold it never made.
+     */
+    @Column(name = "quality_held", nullable = false)
+    @Builder.Default
+    private boolean qualityHeld = false;
 
     /** SHA-256 of the request payload; null for documents written before V25. */
     @Column(name = "payload_hash", length = 64)
@@ -69,9 +93,25 @@ public class GoodsReceipt extends BaseEntity {
         return status == GoodsReceiptStatus.POSTED;
     }
 
+    public boolean isDraft() {
+        return status == GoodsReceiptStatus.DRAFT;
+    }
+
+    public void markPosted(Instant at, UUID by) {
+        this.status = GoodsReceiptStatus.POSTED;
+        this.qualityHeld = true;
+        this.postedAt = at;
+        this.postedBy = by;
+    }
+
     public void cancel(String note) {
+        cancel(note, Instant.now(), null);
+    }
+
+    public void cancel(String note, Instant at, UUID by) {
         this.status = GoodsReceiptStatus.CANCELLED;
-        this.cancelledAt = Instant.now();
+        this.cancelledAt = at;
+        this.cancelledBy = by;
         this.cancelNote = note;
     }
 }

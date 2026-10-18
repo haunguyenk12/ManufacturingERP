@@ -234,7 +234,8 @@ class PurchaseOrderMethodSecurityTest {
             return new PurchaseOrderService(
                     purchaseOrderRepository, purchaseRequisitionRepository, organizationLookupService,
                     itemLookupService, supplierService, mapper, mock(PurchaseOrderPlanningLinkService.class),
-                    mock(PurchasingIdempotency.class), mock(UserLookupService.class), mock(AuditorAware.class));
+                    mock(PurchasingIdempotency.class), mock(UserLookupService.class), mock(AuditorAware.class),
+                    mock(com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository.class));
         }
 
         @Bean PurchasingMapper purchasingMapper() { return new PurchasingMapper(); }

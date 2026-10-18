@@ -8,6 +8,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -50,7 +51,12 @@ public class GoodsReceiptLine extends BaseEntity {
     @Column(name = "received_quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal receivedQuantity;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "stock_movement_id", nullable = false)
+    /** {@code null} while the receipt is DRAFT (V77); set by posting. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "stock_movement_id")
     private StockMovement stockMovement;
+
+    /** G7b: expiry of the new lot, a plant-local date; only lot-tracked lines may carry one. */
+    @Column(name = "expires_on")
+    private LocalDate expiresOn;
 }

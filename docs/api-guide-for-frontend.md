@@ -1319,6 +1319,26 @@ Field mới trên PO: `code` (= `purchaseOrderNo`), `version`, `warehouseName`, 
 > 🔴 `remainingQuantity` trên dòng nay = `openQuantity` (trừ cả phần đã đóng). Chuyển BUY từ hoạch định cần thêm `PERM_PURCHASE_ORDER_MANAGE`.
 > 🔴 Phiếu nhận của PO `CLOSED` không huỷ được (`409 STATE_CONFLICT`). Id PO không tồn tại trả **403** (như mọi `/{id}`).
 
+### Phiếu nhận nháp, nhận vào vùng chờ kiểm — FE giai đoạn 7 phần 2 *(`G7b`, 2026-10-18)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Ứng viên PO để nhận | `GET /v1/goods-receipts/purchase-order-candidates?companyId&plantId&search?` | PO `CONFIRMED`/`PARTIALLY_RECEIVED` còn dòng mở, chỉ trả **dòng mở** (`openQuantity`, `trackingPolicy`, `uomCode`) · `GOODS_RECEIPT_READ` |
+| Tạo nháp | `POST /v1/goods-receipts` — `{purchaseOrderId, receivedDate, reference?, notes?, lines[1..500]{purchaseOrderLineId, receivedQuantity, lotCode?, expiresOn?}}` · `Idempotency-Key` tuỳ chọn | **201** `DRAFT`, mã `GR-000001`…, **không đụng tồn kho**. Đã kiểm sớm: cộng dồn theo dòng PO ≤ mở, `lotCode` bắt buộc/cấm theo loại, mã lô mới (không phân biệt hoa thường), `expiresOn` > hôm nay, `receivedDate` ≤ hôm nay |
+| Sửa nháp | `PATCH /v1/goods-receipts/{id}` — `{expectedVersion, receivedDate, reference?, notes?, lines[]{id?, …}}` | chỉ `DRAFT`, thay toàn bộ dòng, `id` giữ dòng cũ |
+| Post | `POST /v1/goods-receipts/{id}/post` — `{expectedVersion}` · quyền `PERM_GOODS_RECEIPT_POST` | `DRAFT → POSTED`; **kiểm lại tất cả dưới khoá PO** — nháp không giữ chỗ. Hai phiếu tranh cùng lượng mở: một thắng, một `409 PLANNED_QUANTITY_EXCEEDED` field `lines[i].receivedQuantity` |
+| Huỷ | `POST /v1/goods-receipts/{id}/cancel` — body tuỳ chọn `{cancelNote?, expectedVersion?}` | `DRAFT` ⇒ `CANCELLED`, không tồn kho. `POSTED` ⇒ đảo nhập (`REVERSAL`) như trước, chỉ `PERM_PURCHASE_ORDER_MANAGE` |
+| Danh sách toàn nhà máy | `GET /v1/goods-receipts?companyId&plantId&purchaseOrderId?&warehouseId?&status?&search?&receivedDateFrom?&receivedDateTo?` · `X-Plant-Id` phải khớp | `search`: mã phiếu, mã PO, mã/tên NCC |
+| Chi tiết | `GET /v1/goods-receipts/{id}` | `GOODS_RECEIPT_READ` **hoặc** `PURCHASE_ORDER_READ` |
+
+Field mới trên phiếu: `code`, `version`, `receivedDate`, `reference`, `companyId`, `plantId`, `purchaseOrderCode`, `supplierId/Code/Name`,
+`warehouseName`, `postedBy`, `cancelledBy`, `purchaseOrderStatus`, `purchaseOrderVersion`. Trên dòng: `trackingPolicy`, `uomCode`, `unitPrice`,
+`currencyCode`, `expiresOn`, `lotStatus`, `movementIds`. `postedAt` = `null` khi nháp.
+
+> 🔴 **Mọi lần nhận mua vào vùng chờ kiểm, cả đường cũ `POST /purchase-orders/{id}/goods-receipts`:** lô mới tạo `HOLD`; hàng không theo
+> lô vào `qualityHoldQuantity`. Tồn **khả dụng không tăng** cho tới QC mua (phần 3). Đường cũ nêu lô có sẵn thì lô đó phải đang `HOLD`.
+> 🔴 PO còn phiếu nhận `DRAFT` ⇒ huỷ/đóng PO trả `409 PENDING_GOODS_RECEIPT`.
+
 ### Nhập đơn bán hàng Excel — FE giai đoạn 6 phần 3 *(`G6c`, 2026-10-18)*
 
 | Việc | Endpoint | Ghi chú |

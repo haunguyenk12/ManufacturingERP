@@ -18,6 +18,7 @@ import com.erp.manufacturing.module.planning.service.PurchaseOrderPlanningLinkSe
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
+import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseRequisitionRepository;
 import com.erp.manufacturing.module.user.service.UserLookupService;
@@ -61,6 +62,7 @@ public class PurchaseOrderService {
     private final PurchasingIdempotency idempotencyRecords;
     private final UserLookupService userLookupService;
     private final AuditorAware<UUID> auditorAware;
+    private final GoodsReceiptRepository goodsReceiptRepository;
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', 'PLANT', #request.plantId())")
@@ -340,6 +342,7 @@ public class PurchaseOrderService {
                                 + "close the remainder instead");
             }
         }
+        ensureNoPendingReceipt(order);
         idempotencyRecords.record(key, PurchasingCommand.PURCHASE_ORDER_CANCEL, purchaseOrderId, fingerprint);
         String reason = request == null ? null : request.reason().trim();
         Instant at = now();
@@ -374,6 +377,7 @@ public class PurchaseOrderService {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only a CONFIRMED or PARTIALLY_RECEIVED purchase order with an open quantity can be closed");
         }
+        ensureNoPendingReceipt(order);
         idempotencyRecords.record(key, PurchasingCommand.PURCHASE_ORDER_CLOSE, purchaseOrderId, fingerprint);
         order.close(request.reason().trim(), now(), currentActor());
         return detail(purchaseOrderRepository.saveAndFlush(order));
@@ -686,6 +690,15 @@ public class PurchaseOrderService {
 
     private static List<PurchaseOrderLine> sortedLines(PurchaseOrder order) {
         return order.getLines().stream().sorted(PurchasingMapper.LINE_ORDER).toList();
+    }
+
+    /** G7b (FE Q11): a DRAFT goods receipt must be posted or cancelled before the order is cancelled or closed. */
+    private void ensureNoPendingReceipt(PurchaseOrder order) {
+        if (goodsReceiptRepository.existsByPurchaseOrderPurchaseOrderIdAndStatus(
+                order.getPurchaseOrderId(), GoodsReceiptStatus.DRAFT)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.PENDING_GOODS_RECEIPT,
+                    "Purchase order " + order.getPurchaseOrderNo() + " still has a draft goods receipt; post or cancel it first");
+        }
     }
 
     private static void ensureVersion(PurchaseOrder order, Long expectedVersion) {

@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -71,6 +72,18 @@ public class ItemLookupService {
         }
         return itemRepository.findByCompanyCompanyIdAndCodeIn(companyId, codes).stream()
                 .collect(Collectors.toMap(Item::getCode, Function.identity()));
+    }
+
+    /** G7b: the lot a receipt with this exact (trimmed) code would land in — what receive itself looks up. */
+    @Transactional(readOnly = true)
+    public Optional<InventoryLot> findLotByCode(UUID itemId, String lotCode) {
+        return lotRepository.findByItemItemIdAndLotCode(itemId, lotCode.trim());
+    }
+
+    /** G7b (FE Q28): whether the item already has a lot with this code, ignoring case. */
+    @Transactional(readOnly = true)
+    public boolean lotCodeExistsIgnoreCase(UUID itemId, String lotCode) {
+        return lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(itemId, lotCode.trim());
     }
 
     @Transactional(readOnly = true)

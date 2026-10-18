@@ -206,3 +206,14 @@ Lot code vẫn **phân biệt hoa/thường** (`L1` ≠ `l1`), FE A05 kỳ vọn
 | # | Bất biến | Test bảo vệ |
 |---|---|---|
 | B177 | `StockBalanceRepository.findReservableBalancesFefo` (chỉ dùng bởi giữ tồn đơn bán, `module/workorder`): lô `AVAILABLE` **và** `expiresAt` null hoặc > `now`, `quantity − reserved − qualityHold > 0`, thứ tự FEFO (`expiresAt` nulls last, `receivedAt`, `balanceId` tie-break). **Không** thay `findIssuableBalancesFefo` của WO (B154: WO vẫn không xét hạn). Lượng đơn giữ cộng vào `reserved_quantity` như WO ⇒ `availableQuantity()` và mọi aggregate tự trừ; `RESERVED_STOCK` khi đổi trạng thái lô nay gồm cả dòng giữ của đơn bán | `SalesOrderReservationIT.reserveWithoutALot_*` (mutation bỏ điều kiện hạn ⇒ đỏ), `SalesOrderStockReservationServiceTest` |
+
+## G7b — Hàng mua nhận vào vùng chờ kiểm (2026-10-18)
+
+Không đổi một dòng nào trong `module/inventory` ngoài hai lookup (`ItemLookupService.findLotByCode`, `lotCodeExistsIgnoreCase`). Ghi lại vì
+**ngữ nghĩa số liệu đổi**: `module/purchasing` nay gọi `InventoryMovementService.receive(cmd, key, LotStatus.HOLD, allowImplicitLotReuse)` cho
+**mọi** lần nhận mua (B195 ở `module/purchasing/CLAUDE.md`). Hệ quả cho người đọc code inventory:
+
+1. `stock_balances.qualityHoldQuantity` không còn chỉ là carrier QC **sản xuất** (`B2`/`V56`) — hàng mua không theo lô cũng nằm ở đó cho tới
+   QC mua (`G7c`). Mọi số khả dụng (MRP, dashboard, gate xuất) tự trừ đúng, không cần sửa.
+2. Đảo nhập một phiếu mua không theo lô đã nhận vào hold phải `releaseQualityHold` **trước** `reverseReceive` — nếu không CHECK
+   `reserved + qualityHold <= quantity` từ chối. Phía purchasing tự làm (B196); đừng "đơn giản hoá" bằng cách cho `reverseReceive` tự gỡ hold.

@@ -101,6 +101,19 @@ class GoodsReceiptMethodSecurityTest {
                 .doesNotThrowAnyException();
     }
 
+    /** G7b: GOODS_RECEIPT_READ alone opens a receipt (FE Q14) — PURCHASE_ORDER_READ is no longer required. */
+    @Test
+    void get_allowedWithGoodsReceiptReadAlone() {
+        UUID goodsReceiptId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasReceiptAccess(any(), eq("PERM_GOODS_RECEIPT_READ"), eq(goodsReceiptId)))
+                .thenReturn(true);
+        when(goodsReceiptRepository.findWithDetailsByGoodsReceiptId(goodsReceiptId)).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> goodsReceiptService.get(goodsReceiptId))
+                .isInstanceOf(com.erp.manufacturing.common.exception.AppException.class);
+        verify(goodsReceiptRepository).findWithDetailsByGoodsReceiptId(goodsReceiptId);
+    }
+
     @Configuration
     @EnableMethodSecurity
     static class Config {
@@ -110,9 +123,11 @@ class GoodsReceiptMethodSecurityTest {
                                                 PurchaseOrderRepository purchaseOrderRepository,
                                                 InventoryMovementService inventoryMovementService,
                                                 PurchasingMapper mapper) {
+            IdempotencySupport idempotency = new IdempotencySupport(new ObjectMapper());
             return new GoodsReceiptService(
-                    goodsReceiptRepository, purchaseOrderRepository, inventoryMovementService, mapper,
-                    new IdempotencySupport(new ObjectMapper()));
+                    goodsReceiptRepository, purchaseOrderRepository, inventoryMovementService, mapper, idempotency,
+                    mock(GoodsReceiptPoster.class), purchasingPermissionGuard(),
+                    mock(org.springframework.data.domain.AuditorAware.class), mock(PurchasingIdempotency.class));
         }
 
         @Bean PurchasingMapper purchasingMapper() { return new PurchasingMapper(); }

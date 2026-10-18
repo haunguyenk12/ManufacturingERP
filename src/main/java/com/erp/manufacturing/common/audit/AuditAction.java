@@ -164,6 +164,8 @@ public enum AuditAction {
     /** G7a: the open remainder was closed. */
     PURCHASE_ORDER_CLOSED,
     GOODS_RECEIPT_POSTED,
+    /** G7b: draft goods receipt saved (created or edited) — no stock moved. */
+    GOODS_RECEIPT_DRAFT_SAVED,
     GOODS_RECEIPT_CANCELLED,
     ITEM_CREATED,
     ITEM_UPDATED,

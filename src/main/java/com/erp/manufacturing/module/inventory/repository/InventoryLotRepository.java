@@ -9,4 +9,7 @@ import java.util.UUID;
 public interface InventoryLotRepository extends JpaRepository<InventoryLot, UUID> {
 
     Optional<InventoryLot> findByItemItemIdAndLotCode(UUID itemId, String lotCode);
+
+    /** G7b (FE Q28): a purchase receipt may not reuse a lot code of the item, whatever its case. */
+    boolean existsByItemItemIdAndLotCodeIgnoreCase(UUID itemId, String lotCode);
 }

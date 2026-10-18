@@ -263,6 +263,11 @@ tập dòng; kèm `errors[{field}]`. Tách khỏi `STATE_CONFLICT` vì tải l�
 sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nhận ⇒ `VALIDATION_ERROR` field `lines[i].unitPrice`; vật tư sai loại ⇒
 `OPERATION_NOT_ALLOWED` field `lines[i].itemId`; huỷ PO đã nhận / đóng PO hết lượng mở / đảo phiếu nhận của PO `CLOSED` ⇒ `STATE_CONFLICT`.
 
+**Constant thêm ở `G7b` (2026-10-18):** `PENDING_GOODS_RECEIPT` (409) — huỷ hoặc đóng một PO còn phiếu nhận `DRAFT`. Tách khỏi
+`STATE_CONFLICT` vì cách xử lý là post hoặc huỷ phiếu nhận nháp trước, không phải tải lại PO. Còn lại dùng mã sẵn có: nhận vượt lượng mở (kể cả
+kẻ thua của hai lần post đồng thời) ⇒ `PLANNED_QUANTITY_EXCEEDED` field `lines[i].receivedQuantity`; mã lô đã có (không phân biệt hoa thường) ⇒
+`LOT_CODE_ALREADY_EXISTS`; đường cũ nhận vào lô không `HOLD` ⇒ `LOT_NOT_ELIGIBLE`; post phiếu không `DRAFT` ⇒ `STATE_CONFLICT`.
+
 **`G6c` (2026-10-18) — không thêm mã mới.** Nhập đơn bán Excel (`kind=so`) dùng nguyên mã file-level của `G3` (`FILE_FORMAT`,
 `FILE_SIZE` 413, `TEMPLATE`, `EMPTY_FILE`, `ROW_LIMIT`, `IMPORT_REVALIDATION_FAILED`) và lỗi dòng `ImportErrorCode` sẵn có. Mã FE đề xuất ánh
 xạ: `INVALID_FILE` → `FILE_FORMAT`; `FILE_TOO_LARGE` → `FILE_SIZE`; `INVALID_TEMPLATE` → `TEMPLATE`; `IMPORT_ROW_LIMIT_EXCEEDED` → `ROW_LIMIT`;

@@ -13,4 +13,8 @@ public interface PurchaseOrderLineRepository extends JpaRepository<PurchaseOrder
     @EntityGraph(attributePaths = {"purchaseOrder", "item", "purchaseRequisitionLine"})
     List<PurchaseOrderLine> findByPurchaseOrderPurchaseOrderIdAndPurchaseOrderLineIdIn(
             UUID purchaseOrderId, Collection<UUID> purchaseOrderLineIds);
+
+    /** G7b: the lines of a page of receiving candidates, one query (C13/C14). */
+    @EntityGraph(attributePaths = {"purchaseOrder", "item"})
+    List<PurchaseOrderLine> findByPurchaseOrderPurchaseOrderIdIn(Collection<UUID> purchaseOrderIds);
 }

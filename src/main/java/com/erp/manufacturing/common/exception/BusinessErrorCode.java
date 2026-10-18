@@ -90,6 +90,12 @@ public enum BusinessErrorCode implements ErrorCode {
      * STATE_CONFLICT: retrying after a reload fails the same way — the remedy is to cancel the
      * order (giving the quota back) or to change only the editable fields.
      */
+    /**
+     * G7b (FE Q11): a purchase order still has a DRAFT goods receipt, so it cannot be cancelled or
+     * closed. Not STATE_CONFLICT: the order itself is in a state that allows it — the draft has to be
+     * posted or cancelled first.
+     */
+    PENDING_GOODS_RECEIPT     ("PENDING_GOODS_RECEIPT",     "A draft goods receipt is still pending for this purchase order", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────

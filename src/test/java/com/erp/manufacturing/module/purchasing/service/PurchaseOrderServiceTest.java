@@ -14,6 +14,7 @@ import com.erp.manufacturing.module.organization.service.OrganizationLookupServi
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
+import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseRequisitionRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchasingIdempotencyRecordRepository;
@@ -62,6 +63,7 @@ class PurchaseOrderServiceTest {
     @Mock PurchasingIdempotencyRecordRepository idempotencyRecordRepository;
     @Mock UserLookupService userLookupService;
     @Mock AuditorAware<UUID> auditorAware;
+    @Mock GoodsReceiptRepository goodsReceiptRepository;
 
     PurchaseOrderService service;
     IdempotencySupport idempotencySupport;
@@ -79,7 +81,8 @@ class PurchaseOrderServiceTest {
                 planningLinkService,
                 new PurchasingIdempotency(idempotencyRecordRepository, idempotencySupport),
                 userLookupService,
-                auditorAware);
+                auditorAware,
+                goodsReceiptRepository);
     }
 
     @Test
@@ -605,6 +608,26 @@ class PurchaseOrderServiceTest {
         assertThat(order.getPreviousStatus()).isEqualTo(PurchaseOrderStatus.PARTIALLY_RECEIVED);
         assertThat(response.history()).extracting(PurchaseOrderHistoryResponse::fromStatus).contains("PARTIALLY_RECEIVED");
         verify(planningLinkService, never()).releasePurchaseOrder(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("G7b: a pending DRAFT goods receipt blocks cancel and close (FE Q11) — nothing changes")
+    void cancelAndClose_withPendingDraftReceipt_arePendingGoodsReceipt() {
+        DraftFixture f = draftFixture(ItemType.RAW_MATERIAL);
+        PurchaseOrder order = stubbedDraft(f, 1);
+        order.setStatus(PurchaseOrderStatus.CONFIRMED);
+        when(goodsReceiptRepository.existsByPurchaseOrderPurchaseOrderIdAndStatus(order.getPurchaseOrderId(),
+                GoodsReceiptStatus.DRAFT)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.cancel(order.getPurchaseOrderId(), new PurchaseOrderReasonRequest(2L, "x"), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.PENDING_GOODS_RECEIPT));
+        assertThatThrownBy(() -> service.close(order.getPurchaseOrderId(), new PurchaseOrderReasonRequest(2L, "x"), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.PENDING_GOODS_RECEIPT));
+        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.CONFIRMED);
+        verifyNoInteractions(planningLinkService);
+        verify(purchaseOrderRepository, never()).saveAndFlush(any(PurchaseOrder.class));
     }
 
     @Test

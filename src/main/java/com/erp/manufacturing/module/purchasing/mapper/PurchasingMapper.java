@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.purchasing.mapper;
 
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
+import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import org.springframework.stereotype.Component;
@@ -193,17 +194,23 @@ public class PurchasingMapper {
         return currencies.size() == 1 ? currencies.get(0) : null;
     }
 
+    /** G7b: receipt lines in a stable order — same rule as {@link #LINE_ORDER}. */
+    public static final Comparator<GoodsReceiptLine> RECEIPT_LINE_ORDER = Comparator
+            .comparing(GoodsReceiptLine::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(line -> String.valueOf(line.getGoodsReceiptLineId()));
+
     public GoodsReceiptResponse toResponse(GoodsReceipt receipt, boolean includeLines) {
         List<GoodsReceiptLineResponse> lines = includeLines
                 ? receipt.getLines().stream()
-                .sorted(Comparator.comparing(GoodsReceiptLine::getCreatedAt,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .sorted(RECEIPT_LINE_ORDER)
                 .map(this::toResponse)
                 .toList()
                 : List.of();
+        PurchaseOrder order = receipt.getPurchaseOrder();
+        Supplier supplier = order.getSupplier();
         return new GoodsReceiptResponse(
                 receipt.getGoodsReceiptId(),
-                receipt.getPurchaseOrder().getPurchaseOrderId(),
+                order.getPurchaseOrderId(),
                 receipt.getWarehouse().getWarehouseId(),
                 receipt.getWarehouse().getCode(),
                 receipt.getReceiptNo(),
@@ -215,20 +222,82 @@ public class PurchasingMapper {
                 receipt.getCancelNote(),
                 receipt.getCreatedAt(),
                 receipt.getUpdatedAt(),
-                lines);
+                lines,
+                receipt.getReceiptNo(),
+                receipt.getVersion(),
+                receipt.getReceivedDate(),
+                receipt.getReference(),
+                order.getCompany().getCompanyId(),
+                order.getPlant().getPlantId(),
+                order.getPurchaseOrderNo(),
+                supplier.getSupplierId(),
+                supplier.getCode(),
+                supplier.getName(),
+                receipt.getWarehouse().getName(),
+                receipt.getPostedBy(),
+                receipt.getCancelledBy(),
+                order.getStatus().name(),
+                order.getVersion());
     }
 
     public GoodsReceiptLineResponse toResponse(GoodsReceiptLine line) {
         InventoryLot lot = line.getLot();
+        PurchaseOrderLine orderLine = line.getPurchaseOrderLine();
+        UUID movementId = line.getStockMovement() == null ? null : line.getStockMovement().getMovementId();
         return new GoodsReceiptLineResponse(
                 line.getGoodsReceiptLineId(),
-                line.getPurchaseOrderLine().getPurchaseOrderLineId(),
+                orderLine.getPurchaseOrderLineId(),
                 line.getItem().getItemId(),
                 line.getItem().getCode(),
                 line.getItem().getName(),
                 lot == null ? null : lot.getLotId(),
                 line.getLotCode(),
                 line.getReceivedQuantity(),
-                line.getStockMovement().getMovementId());
+                movementId,
+                trackingPolicy(line.getItem()),
+                line.getItem().getUnit(),
+                orderLine.getUnitPrice(),
+                orderLine.getCurrencyCode(),
+                line.getExpiresOn(),
+                lot == null ? null : lot.getStatus().name(),
+                movementId == null ? List.of() : List.of(movementId));
+    }
+
+    /** G7b: {@code LOT_TRACKED} / {@code SERIAL_TRACKED} / {@code NON_TRACKED} (FE trackingPolicy). */
+    public static String trackingPolicy(Item item) {
+        if (item.isLotTracked()) {
+            return "LOT_TRACKED";
+        }
+        return item.isSerialTracked() ? "SERIAL_TRACKED" : "NON_TRACKED";
+    }
+
+    public GoodsReceiptCandidateResponse toCandidate(PurchaseOrder order, List<PurchaseOrderLine> openLines) {
+        return new GoodsReceiptCandidateResponse(
+                order.getPurchaseOrderId(),
+                order.getPurchaseOrderNo(),
+                order.getVersion(),
+                order.getStatus().name(),
+                order.getSupplier().getSupplierId(),
+                order.getSupplier().getCode(),
+                order.getSupplier().getName(),
+                order.getWarehouse().getWarehouseId(),
+                order.getWarehouse().getCode(),
+                order.getWarehouse().getName(),
+                order.getOrderDate(),
+                order.getReference(),
+                openLines.stream().sorted(LINE_ORDER).map(line -> new GoodsReceiptCandidateLineResponse(
+                        line.getPurchaseOrderLineId(),
+                        line.getItem().getItemId(),
+                        line.getItem().getCode(),
+                        line.getItem().getName(),
+                        line.getItem().getUnit(),
+                        trackingPolicy(line.getItem()),
+                        line.getOrderedQuantity(),
+                        line.getReceivedQuantity(),
+                        line.getClosedQuantity(),
+                        line.openQuantity(),
+                        line.getExpectedDate(),
+                        line.getUnitPrice(),
+                        line.getCurrencyCode())).toList());
     }
 }

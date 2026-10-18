@@ -52,6 +52,42 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
                                @Param("orderDateTo") LocalDate orderDateTo,
                                Pageable pageable);
 
+    /**
+     * G7b (D11): {@code SELECT … FOR UPDATE} on the purchase order row, held to the end of the
+     * caller's transaction. Native and id-only on purpose: it hydrates no entity, so it never checks
+     * the version of a purchase order already in the persistence context — the caller re-reads the
+     * order afterwards ({@code GoodsReceiptPoster.lockOrder}).
+     */
+    @Query(value = "select purchase_order_id from purchase_orders where purchase_order_id = :purchaseOrderId for update",
+            nativeQuery = true)
+    Optional<UUID> lockRowByPurchaseOrderId(@Param("purchaseOrderId") UUID purchaseOrderId);
+
+    /**
+     * G7b: purchase orders a goods receipt can be drafted against — CONFIRMED/PARTIALLY_RECEIVED with
+     * at least one line still open. Lines are loaded per page in a separate batch (C13).
+     */
+    @EntityGraph(attributePaths = {"supplier", "warehouse"})
+    @Query("""
+            select p
+            from PurchaseOrder p
+            where p.company.companyId = :companyId
+              and p.plant.plantId = :plantId
+              and p.status in :statuses
+              and exists (select l.purchaseOrderLineId from PurchaseOrderLine l
+                          where l.purchaseOrder = p
+                            and l.orderedQuantity - l.receivedQuantity - l.closedQuantity > 0)
+              and (cast(:search as string) is null
+                   or lower(p.purchaseOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(coalesce(p.reference, '')) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.supplier.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.supplier.name) like lower(concat('%', cast(:search as string), '%')))
+            """)
+    Page<PurchaseOrder> searchReceivingCandidates(@Param("companyId") UUID companyId,
+                                                  @Param("plantId") UUID plantId,
+                                                  @Param("statuses") Collection<PurchaseOrderStatus> statuses,
+                                                  @Param("search") String search,
+                                                  Pageable pageable);
+
     /** Next value of {@code purchase_order_number_seq} (V76) — concurrent drafts never share a number. */
     @Query(value = "select nextval('purchase_order_number_seq')", nativeQuery = true)
     long nextOrderNumber();

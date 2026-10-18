@@ -37,6 +37,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String AUDIT_PIPELINE_SCHEMA = "v67_audit_pipeline_check";
     private static final String VERSION_BACKFILL_SCHEMA = "v73_version_backfill_check";
     private static final String PO_LIFECYCLE_SCHEMA = "v76_po_lifecycle_check";
+    private static final String GR_DRAFT_SCHEMA = "v77_gr_draft_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -51,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("76");
+        assertThat(current.getVersion().getVersion()).isEqualTo("77");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -930,6 +931,85 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             try (ResultSet rs = statement.executeQuery("select nextval('purchase_order_number_seq')")) {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getLong(1)).isEqualTo(1L);
+            }
+        }
+    }
+
+    /**
+     * G7b / {@code V77}: a receipt posted before G7b gets its received date from posted_at in the
+     * plant's zone (20:00Z = 03:00 next day in Asia/Ho_Chi_Minh), is not marked quality-held, a DRAFT
+     * may have no posted_at but a POSTED one may not, and the two new goods receipt permissions go to
+     * ADMIN and MANAGER only (FE Q24).
+     */
+    @Test
+    void migrate_v77_backfillsReceivedDateInThePlantZone_andGuardsPostedAt() throws Exception {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(GR_DRAFT_SCHEMA)
+                .target("76")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111117701";
+        String plant = "22222222-2222-4222-8222-222222227701";
+        String warehouse = "33333333-3333-4333-8333-333333337701";
+        String supplier = "44444444-4444-4444-8444-444444447701";
+        String order = "66666666-6666-4666-8666-666666667701";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + GR_DRAFT_SCHEMA);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V77', 'V77')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')"
+                    .formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into suppliers (supplier_id, company_id, code, name) values ('%s', '%s', 'S', 'S')"
+                    .formatted(supplier, company));
+            statement.execute(("insert into purchase_orders (purchase_order_id, company_id, plant_id, warehouse_id, supplier_id,"
+                    + " purchase_order_no, status, order_date, expected_date) values ('%s', '%s', '%s', '%s', '%s', 'PO-1',"
+                    + " 'PARTIALLY_RECEIVED', date '2026-10-01', date '2026-10-10')").formatted(order, company, plant, warehouse, supplier));
+            statement.execute(("insert into goods_receipts (purchase_order_id, warehouse_id, receipt_no, status, posted_at,"
+                    + " idempotency_key) values ('%s', '%s', 'GR-OLD', 'POSTED', timestamptz '2026-10-18T20:00:00Z', 'K-OLD')")
+                    .formatted(order, warehouse));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(GR_DRAFT_SCHEMA)
+                .target("77")
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + GR_DRAFT_SCHEMA);
+            try (ResultSet rs = statement.executeQuery("select received_date, quality_held from goods_receipts where receipt_no = 'GR-OLD'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getDate(1).toLocalDate()).isEqualTo(java.time.LocalDate.of(2026, 10, 19));
+                assertThat(rs.getBoolean(2)).isFalse();
+            }
+            String insert = "insert into goods_receipts (purchase_order_id, warehouse_id, receipt_no, status, received_date)"
+                    + " values ('" + order + "', '" + warehouse + "', '%s', '%s', date '2026-10-19')";
+            statement.execute(insert.formatted("GR-DRAFT", "DRAFT"));
+            assertThatThrownBy(() -> statement.execute(insert.formatted("GR-BAD", "POSTED")))
+                    .hasMessageContaining("chk_goods_receipts_posted_at");
+            try (ResultSet rs = statement.executeQuery("""
+                    select r.code, string_agg(p.code, ',' order by p.code)
+                    from role_permissions rp join roles r on r.role_id = rp.role_id
+                    join permissions p on p.permission_id = rp.permission_id
+                    where p.code in ('PERM_GOODS_RECEIPT_READ', 'PERM_GOODS_RECEIPT_MANAGE')
+                    group by r.code order by r.code
+                    """)) {
+                java.util.Map<String, String> grants = new java.util.HashMap<>();
+                while (rs.next()) {
+                    grants.put(rs.getString(1), rs.getString(2));
+                }
+                assertThat(grants).containsOnlyKeys("ADMIN", "MANAGER");
+                assertThat(grants.get("MANAGER")).isEqualTo("PERM_GOODS_RECEIPT_MANAGE,PERM_GOODS_RECEIPT_READ");
             }
         }
     }

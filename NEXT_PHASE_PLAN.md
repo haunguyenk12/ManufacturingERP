@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G7` — FE handoff Giai đoạn 7: đơn mua hàng, nhận hàng và QC** (`FE_HANDOFF_GD_07_2026-10-14.md`, P1) — 🔄 **đang chạy**: user chốt D0 = tách `G7a`/`G7b`/`G7c` làm liền, D1–D12 theo khuyến nghị (2026-10-18). ✅ **`G7a` xong** (2026-10-18, `BE_RESPONSE_GD_07_2026-10-18.md` v1) — `G7b` tiếp theo. Xem **§14**. 🔴 Khác mọi handoff trước: `module/purchasing` **đã có** (PO + phiếu nhận + nguồn cung MRP), nên phần lớn là **mở rộng và đổi vòng đời**; nhưng **QC mua hàng** và **giá trị tồn kho** thì repo chưa có gì |
+| **Đang chạy** | **`G7` — FE handoff Giai đoạn 7: đơn mua hàng, nhận hàng và QC** (`FE_HANDOFF_GD_07_2026-10-14.md`, P1) — 🔄 **đang chạy**: user chốt D0 = tách `G7a`/`G7b`/`G7c` làm liền, D1–D12 theo khuyến nghị (2026-10-18). ✅ **`G7a` xong** (2026-10-18, `BE_RESPONSE_GD_07_2026-10-18.md` v1), ✅ **`G7b` xong** (2026-10-18, `_v2`) — `G7c` tiếp theo. Xem **§14**. 🔴 Khác mọi handoff trước: `module/purchasing` **đã có** (PO + phiếu nhận + nguồn cung MRP), nên phần lớn là **mở rộng và đổi vòng đời**; nhưng **QC mua hàng** và **giá trị tồn kho** thì repo chưa có gì |
 | **Chờ FE** | `G6` (§13) — ✅ BE xong cả 3 phần 2026-10-17/18, bản ghi `CLAUDE.md §0.54`–`§0.56`. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -124,7 +124,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 11 | **`G4` — FE handoff Giai đoạn 4 (tồn kho, lô, chuyển kho)** | ✅ **BE xong (2026-10-15)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_04_2026-10-12.md`, P1. Quyết định lớn nhất: có làm định giá tồn kho (moving average) hay không — đụng vùng `P7` (D1). Chi tiết **§11** |
 | 12 | **`G5` — FE handoff Giai đoạn 5 (định mức, quy trình, công suất)** | 📝 **Đã lập kế hoạch — chờ chốt §12.2** | Nguồn `FE_HANDOFF_GD_05_2026-10-13.md`, P1. File FE đề xuất **đảo ngược 4 quyết định thiết kế đã chốt** ở `F4`/`C2-7`/`C2-8`/`F10` — phải chốt từng cái trước khi viết dòng nào. Chi tiết **§12** |
 | 13 | **`G6` — FE handoff Giai đoạn 6 (đơn bán hàng + hoạch định vật tư)** | ✅ **BE xong 2026-10-17/18 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_06_2026-10-14.md`, P1. Mở lại hai thứ đã **cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5`) và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc WO). Chi tiết **§13** |
-| 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | 🔄 **Đang chạy — `G7a` ✅ 2026-10-18** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
+| 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | 🔄 **Đang chạy — `G7a` ✅ `G7b` ✅ 2026-10-18** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -851,7 +851,7 @@ Xác nhận/nhận một phần/QC đơn mua đầy đủ (GĐ7); sẵn sàng v�
 
 ---
 
-## 14. `G7` — FE handoff Giai đoạn 7: Đơn mua hàng, nhận hàng và QC 🔄 ĐANG CHẠY — `G7a` ✅ 2026-10-18
+## 14. `G7` — FE handoff Giai đoạn 7: Đơn mua hàng, nhận hàng và QC 🔄 ĐANG CHẠY — `G7a` ✅ `G7b` ✅ 2026-10-18
 
 Nguồn: `FE_HANDOFF_GD_07_2026-10-14.md` (v1, P1, 597 dòng). FE/mock đã xong: đơn mua hàng thủ công + nháp BUY của `G6b`, nhận hàng **từng phần vào vùng chờ kiểm (HOLD)**, **QC theo lượng** (đạt/loại/còn chờ, nhiều đợt), lô con theo lineage, và nguồn cung PO cho MRP. BE phải (1) trả lời Q1–Q31 §5, (2) đối chiếu R01–R20 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_07_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào — §2 ghi rõ **cả năm mảnh bằng chứng live đều "không có"**.
 
@@ -937,6 +937,22 @@ Phạm vi đã rà: `PurchaseOrderController`, `GoodsReceiptController`, `GoodsR
 2. **Chặn huỷ/đóng khi còn phiếu nhận `DRAFT` (Q11) dời sang `G7b`** — phiếu nhận `DRAFT` chưa tồn tại.
 3. **`history[]` dựng từ cột** (+ `previous_status`), không bảng sự kiện; không có bước do phiếu nhận.
 4. **Thêm ngoài kế hoạch:** chặn huỷ phiếu nhận `POSTED` của PO `CLOSED` (đảo nhập sẽ mở lại PO đã đóng); tie-break thứ tự dòng PO (smoke tìm ra).
+
+### 14.3b Kết quả `G7b` *(2026-10-18)*
+
+✅ Xong. Bản ghi đầy đủ `CLAUDE.md §0.58`, bất biến `B193`–`B198`, trả lời FE `BE_RESPONSE_GD_07_2026-10-18_v2.md`. Migration **`V77`** +
+`PERM_GOODS_RECEIPT_READ`/`_MANAGE` (ADMIN + MANAGER, dời từ `G7a`). Lệch kế hoạch có chủ đích:
+
+1. **Khoá không phải `@Lock` trên query entity.** Kế hoạch ghi "khoá bi quan dòng PO"; bản đầu làm đúng thế và IT xanh, nhưng smoke HTTP thật
+   cho kẻ thua `CONCURRENT_MODIFICATION` thay vì `PLANNED_QUANTITY_EXCEEDED`: open-session-in-view + guard `hasReceiptAccess` đã nạp PO/dòng vào
+   EntityManager trước transaction, và Hibernate **kiểm version** thay vì đọc lại khi query khoá (hoặc `refresh` kèm lock mode) gặp entity đã
+   được quản lý. Nay: khoá native chỉ id → khởi tạo `order.lines` → `refresh` thường (B194). Mất **hai** vòng smoke mới đúng — vòng hai lộ ra
+   collection chưa khởi tạo không được cascade refresh.
+2. **Chặn huỷ/đóng PO còn phiếu nhận `DRAFT`** (Q11, dời từ `G7a`) ⇒ mã mới `PENDING_GOODS_RECEIPT`.
+3. **Thêm ngoài kế hoạch:** cờ `goods_receipts.quality_held` — đảo nhập phiếu mua không theo lô đã vào hold phải gỡ hold trước, nếu không CHECK
+   `reserved + qualityHold <= quantity` từ chối; phiếu cũ (trước `V77`) không có hold nên không được gỡ.
+4. **Script seed demo** (`demo-capstone2`, `VIETBIKE`) gọi đường nhận cũ — nay hàng vào `HOLD`. **Chưa chạy lại** các script đó.
+5. **Smoke tìm thêm:** đảo nhập phiếu `POSTED` (và post đường cũ) ghi bằng `save` rồi map response ⇒ `version` trả về cũ (bẫy §0.39, lộ ra vì G7b mới đưa `version` lên phiếu nhận). Đổi sang `saveAndFlush`.
 
 ### 14.4 Breaking change dự kiến
 
