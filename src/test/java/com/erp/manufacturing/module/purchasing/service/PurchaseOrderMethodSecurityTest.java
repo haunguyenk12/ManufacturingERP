@@ -6,9 +6,18 @@ import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.planning.service.PurchaseOrderPlanningLinkService;
+import com.erp.manufacturing.module.purchasing.dto.PlanningPurchaseLine;
+import com.erp.manufacturing.module.purchasing.dto.PurchaseOrderDraftCreateRequest;
+import com.erp.manufacturing.module.purchasing.dto.PurchaseOrderDraftLineRequest;
+import com.erp.manufacturing.module.purchasing.dto.PurchaseOrderReasonRequest;
+import com.erp.manufacturing.module.purchasing.dto.PurchaseOrderUpdateRequest;
+import com.erp.manufacturing.module.purchasing.dto.PurchaseOrderVersionRequest;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseRequisitionRepository;
+import com.erp.manufacturing.module.user.service.UserLookupService;
+import org.springframework.data.domain.AuditorAware;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +34,9 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -73,7 +85,7 @@ class PurchaseOrderMethodSecurityTest {
         when(purchasingPermissionGuard.hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(purchaseOrderId)))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> purchaseOrderService.cancel(purchaseOrderId))
+        assertThatThrownBy(() -> purchaseOrderService.cancel(purchaseOrderId, null, null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(purchaseOrderRepository);
@@ -88,7 +100,7 @@ class PurchaseOrderMethodSecurityTest {
                 .thenReturn(false);
 
         assertThatThrownBy(() -> purchaseOrderService.list(
-                companyId, plantId, null, null, null, PageRequest.of(0, 20)))
+                companyId, plantId, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(purchaseOrderRepository, organizationLookupService);
@@ -116,11 +128,96 @@ class PurchaseOrderMethodSecurityTest {
                 .status(OrganizationStatus.ACTIVE)
                 .build());
         when(purchaseOrderRepository.search(eq(companyId), eq(plantId), isNull(), isNull(), isNull(),
-                any(Pageable.class))).thenReturn(Page.empty());
+                isNull(), isNull(), isNull(), any(Pageable.class))).thenReturn(Page.empty());
 
         assertThatCode(() -> purchaseOrderService.list(
-                companyId, plantId, null, null, null, PageRequest.of(0, 20)))
+                companyId, plantId, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .doesNotThrowAnyException();
+    }
+
+    // ── G7a ────────────────────────────────────────────────────────────────
+
+    @Test
+    void createDraft_deniedWhenPlantManageMissing() {
+        UUID plantId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq("PLANT"), eq(plantId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> purchaseOrderService.createDraft(new PurchaseOrderDraftCreateRequest(
+                UUID.randomUUID(), plantId, UUID.randomUUID(), UUID.randomUUID(), LocalDate.now(), null, null,
+                List.of(new PurchaseOrderDraftLineRequest(null, UUID.randomUUID(), BigDecimal.ONE, null, LocalDate.now()))),
+                null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(purchaseOrderRepository, organizationLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq("PLANT"), eq(plantId));
+    }
+
+    @Test
+    void updateDraft_deniedWhenOrderManageMissing() {
+        UUID orderId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> purchaseOrderService.updateDraft(orderId, new PurchaseOrderUpdateRequest(
+                1L, UUID.randomUUID(), UUID.randomUUID(), LocalDate.now(), null, null,
+                List.of(new PurchaseOrderDraftLineRequest(null, UUID.randomUUID(), BigDecimal.ONE, null, LocalDate.now()))),
+                null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(purchaseOrderRepository);
+        verify(purchasingPermissionGuard).hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId));
+    }
+
+    @Test
+    void confirm_deniedWhenOrderManageMissing() {
+        UUID orderId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> purchaseOrderService.confirm(orderId, new PurchaseOrderVersionRequest(1L), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(purchaseOrderRepository);
+        verify(purchasingPermissionGuard).hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId));
+    }
+
+    @Test
+    void close_deniedWhenOrderManageMissing() {
+        UUID orderId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> purchaseOrderService.close(orderId, new PurchaseOrderReasonRequest(1L, "x"), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(purchaseOrderRepository);
+        verify(purchasingPermissionGuard).hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId));
+    }
+
+    @Test
+    void close_allowedWhenOrderManagePresent_reachesTheService() {
+        UUID orderId = UUID.randomUUID();
+        when(purchasingPermissionGuard.hasOrderAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq(orderId))).thenReturn(true);
+        when(purchaseOrderRepository.findWithDetailsByPurchaseOrderId(orderId)).thenReturn(java.util.Optional.empty());
+
+        // Past the guard: the service itself answers "not found".
+        assertThatThrownBy(() -> purchaseOrderService.close(orderId, new PurchaseOrderReasonRequest(1L, "x"), null))
+                .isInstanceOf(com.erp.manufacturing.common.exception.AppException.class);
+        verify(purchaseOrderRepository).findWithDetailsByPurchaseOrderId(orderId);
+    }
+
+    /** G7a (FE §1.4): converting BUY proposals now also needs PERM_PURCHASE_ORDER_MANAGE on the plant. */
+    @Test
+    void createFromPlanning_deniedWhenPlantPurchaseOrderManageMissing() {
+        UUID plantId = UUID.randomUUID();
+        when(permissionGuard.hasResourceAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq("PLANT"), eq(plantId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> purchaseOrderService.createFromPlanning(UUID.randomUUID(), plantId, UUID.randomUUID(),
+                UUID.randomUUID(), LocalDate.now(), null,
+                List.of(new PlanningPurchaseLine(UUID.randomUUID(), BigDecimal.ONE, LocalDate.now()))))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(purchaseOrderRepository, organizationLookupService);
+        verify(permissionGuard).hasResourceAccess(any(), eq("PERM_PURCHASE_ORDER_MANAGE"), eq("PLANT"), eq(plantId));
     }
 
     @Configuration
@@ -136,7 +233,8 @@ class PurchaseOrderMethodSecurityTest {
                                                   PurchasingMapper mapper) {
             return new PurchaseOrderService(
                     purchaseOrderRepository, purchaseRequisitionRepository, organizationLookupService,
-                    itemLookupService, supplierService, mapper);
+                    itemLookupService, supplierService, mapper, mock(PurchaseOrderPlanningLinkService.class),
+                    mock(PurchasingIdempotency.class), mock(UserLookupService.class), mock(AuditorAware.class));
         }
 
         @Bean PurchasingMapper purchasingMapper() { return new PurchasingMapper(); }

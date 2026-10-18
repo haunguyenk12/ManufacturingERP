@@ -162,6 +162,78 @@ class PlanningConversionRepositoryIT extends AbstractPostgresIntegrationTest {
                 .hasStackTraceContaining("chk_supply_suggestion_conversions_quantity");
     }
 
+    /**
+     * G7a: a released row (purchase order cancelled) gives its quantity back but still counts as "the
+     * ledger touched this proposal" — the {@code case when} lives in JPQL, so only Postgres can prove it.
+     */
+    @Test
+    void ledgerSum_excludesReleasedRows_butCountsThem() {
+        persist(conversion("40", 1, null));
+        SupplySuggestionConversion released = conversion("25", 1, null);
+        released.release("cancelled", Instant.now(), null);
+        persist(released);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(conversionRepository.sumBySuggestionIds(List.of(makeSuggestion.getSupplySuggestionId())))
+                .singleElement()
+                .satisfies(row -> {
+                    assertThat(row.getQuantity()).isEqualByComparingTo("40");
+                    assertThat(row.getRowCount()).isEqualTo(2L);
+                });
+    }
+
+    @Test
+    void ledgerSum_allRowsReleased_isZeroNotMissing() {
+        SupplySuggestionConversion released = conversion("25", 1, null);
+        released.release("cancelled", Instant.now(), null);
+        persist(released);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(conversionRepository.sumBySuggestionIds(List.of(makeSuggestion.getSupplySuggestionId())))
+                .singleElement()
+                .satisfies(row -> {
+                    assertThat(row.getQuantity()).isEqualByComparingTo("0");
+                    assertThat(row.getRowCount()).isEqualTo(1L);
+                });
+    }
+
+    /** G7a: which purchase orders still hold quota (sourceLocked) and which rows a cancel releases. */
+    @Test
+    void holdingTargets_andHeldRows_ignoreReleasedRowsAndOtherTargetTypes() {
+        UUID heldOrder = UUID.randomUUID();
+        UUID releasedOrder = UUID.randomUUID();
+        UUID workOrder = UUID.randomUUID();
+        UUID lineId = UUID.randomUUID();
+        SupplySuggestionConversion held = purchaseRow(heldOrder, lineId, "5");
+        persist(held);
+        SupplySuggestionConversion gone = purchaseRow(releasedOrder, UUID.randomUUID(), "5");
+        gone.release("cancelled", Instant.now(), null);
+        persist(gone);
+        SupplySuggestionConversion wo = conversion("5", 1, null);
+        wo.setTargetId(workOrder);
+        persist(wo);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(conversionRepository.findHoldingTargetIds(SupplyConversionTargetType.PURCHASE_ORDER,
+                List.of(heldOrder, releasedOrder, workOrder))).containsExactly(heldOrder);
+        assertThat(conversionRepository.findByTargetTypeAndTargetIdAndReleasedAtIsNull(
+                SupplyConversionTargetType.PURCHASE_ORDER, releasedOrder)).isEmpty();
+        assertThat(conversionRepository.findByTargetTypeAndTargetLineIdInOrderByCreatedAtAscEntryNoAsc(
+                SupplyConversionTargetType.PURCHASE_ORDER, List.of(lineId)))
+                .singleElement().satisfies(row -> assertThat(row.getTargetId()).isEqualTo(heldOrder));
+    }
+
+    private SupplySuggestionConversion purchaseRow(UUID orderId, UUID lineId, String quantity) {
+        SupplySuggestionConversion row = conversion(quantity, 1, null);
+        row.setTargetType(SupplyConversionTargetType.PURCHASE_ORDER);
+        row.setTargetId(orderId);
+        row.setTargetLineId(lineId);
+        return row;
+    }
+
     private SupplySuggestionConversion conversion(String quantity, int entryNo, String key) {
         return SupplySuggestionConversion.builder()
                 .mrpRunId(run.getMrpRunId())

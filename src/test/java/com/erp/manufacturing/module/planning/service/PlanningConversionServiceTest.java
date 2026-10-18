@@ -386,6 +386,7 @@ class PlanningConversionServiceTest {
                 new SupplySuggestionConversionRepository.SuggestionQuantityProjection() {
                     @Override public UUID getSupplySuggestionId() { return suggestion.getSupplySuggestionId(); }
                     @Override public BigDecimal getQuantity() { return new BigDecimal(quantity); }
+                    @Override public Long getRowCount() { return 1L; }
                 }));
     }
 

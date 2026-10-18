@@ -55,12 +55,27 @@ public class PurchaseOrderLine extends BaseEntity {
     @Column(name = "expected_date", nullable = false)
     private LocalDate expectedDate;
 
+    /** G7a: the remainder a close gave up on — not rejected goods, not received goods. */
+    @Column(name = "closed_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal closedQuantity = BigDecimal.ZERO;
+
+    /** What may still be received: {@code ordered − received − closed} (FE §3.4). */
+    public BigDecimal openQuantity() {
+        return orderedQuantity.subtract(receivedQuantity).subtract(closedQuantity);
+    }
+
+    /** Kept for the legacy wire field {@code remainingQuantity}; equal to {@link #openQuantity()}. */
     public BigDecimal remainingQuantity() {
-        return orderedQuantity.subtract(receivedQuantity);
+        return openQuantity();
     }
 
     public boolean isFullyReceived() {
         return receivedQuantity.compareTo(orderedQuantity) >= 0;
+    }
+
+    void closeRemainder() {
+        closedQuantity = closedQuantity.add(openQuantity());
     }
 
     public void receive(BigDecimal quantity) {

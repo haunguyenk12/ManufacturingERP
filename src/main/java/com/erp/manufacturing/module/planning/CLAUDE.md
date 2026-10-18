@@ -163,3 +163,13 @@ Nguồn: `FE_HANDOFF_GD_06_2026-10-14.md`; quyết định D5–D10 + hai quyế
 4. **Hướng phụ thuộc mới `planning → sales`** (`SalesOrderPlanningSourceService`) và `planning → purchasing` thêm `createFromPlanning`.
    Không vòng bean: `SalesOrderPlanningSourceService` chỉ phụ thuộc repository sales + hai service workorder chỉ đọc repository.
 5. **`completedAt` của run cắt µs** (§0.51 #3); `createdAt` của sổ (auditing) thì chưa — giới hạn toàn hệ thống.
+
+## G7a — Huỷ PO trả lại quota chuyển đổi (2026-10-18)
+
+`supply_suggestion_conversions` có thêm `released_at`/`released_by`/`release_reason` (`V76`). Dòng **đã giải phóng** (PO đích bị huỷ) **không**
+còn tính vào lượng đã chuyển / còn chuyển được, nhưng **vẫn** đếm là "ledger đã chạm đề xuất này": `MrpPlanningMapper.convertedQuantity(...,
+hasLedgerRows)` chỉ coi đề xuất `CONVERTED` là chuyển hết khi **không có dòng ledger nào** (đường one-shot cũ). Thiếu vế đó thì huỷ PO không
+trả lại được gì vì đề xuất vẫn `CONVERTED`. `sumBySuggestionIds` trả tổng **dòng giữ** + `rowCount` của **mọi** dòng — phần `case when`
+chỉ Postgres chứng minh được (`PlanningConversionRepositoryIT.ledgerSum_*`). `PurchaseOrderPlanningLinkService` là đường duy nhất purchasing
+chạm ledger (đọc nguồn + giải phóng), không `@PreAuthorize`, caller duy nhất `PurchaseOrderService`. Giải phóng tăng `conversionVersion` của
+từng lượt liên quan (khoá theo thứ tự id). Bất biến chính ở `module/purchasing/CLAUDE.md` B190.

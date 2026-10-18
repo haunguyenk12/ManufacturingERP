@@ -221,19 +221,22 @@ public class PlanningConversionService {
     }
 
     private void ensureWithinRemaining(List<PlanningConversionEntryRequest> entries, List<SupplySuggestion> suggestions) {
-        Map<UUID, BigDecimal> ledger = conversionRepository.sumBySuggestionIds(
+        Map<UUID, SupplySuggestionConversionRepository.SuggestionQuantityProjection> ledger =
+                conversionRepository.sumBySuggestionIds(
                         suggestions.stream().map(SupplySuggestion::getSupplySuggestionId).toList())
                 .stream()
                 .collect(Collectors.toMap(
                         SupplySuggestionConversionRepository.SuggestionQuantityProjection::getSupplySuggestionId,
-                        SupplySuggestionConversionRepository.SuggestionQuantityProjection::getQuantity));
+                        projection -> projection));
         Map<String, String> errors = new LinkedHashMap<>();
         for (int i = 0; i < entries.size(); i++) {
             SupplySuggestion suggestion = suggestions.get(i);
+            SupplySuggestionConversionRepository.SuggestionQuantityProjection held =
+                    ledger.get(suggestion.getSupplySuggestionId());
             BigDecimal remaining = MrpPlanningMapper.remaining(
                     suggestion.getSuggestedQuantity(),
                     MrpPlanningMapper.convertedQuantity(suggestion,
-                            ledger.getOrDefault(suggestion.getSupplySuggestionId(), BigDecimal.ZERO)));
+                            held == null ? BigDecimal.ZERO : held.getQuantity(), held != null));
             if (entries.get(i).quantity().compareTo(remaining) > 0) {
                 errors.put("entries[" + i + "].quantity",
                         "exceeds the remaining convertible quantity " + remaining.stripTrailingZeros().toPlainString());

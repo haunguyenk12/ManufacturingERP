@@ -325,12 +325,15 @@ public class MrpRunService {
         Map<UUID, SupplySuggestion> suggestions = lineIds.isEmpty() ? Map.of()
                 : supplySuggestionRepository.findByRequirementLineIds(lineIds).stream()
                     .collect(Collectors.toMap(s -> s.getRequirementLine().getMrpRequirementLineId(), s -> s, (a, b) -> a));
-        Map<UUID, BigDecimal> converted = convertedBySuggestion(suggestions.values());
+        Map<UUID, SupplySuggestionConversionRepository.SuggestionQuantityProjection> converted =
+                convertedBySuggestion(suggestions.values());
         return PageResult.from(page.map(line -> {
             SupplySuggestion suggestion = suggestions.get(line.getMrpRequirementLineId());
+            SupplySuggestionConversionRepository.SuggestionQuantityProjection ledger =
+                    suggestion == null ? null : converted.get(suggestion.getSupplySuggestionId());
             return mapper.toResponse(line, suggestion,
-                    suggestion == null ? BigDecimal.ZERO
-                            : converted.getOrDefault(suggestion.getSupplySuggestionId(), BigDecimal.ZERO),
+                    ledger == null ? BigDecimal.ZERO : ledger.getQuantity(),
+                    ledger != null,
                     null);
         }));
     }
@@ -347,9 +350,11 @@ public class MrpRunService {
                 .findByRequirementLineIds(List.of(requirementLineId)).stream().findFirst().orElse(null);
         List<SupplySuggestionConversion> rows =
                 conversionRepository.findByRequirementLineIdOrderByCreatedAtAscEntryNoAsc(requirementLineId);
-        BigDecimal ledgerSum = rows.stream().map(SupplySuggestionConversion::getQuantity)
+        BigDecimal ledgerSum = rows.stream().filter(row -> !row.isReleased())
+                .map(SupplySuggestionConversion::getQuantity)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return mapper.toResponse(line, suggestion, ledgerSum, rows.stream().map(mapper::toResponse).toList());
+        return mapper.toResponse(line, suggestion, ledgerSum, !rows.isEmpty(),
+                rows.stream().map(mapper::toResponse).toList());
     }
 
     @Transactional(readOnly = true)
@@ -512,7 +517,8 @@ public class MrpRunService {
                 countBlockedProposals(result));
     }
 
-    private Map<UUID, BigDecimal> convertedBySuggestion(Collection<SupplySuggestion> suggestions) {
+    private Map<UUID, SupplySuggestionConversionRepository.SuggestionQuantityProjection> convertedBySuggestion(
+            Collection<SupplySuggestion> suggestions) {
         if (suggestions.isEmpty()) {
             return Map.of();
         }
@@ -521,7 +527,7 @@ public class MrpRunService {
                 .stream()
                 .collect(Collectors.toMap(
                         SupplySuggestionConversionRepository.SuggestionQuantityProjection::getSupplySuggestionId,
-                        SupplySuggestionConversionRepository.SuggestionQuantityProjection::getQuantity));
+                        projection -> projection));
     }
 
     /** {@code CURRENT}/{@code STALE} for a completed commercial run; {@code null} for any other run. */

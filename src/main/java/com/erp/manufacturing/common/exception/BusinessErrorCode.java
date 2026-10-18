@@ -84,6 +84,13 @@ public enum BusinessErrorCode implements ErrorCode {
      * The fix is a new run, not a retry — hence not STATE_CONFLICT.
      */
     PLANNING_SOURCE_STALE     ("PLANNING_SOURCE_STALE",     "Planning sources changed; run planning again before converting", HttpStatus.CONFLICT),
+    /**
+     * G7a (FE Q7): a draft purchase order that still holds planning quota keeps its warehouse,
+     * items, quantities and line set; the request tried to change one of them. Not
+     * STATE_CONFLICT: retrying after a reload fails the same way — the remedy is to cancel the
+     * order (giving the quota back) or to change only the editable fields.
+     */
+    SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */

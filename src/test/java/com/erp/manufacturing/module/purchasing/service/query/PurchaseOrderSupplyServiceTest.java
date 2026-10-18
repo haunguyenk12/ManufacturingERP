@@ -60,11 +60,11 @@ class PurchaseOrderSupplyServiceTest {
         verify(purchaseOrderRepository).aggregateOpenSupply(
                 any(), any(), anyCollection(), anyCollection(), statuses.capture());
         assertThat(statuses.getValue()).containsExactlyInAnyOrder(
-                PurchaseOrderStatus.SENT, PurchaseOrderStatus.PARTIALLY_RECEIVED);
+                PurchaseOrderStatus.CONFIRMED, PurchaseOrderStatus.PARTIALLY_RECEIVED);
         // A DRAFT order is not a promise from anyone; RECEIVED/CANCELLED have nothing left to arrive.
         assertThat(statuses.getValue()).doesNotContain(
                 PurchaseOrderStatus.DRAFT,
-                PurchaseOrderStatus.RECEIVED,
+                PurchaseOrderStatus.FULLY_RECEIVED,
                 PurchaseOrderStatus.CANCELLED);
     }
 

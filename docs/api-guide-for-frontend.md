@@ -1301,6 +1301,24 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Vòng đời đơn mua hàng — FE giai đoạn 7 phần 1 *(`G7a`, 2026-10-18)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Tạo nháp (server cấp mã) | `POST /v1/purchase-orders/drafts` — `{companyId, plantId, supplierId, warehouseId, orderDate, reference?, notes?, lines[1..500]{itemId, orderedQuantity, unitPrice?, expectedDate}}` · `Idempotency-Key` tuỳ chọn · `X-Plant-Id` phải khớp `plantId` | **201**, mã `PO-000001`…; vật tư `RAW_MATERIAL`/`CONSUMABLE`/`WIP`, không theo sê-ri; dòng `VND`; `unitPrice` `null` = chưa có giá, `0` = giá |
+| Sửa nháp | `PATCH /v1/purchase-orders/{id}` — `{expectedVersion, supplierId, warehouseId, orderDate, reference?, notes?, lines[]{id?, itemId, orderedQuantity, unitPrice?, expectedDate}}` | chỉ `DRAFT`; thay toàn bộ dòng, `id` giữ dòng cũ; text `null` = giữ, `""` = xoá. PO còn giữ quota hoạch định ⇒ `409 SOURCE_LOCKED` nếu đổi kho/vật tư/lượng/tập dòng |
+| Xác nhận | `POST /v1/purchase-orders/{id}/confirm` — `{expectedVersion}` | `DRAFT → CONFIRMED`; thiếu giá ⇒ `400` field `lines[i].unitPrice`. `/send` cũ vẫn chạy (không kiểm giá) |
+| Huỷ | `POST /v1/purchase-orders/{id}/cancel` — body **tuỳ chọn** `{expectedVersion, reason}` | không body: chỉ `DRAFT`. Có body: `DRAFT`/`CONFIRMED` (chưa nhận). Trả quota hoạch định một lần |
+| Đóng phần còn lại | `POST /v1/purchase-orders/{id}/close` — `{expectedVersion, reason}` | `CONFIRMED`/`PARTIALLY_RECEIVED` còn lượng mở ⇒ `CLOSED`, `closedQuantity` = phần còn lại. Không trả quota |
+| Danh sách | `GET /v1/purchase-orders?companyId&plantId&warehouseId?&supplierId?&status?&search?&orderDateFrom?&orderDateTo?` | `search`: mã PO, tham chiếu, mã/tên NCC; ngày bao gồm hai đầu |
+
+Field mới trên PO: `code` (= `purchaseOrderNo`), `version`, `warehouseName`, `reference`, `currencyCode`, `sourceLocked`, `reason`,
+`confirmedAt`, `cancelledAt`, `closedAt`, `createdBy`, `history[]`. Trên dòng: `uomCode`, `closedQuantity`, `openQuantity`, `sources[]`.
+
+> 🔴 **Đổi tên trạng thái:** `SENT` → `CONFIRMED`, `RECEIVED` → `FULLY_RECEIVED`, thêm `CLOSED` (dữ liệu cũ đã đổi). `status=SENT` ⇒ 400.
+> 🔴 `remainingQuantity` trên dòng nay = `openQuantity` (trừ cả phần đã đóng). Chuyển BUY từ hoạch định cần thêm `PERM_PURCHASE_ORDER_MANAGE`.
+> 🔴 Phiếu nhận của PO `CLOSED` không huỷ được (`409 STATE_CONFLICT`). Id PO không tồn tại trả **403** (như mọi `/{id}`).
+
 ### Nhập đơn bán hàng Excel — FE giai đoạn 6 phần 3 *(`G6c`, 2026-10-18)*
 
 | Việc | Endpoint | Ghi chú |

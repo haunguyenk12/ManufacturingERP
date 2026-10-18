@@ -19,5 +19,8 @@ public record PlanningConversionResponse(
         String targetCode,
         Integer conversionVersion,
         Instant createdAt,
-        UUID createdBy
+        UUID createdBy,
+        /** G7a: set once the purchase order this row created was cancelled — its quantity counts no more. */
+        Instant releasedAt,
+        String releaseReason
 ) {}

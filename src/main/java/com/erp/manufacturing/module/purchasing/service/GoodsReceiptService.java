@@ -57,7 +57,7 @@ public class GoodsReceiptService {
         PurchaseOrder order = findOrder(purchaseOrderId);
         if (!order.canReceive()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
-                    "Only SENT or PARTIALLY_RECEIVED purchase orders can receive goods");
+                    "Only CONFIRMED or PARTIALLY_RECEIVED purchase orders can receive goods");
         }
         Map<UUID, PurchaseOrderLine> orderLines = order.getLines().stream()
                 .collect(Collectors.toMap(PurchaseOrderLine::getPurchaseOrderLineId, line -> line));
@@ -138,7 +138,7 @@ public class GoodsReceiptService {
      * Cancels a POSTED goods receipt.
      * Creates a REVERSAL movement for every receipt line to restore stock balance.
      * Decrements receivedQuantity on each PurchaseOrderLine.
-     * Refreshes PO status (RECEIVED → PARTIALLY_RECEIVED / SENT if quantities roll back).
+     * Refreshes PO status (FULLY_RECEIVED → PARTIALLY_RECEIVED / CONFIRMED if quantities roll back).
      */
     @Transactional
     @PreAuthorize("@purchasingPermissionGuard.hasReceiptAccess(authentication, 'PERM_PURCHASE_ORDER_MANAGE', #goodsReceiptId)")
@@ -156,6 +156,12 @@ public class GoodsReceiptService {
         }
 
         PurchaseOrder order = receipt.getPurchaseOrder();
+        // G7a: a CLOSED order gave up its remainder. Reversing a receipt would hand open quantity
+        // back to an order that can no longer receive it, so the reversal is refused instead.
+        if (order.getStatus() == PurchaseOrderStatus.CLOSED) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Goods receipts of a CLOSED purchase order cannot be cancelled");
+        }
         // Re-load PO with lines so we can decrement receivedQuantity
         PurchaseOrder orderWithLines = purchaseOrderRepository.findWithDetailsByPurchaseOrderId(
                 order.getPurchaseOrderId())
@@ -191,32 +197,12 @@ public class GoodsReceiptService {
             }
         }
 
-        // Refresh PO status after rolling back quantities
-        refreshCancelledPOStatus(orderWithLines);
+        // Refresh PO status after rolling back quantities (FULLY_RECEIVED → PARTIALLY_RECEIVED → CONFIRMED)
+        orderWithLines.refreshReceiptStatus();
         purchaseOrderRepository.save(orderWithLines);
 
         receipt.cancel(request == null ? null : request.cancelNote());
         return mapper.toResponse(goodsReceiptRepository.save(receipt), true);
-    }
-
-    /**
-     * Re-calculates PO status after a goods receipt cancellation.
-     * If all lines back to 0 → SENT (was at minimum SENT before any receipt).
-     * If some received → PARTIALLY_RECEIVED.
-     * If all fully received → RECEIVED (edge case: another receipt still covers it).
-     */
-    private void refreshCancelledPOStatus(PurchaseOrder order) {
-        boolean anyReceived = order.getLines().stream()
-                .anyMatch(l -> l.getReceivedQuantity().signum() > 0);
-        boolean allReceived = !order.getLines().isEmpty()
-                && order.getLines().stream().allMatch(PurchaseOrderLine::isFullyReceived);
-        if (allReceived) {
-            order.setStatus(PurchaseOrderStatus.RECEIVED);
-        } else if (anyReceived) {
-            order.setStatus(PurchaseOrderStatus.PARTIALLY_RECEIVED);
-        } else {
-            order.setStatus(PurchaseOrderStatus.SENT);
-        }
     }
 
     private String buildCancelLineIdempotencyKey(String base, int lineIndex) {

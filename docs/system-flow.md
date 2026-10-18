@@ -175,7 +175,7 @@ Start
   ▼
 [Calculate net requirements]    ← Gross + stockTarget − (Available + open WO + open PO)
   │                                F5-B: mỗi dòng ghi settingSource + excludedLotCount
-  │                                D4: open PO (SENT/PARTIALLY_RECEIVED) vào scheduledReceipts
+  │                                D4: open PO (CONFIRMED/PARTIALLY_RECEIVED, G7a đổi tên SENT) vào scheduledReceipts
   ▼
 ◇ Shortage found?
   ├── No  → [Mark requirement as covered]
@@ -210,7 +210,7 @@ Start
 |------|-------|
 | Explode BOM | Đệ quy từng cấp BOM → tính tổng nhu cầu component |
 | Net requirements | `net = max(0, gross + stockTarget − (available + scheduledReceipts − priorAllocations))`, với `stockTarget = max(safetyStock, reorderPoint)`. Reserved **không** là available |
-| **`scheduledReceipts` (`D4`)** | Work order `RELEASED`/`IN_PROGRESS` **+** purchase order `SENT`/`PARTIALLY_RECEIVED`. PO `DRAFT` **không** tính. Trước `D4` chỉ có work order ⇒ MRP đề xuất mua trùng thứ đã đặt hàng (nợ #16). Bất biến `B67` |
+| **`scheduledReceipts` (`D4`)** | Work order `RELEASED`/`IN_PROGRESS` **+** purchase order `CONFIRMED`/`PARTIALLY_RECEIVED` (G7a đổi tên `SENT`; lượng mở = đặt − nhận − đóng, PO `CLOSED` không tính). PO `DRAFT` **không** tính. Trước `D4` chỉ có work order ⇒ MRP đề xuất mua trùng thứ đã đặt hàng (nợ #16). Bất biến `B67` |
 | Run header (`D4`) | `code` (`RUN-<8 hex đầu của id>`) + `shortageLines` / `plannedWorkOrders` / `plannedPurchaseRecommendations` / `blockedProposals` — đếm tại chỗ từ kết quả run, không query lại |
 | Supply suggestion | Loại: `PURCHASE_REQUISITION` hoặc `WORK_ORDER` |
 | Reject with note | Ghi lý do từ chối vào suggestion record |

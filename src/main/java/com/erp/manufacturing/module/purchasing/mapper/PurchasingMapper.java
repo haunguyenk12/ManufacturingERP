@@ -7,6 +7,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
+import java.util.Objects;
+import java.util.Map;
 
 @Component
 public class PurchasingMapper {
@@ -92,12 +95,34 @@ public class PurchasingMapper {
                 line.getNote());
     }
 
+    /**
+     * G7a: purchase order lines in a stable order. Lines saved in one flush get the same
+     * {@code created_at} once Postgres rounds it to microseconds, so the id breaks the tie — without
+     * it two reads of the same order listed the lines differently (found by the G7a smoke test), and
+     * a field error such as {@code lines[1].unitPrice} could name the wrong line.
+     */
+    public static final Comparator<PurchaseOrderLine> LINE_ORDER = Comparator
+            .comparing(PurchaseOrderLine::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+            // As text, not UUID.compareTo: that compares signed longs, so "ffff…" would sort first.
+            .thenComparing(line -> String.valueOf(line.getPurchaseOrderLineId()));
+
     public PurchaseOrderResponse toResponse(PurchaseOrder order, boolean includeLines) {
+        return toResponse(order, includeLines, Map.of(), false, List.of());
+    }
+
+    /**
+     * G7a: the full projection. {@code sources} by purchase order line id (detail only),
+     * {@code sourceLocked} and {@code history} are resolved by the service in batch queries.
+     */
+    public PurchaseOrderResponse toResponse(PurchaseOrder order,
+                                            boolean includeLines,
+                                            Map<UUID, List<PurchaseOrderLineSourceResponse>> sources,
+                                            boolean sourceLocked,
+                                            List<PurchaseOrderHistoryResponse> history) {
         List<PurchaseOrderLineResponse> lines = includeLines
                 ? order.getLines().stream()
-                .sorted(Comparator.comparing(PurchaseOrderLine::getCreatedAt,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(this::toResponse)
+                .sorted(LINE_ORDER)
+                .map(line -> toResponse(line, sources.getOrDefault(line.getPurchaseOrderLineId(), List.of())))
                 .toList()
                 : List.of();
         return new PurchaseOrderResponse(
@@ -119,10 +144,26 @@ public class PurchasingMapper {
                 order.getNote(),
                 order.getCreatedAt(),
                 order.getUpdatedAt(),
-                lines);
+                lines,
+                order.getPurchaseOrderNo(),
+                order.getVersion(),
+                order.getWarehouse().getName(),
+                order.getReference(),
+                includeLines ? singleCurrency(order) : null,
+                sourceLocked,
+                order.getStatusReason(),
+                order.getConfirmedAt(),
+                order.getCancelledAt(),
+                order.getClosedAt(),
+                order.getCreatedBy(),
+                history);
     }
 
     public PurchaseOrderLineResponse toResponse(PurchaseOrderLine line) {
+        return toResponse(line, List.of());
+    }
+
+    public PurchaseOrderLineResponse toResponse(PurchaseOrderLine line, List<PurchaseOrderLineSourceResponse> sources) {
         return new PurchaseOrderLineResponse(
                 line.getPurchaseOrderLineId(),
                 line.getPurchaseRequisitionLine() == null
@@ -136,7 +177,20 @@ public class PurchasingMapper {
                 line.remainingQuantity(),
                 line.getUnitPrice(),
                 line.getCurrencyCode(),
-                line.getExpectedDate());
+                line.getExpectedDate(),
+                line.getItem().getUnit(),
+                line.getClosedQuantity(),
+                line.openQuantity(),
+                sources);
+    }
+
+    private static String singleCurrency(PurchaseOrder order) {
+        List<String> currencies = order.getLines().stream()
+                .map(PurchaseOrderLine::getCurrencyCode)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        return currencies.size() == 1 ? currencies.get(0) : null;
     }
 
     public GoodsReceiptResponse toResponse(GoodsReceipt receipt, boolean includeLines) {

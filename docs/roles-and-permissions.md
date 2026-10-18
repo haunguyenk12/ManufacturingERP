@@ -214,6 +214,11 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 > `/api/v1/planning-runs**`; `/api/v1/mrp/suggestions/{id}/**` → `/api/v1/supply-suggestions/{id}/**`
 > (kể cả `convert-to-purchase-requisition` của module `purchasing`). Chuỗi `PERM_MRP_RUN` /
 > `PERM_MRP_READ` / `PERM_SUPPLY_SUGGESTION_MANAGE` giữ nguyên — **không** có migration permission mới.
+>
+> **`G7a` (2026-10-18) — chuyển đề xuất BUY sang PO cần THÊM `PERM_PURCHASE_ORDER_MANAGE`** trên nhà máy của lượt
+> (`POST /v1/planning-runs/{id}/conversions` với entry BUY). Trước đó chỉ cần `PERM_SUPPLY_SUGGESTION_MANAGE`. Không permission mới:
+> `ADMIN`/`MANAGER` vốn có cả hai. Các lệnh PO mới của `G7a` (`/drafts`, `PATCH`, `/confirm`, `/close`, `/cancel` có body) đều dùng
+> `PERM_PURCHASE_ORDER_MANAGE` sẵn có.
 
 ### Purchasing
 | Quyền | Mô tả |

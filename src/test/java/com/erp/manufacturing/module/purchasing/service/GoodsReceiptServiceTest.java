@@ -56,7 +56,7 @@ class GoodsReceiptServiceTest {
 
     @Test
     void postPartialReceipt_callsInventoryReceiveAndUpdatesPoStatus() {
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.SENT, new BigDecimal("10"), BigDecimal.ZERO);
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CONFIRMED, new BigDecimal("10"), BigDecimal.ZERO);
         PurchaseOrderLine line = order.getLines().get(0);
         StockMovement movement = movement(line.getItem(), order.getWarehouse(), new BigDecimal("4"));
         when(goodsReceiptRepository.findWithDetailsByPurchaseOrderPurchaseOrderIdAndIdempotencyKey(
@@ -91,7 +91,7 @@ class GoodsReceiptServiceTest {
 
     @Test
     void postFullReceipt_marksPoReceived() {
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.SENT, new BigDecimal("10"), BigDecimal.ZERO);
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CONFIRMED, new BigDecimal("10"), BigDecimal.ZERO);
         PurchaseOrderLine line = order.getLines().get(0);
         when(goodsReceiptRepository.findWithDetailsByPurchaseOrderPurchaseOrderIdAndIdempotencyKey(
                 order.getPurchaseOrderId(), "GR-KEY")).thenReturn(Optional.empty());
@@ -112,12 +112,12 @@ class GoodsReceiptServiceTest {
                 "GR-001", null, List.of(new GoodsReceiptLineRequest(
                 line.getPurchaseOrderLineId(), null, null, new BigDecimal("10")))), "GR-KEY");
 
-        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.RECEIVED);
+        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.FULLY_RECEIVED);
     }
 
     @Test
     void postOverRemainingQuantity_failsBeforeInventoryReceive() {
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.SENT, new BigDecimal("10"), new BigDecimal("8"));
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CONFIRMED, new BigDecimal("10"), new BigDecimal("8"));
         PurchaseOrderLine line = order.getLines().get(0);
         when(goodsReceiptRepository.findWithDetailsByPurchaseOrderPurchaseOrderIdAndIdempotencyKey(
                 order.getPurchaseOrderId(), "GR-KEY")).thenReturn(Optional.empty());
@@ -142,7 +142,7 @@ class GoodsReceiptServiceTest {
 
     @Test
     void postDuplicateIdempotency_returnsExistingReceiptWithoutInventoryReceive() {
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.SENT, new BigDecimal("10"), BigDecimal.ZERO);
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CONFIRMED, new BigDecimal("10"), BigDecimal.ZERO);
         GoodsReceipt existing = GoodsReceipt.builder()
                 .goodsReceiptId(UUID.randomUUID())
                 .purchaseOrder(order)
@@ -166,7 +166,7 @@ class GoodsReceiptServiceTest {
 
     @Test
     void cancelPosted_shouldCancelAndCreateReversalMovementAndUpdatePOStatus() {
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.RECEIVED, new BigDecimal("10"), new BigDecimal("10"));
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.FULLY_RECEIVED, new BigDecimal("10"), new BigDecimal("10"));
         PurchaseOrderLine poLine = order.getLines().get(0);
         Item item = poLine.getItem();
         Warehouse warehouse = order.getWarehouse();
@@ -205,7 +205,7 @@ class GoodsReceiptServiceTest {
         assertThat(response.cancelNote()).isEqualTo("damaged batch");
         assertThat(response.cancelledAt()).isNotNull();
         // PO received_quantity should go back to 0 → SENT
-        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.SENT);
+        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.CONFIRMED);
         assertThat(poLine.getReceivedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
         verify(inventoryMovementService).reverseReceive(
                 eq(item.getItemId()),
@@ -221,7 +221,7 @@ class GoodsReceiptServiceTest {
     @Test
     void cancelAlreadyCancelled_shouldThrowOperationNotAllowed() {
         UUID grId = UUID.randomUUID();
-        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.SENT, new BigDecimal("10"), BigDecimal.ZERO);
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CONFIRMED, new BigDecimal("10"), BigDecimal.ZERO);
         GoodsReceipt receipt = GoodsReceipt.builder()
                 .goodsReceiptId(grId)
                 .purchaseOrder(order)
@@ -242,6 +242,32 @@ class GoodsReceiptServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(inventoryMovementService, purchaseOrderRepository);
+    }
+
+    /** G7a: a CLOSED order gave up its remainder — reversing a receipt would reopen it. */
+    @Test
+    void cancelPostedReceiptOfClosedOrder_isStateConflictAndReversesNothing() {
+        UUID grId = UUID.randomUUID();
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.CLOSED, new BigDecimal("10"), new BigDecimal("4"));
+        GoodsReceipt receipt = GoodsReceipt.builder()
+                .goodsReceiptId(grId)
+                .purchaseOrder(order)
+                .warehouse(order.getWarehouse())
+                .receiptNo("GR-001")
+                .status(GoodsReceiptStatus.POSTED)
+                .postedAt(Instant.now())
+                .idempotencyKey("GR-KEY")
+                .lines(new ArrayList<>())
+                .build();
+        when(goodsReceiptRepository.findWithDetailsByGoodsReceiptId(grId)).thenReturn(Optional.of(receipt));
+
+        assertThatThrownBy(() -> service.cancel(grId, null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verifyNoInteractions(inventoryMovementService, purchaseOrderRepository);
+        assertThat(receipt.getStatus()).isEqualTo(GoodsReceiptStatus.POSTED);
     }
 
     private StockMovement movement(Item item, Warehouse warehouse, BigDecimal quantity) {

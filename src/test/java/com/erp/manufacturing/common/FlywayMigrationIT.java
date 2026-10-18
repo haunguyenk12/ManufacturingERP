@@ -36,6 +36,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
     private static final String RUN_IDEMPOTENCY_SCHEMA = "v58_run_idempotency_check";
     private static final String AUDIT_PIPELINE_SCHEMA = "v67_audit_pipeline_check";
     private static final String VERSION_BACKFILL_SCHEMA = "v73_version_backfill_check";
+    private static final String PO_LIFECYCLE_SCHEMA = "v76_po_lifecycle_check";
 
     @Test
     void migrate_onEmptyDatabase_appliesAllMigrationsCleanly() {
@@ -50,7 +51,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("75");
+        assertThat(current.getVersion().getVersion()).isEqualTo("76");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -847,6 +848,88 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                     """)) {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getInt(1)).isEqualTo(3);
+            }
+        }
+    }
+
+    /**
+     * G7a / {@code V76}: purchase orders already SENT/RECEIVED are renamed in place to
+     * CONFIRMED/FULLY_RECEIVED (D1, precedent V26), the CHECK refuses the old names and accepts CLOSED,
+     * and received + closed may never exceed ordered. Seeded at V75 in its own schema, then migrated.
+     */
+    @Test
+    void migrate_v76_renamesPurchaseOrderStatusesAndGuardsClosedQuantity() throws Exception {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(PO_LIFECYCLE_SCHEMA)
+                .target("75")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111117601";
+        String plant = "22222222-2222-4222-8222-222222227601";
+        String warehouse = "33333333-3333-4333-8333-333333337601";
+        String supplier = "44444444-4444-4444-8444-444444447601";
+        String item = "55555555-5555-4555-8555-555555557601";
+        String order = "insert into purchase_orders (purchase_order_id, company_id, plant_id, warehouse_id, supplier_id,"
+                + " purchase_order_no, status, order_date, expected_date)"
+                + " values ('%s', '" + company + "', '" + plant + "', '" + warehouse + "', '" + supplier
+                + "', '%s', '%s', date '2026-10-01', date '2026-10-10')";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + PO_LIFECYCLE_SCHEMA);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V76', 'V76')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name) values ('%s', '%s', 'P', 'P')"
+                    .formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into suppliers (supplier_id, company_id, code, name) values ('%s', '%s', 'S', 'S')"
+                    .formatted(supplier, company));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'RM', 'RM', 'RAW_MATERIAL', 'KG')".formatted(item, company));
+            statement.execute(order.formatted("66666666-6666-4666-8666-666666667601", "PO-SENT", "SENT"));
+            statement.execute(order.formatted("66666666-6666-4666-8666-666666667602", "PO-RECEIVED", "RECEIVED"));
+            statement.execute(order.formatted("66666666-6666-4666-8666-666666667603", "PO-DRAFT", "DRAFT"));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(PO_LIFECYCLE_SCHEMA)
+                .target("76")
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + PO_LIFECYCLE_SCHEMA);
+            java.util.Map<String, String> statuses = new java.util.HashMap<>();
+            try (ResultSet rs = statement.executeQuery("select purchase_order_no, status, confirmed_at from purchase_orders")) {
+                while (rs.next()) {
+                    statuses.put(rs.getString(1), rs.getString(2));
+                    // Not backfilled: nobody recorded when a pre-G7a order was sent.
+                    assertThat(rs.getTimestamp(3)).isNull();
+                }
+            }
+            assertThat(statuses).containsEntry("PO-SENT", "CONFIRMED")
+                    .containsEntry("PO-RECEIVED", "FULLY_RECEIVED")
+                    .containsEntry("PO-DRAFT", "DRAFT");
+            assertThatThrownBy(() -> statement.execute(
+                    order.formatted("66666666-6666-4666-8666-666666667604", "PO-OLD", "SENT")))
+                    .hasMessageContaining("chk_purchase_orders_status");
+            statement.execute(order.formatted("66666666-6666-4666-8666-666666667605", "PO-CLOSED", "CLOSED"));
+            String line = "insert into purchase_order_lines (purchase_order_id, item_id, ordered_quantity,"
+                    + " received_quantity, closed_quantity, expected_date) values"
+                    + " ('66666666-6666-4666-8666-666666667605', '" + item + "', 10, %s, %s, date '2026-10-10')";
+            statement.execute(line.formatted("6", "4"));
+            assertThatThrownBy(() -> statement.execute(line.formatted("6", "4.000001")))
+                    .hasMessageContaining("chk_po_lines_received_closed_within_ordered");
+            try (ResultSet rs = statement.executeQuery("select nextval('purchase_order_number_seq')")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getLong(1)).isEqualTo(1L);
             }
         }
     }

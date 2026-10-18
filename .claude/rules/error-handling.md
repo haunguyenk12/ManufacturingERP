@@ -258,6 +258,11 @@ phải của run, hoặc nguồn (dòng đơn / tồn đơn giữ / BOM, routing
 Tách khỏi `STATE_CONFLICT` vì cách xử lý là **chạy run mới**, không phải tải lại rồi thử lại. Còn lại dùng mã sẵn có: vượt phần còn lại ⇒
 `PLANNED_QUANTITY_EXCEEDED`; version chuyển đổi lệch ⇒ `CONCURRENT_MODIFICATION`; đề xuất bị chặn ⇒ đúng mã đã chặn (`MISSING_BOM`…, B58).
 
+**Constant thêm ở `G7a` (2026-10-18):** `SOURCE_LOCKED` (409) — `PATCH` một PO nháp còn giữ quota hoạch định mà đổi kho / vật tư / lượng /
+tập dòng; kèm `errors[{field}]`. Tách khỏi `STATE_CONFLICT` vì tải lại rồi gửi lại vẫn hỏng như cũ — cách xử lý là huỷ PO (trả quota) hoặc chỉ
+sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nhận ⇒ `VALIDATION_ERROR` field `lines[i].unitPrice`; vật tư sai loại ⇒
+`OPERATION_NOT_ALLOWED` field `lines[i].itemId`; huỷ PO đã nhận / đóng PO hết lượng mở / đảo phiếu nhận của PO `CLOSED` ⇒ `STATE_CONFLICT`.
+
 **`G6c` (2026-10-18) — không thêm mã mới.** Nhập đơn bán Excel (`kind=so`) dùng nguyên mã file-level của `G3` (`FILE_FORMAT`,
 `FILE_SIZE` 413, `TEMPLATE`, `EMPTY_FILE`, `ROW_LIMIT`, `IMPORT_REVALIDATION_FAILED`) và lỗi dòng `ImportErrorCode` sẵn có. Mã FE đề xuất ánh
 xạ: `INVALID_FILE` → `FILE_FORMAT`; `FILE_TOO_LARGE` → `FILE_SIZE`; `INVALID_TEMPLATE` → `TEMPLATE`; `IMPORT_ROW_LIMIT_EXCEEDED` → `ROW_LIMIT`;

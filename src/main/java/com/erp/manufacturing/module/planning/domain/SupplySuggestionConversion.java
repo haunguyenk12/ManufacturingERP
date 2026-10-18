@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -69,4 +70,27 @@ public class SupplySuggestionConversion extends BaseEntity {
 
     @Column(name = "payload_hash", length = 64)
     private String payloadHash;
+
+    /**
+     * G7a (FE Q12): the purchase order this row created was cancelled, so its quantity no longer
+     * counts as converted. The row stays for trace; {@code null} means the conversion still holds.
+     */
+    @Column(name = "released_at")
+    private Instant releasedAt;
+
+    @Column(name = "released_by")
+    private UUID releasedBy;
+
+    @Column(name = "release_reason", length = 500)
+    private String releaseReason;
+
+    public boolean isReleased() {
+        return releasedAt != null;
+    }
+
+    public void release(String reason, Instant at, UUID by) {
+        releasedAt = at;
+        releasedBy = by;
+        releaseReason = reason;
+    }
 }

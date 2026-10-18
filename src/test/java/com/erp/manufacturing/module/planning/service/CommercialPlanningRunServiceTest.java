@@ -247,6 +247,7 @@ class CommercialPlanningRunServiceTest {
                 .thenReturn(List.of(new SupplySuggestionConversionRepository.SuggestionQuantityProjection() {
                     @Override public UUID getSupplySuggestionId() { return suggestion.getSupplySuggestionId(); }
                     @Override public BigDecimal getQuantity() { return new BigDecimal("40"); }
+                    @Override public Long getRowCount() { return 1L; }
                 }));
 
         MrpRequirementLineResponse response = service.listRequirements(run.getMrpRunId(), PageRequest.of(0, 50))

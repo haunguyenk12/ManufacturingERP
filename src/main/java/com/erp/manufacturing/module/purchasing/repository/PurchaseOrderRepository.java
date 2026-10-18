@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +19,12 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
 
     boolean existsByCompanyCompanyIdAndPurchaseOrderNo(UUID companyId, String purchaseOrderNo);
 
+    /**
+     * G7a adds {@code search} (number, reference, supplier code or name) and an inclusive
+     * {@code orderDate} range. Every nullable parameter is cast: an untyped {@code null} inside
+     * {@code concat}/{@code like} makes Postgres pick {@code bytea} and fail the whole query
+     * ({@code §0.24}), and a date only seen in {@code is null} has no type at all ({@code §0.36}).
+     */
     @EntityGraph(attributePaths = {"company", "plant", "warehouse", "supplier"})
     @Query("""
             select p
@@ -27,13 +34,27 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
               and (:warehouseId is null or p.warehouse.warehouseId = :warehouseId)
               and (:supplierId is null or p.supplier.supplierId = :supplierId)
               and (:status is null or p.status = :status)
+              and (cast(:search as string) is null
+                   or lower(p.purchaseOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(coalesce(p.reference, '')) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.supplier.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.supplier.name) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:orderDateFrom as date) is null or p.orderDate >= :orderDateFrom)
+              and (cast(:orderDateTo as date) is null or p.orderDate <= :orderDateTo)
             """)
     Page<PurchaseOrder> search(@Param("companyId") UUID companyId,
                                @Param("plantId") UUID plantId,
                                @Param("warehouseId") UUID warehouseId,
                                @Param("supplierId") UUID supplierId,
                                @Param("status") PurchaseOrderStatus status,
+                               @Param("search") String search,
+                               @Param("orderDateFrom") LocalDate orderDateFrom,
+                               @Param("orderDateTo") LocalDate orderDateTo,
                                Pageable pageable);
+
+    /** Next value of {@code purchase_order_number_seq} (V76) — concurrent drafts never share a number. */
+    @Query(value = "select nextval('purchase_order_number_seq')", nativeQuery = true)
+    long nextOrderNumber();
 
     @EntityGraph(attributePaths = {
             "company",
@@ -49,7 +70,7 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
 
     @Query("""
             select l.item.itemId as itemId,
-                   coalesce(sum(l.orderedQuantity - l.receivedQuantity), 0) as openSupplyQuantity
+                   coalesce(sum(l.orderedQuantity - l.receivedQuantity - l.closedQuantity), 0) as openSupplyQuantity
             from PurchaseOrderLine l
             join l.purchaseOrder o
             where o.company.companyId = :companyId
@@ -57,7 +78,7 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
               and l.item.itemId in :itemIds
               and o.warehouse.warehouseId in :warehouseIds
               and o.status in :statuses
-              and l.orderedQuantity - l.receivedQuantity > 0
+              and l.orderedQuantity - l.receivedQuantity - l.closedQuantity > 0
             group by l.item.itemId
             """)
     List<PurchaseOrderSupplyProjection> aggregateOpenSupply(

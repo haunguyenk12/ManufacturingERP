@@ -26,12 +26,12 @@ import java.util.stream.Collectors;
 public class PurchaseOrderSupplyService {
 
     /**
-     * Only orders already sent to the supplier count as goods that will arrive. {@code DRAFT} does
-     * not: nothing has been promised yet. {@code RECEIVED}/{@code CANCELLED} have no open quantity
-     * left to expect.
+     * Only confirmed orders count as goods that will arrive. {@code DRAFT} does not: nothing has
+     * been promised yet. {@code FULLY_RECEIVED}/{@code CLOSED}/{@code CANCELLED} have no open
+     * quantity left to expect (G7a renamed {@code SENT} to {@code CONFIRMED}).
      */
     private static final List<PurchaseOrderStatus> OPEN_SUPPLY_STATUSES = List.of(
-            PurchaseOrderStatus.SENT,
+            PurchaseOrderStatus.CONFIRMED,
             PurchaseOrderStatus.PARTIALLY_RECEIVED);
 
     private final PurchaseOrderRepository purchaseOrderRepository;

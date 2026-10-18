@@ -88,8 +88,17 @@ public class MrpPlanningMapper {
                                                  SupplySuggestion suggestion,
                                                  BigDecimal ledgerSum,
                                                  List<PlanningConversionResponse> conversions) {
+        return toResponse(line, suggestion, ledgerSum, ledgerSum != null && ledgerSum.signum() > 0, conversions);
+    }
+
+    /** @param hasLedgerRows whether any ledger row (released or not) exists for the proposal */
+    public MrpRequirementLineResponse toResponse(MrpRequirementLine line,
+                                                 SupplySuggestion suggestion,
+                                                 BigDecimal ledgerSum,
+                                                 boolean hasLedgerRows,
+                                                 List<PlanningConversionResponse> conversions) {
         Warehouse warehouse = line.getWarehouse();
-        BigDecimal converted = suggestion == null ? null : convertedQuantity(suggestion, ledgerSum);
+        BigDecimal converted = suggestion == null ? null : convertedQuantity(suggestion, ledgerSum, hasLedgerRows);
         MrpRequirementLine parent = line.getParentRequirementLine();
         return new MrpRequirementLineResponse(
                 line.getMrpRequirementLineId(),
@@ -145,7 +154,9 @@ public class MrpPlanningMapper {
                 conversion.getTargetCode(),
                 conversion.getConversionVersion(),
                 conversion.getCreatedAt(),
-                conversion.getCreatedBy());
+                conversion.getCreatedBy(),
+                conversion.getReleasedAt(),
+                conversion.getReleaseReason());
     }
 
     /**
@@ -153,8 +164,18 @@ public class MrpPlanningMapper {
      * legacy endpoint (status {@code CONVERTED}, no ledger row) converted all of it in one go.
      */
     public static BigDecimal convertedQuantity(SupplySuggestion suggestion, BigDecimal ledgerSum) {
-        BigDecimal sum = ledgerSum == null ? BigDecimal.ZERO : ledgerSum;
-        if (sum.signum() == 0 && suggestion.getStatus() == SupplySuggestionStatus.CONVERTED) {
+        return convertedQuantity(suggestion, ledgerSum, ledgerSum != null && ledgerSum.signum() > 0);
+    }
+
+    /**
+     * A proposal {@code CONVERTED} by the legacy one-shot endpoints has no ledger rows and counts as
+     * fully converted. One the ledger touched counts only its held rows — so a purchase order
+     * cancelled since (G7a, released rows) gives its quantity back even though the proposal stays
+     * {@code CONVERTED}.
+     */
+    public static BigDecimal convertedQuantity(SupplySuggestion suggestion, BigDecimal heldSum, boolean hasLedgerRows) {
+        BigDecimal sum = heldSum == null ? BigDecimal.ZERO : heldSum;
+        if (!hasLedgerRows && suggestion.getStatus() == SupplySuggestionStatus.CONVERTED) {
             return suggestion.getSuggestedQuantity();
         }
         return sum;

@@ -78,7 +78,7 @@ sản xuất, 2 ca, 2 lịch, 3 nhà cung cấp, giá thành chuẩn, tồn kho 
 | Giá thành chuẩn | 40 | Nguyên vật liệu mang giá mua; BTP/TP mang nhân công + sản xuất chung, phần vật tư do BOM roll-up |
 | Nhà cung cấp | 3 | 31 liên kết vật tư ↔ nhà cung cấp |
 | Yêu cầu mua hàng | 3 | `DRAFT` · `APPROVED` · `CONVERTED` |
-| Đơn mua hàng | 5 | `DRAFT` · `SENT` ×2 · `PARTIALLY_RECEIVED` · `RECEIVED` (có phiếu nhập kho thật) |
+| Đơn mua hàng | 5 | `DRAFT` · `CONFIRMED` ×2 · `PARTIALLY_RECEIVED` · `FULLY_RECEIVED` (có phiếu nhập kho thật; G7a đổi tên `SENT`/`RECEIVED`) |
 | Đơn bán hàng | 6 | `DRAFT` · `CONFIRMED` ×2 · `CANCELLED` · `PARTIALLY_FULFILLED` · `FULFILLED` |
 | Lượt chạy MRP | **3** | Hai lượt đã xử lý xong; lượt thứ ba để lại **32 đề xuất `DRAFT`** (26 BUY + 6 MAKE, đều `READY`) |
 | Lệnh sản xuất | **8** | `DRAFT` · `PLANNED` · `RELEASED` · `IN_PROGRESS` ×2 · `CLOSED` ×2 · `CANCELLED` |

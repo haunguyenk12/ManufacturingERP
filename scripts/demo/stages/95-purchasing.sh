@@ -73,11 +73,11 @@ log "PO-3001 — DRAFT"
 po_create "PO-3001" "NCC-VANH" "VANH-275" 150 520000 12; PO3001="$NEW_ID"
 assert_status "/purchase-orders/$PO3001" "DRAFT"
 
-# A SENT order is open supply: MRP nets it against demand, so it makes future runs propose less.
-log "PO-3002 — SENT (nguồn cung đang mở, MRP sẽ trừ vào nhu cầu)"
+# A CONFIRMED (formerly SENT) order is open supply: MRP nets it against demand, so it makes future runs propose less.
+log "PO-3002 — CONFIRMED (nguồn cung đang mở, MRP sẽ trừ vào nhu cầu)"
 po_create "PO-3002" "NCC-TRUYENDONG" "XICH" 120 198000 18; PO3002="$NEW_ID"
 call POST "/purchase-orders/$PO3002/send" >/dev/null
-assert_status "/purchase-orders/$PO3002" "SENT"
+assert_status "/purchase-orders/$PO3002" "CONFIRMED"
 
 log "PO-3005 — CANCELLED"
 po_create "PO-3005" "NCC-VANH" "MOAYO" 90 390000 15; PO3005="$NEW_ID"
@@ -114,7 +114,7 @@ assert_status "/goods-receipts/$GR4002" "CANCELLED"
 # ONG-NHOM is lot-tracked, so lotCode is mandatory on the receipt line. Never put a serial-tracked
 # item on a purchase order: GoodsReceiptService has no serial support and answers SERIAL_REQUIRED.
 if [ -n "${ID[purchaseOrders.PO-3004]:-}" ]; then
-    log "PO-3004 — SENT rồi nhận đủ ⇒ RECEIVED"
+    log "PO-3004 — CONFIRMED rồi nhận đủ ⇒ FULLY_RECEIVED"
     call POST "/purchase-orders/${ID[purchaseOrders.PO-3004]}/send" >/dev/null
     PO3004_JSON=$(call GET "/purchase-orders/${ID[purchaseOrders.PO-3004]}")
     PO3004_LINE=$(echo "$PO3004_JSON" | extract "d['result']['lines'][0]['purchaseOrderLineId']")
@@ -123,5 +123,5 @@ if [ -n "${ID[purchaseOrders.PO-3004]:-}" ]; then
         "{\"receiptNo\":\"GR-4003\",\"note\":\"Giao đủ theo đơn, 2 pallet\",\"lines\":[{\"purchaseOrderLineId\":\"$PO3004_LINE\",\"lotCode\":\"LO-NHOM-03\",\"receivedQuantity\":$PO3004_QTY}]}" \
         -H "Idempotency-Key: DEMO-NHAPMUA-3004-1" | rid goodsReceiptId)
     remember "goodsReceipts.GR-4003" "$GR4003"
-    assert_status "/purchase-orders/${ID[purchaseOrders.PO-3004]}" "RECEIVED"
+    assert_status "/purchase-orders/${ID[purchaseOrders.PO-3004]}" "FULLY_RECEIVED"
 fi

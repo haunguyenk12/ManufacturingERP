@@ -43,7 +43,7 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
 
     private static final LocalDate ORDER_DATE = LocalDate.of(2026, 8, 1);
     private static final List<PurchaseOrderStatus> OPEN_STATUSES = List.of(
-            PurchaseOrderStatus.SENT,
+            PurchaseOrderStatus.CONFIRMED,
             PurchaseOrderStatus.PARTIALLY_RECEIVED);
 
     @Autowired
@@ -59,7 +59,7 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
         Supplier supplier = persistSupplier(company);
         Item item = persistItem(company);
 
-        PurchaseOrder sent = persistOrder(warehouse, supplier, "PO-SENT", PurchaseOrderStatus.SENT);
+        PurchaseOrder sent = persistOrder(warehouse, supplier, "PO-SENT", PurchaseOrderStatus.CONFIRMED);
         persistLine(sent, item, new BigDecimal("100.000000"), BigDecimal.ZERO);
         PurchaseOrder partial = persistOrder(warehouse, supplier, "PO-PARTIAL",
                 PurchaseOrderStatus.PARTIALLY_RECEIVED);
@@ -86,11 +86,11 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
 
         persistLine(persistOrder(warehouse, supplier, "PO-DRAFT", PurchaseOrderStatus.DRAFT),
                 item, new BigDecimal("10.000000"), BigDecimal.ZERO);
-        persistLine(persistOrder(warehouse, supplier, "PO-RECEIVED", PurchaseOrderStatus.RECEIVED),
+        persistLine(persistOrder(warehouse, supplier, "PO-RECEIVED", PurchaseOrderStatus.FULLY_RECEIVED),
                 item, new BigDecimal("10.000000"), BigDecimal.ZERO);
         persistLine(persistOrder(warehouse, supplier, "PO-CANCELLED", PurchaseOrderStatus.CANCELLED),
                 item, new BigDecimal("10.000000"), BigDecimal.ZERO);
-        persistLine(persistOrder(warehouse, supplier, "PO-SENT", PurchaseOrderStatus.SENT),
+        persistLine(persistOrder(warehouse, supplier, "PO-SENT", PurchaseOrderStatus.CONFIRMED),
                 item, new BigDecimal("7.000000"), BigDecimal.ZERO);
 
         List<PurchaseOrderSupplyProjection> supply = repository.aggregateOpenSupply(
@@ -142,9 +142,9 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
         Supplier supplier = persistSupplier(company);
         Item item = persistItem(company);
 
-        persistLine(persistOrder(otherWarehouse, supplier, "PO-OTHER-WH", PurchaseOrderStatus.SENT),
+        persistLine(persistOrder(otherWarehouse, supplier, "PO-OTHER-WH", PurchaseOrderStatus.CONFIRMED),
                 item, new BigDecimal("40.000000"), BigDecimal.ZERO);
-        persistLine(persistOrder(warehouse, supplier, "PO-IN-SCOPE", PurchaseOrderStatus.SENT),
+        persistLine(persistOrder(warehouse, supplier, "PO-IN-SCOPE", PurchaseOrderStatus.CONFIRMED),
                 item, new BigDecimal("6.000000"), BigDecimal.ZERO);
 
         List<PurchaseOrderSupplyProjection> supply = repository.aggregateOpenSupply(
@@ -166,9 +166,9 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
         Supplier supplier = persistSupplier(company);
         Item item = persistItem(company);
 
-        persistLine(persistOrder(foreignWarehouse, supplier, "PO-OTHER-PLANT", PurchaseOrderStatus.SENT),
+        persistLine(persistOrder(foreignWarehouse, supplier, "PO-OTHER-PLANT", PurchaseOrderStatus.CONFIRMED),
                 item, new BigDecimal("40.000000"), BigDecimal.ZERO);
-        persistLine(persistOrder(warehouse, supplier, "PO-IN-SCOPE", PurchaseOrderStatus.SENT),
+        persistLine(persistOrder(warehouse, supplier, "PO-IN-SCOPE", PurchaseOrderStatus.CONFIRMED),
                 item, new BigDecimal("5.000000"), BigDecimal.ZERO);
 
         List<PurchaseOrderSupplyProjection> supply = repository.aggregateOpenSupply(
@@ -182,6 +182,120 @@ class PurchaseOrderRepositoryIT extends AbstractPostgresIntegrationTest {
 
         assertThat(supply).hasSize(1);
         assertThat(supply.get(0).getOpenSupplyQuantity()).isEqualByComparingTo("5");
+    }
+
+    // ── G7a ────────────────────────────────────────────────────────────────
+
+    /** G7a: a closed remainder is no longer expected — open = ordered − received − closed. */
+    @Test
+    void aggregateOpenSupply_subtractsTheClosedQuantity() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Supplier supplier = persistSupplier(company);
+        Item item = persistItem(company);
+        Item fullyClosed = persistItem(company);
+
+        PurchaseOrder order = persistOrder(warehouse, supplier, "PO-CLOSED-PART", PurchaseOrderStatus.PARTIALLY_RECEIVED);
+        PurchaseOrderLine open = persistLine(order, item, new BigDecimal("10.000000"), new BigDecimal("2.000000"));
+        open.setClosedQuantity(new BigDecimal("3.000000"));
+        PurchaseOrderLine closed = persistLine(order, fullyClosed, new BigDecimal("10.000000"), new BigDecimal("4.000000"));
+        closed.setClosedQuantity(new BigDecimal("6.000000"));
+        entityManager.flush();
+
+        List<PurchaseOrderSupplyProjection> supply = repository.aggregateOpenSupply(
+                company.getCompanyId(),
+                warehouse.getPlant().getPlantId(),
+                List.of(warehouse.getWarehouseId()),
+                List.of(item.getItemId(), fullyClosed.getItemId()),
+                OPEN_STATUSES);
+
+        assertThat(supply).singleElement().satisfies(row -> {
+            assertThat(row.getItemId()).isEqualTo(item.getItemId());
+            assertThat(row.getOpenSupplyQuantity()).isEqualByComparingTo("5");
+        });
+    }
+
+    /** §0.24: an untyped null search term inside concat/like makes Postgres pick bytea and fail the query. */
+    @Test
+    void search_withoutTermOrDates_returnsEveryOrderOfThePlant() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Supplier supplier = persistSupplier(company);
+        persistOrder(warehouse, supplier, "PO-A", PurchaseOrderStatus.DRAFT);
+        persistOrder(warehouse, supplier, "PO-B", PurchaseOrderStatus.CLOSED);
+
+        var page = repository.search(company.getCompanyId(), warehouse.getPlant().getPlantId(), null, null, null,
+                null, null, null, org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void search_matchesNumberReferenceSupplierCodeAndName_caseInsensitively() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Supplier acme = persistSupplier(company);
+        acme.setName("ACME Metals");
+        Supplier other = persistSupplier(company);
+        PurchaseOrder byReference = persistOrder(warehouse, other, "PO-REF", PurchaseOrderStatus.DRAFT);
+        byReference.setReference("Delivery-XYZ-7");
+        PurchaseOrder bySupplier = persistOrder(warehouse, acme, "PO-SUP", PurchaseOrderStatus.DRAFT);
+        PurchaseOrder byNumber = persistOrder(warehouse, other, "PO-NUMBERMATCH", PurchaseOrderStatus.DRAFT);
+        persistOrder(warehouse, other, "PO-NOISE", PurchaseOrderStatus.DRAFT);
+        entityManager.flush();
+        UUID companyId = company.getCompanyId();
+        UUID plantId = warehouse.getPlant().getPlantId();
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+
+        assertThat(repository.search(companyId, plantId, null, null, null, "xyz-7", null, null, pageable).getContent())
+                .containsExactly(byReference);
+        assertThat(repository.search(companyId, plantId, null, null, null, "acme met", null, null, pageable).getContent())
+                .containsExactly(bySupplier);
+        assertThat(repository.search(companyId, plantId, null, null, null, acme.getCode().toLowerCase(), null, null, pageable)
+                .getContent()).containsExactly(bySupplier);
+        assertThat(repository.search(companyId, plantId, null, null, null, "numbermatch", null, null, pageable).getContent())
+                .containsExactly(byNumber);
+    }
+
+    @Test
+    void search_orderDateRangeIsInclusiveOnBothEnds() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        Supplier supplier = persistSupplier(company);
+        PurchaseOrder before = persistOrder(warehouse, supplier, "PO-BEFORE", PurchaseOrderStatus.DRAFT);
+        before.setOrderDate(ORDER_DATE.minusDays(1));
+        PurchaseOrder first = persistOrder(warehouse, supplier, "PO-FIRST", PurchaseOrderStatus.DRAFT);
+        PurchaseOrder last = persistOrder(warehouse, supplier, "PO-LAST", PurchaseOrderStatus.DRAFT);
+        last.setOrderDate(ORDER_DATE.plusDays(2));
+        PurchaseOrder after = persistOrder(warehouse, supplier, "PO-AFTER", PurchaseOrderStatus.DRAFT);
+        after.setOrderDate(ORDER_DATE.plusDays(3));
+        entityManager.flush();
+
+        var page = repository.search(company.getCompanyId(), warehouse.getPlant().getPlantId(), null, null, null,
+                null, ORDER_DATE, ORDER_DATE.plusDays(2), org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertThat(page.getContent()).containsExactlyInAnyOrder(first, last);
+    }
+
+    @Test
+    void nextOrderNumber_neverRepeats() {
+        long first = repository.nextOrderNumber();
+        long second = repository.nextOrderNumber();
+
+        assertThat(second).isGreaterThan(first);
+    }
+
+    /** V76: the DB itself refuses received + closed above ordered — the service is not the only guard. */
+    @Test
+    void receivedPlusClosedAboveOrdered_isRejectedByTheDatabase() {
+        Warehouse warehouse = persistWarehouse();
+        Company company = warehouse.getPlant().getCompany();
+        PurchaseOrderLine line = persistLine(persistOrder(warehouse, persistSupplier(company), "PO-CHK",
+                PurchaseOrderStatus.CLOSED), persistItem(company), new BigDecimal("10"), new BigDecimal("6"));
+        line.setClosedQuantity(new BigDecimal("4.000001"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> entityManager.flush())
+                .hasMessageContaining("chk_po_lines_received_closed_within_ordered");
     }
 
     // @DataJpaTest does not load JpaAuditingConfig/SecurityAuditorAware, so createdAt/updatedAt

@@ -574,7 +574,7 @@ print(json.dumps([{'purchaseRequisitionLineId': l['purchaseRequisitionLineId'],
             | rid purchaseOrderId)
         remember "purchaseOrders.$PR3_PO_NO" "$poid"
         call POST "/v1/purchase-orders/$poid/send" >/dev/null
-        info "$reqno -> $state -> $PR3_PO_NO (SENT)"
+        info "$reqno -> $state -> $PR3_PO_NO (CONFIRMED)"
     else
         info "$reqno -> $state"
     fi
@@ -601,9 +601,9 @@ while IFS='|' read -r pono supcode state lines; do
     [ "$state" = "DRAFT" ] && { info "$pono -> DRAFT"; continue; }
 
     call POST "/v1/purchase-orders/$poid/send" >/dev/null
-    [ "$state" = "SENT" ] && { info "$pono -> SENT"; continue; }
+    [ "$state" = "CONFIRMED" ] && { info "$pono -> CONFIRMED"; continue; }
 
-    # PARTIALLY_RECEIVED nhận nửa số đặt; RECEIVED nhận đủ. Cả hai đều làm tăng tồn kho thật
+    # PARTIALLY_RECEIVED nhận nửa số đặt; FULLY_RECEIVED nhận đủ. Cả hai đều làm tăng tồn kho thật
     # qua ledger, nên số trên màn hình kho là hệ quả của chứng từ chứ không phải số bịa.
     if [ "$state" = "PARTIALLY_RECEIVED" ]; then ratio=0.5; else ratio=1; fi
     gr_lines=$(echo "$PO_JSON" | "$PY" -c "

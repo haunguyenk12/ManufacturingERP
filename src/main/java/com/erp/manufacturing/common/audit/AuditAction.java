@@ -157,6 +157,12 @@ public enum AuditAction {
     PURCHASE_ORDER_CREATED,
     PURCHASE_ORDER_SENT,
     PURCHASE_ORDER_CANCELLED,
+    /** G7a: draft saved through {@code PATCH /v1/purchase-orders/{id}}. */
+    PURCHASE_ORDER_UPDATED,
+    /** G7a: {@code POST /{id}/confirm}; the legacy {@code /send} keeps {@link #PURCHASE_ORDER_SENT}. */
+    PURCHASE_ORDER_CONFIRMED,
+    /** G7a: the open remainder was closed. */
+    PURCHASE_ORDER_CLOSED,
     GOODS_RECEIPT_POSTED,
     GOODS_RECEIPT_CANCELLED,
     ITEM_CREATED,
