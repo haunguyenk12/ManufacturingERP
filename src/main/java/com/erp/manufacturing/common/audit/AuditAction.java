@@ -116,6 +116,8 @@ public enum AuditAction {
     SUPPLY_SUGGESTION_APPROVED,
     SUPPLY_SUGGESTION_REJECTED,
     SUPPLY_SUGGESTION_CONVERTED,
+    /** G6b: one conversion request of a commercial run (one or more draft documents). */
+    MRP_RUN_CONVERSION_CREATED,
     SUPPLIER_CREATED,
     SUPPLIER_UPDATED,
     SUPPLIER_DEACTIVATED,

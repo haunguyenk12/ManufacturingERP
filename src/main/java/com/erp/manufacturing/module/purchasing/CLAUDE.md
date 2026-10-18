@@ -44,3 +44,10 @@ cho phần đã làm.
 | # | Bất biến | Test bảo vệ |
 |---|---|---|
 | B141 | Đường company-scoped FE §3.4 (`GET/POST /v1/companies/{companyId}/suppliers`, `POST /v1/suppliers/{id}/activate`, `POST /v1/suppliers/{id}/deactivate`) được **thêm song song**, không thay đường cũ (`/v1/suppliers?companyId=&keyword=`, `PATCH .../deactivate`) — purchasing và seed script vẫn gọi đường cũ (`§9.2 D1`). `createForCompany` mang **`@PreAuthorize`/`@Auditable` riêng** và chỉ chia sẻ routine **private** `createInCompany` với `create` — gọi method public kia qua `this` là bypass proxy, mất cả guard lẫn audit (bẫy `§0.19` hệ quả #3). `activate` idempotent, **chặn khi company `INACTIVE`** (`B108`), audit `SUPPLIER_ACTIVATED`. `contactName` (255) / `notes` (500) — cột từ `V69` — PATCH cùng luật `B136` (`null` giữ, rỗng xoá). `taxCode`/`companyCode` giữ nguyên trên response | `SupplierServiceTest` (+7: `createForCompany_*`, `update_nullKeepsContactAndNotes_blankClearsThem`, `activate_*`), `PurchasingMethodSecurityTest` (+4, deny+allow+verify chuỗi `PERM_SUPPLIER_MANAGE`), `SupplierControllerTest` (+5) |
+
+## G6b — Đơn mua nháp từ chuyển đổi hoạch định (2026-10-18)
+
+`PurchaseOrderService.createFromPlanning(...)`: PO `DRAFT`, số `PO-MRP-xxxxxxxx` do server sinh (thử lại khi trùng), không giá, ngày đặt
+do caller truyền (hôm nay theo múi giờ nhà máy), `expectedDate` đầu phiếu = max(ngày đặt, ngày cần sớm nhất), mỗi dòng giữ ngày cần riêng.
+Supplier/kho/item kiểm y như `create`. **Không `@PreAuthorize`**: caller duy nhất là `PlanningConversionService` (đã gác
+`PERM_SUPPLY_SUGGESTION_MANAGE` trên plant — FE Q5, quyền PO riêng để GĐ7). Có `@Auditable(PURCHASE_ORDER_CREATED)`. Không gọi từ controller.

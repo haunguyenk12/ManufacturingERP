@@ -5,6 +5,10 @@ import com.erp.manufacturing.module.planning.domain.*;
 import com.erp.manufacturing.module.planning.dto.*;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
 @Component
 public class MrpPlanningMapper {
 
@@ -33,6 +37,11 @@ public class MrpPlanningMapper {
     }
 
     public MrpRunResponse toResponse(MrpRun run) {
+        return toResponse(run, null);
+    }
+
+    /** @param currentSourceState {@code CURRENT}/{@code STALE}, computed by the caller on detail reads only. */
+    public MrpRunResponse toResponse(MrpRun run, String currentSourceState) {
         Warehouse warehouse = run.getWarehouse();
         return new MrpRunResponse(
                 run.getMrpRunId(),
@@ -58,11 +67,30 @@ public class MrpPlanningMapper {
                 run.getBlockedProposals(),
                 run.getErrorMessage(),
                 run.getCreatedAt(),
-                run.getUpdatedAt());
+                run.getUpdatedAt(),
+                run.getRunKind().name(),
+                run.getSourceVersion(),
+                currentSourceState,
+                run.getConversionVersion(),
+                run.getInputSnapshot());
     }
 
     public MrpRequirementLineResponse toResponse(MrpRequirementLine line) {
+        return toResponse(line, null, BigDecimal.ZERO, null);
+    }
+
+    /**
+     * @param suggestion   the proposal of this line, or {@code null} when nothing is to be supplied
+     * @param ledgerSum    quantity already converted through the G6b ledger
+     * @param conversions  ledger rows, only for the detail read
+     */
+    public MrpRequirementLineResponse toResponse(MrpRequirementLine line,
+                                                 SupplySuggestion suggestion,
+                                                 BigDecimal ledgerSum,
+                                                 List<PlanningConversionResponse> conversions) {
         Warehouse warehouse = line.getWarehouse();
+        BigDecimal converted = suggestion == null ? null : convertedQuantity(suggestion, ledgerSum);
+        MrpRequirementLine parent = line.getParentRequirementLine();
         return new MrpRequirementLineResponse(
                 line.getMrpRequirementLineId(),
                 line.getMrpRun().getMrpRunId(),
@@ -88,7 +116,77 @@ public class MrpPlanningMapper {
                 line.getWarehouseResolutionSource().name(),
                 line.getExcludedLotCount(),
                 line.getNote(),
-                line.getCreatedAt());
+                line.getCreatedAt(),
+                sourceKind(line),
+                sourceSalesOrderLineIds(line.getSourceDemand()),
+                parent == null ? List.of() : List.of(parent.getMrpRequirementLineId()),
+                suggestion != null && suggestion.isBlocked() ? "BLOCKED" : "CALCULATED",
+                suggestion == null ? null : suggestion.getSupplySuggestionId(),
+                suggestion == null ? null : suggestion.getSuggestionType().supplyType(),
+                suggestion == null ? null : suggestion.getExceptionState().name(),
+                suggestion == null ? List.of() : suggestion.messages(),
+                converted,
+                converted == null ? null : remaining(suggestion.getSuggestedQuantity(), converted),
+                conversions);
+    }
+
+    public PlanningConversionResponse toResponse(SupplySuggestionConversion conversion) {
+        return new PlanningConversionResponse(
+                conversion.getConversionId(),
+                conversion.getConversionBatchId(),
+                conversion.getMrpRunId(),
+                conversion.getRequirementLineId(),
+                conversion.getSupplySuggestionId(),
+                conversion.getEntryNo(),
+                conversion.getQuantity(),
+                conversion.getTargetType().name(),
+                conversion.getTargetId(),
+                conversion.getTargetLineId(),
+                conversion.getTargetCode(),
+                conversion.getConversionVersion(),
+                conversion.getCreatedAt(),
+                conversion.getCreatedBy());
+    }
+
+    /**
+     * Quantity of a proposal already turned into documents. A proposal converted through the
+     * legacy endpoint (status {@code CONVERTED}, no ledger row) converted all of it in one go.
+     */
+    public static BigDecimal convertedQuantity(SupplySuggestion suggestion, BigDecimal ledgerSum) {
+        BigDecimal sum = ledgerSum == null ? BigDecimal.ZERO : ledgerSum;
+        if (sum.signum() == 0 && suggestion.getStatus() == SupplySuggestionStatus.CONVERTED) {
+            return suggestion.getSuggestedQuantity();
+        }
+        return sum;
+    }
+
+    public static BigDecimal remaining(BigDecimal suggested, BigDecimal converted) {
+        BigDecimal rest = suggested.subtract(converted);
+        return rest.signum() > 0 ? rest : BigDecimal.ZERO;
+    }
+
+    private static String sourceKind(MrpRequirementLine line) {
+        if (line.getRequirementLevel() != null && line.getRequirementLevel() > 0) {
+            return "COMPONENT";
+        }
+        PlanningDemand demand = line.getSourceDemand();
+        if (demand == null) {
+            return null;
+        }
+        return demand.getDemandType() == PlanningDemandType.SALES_ORDER ? "SALES" : demand.getDemandType().name();
+    }
+
+    private static List<UUID> sourceSalesOrderLineIds(PlanningDemand demand) {
+        if (demand == null
+                || !"SALES_ORDER_LINE".equals(demand.getReferenceType())
+                || demand.getReferenceId() == null) {
+            return List.of();
+        }
+        try {
+            return List.of(UUID.fromString(demand.getReferenceId()));
+        } catch (IllegalArgumentException ex) {
+            return List.of();
+        }
     }
 
     public SupplySuggestionResponse toResponse(SupplySuggestion suggestion) {

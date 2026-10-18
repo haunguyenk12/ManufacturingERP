@@ -292,3 +292,10 @@ thầm viết lại utilization của một ngày đã báo cáo trước đó |
 | B176 | `SalesOrderStockReservationService.reserve`: có `lotId` ⇒ đúng lô đó, lô phải `AVAILABLE` **và chưa hết hạn** (`LOT_NOT_ELIGIBLE`); không `lotId` + vật tư theo lô ⇒ **FEFO** qua `StockBalanceRepository.findReservableBalancesFefo` (loại lô quá hạn — **khác** `findIssuableBalancesFefo` của WO vốn không xét hạn, G4 B154), mỗi lô một dòng giữ, **all-or-nothing** (thiếu ⇒ `INSUFFICIENT_STOCK`, không ghi gì); vật tư sê-ri ⇒ 422. `release` chỉ dòng ACTIVE **của chính đơn** (`404` cho đơn khác/WO) | `SalesOrderStockReservationServiceTest` (10), `SalesOrderReservationIT.reserveWithoutALot_*` (mutation bỏ điều kiện hết hạn ⇒ đỏ) |
 
 `SalesOrderCoverageLookupService` (`service/query/`) là entry point đọc coverage cho `sales`: `sumOpenCoverageBySalesOrderLineIds` (loại WO `CANCELLED`/`CLOSED`) và `findLinkedWorkOrders` (cho `linkedDocuments[]`).
+
+## G6b — Phần gắn đơn của lệnh SX từ chuyển đổi (2026-10-18)
+
+`WorkOrderService.createFromMrp(…, allocationCap)` + `WorkOrderDemandAllocationService.allocate(workOrder, lineId, cap)`: `cap = null`
+giữ luật F6 (`min(planned, openQuantity)`); chuyển đổi G6b truyền `uncovered` của dòng đơn đọc lại lúc chuyển ⇒ hai run cùng phủ một dòng
+không gắn quá phần còn thiếu (phần vượt là WO không gắn đơn). Bản 4 tham số cũ gọi bản 5 tham số qua `this` — nó tự mang
+`@PreAuthorize`/`@Auditable` nên không mất guard. Test: `PlanningConversionServiceTest.convert_firstPartialMake_*` (B183, planning).

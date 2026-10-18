@@ -78,6 +78,12 @@ public enum BusinessErrorCode implements ErrorCode {
     OPERATION_SEQUENCE_CONFLICT("OPERATION_SEQUENCE_CONFLICT", "Schedule overlaps the previous or next operation", HttpStatus.CONFLICT),
     /** G5: the calendar has no working time to place the request in (no calendar, or none within the horizon). */
     SCHEDULING_UNAVAILABLE    ("SCHEDULING_UNAVAILABLE",    "No working time is available to schedule this", HttpStatus.CONFLICT),
+    /**
+     * G6b: the sources a commercial planning run was computed from (sales order lines, held stock,
+     * active BOMs and routings) changed since the run, or the client echoed another run's token.
+     * The fix is a new run, not a retry — hence not STATE_CONFLICT.
+     */
+    PLANNING_SOURCE_STALE     ("PLANNING_SOURCE_STALE",     "Planning sources changed; run planning again before converting", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */

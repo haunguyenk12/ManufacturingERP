@@ -16,6 +16,9 @@ import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import com.erp.manufacturing.module.planning.repository.SupplySuggestionConversionRepository;
+import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +54,10 @@ class MrpRunServiceTest {
     @Mock MrpCalculationService calculationService;
     @Mock AuditLogService auditLogService;
     @Mock MrpRunStateRecorder runStateRecorder;
+    @Mock SalesOrderPlanningSourceService salesOrderPlanningSourceService;
+    @Mock PlanningSourceVersionCalculator sourceVersionCalculator;
+    @Mock SupplySuggestionConversionRepository conversionRepository;
+    @Mock ItemLookupService itemLookupService;
 
     MrpRunService service;
 
@@ -67,7 +74,11 @@ class MrpRunServiceTest {
                 new MrpPlanningMapper(),
                 auditLogService,
                 new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
-                runStateRecorder);
+                runStateRecorder,
+                salesOrderPlanningSourceService,
+                sourceVersionCalculator,
+                conversionRepository,
+                itemLookupService);
     }
 
     @Test

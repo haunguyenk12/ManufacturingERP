@@ -136,3 +136,30 @@ Qua `PurchaseOrderSupplyService` (`module/purchasing/service/query/`) — query 
 `MrpRunService` đếm tại chỗ từ `MrpCalculationResult` đang có trong tay — không query lại. Hệ quả:
 run tạo **trước** `V36` mang giá trị `0` ở cả 4 ô (migration không backfill chúng); số thật của run
 lịch sử vẫn đọc được từ `mrp_requirement_lines` / `supply_suggestions`.
+
+---
+
+## Bất Biến Run Thương Mại + Sổ Chuyển Đổi (`G6b`, 2026-10-18)
+
+Nguồn: `FE_HANDOFF_GD_06_2026-10-14.md`; quyết định D5–D10 + hai quyết định số liệu của user ở `NEXT_PHASE_PLAN.md §13`. Migration
+**`V75`**. Trả lời FE: `BE_RESPONSE_GD_06_2026-10-17_v2.md`.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B178 | **Stock target (`max(safetyStock, reorderPoint)`) cộng MỘT lần cho mỗi pool `(item, warehouse)`** — dòng đầu tiên của pool trong lượt chạy (qua mọi cấp BOM), các dòng sau `safetyStockQuantity = 0`. Áp cho **cả** run cũ (user chốt). Trước G6b mỗi dòng nhu cầu cùng pool mua lại cả tồn an toàn: A/B trên `D26-OMNIPLANT` 11 → 6 đề xuất, 8 → 3 đề xuất mua. Đẳng thức `B77` vẫn đúng **từng dòng** | `MrpCalculationServiceTest.calculate_twoDemandsInOnePool_addTheSafetyStockOnlyOnce` (mutation cộng mỗi dòng ⇒ đỏ) |
+| B179 | **Gross linh kiện = `ceil6(net cha × quantityPer × (1 + scrapRate))`** trước khi net (Q28, áp cả run cũ). Net cha luôn scale 6 (mọi số hạng đều scale 6) nên đó cũng chính là "ceil net MAKE trước khi nổ". Hao hụt **`× (1 + rate)`**, không phải `÷ (1 − rate)` của mock FE — quy ước toàn repo | `.calculate_componentDemand_isRoundedUpToSixDecimalsBeforeItIsNettedAndExploded` (0.33999966 ⇒ 0.340000, RAW 34.000000) |
+| B180 | **`POST /planning-runs/commercial`** lập kế hoạch `uncovered` của dòng đơn (B172), **không** `orderedQuantity` — tồn đơn đang giữ đã trừ ở khả dụng nên không đếm hai lần (A16). Mọi kiểm (kỳ ≤ 90 ngày cả hai đầu, `includeRop=true` ⇒ 422, mapping trùng/`outputWarehouseId ≠ demandWarehouseId` ⇒ 400, dòng ngoài plant ⇒ 404, đơn không hoạch định được / `uncovered = 0` / thiếu demand `OPEN` ⇒ 409) chạy **trước** khi row run tồn tại. `itemWarehouseMappings` ghi đè kho cho **mọi cấp** trong run (`RUN_ITEM_MAPPING`), không sửa master. Demand snapshot (`mrp_run_demands.required_quantity`) = lượng đã lập kế hoạch | `CommercialPlanningRunServiceTest` (9), `MrpCalculationServiceTest.calculate_runItemMappingAndQuantityOverride_winForRootAndComponents` |
+| B181 | **`sourceVersion`** = sha-256 của (mỗi dòng đơn nguồn: item, ordered, dueDate, đơn còn hoạch định được, held) + (mỗi item FG/WIP của run: id BOM `ACTIVE`, id routing `ACTIVE`). Tính lúc run xong; `computeCurrent` đọc lại **đúng các đầu vào đó** (SO line từ `mrp_run_demands`, item từ requirement lines). Cố ý **không** gồm tồn tự do/nguồn cung mở (đổi liên tục) và coverage WO/QC (chính chuyển đổi của run làm đổi) | `PlanningConversionRepositoryIT.sourceVersionInputs_*` (mutation nới bộ lọc type ⇒ đỏ), `CommercialPlanningRunServiceTest.get_commercialRunWhoseSourcesChanged_reportsStale_A26` |
+| B182 | **Chuyển đổi** (`PlanningConversionService.convert`, một transaction, dưới `PESSIMISTIC_WRITE` dòng run): replay theo `(run, Idempotency-Key)` → run COMMERCIAL + COMPLETED (`STATE_CONFLICT`) → `expectedConversionVersion` (`CONCURRENT_MODIFICATION`) → `expectedSourceVersion` = run (`PLANNING_SOURCE_STALE`) → `computeCurrent` = run (`PLANNING_SOURCE_STALE`, Q23) → entry thuộc run, có đề xuất, không `REJECTED`, không `BLOCKED` (mã B58) → cùng một loại → quantity ≤ `suggested − Σ sổ` (`PLANNED_QUANTITY_EXCEEDED` + field). Đề xuất chuyển qua đường cũ (CONVERTED, sổ rỗng) còn lại **0**. Lần chuyển đầu `markConverted` ⇒ đường `approve`/`convert-to-*` cũ không chuyển trùng | `PlanningConversionServiceTest` (14 — mutation bỏ kiểm còn lại / bỏ kiểm nguồn hiện tại / đổi mã stale ⇒ đỏ) |
+| B183 | **MAKE**: mỗi entry một WO `DRAFT` qua `WorkOrderService.createFromMrp` (snapshot BOM/routing, routing `ACTIVE` bắt buộc). Chỉ dòng **cấp 0** của demand `SALES_ORDER_LINE` gắn đơn, cap phần gắn = `uncovered` **đọc lại lúc chuyển** (`WorkOrderDemandAllocationService.allocate(…, cap)`). **BUY**: một PO `DRAFT` qua `PurchaseOrderService.createFromPlanning`, mọi entry cùng kho nhận, `supplierId` bắt buộc | `.convert_firstPartialMake_createsADraftWorkOrderCappedByTheUncoveredQuantity_A27` (mutation cap `null` ⇒ đỏ), `.convert_componentProposal_isNotAllocatedToTheSalesOrder_A28`, `.convert_buy_createsOneDraftPurchaseOrderForAllEntries_A31` |
+
+**Quyết định cần nhớ:**
+
+1. 🔴 **Không có bảng `mrp_requirement_sources` (lệch D7 của kế hoạch).** Engine không bao giờ gộp nhiều nguồn vào một dòng — mỗi seed
+   một dòng, một cha, một demand gốc — nên bảng nối sẽ luôn đúng một hàng/dòng. `sourceKind`/`sourceSalesOrderLineIds`/
+   `parentRequirementLineIds` suy từ cột có sẵn trong mapper. Pool `(item, warehouse)` vẫn net tồn dùng chung một lần (A18).
+2. **`/conversions` chỉ nhận run thương mại** — run cũ không có `sourceVersion`, dùng đường cũ.
+3. **Replay trả `documents[].status = null`** — sổ không lưu trạng thái hiện tại của chứng từ.
+4. **Hướng phụ thuộc mới `planning → sales`** (`SalesOrderPlanningSourceService`) và `planning → purchasing` thêm `createFromPlanning`.
+   Không vòng bean: `SalesOrderPlanningSourceService` chỉ phụ thuộc repository sales + hai service workorder chỉ đọc repository.
+5. **`completedAt` của run cắt µs** (§0.51 #3); `createdAt` của sổ (auditing) thì chưa — giới hạn toàn hệ thống.

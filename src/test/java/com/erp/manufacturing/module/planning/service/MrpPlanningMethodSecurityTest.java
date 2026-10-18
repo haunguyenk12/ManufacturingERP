@@ -14,6 +14,9 @@ import com.erp.manufacturing.module.planning.repository.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import com.erp.manufacturing.module.planning.repository.SupplySuggestionConversionRepository;
+import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -119,6 +122,7 @@ class MrpPlanningMethodSecurityTest {
                                     AuditLogService auditLogService,
                                     IdempotencySupport idempotency,
                                     MrpRunStateRecorder runStateRecorder) {
+            // G6b collaborators: only the commercial path and the requirement read touch them.
             return new MrpRunService(
                     mrpRunRepository,
                     planningDemandRepository,
@@ -130,7 +134,11 @@ class MrpPlanningMethodSecurityTest {
                     mapper,
                     auditLogService,
                     idempotency,
-                    runStateRecorder);
+                    runStateRecorder,
+                    mock(SalesOrderPlanningSourceService.class),
+                    mock(PlanningSourceVersionCalculator.class),
+                    mock(SupplySuggestionConversionRepository.class),
+                    mock(ItemLookupService.class));
         }
 
         @Bean

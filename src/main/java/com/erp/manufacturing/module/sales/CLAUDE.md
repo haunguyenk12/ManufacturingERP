@@ -113,3 +113,9 @@ Theo tiền lệ `F2`. Lưu ý phân biệt trong chính service này: lỗi **d
 1. 🔴 **Hướng phụ thuộc mới `sales → workorder`** (qua `SalesOrderStockReservationService` + `SalesOrderCoverageLookupService`, đều không `@PreAuthorize`). Mục 1 ở trên ("`sales` không biết gì về work order") **không còn đúng** — đã lỗi thời từ G6a. Chiều `workorder → sales` (`SalesOrderFulfillmentService`) vẫn giữ; không vòng bean vì cả hai service phía workorder chỉ phụ thuộc repository.
 2. `customer_id` là **UUID phẳng**, không `@ManyToOne`, không backfill (G2 §9.5). Đơn cũ `customerId = null` ⇒ confirm không kiểm khách.
 3. Idempotency-Key **không** áp cho đơn bán — replay safety là `expectedVersion`. Tạo nháp gửi lại hai lần tạo **hai** nháp (đã ghi cho FE).
+
+### G6b — entry point cho hoạch định
+
+`SalesOrderPlanningSourceService.findSources(lineIds)` (không `@PreAuthorize`, 3 batch query): mỗi dòng đơn kèm Công ty/nhà máy, đơn còn
+hoạch định được, held, WO coverage, `uncovered` — **cùng** công thức B172 (`SalesOrderMapper.uncovered`). Caller: run thương mại, tính
+phiên bản nguồn, chuyển đổi (cap phần gắn đơn).

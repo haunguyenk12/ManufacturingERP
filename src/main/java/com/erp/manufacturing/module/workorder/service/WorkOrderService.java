@@ -110,13 +110,31 @@ public class WorkOrderService {
                                            WorkOrderCreateRequest request,
                                            UUID salesOrderLineId,
                                            PlanningLineage lineage) {
+        return createFromMrp(plantId, request, salesOrderLineId, lineage, null);
+    }
+
+    /**
+     * @param allocationCap the most this work order may cover on {@code salesOrderLineId} — the
+     *                      line's uncovered quantity read in the caller's transaction (G6b, B181).
+     *                      {@code null} keeps the original cap, the line's open quantity.
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SUPPLY_SUGGESTION_MANAGE', 'PLANT', #plantId)")
+    @Auditable(action = AuditAction.WORK_ORDER_CREATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
+    public WorkOrderResponse createFromMrp(UUID plantId,
+                                           WorkOrderCreateRequest request,
+                                           UUID salesOrderLineId,
+                                           PlanningLineage lineage,
+                                           BigDecimal allocationCap) {
         WorkOrder workOrder = createInternal(plantId, request, true);
         if (lineage != null) {
             workOrder.setPlanningRunId(lineage.runId());
             workOrder.setPlanningRunCode(lineage.runCode());
             workOrder.setPlanningProposalId(lineage.proposalId());
         }
-        allocationService.allocate(workOrder, salesOrderLineId);
+        allocationService.allocate(workOrder, salesOrderLineId, allocationCap);
         return toResponse(workOrder);
     }
 

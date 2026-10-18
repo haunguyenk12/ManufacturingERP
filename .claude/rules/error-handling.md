@@ -253,6 +253,11 @@ Còn lại của bảng mã FE ánh xạ vào mã **sẵn có**: `CIRCULAR_BOM` 
 (FE đề xuất `DEMAND_QUANTITY_EXCEEDED`); có lệnh SX ⇒ `STATE_CONFLICT` (FE đề xuất `DOWNSTREAM_DOCUMENT_EXISTS`); khách/vật tư ngừng
 ⇒ `RESOURCE_INACTIVE`; `RESERVED_STOCK` nay gồm cả tồn đơn bán đang giữ.
 
+**Constant thêm ở `G6b` (2026-10-18):** `PLANNING_SOURCE_STALE` (409) — chuyển đổi một run thương mại mà `expectedSourceVersion` không
+phải của run, hoặc nguồn (dòng đơn / tồn đơn giữ / BOM, routing `ACTIVE`) đã đổi từ lúc chạy; kèm `errors[{field:"expectedSourceVersion"}]`.
+Tách khỏi `STATE_CONFLICT` vì cách xử lý là **chạy run mới**, không phải tải lại rồi thử lại. Còn lại dùng mã sẵn có: vượt phần còn lại ⇒
+`PLANNED_QUANTITY_EXCEEDED`; version chuyển đổi lệch ⇒ `CONCURRENT_MODIFICATION`; đề xuất bị chặn ⇒ đúng mã đã chặn (`MISSING_BOM`…, B58).
+
 **Constant thêm ở `F5`:** `MISSING_BOM` (409) — anh em của `MISSING_ROUTING`. Trước `F5`,
 `BomLookupService.getActiveBom` ném `RESOURCE_NOT_FOUND` (404) trong khi routing tương ứng trả 409,
 dù spec §8.1 coi hai lỗi cùng loại (nợ #14).

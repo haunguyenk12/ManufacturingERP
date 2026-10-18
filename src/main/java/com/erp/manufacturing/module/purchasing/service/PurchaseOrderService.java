@@ -26,6 +26,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -110,6 +111,64 @@ public class PurchaseOrderService {
         ensureDraft(order, "Only DRAFT purchase orders can be cancelled");
         order.cancel();
         return mapper.toResponse(purchaseOrderRepository.save(order), true);
+    }
+
+    /**
+     * Drafts a purchase order for a planning conversion (G6b, D9): {@code DRAFT}, never sent, no
+     * price. The number is server-generated ({@code PO-MRP-xxxxxxxx}).
+     *
+     * <p>No {@code @PreAuthorize}: the only caller is the planning conversion service, authorised
+     * with {@code PERM_SUPPLY_SUGGESTION_MANAGE} on the run's plant (FE Q5 — there is no purchase
+     * order permission check here until GĐ7). Supplier, warehouse and items are validated exactly as
+     * on {@link #create}. Runs in the caller's transaction, so a failure rolls the conversion back.
+     */
+    @Transactional
+    @Auditable(action = AuditAction.PURCHASE_ORDER_CREATED, entityType = "PurchaseOrder", entityIdExpression = "purchaseOrderId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()",
+               warehouseId = "#result?.warehouseId()")
+    public PurchaseOrderResponse createFromPlanning(UUID companyId,
+                                                    UUID plantId,
+                                                    UUID warehouseId,
+                                                    UUID supplierId,
+                                                    LocalDate orderDate,
+                                                    String note,
+                                                    List<PlanningPurchaseLine> lines) {
+        LocalDate earliest = lines.stream()
+                .map(PlanningPurchaseLine::expectedDate)
+                .min(LocalDate::compareTo)
+                .orElse(orderDate);
+        PurchaseOrder order = buildOrder(
+                companyId,
+                plantId,
+                warehouseId,
+                supplierService.findActiveSupplier(supplierId),
+                nextPlanningOrderNo(companyId),
+                orderDate,
+                earliest.isBefore(orderDate) ? orderDate : earliest,
+                null,
+                trimToNull(note));
+        for (PlanningPurchaseLine line : lines) {
+            Item item = itemLookupService.getActiveItem(line.itemId());
+            ensureItemBelongsToCompany(item, order.getCompany());
+            order.getLines().add(PurchaseOrderLine.builder()
+                    .purchaseOrder(order)
+                    .item(item)
+                    .orderedQuantity(requirePositive(line.orderedQuantity(), "Ordered quantity"))
+                    .receivedQuantity(BigDecimal.ZERO)
+                    .expectedDate(line.expectedDate())
+                    .build());
+        }
+        return mapper.toResponse(purchaseOrderRepository.saveAndFlush(order), true);
+    }
+
+    private String nextPlanningOrderNo(UUID companyId) {
+        while (true) {
+            String candidate = "PO-MRP-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+            if (!purchaseOrderRepository.existsByCompanyCompanyIdAndPurchaseOrderNo(companyId, candidate)) {
+                return candidate;
+            }
+        }
     }
 
     @Transactional

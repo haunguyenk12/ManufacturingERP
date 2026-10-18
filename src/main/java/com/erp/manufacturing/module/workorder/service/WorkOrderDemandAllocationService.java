@@ -47,6 +47,16 @@ public class WorkOrderDemandAllocationService {
      */
     @Transactional
     public void allocate(WorkOrder workOrder, UUID salesOrderLineId) {
+        allocate(workOrder, salesOrderLineId, null);
+    }
+
+    /**
+     * @param cap the most this work order may cover; {@code null} ⇒ the line's open quantity (the
+     *            original rule). The commercial conversion passes the line's uncovered quantity so a
+     *            second run cannot cover what holds or earlier work orders already cover (B181).
+     */
+    @Transactional
+    public void allocate(WorkOrder workOrder, UUID salesOrderLineId, BigDecimal cap) {
         if (salesOrderLineId == null) {
             return;
         }
@@ -56,7 +66,7 @@ public class WorkOrderDemandAllocationService {
         if (target == null) {
             return;
         }
-        BigDecimal allocatedQuantity = workOrder.getPlannedQuantity().min(target.openQuantity());
+        BigDecimal allocatedQuantity = workOrder.getPlannedQuantity().min(cap == null ? target.openQuantity() : cap);
         if (allocatedQuantity.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }

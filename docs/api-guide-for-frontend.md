@@ -1301,6 +1301,19 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Hoạch định theo dòng đơn + chuyển đổi một phần — FE giai đoạn 6 phần 2 *(`G6b`, 2026-10-18)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Run thương mại | `POST /v1/planning-runs/commercial` — `{companyId, plantId, horizonStartDate, horizonEndDate, salesOrderLineIds[1..200], itemWarehouseMappings[]?{itemId, demandWarehouseId, outputWarehouseId?}, includeRop?}` · `Idempotency-Key` tuỳ chọn | **201**; lập kế hoạch phần **chưa phủ** của dòng đơn; kỳ ≤ 90 ngày cả hai đầu; `includeRop=true` ⇒ 422 |
+| Chi tiết run | `GET /v1/planning-runs/{id}` | thêm `runKind`, `sourceVersion`, `currentSourceState` (`CURRENT`/`STALE`, chỉ ở đây), `conversionVersion`, `inputSnapshot` |
+| Dòng nhu cầu | `GET /v1/planning-runs/{id}/requirements` · `GET .../requirements/{lineId}` | thêm `sourceKind`, `sourceSalesOrderLineIds[]`, `parentRequirementLineIds[]`, `calculationState`, `supplySuggestionId`, `supplyType`, `exceptionState`, `messages[]`, `convertedQuantity`, `remainingConvertibleQuantity`; chi tiết thêm `conversions[]` |
+| Chuyển đổi | `POST /v1/planning-runs/{id}/conversions` — `{expectedSourceVersion, expectedConversionVersion, entries[1..100]{requirementLineId, quantity}, supplierId?}` · `Idempotency-Key` tuỳ chọn | **201** `{conversionVersion, sourceVersion, documents[], conversions[]}`. Toàn MAKE (mỗi entry một WO `DRAFT`) hoặc toàn BUY (một PO `DRAFT`, `supplierId` bắt buộc). Không cần duyệt |
+| Sổ chuyển đổi | `GET /v1/planning-runs/{id}/conversions?page&size` | |
+
+> 🔴 Số MRP đổi cho **cả** run cũ: tồn an toàn chỉ cộng một lần mỗi vật tư–kho; nhu cầu linh kiện làm tròn **lên** 6 số lẻ. Hao hụt là `× (1 + tỉ lệ)`.
+> 🔴 Nguồn đổi ⇒ `409 PLANNING_SOURCE_STALE` — chạy run mới. Đọc `remainingConvertibleQuantity`, không đọc `status` của đề xuất.
+
 ### Đơn bán hàng nối khách + giữ tồn cho đơn — FE giai đoạn 6 phần 1 *(`G6a`, 2026-10-17)*
 
 | Việc | Endpoint | Ghi chú |

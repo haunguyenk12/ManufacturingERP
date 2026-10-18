@@ -6,6 +6,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,6 +15,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface MrpRunRepository extends JpaRepository<MrpRun, UUID> {
+
+    /**
+     * Serialises conversions of one run (G6b): the conversion version, the remaining quantities and
+     * the source check are all read under this lock, so two requests cannot both pass them.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from MrpRun r where r.mrpRunId = :mrpRunId")
+    Optional<MrpRun> lockByMrpRunId(@Param("mrpRunId") UUID mrpRunId);
 
     @EntityGraph(attributePaths = {"company", "plant", "warehouse"})
     Optional<MrpRun> findWithDetailsByMrpRunId(UUID mrpRunId);

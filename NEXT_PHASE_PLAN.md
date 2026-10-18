@@ -2,8 +2,9 @@
 
 > **`G6` — FE handoff Giai đoạn 6** (`FE_HANDOFF_GD_06_2026-10-14.md`): **đang chạy** — user chốt tách 3 phần làm liền.
 > ✅ **`G6a` xong 2026-10-17** (đơn bán hàng nối khách, giữ tồn cho đơn, `V74`, `BE_RESPONSE_GD_06_2026-10-17.md` v1;
-> **1583 unit / 184 class + 224 IT / 33 class**, 0/0; bản ghi `CLAUDE.md §0.54`). Đang làm **`G6b`** (hoạch định + chuyển đổi),
+> **1583 unit / 184 class + 224 IT / 33 class**, 0/0; bản ghi `CLAUDE.md §0.54`). Tiếp theo **`G6b`** (hoạch định + chuyển đổi),
 > sau đó **`G6c`** (nhập Excel). Chi tiết **§13**.
+> ✅ **`G6b` xong 2026-10-18** (run thương mại + chuyển đổi một phần, `V75`, `_v2`; **1621 unit + 230 IT**, 0/0; bản ghi `CLAUDE.md §0.55`).
 >
 > **`G5` — FE handoff Giai đoạn 5** (`FE_HANDOFF_GD_05_2026-10-13.md`): ✅ **BE xong + nghiệm thu
 > 2026-10-16** — `G5-1`..`G5-6` hoàn tất, file trả lời **`BE_RESPONSE_GD_05_2026-10-16.md`** (**user tự gửi qua
@@ -743,7 +744,7 @@ Gantt kéo-thả, optimizer, phân máy/người cụ thể, xử lý va chạm 
 
 ---
 
-## 13. `G6` — FE handoff Giai đoạn 6: Đơn bán hàng và hoạch định vật tư 🔄 ĐANG CHẠY — `G6a` ✅ 2026-10-17, `G6b`/`G6c` đang làm
+## 13. `G6` — FE handoff Giai đoạn 6: Đơn bán hàng và hoạch định vật tư 🔄 ĐANG CHẠY — `G6a` ✅ 2026-10-17, `G6b` ✅ 2026-10-18, `G6c` đang làm
 
 Nguồn: `FE_HANDOFF_GD_06_2026-10-14.md` (v1, P1, 605 dòng). FE/mock đã xong: đơn bán hàng nối Customer, **giữ tồn cho đơn**, 6 con số tiến độ theo từng dòng, chạy MRP thương mại, chi tiết nhu cầu, **chuyển đề xuất thành lệnh sản xuất / đơn mua nháp (một phần, nhiều lần)**, và **nhập đơn bán hàng Excel**. BE phải (1) trả lời Q1–Q28 §5, (2) đối chiếu R01–R18 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_06_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào.
 
@@ -965,7 +966,7 @@ Xác nhận/nhận một phần/QC đơn mua đầy đủ (GĐ7); sẵn sàng v�
   - [x] **Chốt `D0` — tách `G6a`/`G6b`/`G6c` hay làm một lượt** — user: **tách 3, làm liền cả 3**
   - [x] Chốt 12 quyết định còn lại §13.2 (D1–D12) — D4 mở rộng `material_reservations`; D8 + safety stock một lần: **làm, cho cả đường cũ và mới**; còn lại theo khuyến nghị
   - [x] `G6a` Đơn bán hàng: nối Customer, sinh `orderNo`, 6 số tiến độ, giữ tồn cho đơn, huỷ đơn (`V74`) — `B171`–`B177`; 1583 + 224, mutation 7/7, smoke `142411`, `BE_RESPONSE_GD_06_2026-10-17.md` v1
-  - [ ] `G6b` Hoạch định: run thương mại, nguồn nhu cầu nhiều chiều, ledger chuyển đổi, PO nháp
+  - [x] `G6b` Hoạch định: run thương mại, nguồn nhu cầu nhiều chiều, ledger chuyển đổi, PO nháp (`V75`) — `B178`–`B183`; 1621 + 230, mutation 8/8, A/B `D26-`, smoke `112703`, `_v2`. 🔴 Lệch D7: không có `mrp_requirement_sources` (engine không gộp nguồn)
   - [ ] `G6c` Nhập đơn bán hàng Excel (`omniplant-so-v1`)
   - [ ] `G6-9` `mvn -o clean verify` + mutation + smoke A01–A38 + `BE_RESPONSE_GD_06_*.md` + docs
   - [ ] FE nghiệm thu A01–A38

@@ -6,6 +6,8 @@ import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -118,6 +120,28 @@ public class MrpRun extends BaseEntity {
     @Column(name = "payload_hash", length = 64)
     private String payloadHash;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "run_kind", nullable = false, length = 20)
+    @Builder.Default
+    private MrpRunKind runKind = MrpRunKind.STANDARD;
+
+    /**
+     * Opaque token over the sources this run was computed from (V75, G6b) — see
+     * {@code PlanningSourceVersionCalculator}. Immutable once the run completes; {@code null} on
+     * standard runs and on every run made before G6b.
+     */
+    @Column(name = "source_version", length = 64)
+    private String sourceVersion;
+
+    /** Bumped by each successful conversion request; clients echo it as {@code expectedConversionVersion}. */
+    @Column(name = "conversion_version", nullable = false)
+    @Builder.Default
+    private Integer conversionVersion = 0;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "input_snapshot", columnDefinition = "jsonb")
+    private MrpRunInputSnapshot inputSnapshot;
+
     /**
      * Derives the human-facing run code (spec §2.4) from the identifier.
      *
@@ -161,6 +185,14 @@ public class MrpRun extends BaseEntity {
         plannedWorkOrders = plannedWorkOrderCount;
         plannedPurchaseRecommendations = plannedPurchaseRecommendationCount;
         blockedProposals = blockedProposalCount;
+    }
+
+    public boolean isCommercial() {
+        return runKind == MrpRunKind.COMMERCIAL;
+    }
+
+    public void advanceConversionVersion() {
+        conversionVersion = conversionVersion + 1;
     }
 
     public void fail(Instant now, String message) {

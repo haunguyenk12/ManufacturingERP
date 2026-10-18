@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -37,20 +38,45 @@ public class MrpCalculationService {
     @Autowired(required = false)
     private MrpWarehouseResolutionService warehouseResolutionService;
 
+    /** Every quantity column is {@code NUMERIC(19,6)}; derived component demand is rounded up to it (Q28). */
+    static final int QUANTITY_SCALE = 6;
+
     public MrpCalculationResult calculate(MrpRun run,
                                           List<PlanningDemand> demands,
                                           Collection<UUID> scopeWarehouseIds) {
-        if (demands.isEmpty()) {
+        return calculate(run,
+                demands.stream().map(demand -> new TopLevelDemand(demand, demand.getRequiredQuantity(), null)).toList(),
+                scopeWarehouseIds,
+                Map.of());
+    }
+
+    /**
+     * @param topLevelDemands  the demand rows of the run, each with the quantity to plan (the
+     *                         commercial run plans a sales order line's uncovered quantity, not its
+     *                         ordered quantity) and an optional netting warehouse chosen for the run
+     * @param itemWarehouses   per-item warehouse chosen for this run only (G6b); wins over the
+     *                         item-warehouse settings at every level, master data is not touched
+     */
+    public MrpCalculationResult calculate(MrpRun run,
+                                          List<TopLevelDemand> topLevelDemands,
+                                          Collection<UUID> scopeWarehouseIds,
+                                          Map<UUID, Warehouse> itemWarehouses) {
+        if (topLevelDemands.isEmpty()) {
             return new MrpCalculationResult(List.of(), List.of());
         }
 
         List<RequirementDraft> allRequirements = new ArrayList<>();
         List<SuggestionDraft> allSuggestions = new ArrayList<>();
-        List<RequirementSeed> currentLevel = demands.stream()
-                .map(demand -> topLevelSeed(run, demand))
+        List<RequirementSeed> currentLevel = topLevelDemands.stream()
+                .map(demand -> topLevelSeed(run, demand, itemWarehouses))
                 .toList();
 
         Map<ItemScopeKey, BigDecimal> consumedCoverageByItem = new HashMap<>();
+        // The stock target (max of safety stock and reorder point) is the level a pool must end at,
+        // not an extra demand per line: it is added to the first line of each (item, warehouse) pool
+        // only. Adding it to every line bought the whole safety stock again for each demand line and
+        // for each parent sharing a component (G6b, user decision, B178).
+        Set<ItemScopeKey> stockTargetApplied = new HashSet<>();
         while (!currentLevel.isEmpty()) {
             Set<UUID> manufacturableItemIds = currentLevel.stream()
                     .map(RequirementSeed::item)
@@ -76,9 +102,9 @@ public class MrpCalculationService {
                 BigDecimal openSupplyQuantity = supplySnapshot.openSupplyBySeed()
                         .getOrDefault(seed, BigDecimal.ZERO);
 
-                BigDecimal stockTargetQuantity = max(
-                        inventory.safetyStockQuantity(),
-                        inventory.reorderPointQuantity());
+                BigDecimal stockTargetQuantity = stockTargetApplied.add(itemScopeKey)
+                        ? max(inventory.safetyStockQuantity(), inventory.reorderPointQuantity())
+                        : BigDecimal.ZERO;
                 BigDecimal remainingCoverage = positiveDifference(
                         inventory.availableQuantity().add(openSupplyQuantity),
                         consumedCoverageByItem.getOrDefault(itemScopeKey, BigDecimal.ZERO));
@@ -125,7 +151,8 @@ public class MrpCalculationService {
                 }
 
                 if (netRequiredQuantity.compareTo(BigDecimal.ZERO) > 0 && activeBom != null) {
-                    nextLevel.addAll(expandChildren(requirement, seed, activeBom, netRequiredQuantity, suggestedOrderDate));
+                    nextLevel.addAll(expandChildren(
+                            requirement, seed, activeBom, netRequiredQuantity, suggestedOrderDate, itemWarehouses));
                 }
             }
             currentLevel = nextLevel;
@@ -177,7 +204,17 @@ public class MrpCalculationService {
         return new LevelSupplySnapshot(inventoryBySeed, openSupplyBySeed);
     }
 
-    private RequirementSeed topLevelSeed(MrpRun run, PlanningDemand demand) {
+    private RequirementSeed topLevelSeed(MrpRun run, TopLevelDemand topLevel, Map<UUID, Warehouse> itemWarehouses) {
+        PlanningDemand demand = topLevel.demand();
+        Warehouse mapped = topLevel.warehouse() != null
+                ? topLevel.warehouse()
+                : itemWarehouses.get(demand.getItem().getItemId());
+        if (mapped != null) {
+            return new RequirementSeed(
+                    null, demand, demand.getItem(), mapped, topLevel.quantity(), demand.getDueDate(), 0,
+                    new LinkedHashSet<>(Set.of(demand.getItem().getItemId())),
+                    WarehouseResolutionSource.RUN_ITEM_MAPPING, null);
+        }
         Warehouse warehouse = demand.getWarehouse() != null ? demand.getWarehouse() : run.getWarehouse();
         WarehouseResolutionSource source = demand.getWarehouse() != null
                 ? WarehouseResolutionSource.DEMAND_WAREHOUSE
@@ -193,7 +230,7 @@ public class MrpCalculationService {
             blockingMessage = resolution.blockingMessage();
         }
         return new RequirementSeed(
-                null, demand, demand.getItem(), warehouse, demand.getRequiredQuantity(), demand.getDueDate(), 0,
+                null, demand, demand.getItem(), warehouse, topLevel.quantity(), demand.getDueDate(), 0,
                 new LinkedHashSet<>(Set.of(demand.getItem().getItemId())), source, blockingMessage);
     }
 
@@ -201,7 +238,8 @@ public class MrpCalculationService {
                                                  RequirementSeed seed,
                                                  BomHeader activeBom,
                                                  BigDecimal parentNetRequiredQuantity,
-                                                 LocalDate childDueDate) {
+                                                 LocalDate childDueDate,
+                                                 Map<UUID, Warehouse> itemWarehouses) {
         List<RequirementSeed> children = new ArrayList<>();
         for (BomLine line : activeBom.getLines()) {
             Item component = line.getComponentItem();
@@ -210,13 +248,23 @@ public class MrpCalculationService {
             }
             LinkedHashSet<UUID> childPath = new LinkedHashSet<>(seed.path());
             childPath.add(component.getItemId());
+            // Rounded UP to the stored scale before it is netted (Q28, user decision, B179): the parent
+            // net becomes a work order, and that work order issues components at this scale. Netting
+            // the unrounded product left the child a fraction short of what the work order will
+            // actually issue, and NUMERIC(19,6) then rounded the stored figure half-up on top of that.
             BigDecimal grossRequiredQuantity = parentNetRequiredQuantity
                     .multiply(line.getQuantityPer())
-                    .multiply(BigDecimal.ONE.add(line.getScrapRate()));
+                    .multiply(BigDecimal.ONE.add(line.getScrapRate()))
+                    .setScale(QUANTITY_SCALE, RoundingMode.CEILING);
             Warehouse childWarehouse = seed.warehouse();
             WarehouseResolutionSource resolutionSource = seed.warehouseResolutionSource();
             PlanningMessageCode blockingMessage = seed.warehouseBlockingMessage();
-            if (warehouseResolutionService != null) {
+            Warehouse mapped = itemWarehouses.get(component.getItemId());
+            if (mapped != null) {
+                childWarehouse = mapped;
+                resolutionSource = WarehouseResolutionSource.RUN_ITEM_MAPPING;
+                blockingMessage = null;
+            } else if (warehouseResolutionService != null) {
                 MrpWarehouseResolutionService.Resolution resolution = warehouseResolutionService.resolve(
                         seed.sourceDemand().getPlant(), component, MrpWarehouseResolutionService.Role.SUPPLY);
                 childWarehouse = resolution.warehouse();
@@ -343,6 +391,12 @@ public class MrpCalculationService {
     private BigDecimal max(BigDecimal left, BigDecimal right) {
         return left.compareTo(right) >= 0 ? left : right;
     }
+
+    /**
+     * One top-level row of a run: the demand, the quantity to plan for it, and an optional netting
+     * warehouse chosen for the run. The standard run plans {@code requiredQuantity} as it always did.
+     */
+    public record TopLevelDemand(PlanningDemand demand, BigDecimal quantity, Warehouse warehouse) {}
 
     public record MrpCalculationResult(
             List<RequirementDraft> requirements,

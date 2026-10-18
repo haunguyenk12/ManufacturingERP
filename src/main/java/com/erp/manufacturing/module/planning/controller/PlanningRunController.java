@@ -7,6 +7,7 @@ import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.planning.domain.MrpRunStatus;
 import com.erp.manufacturing.module.planning.dto.*;
 import com.erp.manufacturing.module.planning.service.MrpRunService;
+import com.erp.manufacturing.module.planning.service.PlanningConversionService;
 import com.erp.manufacturing.module.planning.service.SupplySuggestionService;
 import com.erp.manufacturing.common.web.PageableFactory;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,6 +37,7 @@ public class PlanningRunController {
 
     private final MrpRunService mrpRunService;
     private final SupplySuggestionService supplySuggestionService;
+    private final PlanningConversionService planningConversionService;
     private final PlantContextResolver plantContextResolver;
 
     @PostMapping("/v1/planning-runs")
@@ -54,6 +56,25 @@ public class PlanningRunController {
         plantContextResolver.ensureMatches(plantHeader, request.plantId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(mrpRunService.run(request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/planning-runs/commercial")
+    @Operation(summary = "Run MRP over sales order lines (commercial run)",
+            description = """
+                    Plans the uncovered quantity of the selected sales order lines (ordered minus QC
+                    accepted, held stock and open work order coverage). salesOrderLineIds are sales
+                    order line ids, not planning demand ids. Period at most 90 days, both ends
+                    included. itemWarehouseMappings choose the netting warehouse of an item for this
+                    run only; outputWarehouseId, when sent, must equal demandWarehouseId.
+                    includeRop=true is refused (422): no reorder quantity is configured anywhere.
+                    Optional Idempotency-Key, same contract as POST /v1/planning-runs.""")
+    public ResponseEntity<ApiResponse<MrpRunResponse>> runCommercial(
+            @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CommercialPlanningRunRequest request) {
+        plantContextResolver.ensureMatches(plantHeader, request.plantId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created(mrpRunService.runCommercial(request, idempotencyKey)));
     }
 
     @GetMapping("/v1/planning-runs")
@@ -89,6 +110,41 @@ public class PlanningRunController {
             @RequestParam(defaultValue = "asc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(mrpRunService.listRequirements(
                 runId, PageableFactory.of(page, size, sortBy, sortDir))));
+    }
+
+    @GetMapping("/v1/planning-runs/{runId}/requirements/{requirementLineId}")
+    @Operation(summary = "Get one requirement line with its proposal and conversions")
+    public ResponseEntity<ApiResponse<MrpRequirementLineResponse>> getRequirement(
+            @PathVariable UUID runId,
+            @PathVariable UUID requirementLineId) {
+        return ResponseEntity.ok(ApiResponse.ok(mrpRunService.getRequirement(runId, requirementLineId)));
+    }
+
+    @PostMapping("/v1/planning-runs/{runId}/conversions")
+    @Operation(summary = "Convert proposals of a commercial run into draft documents",
+            description = """
+                    All entries MAKE (one DRAFT work order each) or all BUY (one DRAFT purchase
+                    order, supplierId required, one receiving warehouse). Partial and repeatable:
+                    each quantity must not exceed the requirement's remaining convertible quantity.
+                    expectedConversionVersion / expectedSourceVersion come from the run; a stale
+                    one is 409 CONCURRENT_MODIFICATION / PLANNING_SOURCE_STALE. No approve step.
+                    Optional Idempotency-Key: a replay returns the same documents.""")
+    public ResponseEntity<ApiResponse<PlanningConversionResult>> convert(
+            @PathVariable UUID runId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody PlanningConversionRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created(planningConversionService.convert(runId, request, idempotencyKey)));
+    }
+
+    @GetMapping("/v1/planning-runs/{runId}/conversions")
+    @Operation(summary = "List conversions of a planning run")
+    public ResponseEntity<ApiResponse<PageResult<PlanningConversionResponse>>> listConversions(
+            @PathVariable UUID runId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(planningConversionService.list(
+                runId, PageableFactory.of(page, size, "createdAt", "asc"))));
     }
 
     @GetMapping("/v1/planning-runs/{runId}/suggestions")

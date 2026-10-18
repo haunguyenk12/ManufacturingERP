@@ -174,7 +174,7 @@ public class SupplySuggestionService {
      * (B58). Without this the failure would still happen, but only deeper inside
      * {@code WorkOrderService.createFromMrp} and only for the routing case.
      */
-    private void ensureNotBlocked(SupplySuggestion suggestion) {
+    static void ensureNotBlocked(SupplySuggestion suggestion) {
         if (!suggestion.isBlocked()) {
             return;
         }

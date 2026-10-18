@@ -10,6 +10,8 @@ import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
@@ -17,13 +19,18 @@ import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.organization.service.OrganizationScopeResolution;
 import com.erp.manufacturing.module.planning.domain.*;
+import com.erp.manufacturing.module.planning.dto.CommercialPlanningRunRequest;
+import com.erp.manufacturing.module.planning.dto.ItemWarehouseMappingRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRequirementLineResponse;
 import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
 import com.erp.manufacturing.module.planning.dto.SupplySuggestionResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
+import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSource;
+import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,10 +42,16 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -61,6 +74,13 @@ public class MrpRunService {
     private final AuditLogService auditLogService;
     private final IdempotencySupport idempotency;
     private final MrpRunStateRecorder runStateRecorder;
+    private final SalesOrderPlanningSourceService salesOrderPlanningSourceService;
+    private final PlanningSourceVersionCalculator sourceVersionCalculator;
+    private final SupplySuggestionConversionRepository conversionRepository;
+    private final ItemLookupService itemLookupService;
+
+    /** FE R08 / A15: the commercial period is at most 90 days, both ends included. */
+    static final long MAX_COMMERCIAL_PERIOD_DAYS = 90;
 
     /**
      * Runs MRP synchronously.
@@ -142,19 +162,7 @@ public class MrpRunService {
         try {
             MrpCalculationService.MrpCalculationResult result = calculationService.calculate(
                     persistedRun, demands, scopeWarehouseIds);
-            Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> savedRequirements =
-                    persistRequirements(persistedRun, result.requirements());
-            persistSuggestions(persistedRun, result.suggestions(), savedRequirements);
-            persistedRun.complete(
-                    Instant.now(),
-                    demands.size(),
-                    result.requirements().size(),
-                    result.suggestions().size(),
-                    sumGrossDemand(result),
-                    countShortageLines(result),
-                    countSuggestions(result, SupplySuggestionType.WORK_ORDER),
-                    countSuggestions(result, SupplySuggestionType.PURCHASE_REQUISITION),
-                    countBlockedProposals(result));
+            persistResult(persistedRun, demands.size(), result);
             auditRunOutcome(AuditAction.MRP_RUN_COMPLETED, persistedRun, null);
         } catch (RuntimeException e) {
             String recorded = clientSafeFailureMessage(e);
@@ -164,6 +172,119 @@ public class MrpRunService {
             return failed;
         }
 
+        return mapper.toResponse(mrpRunRepository.save(persistedRun));
+    }
+
+    /**
+     * Commercial run (G6b, D6): plans the <em>uncovered</em> quantity of the selected sales order
+     * lines — ordered minus QC accepted, held stock and open work order coverage (B172) — so stock
+     * already held for an order is not counted twice (A16). The engine, netting and proposals are
+     * the standard run's; what differs is the input and the source version recorded at the end.
+     *
+     * <p>Nothing is written for an unusable selection (rule C9): every line, mapping and demand is
+     * checked before the run row exists. {@code Idempotency-Key} behaves exactly as on {@link #run}.
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MRP_RUN', 'PLANT', #request.plantId())")
+    @Auditable(action = AuditAction.MRP_RUN_CREATED, entityType = "MrpRun", entityIdExpression = "mrpRunId.toString()",
+               companyId = "#result?.companyId()",
+               plantId = "#result?.plantId()")
+    public MrpRunResponse runCommercial(CommercialPlanningRunRequest request, String idempotencyKey) {
+        String normalizedKey = StringUtils.hasText(idempotencyKey)
+                ? idempotency.normalizeKey(idempotencyKey)
+                : null;
+        if (normalizedKey != null) {
+            Optional<MrpRun> replayed = mrpRunRepository.findByIdempotencyKey(normalizedKey);
+            if (replayed.isPresent()) {
+                idempotency.ensureSamePayload(replayed.get().getPayloadHash(), request);
+                return mapper.toResponse(replayed.get());
+            }
+        }
+        validateCommercialPeriod(request);
+        if (Boolean.TRUE.equals(request.includeRop())) {
+            throw ExceptionFactory.businessRule(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "includeRop is not available: item-warehouse settings carry no reorder quantity, "
+                            + "so a reorder-point lane cannot be computed; send false");
+        }
+        Company company = organizationLookupService.getActiveCompany(request.companyId());
+        Plant plant = organizationLookupService.getActivePlant(request.plantId());
+        ensurePlantBelongsToCompany(plant, company);
+        Map<UUID, Warehouse> itemWarehouses = resolveItemWarehouses(request, company, plant);
+
+        List<UUID> lineIds = distinctLineIds(request.salesOrderLineIds());
+        Map<UUID, SalesOrderPlanningSource> sources = salesOrderPlanningSourceService.findSources(lineIds);
+        for (UUID lineId : lineIds) {
+            ensureSourceEligible(sources.get(lineId), lineId, company, plant);
+        }
+        Map<UUID, PlanningDemand> demandByLine = planningDemandRepository.findOpenByReference(
+                        PlanningDemandService.REFERENCE_TYPE_SALES_ORDER_LINE,
+                        lineIds.stream().map(UUID::toString).toList())
+                .stream()
+                .collect(Collectors.toMap(d -> UUID.fromString(d.getReferenceId()), d -> d, (a, b) -> a));
+        for (UUID lineId : lineIds) {
+            if (!demandByLine.containsKey(lineId)) {
+                throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                        "Sales order line " + lineId + " has no OPEN planning demand");
+            }
+        }
+        // Reloaded with its associations, in the same order the standard run nets demands.
+        List<PlanningDemand> demands = planningDemandRepository.findSelectedDemandsForRun(
+                demandByLine.values().stream().map(PlanningDemand::getPlanningDemandId).toList());
+        Map<UUID, BigDecimal> uncoveredByDemand = new HashMap<>();
+        demandByLine.forEach((lineId, demand) ->
+                uncoveredByDemand.put(demand.getPlanningDemandId(), sources.get(lineId).uncoveredQuantity()));
+        List<MrpCalculationService.TopLevelDemand> topLevels = demands.stream()
+                .map(demand -> new MrpCalculationService.TopLevelDemand(
+                        demand, uncoveredByDemand.get(demand.getPlanningDemandId()), null))
+                .toList();
+
+        MrpRun run = MrpRun.builder()
+                .company(company)
+                .plant(plant)
+                .horizonStartDate(request.horizonStartDate())
+                .horizonEndDate(request.horizonEndDate())
+                .runKind(MrpRunKind.COMMERCIAL)
+                .inputSnapshot(new MrpRunInputSnapshot(
+                        lineIds,
+                        request.itemWarehouseMappings() == null ? List.of()
+                                : request.itemWarehouseMappings().stream()
+                                    .map(m -> new MrpRunInputSnapshot.ItemWarehouse(
+                                            m.itemId(), m.demandWarehouseId(),
+                                            m.outputWarehouseId() == null ? m.demandWarehouseId() : m.outputWarehouseId()))
+                                    .toList(),
+                        false))
+                .idempotencyKey(normalizedKey)
+                .payloadHash(normalizedKey == null ? null : idempotency.payloadHash(request))
+                .build();
+        UUID mrpRunId = runStateRecorder.start(run);
+        MrpRun persistedRun = mrpRunRepository.findById(mrpRunId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "MRP run", mrpRunId));
+        mrpRunDemandRepository.saveAll(demands.stream()
+                .map(demand -> snapshotDemand(persistedRun, demand, uncoveredByDemand.get(demand.getPlanningDemandId())))
+                .toList());
+
+        try {
+            MrpCalculationService.MrpCalculationResult result = calculationService.calculate(
+                    persistedRun, topLevels, resolveScopeWarehouseIds(plant, null), itemWarehouses);
+            persistResult(persistedRun, demands.size(), result);
+            persistedRun.setSourceVersion(sourceVersionCalculator.compute(
+                    company.getCompanyId(),
+                    lineIds,
+                    result.requirements().stream()
+                            .map(MrpCalculationService.RequirementDraft::item)
+                            .filter(item -> PlanningSourceVersionCalculator.MANUFACTURABLE_TYPES.contains(item.getType()))
+                            .map(Item::getItemId)
+                            .distinct()
+                            .toList()));
+            auditRunOutcome(AuditAction.MRP_RUN_COMPLETED, persistedRun, null);
+        } catch (RuntimeException e) {
+            String recorded = clientSafeFailureMessage(e);
+            log.error("MRP run {} failed: {}", persistedRun.getCode(), e.getMessage(), e);
+            MrpRunResponse failed = runStateRecorder.recordFailure(mrpRunId, recorded);
+            auditRunOutcome(AuditAction.MRP_RUN_FAILED, persistedRun, recorded);
+            return failed;
+        }
         return mapper.toResponse(mrpRunRepository.save(persistedRun));
     }
 
@@ -187,15 +308,48 @@ public class MrpRunService {
     @Transactional(readOnly = true)
     @PreAuthorize("@mrpPlanningPermissionGuard.hasRunAccess(authentication, 'PERM_MRP_READ', #runId)")
     public MrpRunResponse get(UUID runId) {
-        return mapper.toResponse(findRun(runId));
+        MrpRun run = findRun(runId);
+        return mapper.toResponse(run, currentSourceState(run));
     }
 
+    /**
+     * Requirement lines with their proposal and converted quantity (G6b). Two batch queries for the
+     * page — proposals, then ledger sums — never one per line (C14).
+     */
     @Transactional(readOnly = true)
     @PreAuthorize("@mrpPlanningPermissionGuard.hasRunAccess(authentication, 'PERM_MRP_READ', #runId)")
     public PageResult<MrpRequirementLineResponse> listRequirements(UUID runId, Pageable pageable) {
         ensureRunExists(runId);
-        return PageResult.from(requirementLineRepository.findByMrpRunMrpRunId(runId, pageable)
-                .map(mapper::toResponse));
+        Page<MrpRequirementLine> page = requirementLineRepository.findByMrpRunMrpRunId(runId, pageable);
+        List<UUID> lineIds = page.getContent().stream().map(MrpRequirementLine::getMrpRequirementLineId).toList();
+        Map<UUID, SupplySuggestion> suggestions = lineIds.isEmpty() ? Map.of()
+                : supplySuggestionRepository.findByRequirementLineIds(lineIds).stream()
+                    .collect(Collectors.toMap(s -> s.getRequirementLine().getMrpRequirementLineId(), s -> s, (a, b) -> a));
+        Map<UUID, BigDecimal> converted = convertedBySuggestion(suggestions.values());
+        return PageResult.from(page.map(line -> {
+            SupplySuggestion suggestion = suggestions.get(line.getMrpRequirementLineId());
+            return mapper.toResponse(line, suggestion,
+                    suggestion == null ? BigDecimal.ZERO
+                            : converted.getOrDefault(suggestion.getSupplySuggestionId(), BigDecimal.ZERO),
+                    null);
+        }));
+    }
+
+    /** One requirement line with its proposal and every conversion made from it (G6b). */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@mrpPlanningPermissionGuard.hasRunAccess(authentication, 'PERM_MRP_READ', #runId)")
+    public MrpRequirementLineResponse getRequirement(UUID runId, UUID requirementLineId) {
+        MrpRequirementLine line = requirementLineRepository
+                .findByMrpRunMrpRunIdAndMrpRequirementLineId(runId, requirementLineId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Requirement line", requirementLineId));
+        SupplySuggestion suggestion = supplySuggestionRepository
+                .findByRequirementLineIds(List.of(requirementLineId)).stream().findFirst().orElse(null);
+        List<SupplySuggestionConversion> rows =
+                conversionRepository.findByRequirementLineIdOrderByCreatedAtAscEntryNoAsc(requirementLineId);
+        BigDecimal ledgerSum = rows.stream().map(SupplySuggestionConversion::getQuantity)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return mapper.toResponse(line, suggestion, ledgerSum, rows.stream().map(mapper::toResponse).toList());
     }
 
     @Transactional(readOnly = true)
@@ -260,12 +414,17 @@ public class MrpRunService {
     }
 
     private MrpRunDemand snapshotDemand(MrpRun run, PlanningDemand demand) {
+        return snapshotDemand(run, demand, demand.getRequiredQuantity());
+    }
+
+    /** {@code plannedQuantity}: what the run plans for this demand — the uncovered quantity on a commercial run. */
+    private MrpRunDemand snapshotDemand(MrpRun run, PlanningDemand demand, BigDecimal plannedQuantity) {
         return MrpRunDemand.builder()
                 .mrpRun(run)
                 .planningDemand(demand)
                 .item(demand.getItem())
                 .warehouse(demand.getWarehouse())
-                .requiredQuantity(demand.getRequiredQuantity())
+                .requiredQuantity(plannedQuantity)
                 .dueDate(demand.getDueDate())
                 .priority(demand.getPriority())
                 .build();
@@ -333,6 +492,123 @@ public class MrpRunService {
                             .build();
                 })
                 .toList());
+    }
+
+    private void persistResult(MrpRun persistedRun, int demandCount, MrpCalculationService.MrpCalculationResult result) {
+        Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> savedRequirements =
+                persistRequirements(persistedRun, result.requirements());
+        persistSuggestions(persistedRun, result.suggestions(), savedRequirements);
+        persistedRun.complete(
+                // Postgres keeps microseconds; a 100 ns Windows clock reading would make the response
+                // disagree with every later read of the same run (the G3/G4 lesson, §0.51 #3).
+                Instant.now().truncatedTo(ChronoUnit.MICROS),
+                demandCount,
+                result.requirements().size(),
+                result.suggestions().size(),
+                sumGrossDemand(result),
+                countShortageLines(result),
+                countSuggestions(result, SupplySuggestionType.WORK_ORDER),
+                countSuggestions(result, SupplySuggestionType.PURCHASE_REQUISITION),
+                countBlockedProposals(result));
+    }
+
+    private Map<UUID, BigDecimal> convertedBySuggestion(Collection<SupplySuggestion> suggestions) {
+        if (suggestions.isEmpty()) {
+            return Map.of();
+        }
+        return conversionRepository.sumBySuggestionIds(
+                        suggestions.stream().map(SupplySuggestion::getSupplySuggestionId).toList())
+                .stream()
+                .collect(Collectors.toMap(
+                        SupplySuggestionConversionRepository.SuggestionQuantityProjection::getSupplySuggestionId,
+                        SupplySuggestionConversionRepository.SuggestionQuantityProjection::getQuantity));
+    }
+
+    /** {@code CURRENT}/{@code STALE} for a completed commercial run; {@code null} for any other run. */
+    private String currentSourceState(MrpRun run) {
+        if (!run.isCommercial() || run.getSourceVersion() == null || run.getStatus() != MrpRunStatus.COMPLETED) {
+            return null;
+        }
+        return run.getSourceVersion().equals(sourceVersionCalculator.computeCurrent(run)) ? "CURRENT" : "STALE";
+    }
+
+    private void validateCommercialPeriod(CommercialPlanningRunRequest request) {
+        if (request.horizonStartDate().isAfter(request.horizonEndDate())) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("horizonEndDate", "must not be before horizonStartDate"));
+        }
+        long days = ChronoUnit.DAYS.between(request.horizonStartDate(), request.horizonEndDate()) + 1;
+        if (days > MAX_COMMERCIAL_PERIOD_DAYS) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("horizonEndDate", "planning period must be at most "
+                            + MAX_COMMERCIAL_PERIOD_DAYS + " days, both ends included"));
+        }
+    }
+
+    private List<UUID> distinctLineIds(List<UUID> salesOrderLineIds) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        Set<UUID> seen = new HashSet<>();
+        for (int i = 0; i < salesOrderLineIds.size(); i++) {
+            if (!seen.add(salesOrderLineIds.get(i))) {
+                errors.put("salesOrderLineIds[" + i + "]", "is listed more than once");
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT, errors);
+        }
+        return List.copyOf(salesOrderLineIds);
+    }
+
+    /**
+     * Run-only warehouse choice per item (FE Q9/A21): ACTIVE, in this plant, item of this company.
+     * Master data is not touched. The output warehouse must be the netting warehouse (FE Q16).
+     */
+    private Map<UUID, Warehouse> resolveItemWarehouses(CommercialPlanningRunRequest request, Company company, Plant plant) {
+        List<ItemWarehouseMappingRequest> mappings = request.itemWarehouseMappings() == null
+                ? List.of() : request.itemWarehouseMappings();
+        Map<String, String> errors = new LinkedHashMap<>();
+        Set<UUID> seen = new HashSet<>();
+        for (int i = 0; i < mappings.size(); i++) {
+            ItemWarehouseMappingRequest mapping = mappings.get(i);
+            if (!seen.add(mapping.itemId())) {
+                errors.put("itemWarehouseMappings[" + i + "].itemId", "is mapped more than once");
+            }
+            if (mapping.outputWarehouseId() != null && !mapping.outputWarehouseId().equals(mapping.demandWarehouseId())) {
+                errors.put("itemWarehouseMappings[" + i + "].outputWarehouseId",
+                        "must equal demandWarehouseId: planned transfers between warehouses are not supported");
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT, errors);
+        }
+        Map<UUID, Warehouse> result = new HashMap<>();
+        for (ItemWarehouseMappingRequest mapping : mappings) {
+            Item item = itemLookupService.getActiveItem(mapping.itemId());
+            if (!item.getCompany().getCompanyId().equals(company.getCompanyId())) {
+                throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
+                        "Item " + mapping.itemId() + " does not belong to the selected company");
+            }
+            result.put(item.getItemId(),
+                    organizationLookupService.getActiveWarehouseInPlant(mapping.demandWarehouseId(), plant.getPlantId()));
+        }
+        return result;
+    }
+
+    /** Out of scope reads as not found, like the standard run's demand selection (B60). */
+    private void ensureSourceEligible(SalesOrderPlanningSource source, UUID lineId, Company company, Plant plant) {
+        if (source == null
+                || !source.companyId().equals(company.getCompanyId())
+                || !source.plantId().equals(plant.getPlantId())) {
+            throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Sales order line", lineId);
+        }
+        if (!source.planningEligible()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Sales order " + source.salesOrderNo() + " is " + source.orderStatus() + " and cannot be planned");
+        }
+        if (source.uncoveredQuantity().signum() <= 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Sales order line " + lineId + " has nothing left to plan (uncovered quantity is 0)");
+        }
     }
 
     // The four Run-header cells of spec §2.4 are counted off the calculation result already in hand,

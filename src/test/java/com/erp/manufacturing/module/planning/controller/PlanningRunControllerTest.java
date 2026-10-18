@@ -14,6 +14,7 @@ import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
 import com.erp.manufacturing.module.planning.dto.SupplySuggestionResponse;
 import com.erp.manufacturing.module.planning.service.MrpRunService;
+import com.erp.manufacturing.module.planning.service.PlanningConversionService;
 import com.erp.manufacturing.module.planning.service.SupplySuggestionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,8 @@ class PlanningRunControllerTest {
     MrpRunService mrpRunService;
     @MockBean
     SupplySuggestionService supplySuggestionService;
+    @MockBean
+    PlanningConversionService planningConversionService;
 
     // Unused directly by these tests – required only so the auto-detected security filters
     // can be constructed by the @WebMvcTest slice, even with addFilters = false.
@@ -224,6 +227,133 @@ class PlanningRunControllerTest {
     }
 
     /** Line 2 of the two-demand story in {@code MrpCalculationServiceTest}: 12 on hand, 10 taken. */
+    // ── G6b ──────────────────────────────────────────────────────────
+
+    private String commercialBody(UUID plantId) {
+        return """
+                {"companyId":"%s","plantId":"%s","horizonStartDate":"2026-10-14","horizonEndDate":"2026-11-12",
+                 "salesOrderLineIds":["%s"],"includeRop":false,
+                 "itemWarehouseMappings":[{"itemId":"%s","demandWarehouseId":"%s"}]}
+                """.formatted(COMPANY_ID, plantId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+    }
+
+    @Test
+    @DisplayName("commercial run: 201 with runKind/sourceVersion; Idempotency-Key forwarded")
+    void runCommercial_returns201WithTheSourceVersion() throws Exception {
+        MrpRunResponse run = sampleRun();
+        MrpRunResponse commercial = new MrpRunResponse(run.mrpRunId(), run.code(), run.companyId(), run.companyCode(),
+                run.plantId(), run.plantCode(), null, null, run.horizonStartDate(), run.horizonEndDate(), run.status(),
+                run.startedAt(), run.completedAt(), 1, 2, 1, new BigDecimal("70.000000"), 1, 1, 0, 0, null,
+                run.createdAt(), run.updatedAt(), "COMMERCIAL", "abc123", null, 0, null);
+        when(mrpRunService.runCommercial(any(), eq("cr-1"))).thenReturn(commercial);
+
+        mockMvc.perform(post("/v1/planning-runs/commercial")
+                        .header("Idempotency-Key", "cr-1")
+                        .header(PlantContextResolver.HEADER, PLANT_ID.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(commercialBody(PLANT_ID)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.runKind").value("COMMERCIAL"))
+                .andExpect(jsonPath("$.result.sourceVersion").value("abc123"))
+                .andExpect(jsonPath("$.result.conversionVersion").value(0));
+    }
+
+    @Test
+    @DisplayName("commercial run: X-Plant-Id of another plant is 409 before the service")
+    void runCommercial_plantHeaderMismatch_returns409() throws Exception {
+        mockMvc.perform(post("/v1/planning-runs/commercial")
+                        .header(PlantContextResolver.HEADER, UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(commercialBody(PLANT_ID)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
+        verifyNoInteractions(mrpRunService);
+    }
+
+    @Test
+    @DisplayName("commercial run: empty salesOrderLineIds fails @Valid with a field error")
+    void runCommercial_withoutLines_returns400() throws Exception {
+        mockMvc.perform(post("/v1/planning-runs/commercial")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"companyId":"%s","plantId":"%s","horizonStartDate":"2026-10-14",
+                                 "horizonEndDate":"2026-11-12","salesOrderLineIds":[]}
+                                """.formatted(COMPANY_ID, PLANT_ID)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("salesOrderLineIds"));
+        verifyNoInteractions(mrpRunService);
+    }
+
+    @Test
+    @DisplayName("conversions: seven decimals on a quantity is a field error, not silently rounded")
+    void convert_sevenDecimals_returns400OnTheEntryField() throws Exception {
+        mockMvc.perform(post("/v1/planning-runs/{runId}/conversions", RUN_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedSourceVersion":"v1","expectedConversionVersion":0,
+                                 "entries":[{"requirementLineId":"%s","quantity":1.0000001}]}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("entries[0].quantity"));
+        verifyNoInteractions(planningConversionService);
+    }
+
+    @Test
+    @DisplayName("conversions: stale sources surface 409 PLANNING_SOURCE_STALE")
+    void convert_staleSources_returns409PlanningSourceStale() throws Exception {
+        when(planningConversionService.convert(eq(RUN_ID), any(), isNull()))
+                .thenThrow(new AppException(BusinessErrorCode.PLANNING_SOURCE_STALE, "changed"));
+
+        mockMvc.perform(post("/v1/planning-runs/{runId}/conversions", RUN_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedSourceVersion":"v1","expectedConversionVersion":0,
+                                 "entries":[{"requirementLineId":"%s","quantity":40}]}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.PLANNING_SOURCE_STALE.code()));
+    }
+
+    @Test
+    @DisplayName("conversions: 201 with documents, ledger rows and the next versions")
+    void convert_returns201WithDocuments() throws Exception {
+        UUID workOrderId = UUID.randomUUID();
+        when(planningConversionService.convert(eq(RUN_ID), any(), eq("cv-1")))
+                .thenReturn(new com.erp.manufacturing.module.planning.dto.PlanningConversionResult(RUN_ID, 1, "v1",
+                        List.of(new com.erp.manufacturing.module.planning.dto.PlanningConversionDocumentResponse(
+                                "WORK_ORDER", workOrderId, "MRP-ABC", "DRAFT", new BigDecimal("40"), List.of())),
+                        List.of()));
+
+        mockMvc.perform(post("/v1/planning-runs/{runId}/conversions", RUN_ID)
+                        .header("Idempotency-Key", "cv-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedSourceVersion":"v1","expectedConversionVersion":0,
+                                 "entries":[{"requirementLineId":"%s","quantity":40}]}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.result.conversionVersion").value(1))
+                .andExpect(jsonPath("$.result.documents[0].type").value("WORK_ORDER"))
+                .andExpect(jsonPath("$.result.documents[0].documentId").value(workOrderId.toString()));
+    }
+
+    @Test
+    @DisplayName("conversions list and one requirement are plain reads")
+    void listConversionsAndGetRequirement_return200() throws Exception {
+        UUID lineId = UUID.randomUUID();
+        when(planningConversionService.list(eq(RUN_ID), any())).thenReturn(PageResult.from(
+                new org.springframework.data.domain.PageImpl<>(List.of())));
+        when(mrpRunService.getRequirement(RUN_ID, lineId)).thenReturn(sampleRequirementLine());
+
+        mockMvc.perform(get("/v1/planning-runs/{runId}/conversions", RUN_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.totalElements").value(0));
+        mockMvc.perform(get("/v1/planning-runs/{runId}/requirements/{lineId}", RUN_ID, lineId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
     private MrpRequirementLineResponse sampleRequirementLine() {
         return new MrpRequirementLineResponse(
                 UUID.randomUUID(), RUN_ID, null, null,

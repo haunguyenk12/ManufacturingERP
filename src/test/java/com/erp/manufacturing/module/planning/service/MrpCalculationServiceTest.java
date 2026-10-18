@@ -525,6 +525,118 @@ class MrpCalculationServiceTest {
         assertThat(result.suggestions().get(0).requirement().suggestedOrderDate()).isEqualTo(dueDate.minusDays(3));
     }
 
+    /**
+     * G6b / B178 (FE A19, user decision): the stock target is the level the pool ends at, so it is
+     * added once per (item, warehouse) pool, not once per demand line. Two demands of 10 against no
+     * stock and a safety stock of 5: the first nets 10 + 5 = 15, the second only its own 10. Before
+     * G6b the second line bought the safety stock again (15 + 15 = 30 for 20 of demand).
+     */
+    @Test
+    void calculate_twoDemandsInOnePool_addTheSafetyStockOnlyOnce() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item raw = item(UUID.randomUUID(), company, "RM", ItemType.RAW_MATERIAL);
+        PlanningDemand first = demand(company, plant, warehouse, raw, "10", LocalDate.now().plusDays(10));
+        PlanningDemand second = demand(company, plant, warehouse, raw, "10", LocalDate.now().plusDays(20));
+        MrpRun run = run(company, plant, warehouse);
+
+        when(bomLookupService.findActiveBoms(eq(company.getCompanyId()), anyCollection())).thenReturn(Map.of());
+        when(inventoryAvailabilityService.getPlanningQuantities(itemIdsContaining(raw.getItemId()), anyCollection()))
+                .thenReturn(Map.of(raw.getItemId(), qty("0", "0", "0", "5", "0", 0)));
+        when(workOrderSupplyService.getOpenSupplyQuantities(eq(company.getCompanyId()), eq(plant.getPlantId()), anyCollection(), anyCollection()))
+                .thenReturn(Map.of());
+
+        MrpCalculationService.MrpCalculationResult result =
+                service.calculate(run, List.of(first, second), List.of(warehouse.getWarehouseId()));
+
+        MrpCalculationService.RequirementDraft line1 = result.requirements().get(0);
+        MrpCalculationService.RequirementDraft line2 = result.requirements().get(1);
+        assertThat(line1.safetyStockQuantity()).isEqualByComparingTo("5");
+        assertThat(line1.netRequiredQuantity()).isEqualByComparingTo("15");
+        assertThat(line2.safetyStockQuantity()).isEqualByComparingTo("0");
+        assertThat(line2.netRequiredQuantity()).isEqualByComparingTo("10");
+        // B77 still holds per line: net = max(0, gross + safety - projected).
+        assertThat(line2.grossRequiredQuantity().add(line2.safetyStockQuantity())
+                .subtract(line2.projectedAvailableQuantity())).isEqualByComparingTo(line2.netRequiredQuantity());
+    }
+
+    /**
+     * G6b / B179 (FE Q28, user decision): component demand is rounded UP to six decimals before it is
+     * netted, so it matches what the parent's work order will issue. FG net 1, WIP 0.333333 per unit
+     * with 2% scrap: 0.33999966 rounds up to 0.340000, and RAW at 100 per WIP needs 34.000000 — not
+     * the 33.999966 netted from the unrounded figure before G6b.
+     */
+    @Test
+    void calculate_componentDemand_isRoundedUpToSixDecimalsBeforeItIsNettedAndExploded() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item product = item(UUID.randomUUID(), company, "FG", ItemType.FINISHED_GOOD);
+        Item wip = item(UUID.randomUUID(), company, "WIP", ItemType.WIP);
+        Item raw = item(UUID.randomUUID(), company, "RM", ItemType.RAW_MATERIAL);
+        PlanningDemand demand = demand(company, plant, warehouse, product, "1", LocalDate.now().plusDays(10));
+        MrpRun run = run(company, plant, warehouse);
+
+        when(bomLookupService.findActiveBoms(eq(company.getCompanyId()), anyCollection()))
+                .thenReturn(Map.of(product.getItemId(), bom(product, line(wip, "0.333333", "0.02"))))
+                .thenReturn(Map.of(wip.getItemId(), bom(wip, line(raw, "100", "0"))))
+                .thenReturn(Map.of());
+        when(inventoryAvailabilityService.getPlanningQuantities(anyCollection(), anyCollection())).thenReturn(Map.of());
+        when(workOrderSupplyService.getOpenSupplyQuantities(eq(company.getCompanyId()), eq(plant.getPlantId()), anyCollection(), anyCollection()))
+                .thenReturn(Map.of());
+
+        MrpCalculationService.MrpCalculationResult result =
+                service.calculate(run, List.of(demand), List.of(warehouse.getWarehouseId()));
+
+        assertThat(result.requirements()).hasSize(3);
+        assertThat(result.requirements().get(1).grossRequiredQuantity()).isEqualTo(new BigDecimal("0.340000"));
+        assertThat(result.requirements().get(1).netRequiredQuantity()).isEqualTo(new BigDecimal("0.340000"));
+        assertThat(result.requirements().get(2).grossRequiredQuantity()).isEqualByComparingTo("34.000000");
+    }
+
+    /**
+     * G6b (FE A16/A21): a commercial run plans the quantity it is given (the uncovered quantity, not
+     * the demand's required quantity) in the warehouse the run maps the item to, for the root and
+     * for every component; the resolution is reported as {@code RUN_ITEM_MAPPING}.
+     */
+    @Test
+    void calculate_runItemMappingAndQuantityOverride_winForRootAndComponents() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse demandWarehouse = warehouse(UUID.randomUUID(), plant);
+        Warehouse fgWarehouse = warehouse(UUID.randomUUID(), plant);
+        Warehouse rawWarehouse = warehouse(UUID.randomUUID(), plant);
+        Item product = item(UUID.randomUUID(), company, "FG", ItemType.FINISHED_GOOD);
+        Item raw = item(UUID.randomUUID(), company, "RM", ItemType.RAW_MATERIAL);
+        PlanningDemand demand = demand(company, plant, null, product, "100", LocalDate.now().plusDays(10));
+        MrpRun run = run(company, plant, null);
+
+        when(bomLookupService.findActiveBoms(eq(company.getCompanyId()), anyCollection()))
+                .thenReturn(Map.of(product.getItemId(), bom(product, line(raw, "2", "0"))))
+                .thenReturn(Map.of());
+        when(inventoryAvailabilityService.getPlanningQuantities(anyCollection(), anyCollection())).thenReturn(Map.of());
+        when(workOrderSupplyService.getOpenSupplyQuantities(eq(company.getCompanyId()), eq(plant.getPlantId()), anyCollection(), anyCollection()))
+                .thenReturn(Map.of());
+
+        MrpCalculationService.MrpCalculationResult result = service.calculate(
+                run,
+                List.of(new MrpCalculationService.TopLevelDemand(demand, new BigDecimal("70"), null)),
+                List.of(demandWarehouse.getWarehouseId()),
+                Map.of(product.getItemId(), fgWarehouse, raw.getItemId(), rawWarehouse));
+
+        MrpCalculationService.RequirementDraft root = result.requirements().get(0);
+        MrpCalculationService.RequirementDraft component = result.requirements().get(1);
+        assertThat(root.grossRequiredQuantity()).isEqualByComparingTo("70");
+        assertThat(root.warehouse()).isSameAs(fgWarehouse);
+        assertThat(root.warehouseResolutionSource()).isEqualTo(WarehouseResolutionSource.RUN_ITEM_MAPPING);
+        assertThat(component.grossRequiredQuantity()).isEqualByComparingTo("140");
+        assertThat(component.warehouse()).isSameAs(rawWarehouse);
+        assertThat(component.warehouseResolutionSource()).isEqualTo(WarehouseResolutionSource.RUN_ITEM_MAPPING);
+        verify(inventoryAvailabilityService).getPlanningQuantities(itemIdsContaining(raw.getItemId()),
+                eq(List.of(rawWarehouse.getWarehouseId())));
+    }
+
     private MrpRun run(Company company, Plant plant, Warehouse warehouse) {
         return MrpRun.builder()
                 .mrpRunId(UUID.randomUUID())

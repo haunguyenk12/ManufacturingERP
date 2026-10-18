@@ -50,7 +50,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("74");
+        assertThat(current.getVersion().getVersion()).isEqualTo("75");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -809,6 +809,44 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             try (ResultSet rs = statement.executeQuery("SELECT nextval('sales_order_number_seq')")) {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getLong(1)).isPositive();
+            }
+        }
+    }
+
+    /**
+     * G6b: commercial runs and the conversion ledger. Existing runs default to STANDARD with no
+     * source version, and the requirement-line CHECK accepts the new RUN_ITEM_MAPPING source.
+     */
+    @Test
+    void migrate_v75_addsRunKindAndTheConversionLedger() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT column_default FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'mrp_runs' AND column_name = 'run_kind'
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).contains("STANDARD");
+            }
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                    WHERE conname = 'chk_mrp_req_warehouse_resolution_source'
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).contains("RUN_ITEM_MAPPING").contains("ITEM_WAREHOUSE_DEFAULT");
+            }
+            try (ResultSet rs = statement.executeQuery("""
+                    SELECT count(*) FROM pg_constraint
+                    WHERE connamespace = 'public'::regnamespace
+                      AND conname IN ('uk_supply_suggestion_conversions_run_key_entry',
+                                      'chk_supply_suggestion_conversions_quantity',
+                                      'chk_supply_suggestion_conversions_target_type')
+                    """)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(3);
             }
         }
     }

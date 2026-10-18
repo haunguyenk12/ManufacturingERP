@@ -74,6 +74,16 @@ public interface SalesOrderLineRepository extends JpaRepository<SalesOrderLine, 
             """)
     List<UUID> findOrderIdsByLineIds(@Param("salesOrderLineIds") Collection<UUID> salesOrderLineIds);
 
+    /** Lines with their order and item, for planning (G6b) — one query for the whole selection. */
+    @Query("""
+            select l
+            from SalesOrderLine l
+            join fetch l.salesOrder o
+            join fetch l.item i
+            where l.salesOrderLineId in :salesOrderLineIds
+            """)
+    List<SalesOrderLine> findWithOrderAndItemByLineIds(@Param("salesOrderLineIds") Collection<UUID> salesOrderLineIds);
+
     interface OrderLineSummaryProjection {
         UUID getSalesOrderId();
         LocalDate getEarliestDueDate();
