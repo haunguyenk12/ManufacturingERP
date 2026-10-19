@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -85,7 +87,23 @@ class ManufacturingExecutionMethodSecurityTest {
                 .thenReturn(false);
 
         assertThatThrownBy(() -> reservationService.reserve(workOrderId, new MaterialReservationCreateRequest(
-                UUID.randomUUID(), UUID.randomUUID(), null, BigDecimal.ONE)))
+                UUID.randomUUID(), UUID.randomUUID(), null, BigDecimal.ONE, 0L), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(
+                any(), eq("PERM_MATERIAL_RESERVATION_MANAGE"), eq(workOrderId));
+    }
+
+    /** G8a release-reservations: the same permission as releasing one reservation. */
+    @Test
+    void releaseAllReservations_deniedWhenPermissionMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_RESERVATION_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> reservationService.releaseAll(workOrderId,
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(support);
@@ -316,7 +334,9 @@ class ManufacturingExecutionMethodSecurityTest {
                                                              WorkOrderExecutionSupport support,
                                                              ManufacturingExecutionMapper mapper) {
             return new MaterialReservationService(
-                    reservationRepository, stockBalanceRepository, organizationLookupService, support, mapper);
+                    reservationRepository, stockBalanceRepository, organizationLookupService, support, mapper,
+                    new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
+                            new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
         }
 
         @Bean

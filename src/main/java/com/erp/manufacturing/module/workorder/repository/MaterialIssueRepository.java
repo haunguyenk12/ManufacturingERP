@@ -14,6 +14,9 @@ import java.util.UUID;
 
 public interface MaterialIssueRepository extends JpaRepository<MaterialIssue, UUID> {
 
+    /** G8a: a work order with an issue still waiting for a decision cannot be cancelled (FE R06). */
+    boolean existsByWorkOrderWorkOrderIdAndStatus(UUID workOrderId, MaterialIssueStatus status);
+
     Optional<MaterialIssue> findByIdempotencyKey(String idempotencyKey);
 
     @EntityGraph(attributePaths = {"workOrder", "lines", "lines.componentLine", "lines.reservation",

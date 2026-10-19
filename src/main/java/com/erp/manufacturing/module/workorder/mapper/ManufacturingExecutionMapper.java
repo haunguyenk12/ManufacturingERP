@@ -44,7 +44,8 @@ public class ManufacturingExecutionMapper {
                 reservation.remainingQuantity(),
                 reservation.getStatus().name(),
                 reservation.getCreatedAt(),
-                reservation.getUpdatedAt());
+                reservation.getUpdatedAt(),
+                reservation.getWorkOrder().getVersion());
     }
 
     /**

@@ -10,6 +10,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Collection;
+import java.util.HexFormat;
+import java.util.TreeSet;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -157,6 +163,47 @@ public class WorkCalendarLookupService {
      * like a safeguard. {@code exceptions} keeps its pre-existing touch — that one predates the fix
      * and is out of its scope.
      */
+    /**
+     * Content fingerprint of the calendars a schedule was computed on (G8a, D9): the first 16 hex
+     * characters of a SHA-256 over each calendar's status, effective range, weekly shifts (with their
+     * times and breaks) and non-working dates, in a fixed order. Built from content rather than from
+     * {@code version} columns because the weekly shifts, breaks and exceptions are child rows whose edits
+     * do not necessarily move the parent's version. {@code null} when no calendar was consulted.
+     */
+    @Transactional(readOnly = true)
+    public String calendarRevision(Collection<UUID> workCalendarIds) {
+        if (workCalendarIds == null || workCalendarIds.isEmpty()) {
+            return null;
+        }
+        StringBuilder canonical = new StringBuilder();
+        for (UUID calendarId : new TreeSet<>(workCalendarIds)) {
+            WorkCalendar calendar = loadWithExceptions(calendarId);
+            canonical.append(calendarId).append('|').append(calendar.getStatus())
+                    .append('|').append(calendar.getEffectiveFrom()).append('|').append(calendar.getEffectiveTo());
+            calendar.getWeeklyShifts().stream()
+                    .map(weekly -> weekly.getWeekday() + "@" + weekly.getShift().getShiftId()
+                            + "/" + weekly.getShift().getStartTime() + "-" + weekly.getShift().getEndTime()
+                            + weekly.getShift().getBreaks().stream()
+                            .map(shiftBreak -> shiftBreak.getStartTime() + "~" + shiftBreak.getEndTime())
+                            .sorted()
+                            .collect(Collectors.joining(",", "[", "]")))
+                    .sorted()
+                    .forEach(entry -> canonical.append('|').append(entry));
+            calendar.getExceptions().stream()
+                    .map(exception -> exception.getExceptionDate().toString())
+                    .sorted()
+                    .forEach(date -> canonical.append("|x").append(date));
+            canonical.append(';');
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, 16);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by every JVM", e);
+        }
+    }
+
     private WorkCalendar loadWithExceptions(UUID workCalendarId) {
         WorkCalendar calendar = workCalendarRepository.findWithWeeklyShiftsByWorkCalendarId(workCalendarId)
                 .orElseThrow(() -> ExceptionFactory.notFound(

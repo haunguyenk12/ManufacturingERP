@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +34,10 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
      * {@code function lower(bytea) does not exist}, a 500 on the plain unfiltered list. The
      * {@code :search is null} short circuit does not help: Postgres types the whole expression before
      * it evaluates anything.
+     *
+     * <p>{@code createdFrom}/{@code createdTo} (G8a) bound a half-open range {@code [from, to)} the
+     * caller computed from plant-local dates. Only the {@code is null} side carries the cast — the
+     * comparison already gives Postgres a type, the bare {@code is null} does not (CLAUDE.md §0.36 #4).
      */
     @Query("""
             select w
@@ -44,11 +49,15 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
               and (cast(:search as string) is null
                    or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
                    or lower(p.code) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:createdFrom as timestamp) is null or w.createdAt >= :createdFrom)
+              and (cast(:createdTo as timestamp) is null or w.createdAt < :createdTo)
             """)
     Page<WorkOrder> search(@Param("plantId") UUID plantId,
                            @Param("status") WorkOrderStatus status,
                            @Param("productItemId") UUID productItemId,
                            @Param("search") String search,
+                           @Param("createdFrom") Instant createdFrom,
+                           @Param("createdTo") Instant createdTo,
                            Pageable pageable);
 
     /**
@@ -150,7 +159,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             "outputWarehouse",
             "componentLines",
             "componentLines.bomLine",
-            "componentLines.componentItem"
+            "componentLines.componentItem",
+            "componentLines.warehouse"
     })
     Optional<WorkOrder> findWithDetailsByWorkOrderId(UUID workOrderId);
 

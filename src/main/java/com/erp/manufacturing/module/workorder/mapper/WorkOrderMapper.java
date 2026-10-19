@@ -91,7 +91,14 @@ public class WorkOrderMapper {
                 lines,
                 operations,
                 allocations == null ? List.of() : allocations,
-                workOrder.getClosedAt());
+                workOrder.getClosedAt(),
+                workOrder.getVersion(),
+                // 0 is "nothing committed yet" in storage, which reads as null on the wire (G8a).
+                workOrder.getScheduleRevision() == null || workOrder.getScheduleRevision() == 0
+                        ? null : workOrder.getScheduleRevision(),
+                workOrder.getScheduleCalendarRevision(),
+                workOrder.getScheduleTimeZone(),
+                workOrder.getScheduleCapturedAt());
     }
 
     public WorkOrderOperationResponse toResponse(WorkOrderOperation operation) {
@@ -106,7 +113,8 @@ public class WorkOrderMapper {
                 operation.getRunMinutesPerUnit(),
                 operation.getPlannedStartAt(),
                 operation.getPlannedEndAt(),
-                operation.getVersion());
+                operation.getVersion(),
+                operation.workMinutes(operation.getWorkOrder().getPlannedQuantity()));
     }
 
     public WorkOrderComponentLineResponse toResponse(WorkOrderComponentLine line,
@@ -126,6 +134,8 @@ public class WorkOrderMapper {
                 // row for such a line rather than a zero row.
                 reservedByComponentLine.getOrDefault(line.getComponentLineId(), BigDecimal.ZERO),
                 line.getIssuedQuantity(),
-                line.remainingQuantity());
+                line.remainingQuantity(),
+                line.getWarehouse() == null ? null : line.getWarehouse().getWarehouseId(),
+                line.getWarehouse() == null ? null : line.getWarehouse().getCode());
     }
 }

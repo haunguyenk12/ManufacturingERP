@@ -96,6 +96,11 @@ public class ScheduleAdjustmentService {
         operation.setPlannedStartAt(request.plannedStartAt());
         operation.setPlannedEndAt(plannedEndAt);
         operation.setScheduleAdjustmentReason(request.reason().trim());
+        // G8a (D9): a hand-made change is a new committed schedule. The calendar revision stays the one
+        // release computed on — nothing was recomputed from the calendars here. Flushed with the operation.
+        workOrder.commitSchedule(workOrder.getScheduleCalendarRevision(),
+                workOrder.getScheduleTimeZone() != null ? workOrder.getScheduleTimeZone() : workOrder.getPlant().getTimezone(),
+                Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
         // saveAndFlush: the response carries the bumped version (lesson of CLAUDE.md §0.39).
         WorkOrderOperation saved = workOrderOperationRepository.saveAndFlush(operation);
 

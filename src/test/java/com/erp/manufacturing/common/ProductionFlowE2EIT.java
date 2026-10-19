@@ -240,7 +240,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualTo("IN_PRODUCTION");
 
         // ── 4. Reserve (FEFO) — straight after convert, no release needed first (D9) ────────────
-        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
         assertThat(reservations.size()).as("reservations were %s", reservations).isEqualTo(1);
         UUID reservationId = uuid(reservations.get(0), "reservationId");
         assertThat(new BigDecimal(reservations.get(0).get("quantity").asText()))
@@ -249,7 +249,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
 
         // ── 5. Release now that reservation covers 100% (gate 1a / B14, happy path) ─────────────
-        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId), 200)
+        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200)
                 .get("status").asText()).isEqualTo("RELEASED");
 
         // ── 6. Issue the reserved component ─────────────────────────────────────────────────────
@@ -403,7 +403,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // Release with nothing reserved: refused. The message proves the release gate itself ran,
         // rather than the "no component requirements" guard that sits before it.
-        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/release", workOrderId)))
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers
@@ -418,13 +418,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(blocked.getBlockReason()).isEqualTo("1/1 components short on reservation");
 
         // Debt #22: reserving is exactly what a planner does next, and BLOCKED must not stand in the way.
-        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
         assertThat(reservations.size()).isEqualTo(1);
         assertThat(new BigDecimal(reservations.get(0).get("quantity").asText()))
                 .isEqualByComparingTo(COMPONENT_REQUIREMENT);
 
         // With coverage complete the same call now succeeds, and the block fields are cleared.
-        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId), 200)
+        assertThat(result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200)
                 .get("status").asText()).isEqualTo("RELEASED");
         WorkOrder released = workOrderRepository.findById(workOrderId).orElseThrow();
         assertThat(released.getBlockedAt()).isNull();
@@ -503,8 +503,8 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(new BigDecimal(allocation.get("allocatedQuantity").asText()))
                 .isEqualByComparingTo(ORDERED_QUANTITY);
 
-        result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
-        result(post("/v1/work-orders/{id}/release", workOrderId), 200);
+        result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
         result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-NOLOT-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", ORDERED_QUANTITY,
@@ -568,8 +568,8 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "productItemId", product.itemId,
                         "outputWarehouseId", fixture.warehouseId,
                         "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
-        result(post("/v1/work-orders/{id}/reserve", workOrderId), 201);
-        result(post("/v1/work-orders/{id}/release", workOrderId), 200);
+        result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
         result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-REJ-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", GOOD_REPORTED,
@@ -615,9 +615,10 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
         // Spec §3.2 (F7): cancelling requires a reason.
         result(post("/v1/work-orders/{id}/cancel", workOrderId)
-                .content(json(Map.of("reason", "Cancelled by E2E scenario"))), 200);
+                .content(json(Map.of("reason", "Cancelled by E2E scenario",
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId)))), 200);
 
-        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/reserve", workOrderId)))
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
 
@@ -765,6 +766,18 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     }
 
     /** Performs the request, asserts the HTTP status, and returns the {@code result} payload. */
+    /**
+     * G8 (D5): every work order command carries the version last read. Read fresh each time — a refused
+     * release persists BLOCKED in its own transaction and moves the version on behind the caller's back.
+     */
+    private long workOrderVersion(UUID workOrderId) throws Exception {
+        return result(get("/v1/work-orders/{id}", workOrderId), 200).get("version").asLong();
+    }
+
+    private String versionBody(UUID workOrderId) throws Exception {
+        return json(Map.of("expectedWorkOrderVersion", workOrderVersion(workOrderId)));
+    }
+
     private JsonNode result(MockHttpServletRequestBuilder builder, int expectedStatus) throws Exception {
         MvcResult mvcResult = mockMvc.perform(withDefaults(builder)).andReturn();
         JsonNode body = objectMapper.readTree(mvcResult.getResponse().getContentAsString());

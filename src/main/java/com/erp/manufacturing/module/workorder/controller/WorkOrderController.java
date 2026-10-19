@@ -9,7 +9,10 @@ import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
 import com.erp.manufacturing.module.workorder.dto.variance.*;
 import com.erp.manufacturing.module.workorder.service.WorkOrderService;
+import com.erp.manufacturing.module.workorder.dto.schedule.WorkOrderSchedulePreviewRequest;
+import com.erp.manufacturing.module.workorder.dto.schedule.WorkOrderSchedulePreviewResponse;
 import com.erp.manufacturing.module.workorder.service.query.WorkOrderReadinessService;
+import com.erp.manufacturing.module.workorder.service.query.WorkOrderSchedulePreviewService;
 import com.erp.manufacturing.common.web.PageableFactory;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,8 +20,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @RestController
@@ -28,6 +33,7 @@ public class WorkOrderController {
 
     private final WorkOrderService workOrderService;
     private final WorkOrderReadinessService readinessService;
+    private final WorkOrderSchedulePreviewService schedulePreviewService;
     private final PlantContextResolver plantContextResolver;
 
     @PostMapping("/v1/plants/{plantId}/work-orders")
@@ -48,13 +54,17 @@ public class WorkOrderController {
             @RequestParam(required = false) UUID productItemId,
             // Free-text over work order number and product SKU (spec §3.2).
             @RequestParam(required = false) String search,
+            // G8a: plant-local calendar days on createdAt, both ends inclusive.
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(workOrderService.list(
-                plantId, status, productItemId, search, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, status, productItemId, search, fromDate, toDate,
+                PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     @GetMapping("/v1/work-orders/{workOrderId}")
@@ -67,8 +77,20 @@ public class WorkOrderController {
     @Operation(summary = "Update draft work order")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> update(
             @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody WorkOrderUpdateRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(workOrderService.update(workOrderId, request)));
+        return ResponseEntity.ok(ApiResponse.ok(workOrderService.update(workOrderId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/schedule-preview")
+    @Operation(summary = "Preview the schedule release would commit",
+            description = "G8a: read-only — the same scheduling formula release uses, against the calendars as "
+                    + "they are now, with overlap warnings against other work orders' committed load. Every body "
+                    + "field is optional. Only for DRAFT, PLANNED and BLOCKED work orders.")
+    public ResponseEntity<ApiResponse<WorkOrderSchedulePreviewResponse>> schedulePreview(
+            @PathVariable UUID workOrderId,
+            @Valid @RequestBody(required = false) WorkOrderSchedulePreviewRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(schedulePreviewService.preview(workOrderId, request)));
     }
 
     @GetMapping("/v1/work-orders/{workOrderId}/material-readiness")
@@ -84,27 +106,37 @@ public class WorkOrderController {
     @PostMapping("/v1/work-orders/{workOrderId}/plan")
     @Operation(summary = "Schedule draft work order",
             description = "Moves DRAFT to PLANNED. Nothing is reserved and no material moves — this "
-                    + "only records that a planner has committed to the dates.")
-    public ResponseEntity<ApiResponse<WorkOrderResponse>> plan(@PathVariable UUID workOrderId) {
-        return ResponseEntity.ok(ApiResponse.ok(workOrderService.plan(workOrderId)));
+                    + "only records that a planner has committed to the dates. Body "
+                    + "{expectedWorkOrderVersion, componentWarehouses?} — the version is required (G8).")
+    public ResponseEntity<ApiResponse<WorkOrderResponse>> plan(
+            @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody(required = false) WorkOrderPlanRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(workOrderService.plan(workOrderId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/release")
     @Operation(summary = "Release work order",
-            description = "Fails with 422 when material reservation does not fully cover the component "
-                    + "requirements; the work order is then persisted as BLOCKED. Use "
-                    + "GET /material-readiness to see the shortage per component.")
-    public ResponseEntity<ApiResponse<WorkOrderResponse>> release(@PathVariable UUID workOrderId) {
-        return ResponseEntity.ok(ApiResponse.ok(workOrderService.release(workOrderId)));
+            description = "Fails with 409 STATE_CONFLICT when material reservation does not fully cover the "
+                    + "component requirements; the work order is then persisted as BLOCKED. Use "
+                    + "GET /material-readiness to see the shortage per component. Body "
+                    + "{expectedWorkOrderVersion} is required (G8).")
+    public ResponseEntity<ApiResponse<WorkOrderResponse>> release(
+            @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody(required = false) WorkOrderVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(workOrderService.release(workOrderId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/cancel")
     @Operation(summary = "Cancel work order",
-            description = "Spec §3.2 requires a reason; omitting it returns 400 APPROVAL_REASON_REQUIRED.")
+            description = "Spec §3.2 requires a reason; omitting it returns 400 APPROVAL_REASON_REQUIRED. "
+                    + "expectedWorkOrderVersion is required too (G8). Gives the planning quota back once.")
     public ResponseEntity<ApiResponse<WorkOrderResponse>> cancel(
             @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody(required = false) WorkOrderCancelRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(workOrderService.cancel(workOrderId, request)));
+        return ResponseEntity.ok(ApiResponse.ok(workOrderService.cancel(workOrderId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/close")

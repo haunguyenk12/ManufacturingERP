@@ -190,6 +190,26 @@ public class WorkOrder extends BaseEntity {
     @Column(name = "planning_proposal_id")
     private UUID planningProposalId;
 
+    /**
+     * Context of the schedule committed at release (G8a, D9, V79). {@code 0} means no schedule has been
+     * committed yet; it moves on at every release and every manual schedule adjustment, so a client can
+     * tell which schedule it is looking at. The calendar revision is a content fingerprint of the
+     * calendars consulted and the time zone is the plant's at that moment — a plant's time zone can be
+     * edited later, the committed schedule was not computed in the new one.
+     */
+    @Column(name = "schedule_revision", nullable = false)
+    @Builder.Default
+    private Integer scheduleRevision = 0;
+
+    @Column(name = "schedule_calendar_revision", length = 64)
+    private String scheduleCalendarRevision;
+
+    @Column(name = "schedule_time_zone", length = 64)
+    private String scheduleTimeZone;
+
+    @Column(name = "schedule_captured_at")
+    private Instant scheduleCapturedAt;
+
     @OneToMany(mappedBy = "workOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("lineNo ASC")
     @Builder.Default
@@ -203,6 +223,33 @@ public class WorkOrder extends BaseEntity {
 
     public boolean isDraft() {
         return status == WorkOrderStatus.DRAFT;
+    }
+
+    /**
+     * Linked to a planning source (MAKE proposal) — its quantity and output warehouse are what the
+     * conversion quota and the sales order allocation were sized on, so they are locked (G8a, FE Q7).
+     */
+    public boolean isSourceLinked() {
+        return planningProposalId != null;
+    }
+
+    /**
+     * Makes the row dirty so its {@code @Version} moves on even when only child rows changed (G8, D5).
+     * Component lines, reservations and operations are inverse collections: changing them alone never
+     * issues an {@code UPDATE work_orders}, so two concurrent commands on the same version would both
+     * pass — the trap B112 found on sales order lines. The value is overwritten by auditing at flush;
+     * only the dirtiness matters.
+     */
+    public void touch() {
+        setUpdatedAt(Instant.now());
+    }
+
+    /** Records that a schedule was committed (release) or changed by hand (G8a, D9). */
+    public void commitSchedule(String calendarRevision, String timeZone, Instant at) {
+        scheduleRevision = (scheduleRevision == null ? 0 : scheduleRevision) + 1;
+        scheduleCalendarRevision = calendarRevision;
+        scheduleTimeZone = timeZone;
+        scheduleCapturedAt = at;
     }
 
     public boolean canExecute() {

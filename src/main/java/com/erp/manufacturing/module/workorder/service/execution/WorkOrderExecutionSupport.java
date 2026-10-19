@@ -35,6 +35,16 @@ class WorkOrderExecutionSupport {
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Work order", workOrderId));
     }
 
+    /**
+     * Moves the work order's version on and writes it now (G8, D5): a command that only changed child
+     * rows (reservations, issue lines) would otherwise leave the version where it was, and the response
+     * built afterwards must carry the version just written — the save-vs-flush lesson of CLAUDE.md §0.39.
+     */
+    WorkOrder touchAndFlush(WorkOrder workOrder) {
+        workOrder.touch();
+        return workOrderRepository.saveAndFlush(workOrder);
+    }
+
     void ensureExecutable(WorkOrder workOrder) {
         if (!workOrder.canExecute()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,

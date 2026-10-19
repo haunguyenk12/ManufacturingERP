@@ -1,5 +1,11 @@
 package com.erp.manufacturing.module.workorder.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
+import com.erp.manufacturing.module.planning.service.WorkOrderPlanningLinkService;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
@@ -52,6 +58,7 @@ import static org.mockito.Mockito.*;
 class WorkOrderMethodSecurityTest {
 
     @Autowired WorkOrderService workOrderService;
+    @Autowired com.erp.manufacturing.module.workorder.service.query.WorkOrderSchedulePreviewService schedulePreviewService;
     @Autowired PermissionGuard permissionGuard;
     @Autowired WorkOrderPermissionGuard workOrderPermissionGuard;
     @Autowired PlantRepository plantRepository;
@@ -101,6 +108,47 @@ class WorkOrderMethodSecurityTest {
         verifyNoInteractions(plantRepository, workOrderRepository);
         verify(permissionGuard).hasResourceAccess(
                 any(), eq("PERM_SUPPLY_SUGGESTION_MANAGE"), eq("PLANT"), eq(plantId));
+    }
+
+    /** G8a: the schedule preview is a read — PERM_WORK_ORDER_READ, never MANAGE. */
+    @Test
+    void schedulePreview_deniedWhenWorkOrderReadScopeMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_READ"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> schedulePreviewService.preview(workOrderId, null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(workOrderRepository);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_READ"), eq(workOrderId));
+    }
+
+    @Test
+    void schedulePreview_allowedWhenWorkOrderReadScopePresent() {
+        WorkOrder workOrder = workOrder();
+        workOrder.setVersion(0L);
+        when(workOrderPermissionGuard.hasWorkOrderAccess(
+                any(), eq("PERM_WORK_ORDER_READ"), eq(workOrder.getWorkOrderId()))).thenReturn(true);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatCode(() -> schedulePreviewService.preview(workOrder.getWorkOrderId(), null))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void plan_deniedWhenWorkOrderManageScopeMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> workOrderService.plan(workOrderId,
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderPlanRequest(0L, null), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(workOrderRepository);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId));
     }
 
     @Test
@@ -162,7 +210,7 @@ class WorkOrderMethodSecurityTest {
                 any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrder.getWorkOrderId()))).thenReturn(true);
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
         assertThatCode(() -> workOrderService.close(workOrder.getWorkOrderId())).doesNotThrowAnyException();
     }
@@ -243,6 +291,9 @@ class WorkOrderMethodSecurityTest {
                                           WorkOrderReleaseGate releaseGate,
                                           WorkCalendarLookupService workCalendarLookupService,
                                           WorkOrderMapper mapper) {
+            WorkOrderIdempotency idempotency = new WorkOrderIdempotency(
+                    mock(WorkOrderIdempotencyRecordRepository.class),
+                    new IdempotencySupport(new ObjectMapper().findAndRegisterModules()));
             return new WorkOrderService(
                     workOrderRepository,
                     organizationLookupService,
@@ -256,8 +307,20 @@ class WorkOrderMethodSecurityTest {
                     allocationService,
                     reservationRepository,
                     releaseGate,
-                    workCalendarLookupService,
+                    new WorkOrderScheduler(workCalendarLookupService),
+                    mock(MaterialIssueRepository.class),
+                    mock(WorkOrderPlanningLinkService.class),
+                    idempotency,
+                    mock(SecurityAuditorAware.class),
                     mapper);
+        }
+
+        @Bean
+        com.erp.manufacturing.module.workorder.service.query.WorkOrderSchedulePreviewService workOrderSchedulePreviewService(
+                WorkOrderRepository workOrderRepository, WorkCalendarLookupService workCalendarLookupService) {
+            return new com.erp.manufacturing.module.workorder.service.query.WorkOrderSchedulePreviewService(
+                    workOrderRepository, new WorkOrderScheduler(workCalendarLookupService),
+                    mock(com.erp.manufacturing.module.workorder.service.query.CapacityLoadCalculator.class));
         }
 
         @Bean MaterialReservationRepository materialReservationRepository() {

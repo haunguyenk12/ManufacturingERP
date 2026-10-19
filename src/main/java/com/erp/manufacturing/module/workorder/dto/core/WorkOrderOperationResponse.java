@@ -15,5 +15,11 @@ public record WorkOrderOperationResponse(
         BigDecimal runMinutesPerUnit,
         Instant plannedStartAt,
         Instant plannedEndAt,
-        Long version
+        Long version,
+        /**
+         * G8a: working minutes the operation needs — {@code ceil(setup + run × planned quantity)}, the
+         * figure release schedules with. It is work time, not wall time: on a calendar the window from
+         * {@code plannedStartAt} to {@code plannedEndAt} also spans breaks and off-shift hours.
+         */
+        Long workMinutes
 ) {}

@@ -30,5 +30,23 @@ public record WorkOrderComponentLineResponse(
          */
         BigDecimal reservedQuantity,
         BigDecimal issuedQuantity,
-        BigDecimal remainingQuantity
-) {}
+        BigDecimal remainingQuantity,
+        /**
+         * G8a (D2): the one warehouse this component is reserved from. {@code null} means "any warehouse
+         * of the plant" — every line created before G8a, and any line nobody chose a warehouse for.
+         */
+        UUID warehouseId,
+        String warehouseCode
+) {
+
+    /** Shape before G8a. */
+    public WorkOrderComponentLineResponse(UUID componentLineId, UUID bomLineId, Integer lineNo, UUID componentItemId,
+                                          String componentItemCode, String componentItemName, String uom,
+                                          BigDecimal quantityPer, BigDecimal scrapRate, BigDecimal requiredQuantity,
+                                          BigDecimal reservedQuantity, BigDecimal issuedQuantity,
+                                          BigDecimal remainingQuantity) {
+        this(componentLineId, bomLineId, lineNo, componentItemId, componentItemCode, componentItemName, uom,
+                quantityPer, scrapRate, requiredQuantity, reservedQuantity, issuedQuantity, remainingQuantity,
+                null, null);
+    }
+}

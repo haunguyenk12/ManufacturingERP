@@ -76,8 +76,19 @@ public class PurchaseOrderPlanningLinkService {
      */
     @Transactional
     public int releasePurchaseOrder(UUID purchaseOrderId, String reason, Instant at, UUID by) {
+        return releaseTarget(SupplyConversionTargetType.PURCHASE_ORDER, purchaseOrderId, reason, at, by,
+                conversionRepository, mrpRunRepository);
+    }
+
+    /**
+     * The release routine shared with {@link WorkOrderPlanningLinkService} (G8a) — one implementation of
+     * "mark held rows released, move every source run's conversion version on", whatever the target.
+     */
+    static int releaseTarget(SupplyConversionTargetType targetType, UUID targetId, String reason, Instant at, UUID by,
+                             SupplySuggestionConversionRepository conversionRepository,
+                             MrpRunRepository mrpRunRepository) {
         List<SupplySuggestionConversion> held = conversionRepository
-                .findByTargetTypeAndTargetIdAndReleasedAtIsNull(SupplyConversionTargetType.PURCHASE_ORDER, purchaseOrderId);
+                .findByTargetTypeAndTargetIdAndReleasedAtIsNull(targetType, targetId);
         if (held.isEmpty()) {
             return 0;
         }

@@ -53,21 +53,35 @@ public class ManufacturingExecutionController {
     @Operation(summary = "Reserve material for work order")
     public ResponseEntity<ApiResponse<MaterialReservationResponse>> reserveMaterial(
             @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody MaterialReservationCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(reservationService.reserve(workOrderId, request)));
+                .body(ApiResponse.created(reservationService.reserve(workOrderId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/reserve")
     @Operation(summary = "Reserve all short components automatically (FEFO)",
-            description = "Allocates available stock across the plant's warehouses, earliest expiry "
-                    + "first. Components with no stock left are simply skipped — check "
-                    + "GET /material-readiness afterwards. Use POST /material-reservations to pick a "
-                    + "specific warehouse or lot instead.")
+            description = "Allocates available stock earliest expiry first — from the component line's own "
+                    + "warehouse when it has one (G8a), otherwise across the plant's warehouses. Components "
+                    + "with no stock left are simply skipped — check GET /material-readiness afterwards. Body "
+                    + "{expectedWorkOrderVersion} is required (G8).")
     public ResponseEntity<ApiResponse<List<MaterialReservationResponse>>> reserveAutomatically(
-            @PathVariable UUID workOrderId) {
+            @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody(required = false) WorkOrderVersionRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(reservationService.reserveAutomatically(workOrderId)));
+                .body(ApiResponse.created(reservationService.reserveAutomatically(workOrderId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/release-reservations")
+    @Operation(summary = "Release every unissued reservation of the work order",
+            description = "G8a: gives the unissued part of each ACTIVE reservation back to free stock. No stock "
+                    + "movement — on hand never changed. Body {expectedWorkOrderVersion} is required.")
+    public ResponseEntity<ApiResponse<WorkOrderReservationReleaseResponse>> releaseReservations(
+            @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody(required = false) WorkOrderVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(reservationService.releaseAll(workOrderId, request, idempotencyKey)));
     }
 
     @GetMapping("/v1/work-orders/{workOrderId}/material-reservations")
@@ -83,11 +97,15 @@ public class ManufacturingExecutionController {
     }
 
     @DeleteMapping("/v1/work-orders/{workOrderId}/material-reservations/{reservationId}")
-    @Operation(summary = "Release material reservation")
+    @Operation(summary = "Release material reservation",
+            description = "Query parameter expectedWorkOrderVersion is required (G8).")
     public ResponseEntity<ApiResponse<MaterialReservationResponse>> releaseReservation(
             @PathVariable UUID workOrderId,
-            @PathVariable UUID reservationId) {
-        return ResponseEntity.ok(ApiResponse.ok(reservationService.release(workOrderId, reservationId)));
+            @PathVariable UUID reservationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestParam(required = false) Long expectedWorkOrderVersion) {
+        return ResponseEntity.ok(ApiResponse.ok(reservationService.release(
+                workOrderId, reservationId, expectedWorkOrderVersion, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/material-issues")

@@ -541,7 +541,16 @@ Với `BUY`: `POST /api/v1/supply-suggestions/{suggestionId}/convert-to-purchase
 
 ### Bước 4 — Giữ vật tư (reserve)
 
-**`POST /api/v1/work-orders/{workOrderId}/reserve`** → `201`, trả **mảng** reservation (FEFO tự động).
+**`POST /api/v1/work-orders/{workOrderId}/reserve`** body `{"expectedWorkOrderVersion": <version>}` → `201`, trả **mảng**
+reservation (FEFO tự động), mỗi phần tử có `workOrderVersion` = version của lệnh **sau** lệnh này.
+
+> 🔴 **G8a (2026-10-19): mọi lệnh trên work order bắt buộc gửi version vừa đọc** — PATCH (`expectedVersion`), plan/release/cancel/
+> reserve/release-reservations (`expectedWorkOrderVersion` trong body), tạo reservation (body), xoá reservation (query
+> `?expectedWorkOrderVersion=`). Thiếu ⇒ `400 VALIDATION_ERROR` theo field; lệch ⇒ `409 CONCURRENT_MODIFICATION` (đọc lại lệnh).
+> Header `Idempotency-Key` tuỳ chọn: gửi lại cùng key + cùng body ⇒ trạng thái hiện tại, không chạy lại; khác body ⇒ `409 IDEMPOTENCY_CONFLICT`.
+>
+> **Kho cho từng vật tư:** dòng vật tư có `warehouseId` (chọn qua `componentWarehouses: [{itemId, warehouseId}]` lúc tạo/sửa/plan) chỉ giữ
+> tồn ở kho đó; giữ tay từ kho khác ⇒ `422 RESOURCE_SCOPE_MISMATCH` field `warehouseId`. `warehouseId: null` = mọi kho của nhà máy (hành vi cũ).
 
 🔴 **Thành công một phần là bình thường, không phải lỗi.** Component nào không còn tồn sẽ bị **bỏ qua
 im lặng**. Sau khi gọi, **luôn** gọi tiếp:
@@ -563,14 +572,18 @@ im lặng**. Sau khi gọi, **luôn** gọi tiếp:
 Dùng `canRelease` để bật/tắt nút Release, `lines[].shortageQuantity` để hiện thiếu bao nhiêu.
 
 > Muốn chỉ định kho/lot cụ thể: `POST /work-orders/{id}/material-reservations`
-> body `{componentLineId, warehouseId, lotId?, quantity}`.
-> Huỷ giữ: `DELETE /work-orders/{id}/material-reservations/{reservationId}`.
+> body `{componentLineId, warehouseId, lotId?, quantity, expectedWorkOrderVersion}`.
+> Huỷ giữ: `DELETE /work-orders/{id}/material-reservations/{reservationId}?expectedWorkOrderVersion=`.
+> Huỷ **mọi** phần chưa cấp: `POST /work-orders/{id}/release-reservations` body `{expectedWorkOrderVersion}` (không biến động kho).
 
 ---
 
 ### Bước 5 — Release
 
-**`POST /api/v1/work-orders/{workOrderId}/release`** → `200`, status → `RELEASED`.
+**`POST /api/v1/work-orders/{workOrderId}/release`** body `{"expectedWorkOrderVersion": <version>}` → `200`, status → `RELEASED`,
+lịch công đoạn được chốt: `scheduleRevision` (1, 2, … — `null` khi chưa chốt), `calendarRevision`, `scheduleTimeZone`, `scheduleCapturedAt`;
+mỗi công đoạn có `workMinutes` (phút làm việc). Xem trước đúng lịch đó **trước** release: `POST /work-orders/{id}/schedule-preview`
+(chỉ đọc, body tuỳ chọn `{expectedVersion?, plannedStartAt?, plannedQuantity?}`).
 
 🔴 Nếu reservation **chưa phủ 100%**: trả `409` **và** work order bị đẩy sang trạng thái `BLOCKED`
 (được lưu thật vào DB, không rollback). FE phải refetch WO để hiển thị `BLOCKED` + `blockReason`.
@@ -816,13 +829,15 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 ### Work Order
 | Việc | Endpoint | Quyền |
 |---|---|---|
-| Danh sách (lọc `status`, `productItemId`, `search`) | `GET /plants/{plantId}/work-orders` | `PERM_WORK_ORDER_READ` |
+| Danh sách (lọc `status`, `productItemId`, `search`, `fromDate`/`toDate` theo ngày nhà máy trên `createdAt`) | `GET /plants/{plantId}/work-orders` | `PERM_WORK_ORDER_READ` |
 | Chi tiết | `GET /work-orders/{id}` | `PERM_WORK_ORDER_READ` |
 | Tạo thủ công | `POST /plants/{plantId}/work-orders` | `PERM_WORK_ORDER_MANAGE` |
-| Sửa (chỉ khi DRAFT) | `PATCH /work-orders/{id}` | `PERM_WORK_ORDER_MANAGE` |
-| Lên lịch | `POST /work-orders/{id}/plan` | `PERM_WORK_ORDER_MANAGE` |
-| Release | `POST /work-orders/{id}/release` | `PERM_WORK_ORDER_MANAGE` |
-| Huỷ (**bắt buộc** `{reason}`) | `POST /work-orders/{id}/cancel` | `PERM_WORK_ORDER_MANAGE` |
+| Sửa (chỉ khi DRAFT, **bắt buộc** `expectedVersion`; lệnh MAKE khoá `plannedQuantity`/`outputWarehouseId` ⇒ `409 SOURCE_LOCKED`) | `PATCH /work-orders/{id}` | `PERM_WORK_ORDER_MANAGE` |
+| Xem trước lịch (chỉ đọc) | `POST /work-orders/{id}/schedule-preview` | `PERM_WORK_ORDER_READ` |
+| Lên lịch (`{expectedWorkOrderVersion, componentWarehouses?}`) | `POST /work-orders/{id}/plan` | `PERM_WORK_ORDER_MANAGE` |
+| Release (`{expectedWorkOrderVersion}`) | `POST /work-orders/{id}/release` | `PERM_WORK_ORDER_MANAGE` |
+| Huỷ (**bắt buộc** `{reason, expectedWorkOrderVersion}`; còn phiếu cấp chờ duyệt ⇒ `409`; lệnh MAKE trả hạn ngạch chuyển đổi một lần) | `POST /work-orders/{id}/cancel` | `PERM_WORK_ORDER_MANAGE` |
+| Giải phóng mọi phần chưa cấp (`{expectedWorkOrderVersion}`) | `POST /work-orders/{id}/release-reservations` | `PERM_MATERIAL_RESERVATION_MANAGE` |
 | Đóng/chốt sổ (chỉ từ `COMPLETED`, **không** body) | `POST /work-orders/{id}/close` | `PERM_WORK_ORDER_MANAGE` |
 | Sẵn sàng vật tư | `GET /work-orders/{id}/material-readiness` | `PERM_WORK_ORDER_READ` |
 | Variance | `GET /work-orders/{id}/variance` | `PERM_WORK_ORDER_VARIANCE_READ` |

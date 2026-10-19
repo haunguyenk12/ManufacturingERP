@@ -160,7 +160,7 @@ pf PF-13 "ảnh chụp quy trình công nghệ không rỗng" \
 
 # reserveAutomatically phân giải theo PHẠM VI NHÀ MÁY chứ không theo kho đầu ra của lệnh sản xuất
 # — nên vật tư nằm ở D26-WIP/D26-RM vẫn được giữ chỗ dù lệnh sản xuất xuất hàng ra D26-FG.
-call POST "/v1/work-orders/$WO/reserve" >/dev/null
+wo_cmd "$WO" reserve >/dev/null
 READY=$(call GET "/v1/work-orders/$WO/material-readiness")
 pf PF-14 "reservedPercent = 100" \
     "$(echo "$READY" | extract "'%g' % float(d['result']['reservedPercent'])")" "100"
@@ -174,7 +174,7 @@ pf PF-14 "ready = true và canRelease = true" \
 ################################################################################
 stage_banner "C. Sản xuất: release -> xuất vật tư -> ghi sản lượng"
 
-call POST "/v1/work-orders/$WO/release" >/dev/null
+wo_cmd "$WO" release >/dev/null
 pf "SMOKE-3" "lệnh sản xuất -> RELEASED" \
     "$(call GET "/v1/work-orders/$WO" | rid status)" "RELEASED"
 

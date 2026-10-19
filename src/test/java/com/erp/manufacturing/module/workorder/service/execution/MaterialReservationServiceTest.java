@@ -1,5 +1,9 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
@@ -43,6 +47,7 @@ class MaterialReservationServiceTest {
     @Mock WorkOrderRepository workOrderRepository;
     @Mock OrganizationLookupService organizationLookupService;
     @Mock InventoryAvailabilityService inventoryAvailabilityService;
+    @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
 
     MaterialReservationService service;
 
@@ -55,7 +60,9 @@ class MaterialReservationServiceTest {
                 stockBalanceRepository,
                 organizationLookupService,
                 support,
-                new ManufacturingExecutionMapper());
+                new ManufacturingExecutionMapper(),
+                new WorkOrderIdempotency(idempotencyRecordRepository,
+                        new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
     }
 
     /**
@@ -88,7 +95,7 @@ class MaterialReservationServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
-                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4")));
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4"), 0L), null);
 
         assertThat(balance.getReservedQuantity()).isEqualByComparingTo("4");
         verify(reservationRepository).save(any(MaterialReservation.class));
@@ -105,9 +112,9 @@ class MaterialReservationServiceTest {
 
         UUID workOrderId = workOrder.getWorkOrderId();
         MaterialReservationCreateRequest request = new MaterialReservationCreateRequest(
-                line.getComponentLineId(), warehouse.getWarehouseId(), null, BigDecimal.ONE);
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, BigDecimal.ONE, 0L);
 
-        assertThatThrownBy(() -> service.reserve(workOrderId, request))
+        assertThatThrownBy(() -> service.reserve(workOrderId, request, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -139,7 +146,7 @@ class MaterialReservationServiceTest {
         when(reservationRepository.save(any(MaterialReservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
-                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4")));
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4"), 0L), null);
 
         assertThat(balance.getReservedQuantity()).isEqualByComparingTo("4");
         verify(stockBalanceRepository).save(balance);
@@ -167,7 +174,7 @@ class MaterialReservationServiceTest {
                 .thenReturn(balance);
 
         assertThatThrownBy(() -> service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
-                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4"))))
+                line.getComponentLineId(), warehouse.getWarehouseId(), null, new BigDecimal("4"), 0L), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
@@ -194,10 +201,130 @@ class MaterialReservationServiceTest {
                 .thenReturn(balance);
         when(reservationRepository.save(reservation)).thenReturn(reservation);
 
-        service.release(workOrder.getWorkOrderId(), reservation.getReservationId());
+        service.release(workOrder.getWorkOrderId(), reservation.getReservationId(), 0L, null);
 
         assertThat(balance.getReservedQuantity()).isEqualByComparingTo("0");
         assertThat(reservation.getStatus()).isEqualTo(MaterialReservationStatus.RELEASED);
+    }
+
+    // ── G8a ────────────────────────────────────────────────────────────────────────────────────────
+
+    /** D2: a line that names a warehouse is reserved from it only — another one is refused, not used. */
+    @Test
+    void reserve_lineWithAWarehouse_fromAnotherWarehouse_isRefusedOnTheWarehouseField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse raw = warehouse(UUID.randomUUID(), workOrder.getPlant());
+        line.setWarehouse(raw);
+        Warehouse other = workOrder.getOutputWarehouse();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(other.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(other);
+
+        assertThatThrownBy(() -> service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
+                line.getComponentLineId(), other.getWarehouseId(), null, BigDecimal.ONE, 0L), null))
+                .isInstanceOf(com.erp.manufacturing.common.exception.MultiErrorException.class)
+                .satisfies(ex -> {
+                    var error = (com.erp.manufacturing.common.exception.MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("warehouseId");
+                });
+        verifyNoInteractions(stockBalanceRepository);
+        verify(reservationRepository, never()).save(any());
+    }
+
+    @Test
+    void reserve_staleWorkOrderVersion_throwsConcurrentModificationBeforeTouchingStock() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
+                line.getComponentLineId(), UUID.randomUUID(), null, BigDecimal.ONE, 7L), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
+        verifyNoInteractions(stockBalanceRepository, organizationLookupService);
+    }
+
+    /**
+     * FE F2: 15 in the line's warehouse, 500 elsewhere in the plant — only the line's warehouse is asked,
+     * so 15 is reserved and 5 stays short. The plant scope is still resolved (for lines without a
+     * warehouse) but never queried for this line.
+     */
+    @Test
+    void reserveAutomatically_lineWithAWarehouse_looksInThatWarehouseOnly() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("20"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse raw = warehouse(UUID.randomUUID(), workOrder.getPlant());
+        line.setWarehouse(raw);
+        StockBalance fifteen = StockBalance.builder().item(line.getComponentItem()).warehouse(raw)
+                .quantity(new BigDecimal("15")).reservedQuantity(BigDecimal.ZERO).build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.resolveScope(ScopeResourceType.PLANT, workOrder.getPlant().getPlantId()))
+                .thenReturn(new com.erp.manufacturing.module.organization.service.OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, workOrder.getPlant().getPlantId(), UUID.randomUUID(),
+                        java.util.List.of(raw.getWarehouseId(), UUID.randomUUID())));
+        when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId())).thenReturn(BigDecimal.ZERO);
+        when(stockBalanceRepository.findIssuableBalancesFefo(line.getComponentItem().getItemId(),
+                java.util.List.of(raw.getWarehouseId()), LotStatus.AVAILABLE)).thenReturn(java.util.List.of(fifteen));
+        when(reservationRepository.save(any(MaterialReservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        var created = service.reserveAutomatically(workOrder.getWorkOrderId(),
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null);
+
+        assertThat(created).hasSize(1);
+        assertThat(created.get(0).quantity()).isEqualByComparingTo("15");
+        assertThat(fifteen.getReservedQuantity()).isEqualByComparingTo("15");
+        verify(stockBalanceRepository).findIssuableBalancesFefo(any(), eq(java.util.List.of(raw.getWarehouseId())), any());
+        // touch(): reservations are child rows, so without it the work order's @Version would not move (B112).
+        assertThat(workOrder.getUpdatedAt()).isNotNull();
+        verify(workOrderRepository).saveAndFlush(workOrder);
+    }
+
+    /** FE §3.3 release-reservations: every ACTIVE reservation goes back to free stock, no movement. */
+    @Test
+    void releaseAll_releasesTheUnissuedPartOfEveryActiveReservation_andMovesTheVersionOn() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialReservation reservation = reservation(workOrder, line, warehouse, new BigDecimal("6"));
+        reservation.setConsumedQuantity(new BigDecimal("2"));
+        StockBalance balance = StockBalance.builder().item(line.getComponentItem()).warehouse(warehouse)
+                .quantity(new BigDecimal("10")).reservedQuantity(new BigDecimal("4")).build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(reservationRepository.findByWorkOrderWorkOrderIdAndStatus(workOrder.getWorkOrderId(), MaterialReservationStatus.ACTIVE))
+                .thenReturn(java.util.List.of(reservation));
+        when(inventoryAvailabilityService.getStockBalanceForIssue(line.getComponentItem(), warehouse.getWarehouseId(), null))
+                .thenReturn(balance);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenAnswer(invocation -> {
+            workOrder.setVersion(1L);
+            return workOrder;
+        });
+
+        var response = service.releaseAll(workOrder.getWorkOrderId(),
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null);
+
+        assertThat(response.releasedReservationCount()).isEqualTo(1);
+        assertThat(response.lines().get(0).releasedQuantity()).isEqualByComparingTo("4");
+        assertThat(response.workOrderVersion()).isEqualTo(1L);
+        assertThat(balance.getReservedQuantity()).isEqualByComparingTo("0");
+        assertThat(balance.getQuantity()).isEqualByComparingTo("10");
+        assertThat(reservation.getStatus()).isEqualTo(MaterialReservationStatus.RELEASED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WorkOrderStatus.class, names = {"CANCELLED", "CLOSED"})
+    void releaseAll_onACancelledOrClosedWorkOrder_throwsStateConflict(WorkOrderStatus status) {
+        WorkOrder workOrder = workOrder(status, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.releaseAll(workOrder.getWorkOrderId(),
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verifyNoInteractions(stockBalanceRepository);
     }
 
     private MaterialReservation reservation(WorkOrder workOrder,
@@ -252,6 +379,7 @@ class MaterialReservationServiceTest {
                 .status(status)
                 .componentLines(new ArrayList<>())
                 .build();
+        workOrder.setVersion(0L);
         workOrder.getComponentLines().add(WorkOrderComponentLine.builder()
                 .componentLineId(UUID.randomUUID())
                 .workOrder(workOrder)

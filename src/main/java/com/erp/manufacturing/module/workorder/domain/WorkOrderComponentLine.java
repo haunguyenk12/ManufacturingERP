@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workorder.domain;
 import com.erp.manufacturing.common.audit.BaseEntity;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.organization.domain.Warehouse;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -40,6 +41,15 @@ public class WorkOrderComponentLine extends BaseEntity {
 
     @Column(name = "line_no", nullable = false)
     private Integer lineNo;
+
+    /**
+     * The one warehouse this component is reserved from (G8a, D2). {@code null} — every line created
+     * before V79, and any line nobody chose a warehouse for — keeps the old behaviour: reservation looks
+     * across every warehouse of the plant. Not backfilled; there is no truthful value for history.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "warehouse_id")
+    private Warehouse warehouse;
 
     @Column(name = "quantity_per", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantityPer;

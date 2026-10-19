@@ -82,5 +82,45 @@ public record WorkOrderResponse(
         /** Sales order lines this output is earmarked for (F6). Empty for unallocated work orders. */
         List<WorkOrderDemandAllocationResponse> allocations,
         /** When this work order was reconciled and locked (P6). Null until {@code CLOSED}. */
-        Instant closedAt
-) {}
+        Instant closedAt,
+        /** G8 (D5): what every command on this work order must send back as its expected version. */
+        Long version,
+        /**
+         * G8a (D9): which committed schedule the operations carry. {@code null} until the first release;
+         * moves on at every release and manual schedule adjustment.
+         */
+        Integer scheduleRevision,
+        /** Content fingerprint of the work calendars the committed schedule was computed on; null without one. */
+        String calendarRevision,
+        /** The plant's time zone when the schedule was committed. */
+        String scheduleTimeZone,
+        Instant scheduleCapturedAt
+) {
+
+    /** Shape before G8a — callers that build a work order response without version and schedule context. */
+    public WorkOrderResponse(
+            UUID workOrderId, UUID companyId, UUID plantId, String plantCode, String workOrderNo,
+            UUID productItemId, String productItemCode, String productItemName, String outputUom, UUID bomId,
+            String bomRevision, Instant bomCapturedAt, UUID sourceRoutingId, String sourceRoutingCode,
+            String sourceRoutingVersion, Instant routingCapturedAt, UUID planningRunId,
+            String planningRunCode, UUID planningProposalId, UUID outputWarehouseId,
+            String outputWarehouseCode, BigDecimal plannedQuantity, BigDecimal completedQuantity,
+            BigDecimal remainingQuantity, BigDecimal actualGoodQuantity, BigDecimal actualScrapQuantity,
+            BigDecimal actualReworkQuantity, BigDecimal availableToReceipt, String status,
+            Instant plannedStartAt, Instant plannedEndAt, Instant releasedAt, Instant executionStartedAt,
+            Instant executionCompletedAt, Instant completedAt, Instant cancelledAt, String cancelReason,
+            Instant blockedAt, String blockReason, String notes, Instant createdAt, Instant updatedAt,
+            List<WorkOrderComponentLineResponse> componentLines, List<WorkOrderOperationResponse> operations,
+            List<WorkOrderDemandAllocationResponse> allocations, Instant closedAt) {
+        this(
+                workOrderId, companyId, plantId, plantCode, workOrderNo, productItemId, productItemCode,
+                productItemName, outputUom, bomId, bomRevision, bomCapturedAt, sourceRoutingId,
+                sourceRoutingCode, sourceRoutingVersion, routingCapturedAt, planningRunId, planningRunCode,
+                planningProposalId, outputWarehouseId, outputWarehouseCode, plannedQuantity,
+                completedQuantity, remainingQuantity, actualGoodQuantity, actualScrapQuantity,
+                actualReworkQuantity, availableToReceipt, status, plannedStartAt, plannedEndAt, releasedAt,
+                executionStartedAt, executionCompletedAt, completedAt, cancelledAt, cancelReason, blockedAt,
+                blockReason, notes, createdAt, updatedAt, componentLines, operations, allocations, closedAt,
+                null, null, null, null, null);
+    }
+}

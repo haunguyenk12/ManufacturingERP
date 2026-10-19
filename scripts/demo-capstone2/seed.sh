@@ -803,8 +803,8 @@ convert_suggestion() {
 log "A. $SO_PLANNED_FULL_NO: chạy hết luồng tới FULFILLED"
 WO_FULL=$(convert_suggestion "$RUN1_ID" "$NS-WO-1004")
 remember "workOrders.$NS-WO-1004" "$WO_FULL"
-call POST "/v1/work-orders/$WO_FULL/reserve" >/dev/null
-call POST "/v1/work-orders/$WO_FULL/release" >/dev/null
+wo_cmd "$WO_FULL" reserve >/dev/null
+wo_cmd "$WO_FULL" release >/dev/null
 issue_all "$WO_FULL" "$NS-ISSUE-1004"
 # 🔴 Số kế hoạch của lệnh sản xuất là số RÒNG của MRP, KHÔNG phải số trên đơn hàng: netting đã
 # trừ tồn kho sẵn có. Báo sản lượng theo số đặt hàng sẽ trả 409 PLANNED_QUANTITY_EXCEEDED (B54).
@@ -819,8 +819,8 @@ info "$NS-WO-1004 -> CLOSED, $SO_PLANNED_FULL_NO -> FULFILLED, lô $LOT_SO1004 A
 log "B. $SO_PLANNED_PARTIAL_NO: sản xuất một phần -> PARTIALLY_FULFILLED"
 WO_PART=$(convert_suggestion "$RUN2_ID" "$NS-WO-1005")
 remember "workOrders.$NS-WO-1005" "$WO_PART"
-call POST "/v1/work-orders/$WO_PART/reserve" >/dev/null
-call POST "/v1/work-orders/$WO_PART/release" >/dev/null
+wo_cmd "$WO_PART" reserve >/dev/null
+wo_cmd "$WO_PART" release >/dev/null
 issue_all "$WO_PART" "$NS-ISSUE-1005"
 # Làm ra ÍT hơn số kế hoạch ⇒ lệnh sản xuất dừng ở IN_PROGRESS và đơn hàng chỉ giao được một
 # phần. Trần là số kế hoạch ròng của MRP (xem ghi chú ở luồng A), nên lấy nửa số đó.
@@ -844,24 +844,24 @@ while IFS='|' read -r wono icode qty state; do
     case "$state" in
         DRAFT) ;;
         PLANNED)
-            call POST "/v1/work-orders/$wo/plan" >/dev/null ;;
+            wo_cmd "$wo" plan >/dev/null ;;
         CANCELLED)
             call POST "/v1/work-orders/$wo/cancel" \
-                '{"reason":"Customer postponed the order"}' >/dev/null ;;
+                "{\"reason\":\"Customer postponed the order\",\"expectedWorkOrderVersion\":$(wo_version "$wo")}" >/dev/null ;;
         RELEASED)
-            call POST "/v1/work-orders/$wo/reserve" >/dev/null
-            call POST "/v1/work-orders/$wo/release" >/dev/null ;;
+            wo_cmd "$wo" reserve >/dev/null
+            wo_cmd "$wo" release >/dev/null ;;
         IN_PROGRESS)
-            call POST "/v1/work-orders/$wo/reserve" >/dev/null
-            call POST "/v1/work-orders/$wo/release" >/dev/null
+            wo_cmd "$wo" reserve >/dev/null
+            wo_cmd "$wo" release >/dev/null
             issue_all "$wo" "$NS-ISSUE-$suffix"
             # Sản lượng nhỏ hơn kế hoạch ⇒ lệnh sản xuất dừng ở IN_PROGRESS, và lô nhập kho
             # dừng ở HOLD chờ QC — hai màn hình cần dữ liệu ở đúng trạng thái đó.
             report_output "$wo" 2 "$NS-EXEC-$suffix"
             receipt_and_qc "$wo" 2 "$LOT_WO2004" "$NS-RECEIPT-$suffix" hold >/dev/null ;;
         CLOSED)
-            call POST "/v1/work-orders/$wo/reserve" >/dev/null
-            call POST "/v1/work-orders/$wo/release" >/dev/null
+            wo_cmd "$wo" reserve >/dev/null
+            wo_cmd "$wo" release >/dev/null
             issue_all "$wo" "$NS-ISSUE-$suffix"
             report_output "$wo" "$qty" "$NS-EXEC-$suffix"
             receipt_and_qc "$wo" "$qty" "$LOT_WO2005" "$NS-RECEIPT-$suffix" yes >/dev/null

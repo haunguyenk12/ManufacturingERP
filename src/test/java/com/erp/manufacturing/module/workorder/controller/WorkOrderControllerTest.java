@@ -13,7 +13,11 @@ import com.erp.manufacturing.module.workorder.dto.core.WorkOrderComponentLineRes
 import com.erp.manufacturing.module.workorder.dto.core.WorkOrderResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.WorkOrderComponentIssueRequest;
 import com.erp.manufacturing.module.workorder.service.WorkOrderService;
+import com.erp.manufacturing.module.workorder.dto.core.WorkOrderPlanRequest;
+import com.erp.manufacturing.module.workorder.dto.schedule.WorkOrderSchedulePreviewResponse;
 import com.erp.manufacturing.module.workorder.service.query.WorkOrderReadinessService;
+import com.erp.manufacturing.module.workorder.service.query.WorkOrderSchedulePreviewService;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +36,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -60,6 +65,8 @@ class WorkOrderControllerTest {
     WorkOrderService workOrderService;
     @MockBean
     WorkOrderReadinessService readinessService;
+    @MockBean
+    WorkOrderSchedulePreviewService schedulePreviewService;
 
     // Unused directly by these tests – required only so the auto-detected security filters
     // can be constructed by the @WebMvcTest slice, even with addFilters = false.
@@ -127,11 +134,13 @@ class WorkOrderControllerTest {
     @Test
     @DisplayName("release: insufficient reservation (bất biến B14) returns 409 STATE_CONFLICT")
     void releaseWorkOrder_insufficientReservation_returns409() throws Exception {
-        when(workOrderService.release(WORK_ORDER_ID))
+        when(workOrderService.release(eq(WORK_ORDER_ID), any(), any()))
                 .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT,
                         "Reservation does not fully cover component requirements"));
 
-        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/release"))
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/release")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":3}"))
                 .andExpect(status().is(BusinessErrorCode.STATE_CONFLICT.status().value()))
                 .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
     }
@@ -250,5 +259,70 @@ class WorkOrderControllerTest {
                 .andExpect(status().isOk());
 
         verify(workOrderService).issueComponent(eq(WORK_ORDER_ID), any(WorkOrderComponentIssueRequest.class), isNull());
+    }
+
+    // ── G8a ────────────────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("plan: body (version + component warehouses) and Idempotency-Key reach the service")
+    void plan_forwardsTheBodyAndTheIdempotencyKey() throws Exception {
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        when(workOrderService.plan(eq(WORK_ORDER_ID), any(), eq("PLAN-1"))).thenReturn(sampleResponse());
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/plan")
+                        .header("Idempotency-Key", "PLAN-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedWorkOrderVersion":3,"componentWarehouses":[{"itemId":"%s","warehouseId":"%s"}]}
+                                """.formatted(itemId, warehouseId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        ArgumentCaptor<WorkOrderPlanRequest> captor = ArgumentCaptor.forClass(WorkOrderPlanRequest.class);
+        verify(workOrderService).plan(eq(WORK_ORDER_ID), captor.capture(), eq("PLAN-1"));
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().expectedWorkOrderVersion()).isEqualTo(3L);
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().componentWarehouses().get(0).warehouseId())
+                .isEqualTo(warehouseId);
+    }
+
+    @Test
+    @DisplayName("PATCH without expectedVersion: 400 naming the field, the service is never called")
+    void update_withoutExpectedVersion_returns400NamingTheField() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/v1/work-orders/" + WORK_ORDER_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"notes":"x"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("expectedVersion"));
+
+        verifyNoInteractions(workOrderService);
+    }
+
+    @Test
+    @DisplayName("schedule-preview: 200 with the preview envelope, body optional")
+    void schedulePreview_returns200WithTheEnvelope() throws Exception {
+        when(schedulePreviewService.preview(eq(WORK_ORDER_ID), isNull())).thenReturn(new WorkOrderSchedulePreviewResponse(
+                WORK_ORDER_ID, 2L, "Asia/Ho_Chi_Minh", "0123456789abcdef", BigDecimal.TEN,
+                java.time.Instant.parse("2026-10-20T01:00:00Z"), List.of(), List.of(), java.time.Instant.parse("2026-10-19T01:00:00Z")));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/schedule-preview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.version").value(2))
+                .andExpect(jsonPath("$.result.calendarRevision").value("0123456789abcdef"));
+    }
+
+    @Test
+    @DisplayName("list: a fromDate that is not a date is 400, not 500")
+    void list_withAMalformedFromDate_returns400() throws Exception {
+        mockMvc.perform(get("/v1/plants/" + PLANT_ID + "/work-orders").param("fromDate", "15/10/2026"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(workOrderService);
     }
 }

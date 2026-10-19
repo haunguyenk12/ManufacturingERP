@@ -89,6 +89,17 @@ public class WorkOrderOperation extends BaseEntity {
     @Column(name = "schedule_adjustment_reason", columnDefinition = "TEXT")
     private String scheduleAdjustmentReason;
 
+    /**
+     * Working minutes this operation needs for {@code plannedQuantity}: {@code ceil(setup + run × qty)}.
+     * The one formula release schedules with and the schedule preview shows (G8a) — work time, not wall
+     * time.
+     */
+    public long workMinutes(BigDecimal plannedQuantity) {
+        return setupMinutes.add(runMinutesPerUnit.multiply(plannedQuantity))
+                .setScale(0, java.math.RoundingMode.CEILING)
+                .longValueExact();
+    }
+
     /** Stage label used on the WIP ledger when a transaction is reported against this operation. */
     public String stageCode() {
         return sequence + "-" + workCenterCode;

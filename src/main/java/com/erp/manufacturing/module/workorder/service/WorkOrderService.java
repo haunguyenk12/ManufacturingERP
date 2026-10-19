@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.workorder.service;
 
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
+import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -18,9 +19,11 @@ import com.erp.manufacturing.module.organization.service.OrganizationLookupServi
 import com.erp.manufacturing.module.routing.domain.RoutingHeader;
 import com.erp.manufacturing.module.routing.domain.RoutingOperation;
 import com.erp.manufacturing.module.routing.service.RoutingLookupService;
-import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
-import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
+import com.erp.manufacturing.module.planning.service.WorkOrderPlanningLinkService;
+import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
+import com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
+import com.erp.manufacturing.module.workorder.domain.WorkOrderCommand;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderComponentLine;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
@@ -29,6 +32,7 @@ import com.erp.manufacturing.module.workorder.dto.execution.*;
 import com.erp.manufacturing.module.workorder.dto.variance.*;
 import com.erp.manufacturing.module.workorder.mapper.WorkOrderMapper;
 import com.erp.manufacturing.module.workorder.repository.ComponentQuantityProjection;
+import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
 import com.erp.manufacturing.module.workorder.repository.MaterialReservationRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
@@ -44,12 +48,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -69,7 +77,11 @@ public class WorkOrderService {
     private final WorkOrderDemandAllocationService allocationService;
     private final MaterialReservationRepository reservationRepository;
     private final WorkOrderReleaseGate releaseGate;
-    private final WorkCalendarLookupService workCalendarLookupService;
+    private final WorkOrderScheduler scheduler;
+    private final MaterialIssueRepository materialIssueRepository;
+    private final WorkOrderPlanningLinkService planningLinkService;
+    private final WorkOrderIdempotency idempotencyRecords;
+    private final SecurityAuditorAware auditorAware;
     private final WorkOrderMapper mapper;
 
     /**
@@ -177,6 +189,7 @@ public class WorkOrderService {
                 .notes(trimToNull(request.notes()))
                 .build();
         snapshotComponentLines(workOrder, bom, plannedQuantity);
+        applyComponentWarehouses(workOrder, request.componentWarehouses());
         snapshotRouting(workOrder, plant, product, routingRequired);
         return workOrderRepository.save(workOrder);
     }
@@ -187,10 +200,21 @@ public class WorkOrderService {
                                               WorkOrderStatus status,
                                               UUID productItemId,
                                               String search,
+                                              LocalDate fromDate,
+                                              LocalDate toDate,
                                               Pageable pageable) {
-        organizationLookupService.getActivePlant(plantId);
+        Plant plant = organizationLookupService.getActivePlant(plantId);
+        if (fromDate != null && toDate != null && toDate.isBefore(fromDate)) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("toDate", "must not be before fromDate"));
+        }
+        // G8a: the dates are the plant's calendar days, so a work order created at 23:30 local time lands
+        // on that local day, not on the next UTC one. Half-open [from 00:00, to + 1 day 00:00).
+        Instant createdFrom = fromDate == null ? null : fromDate.atStartOfDay(ZoneId.of(plant.getTimezone())).toInstant();
+        Instant createdTo = toDate == null ? null
+                : toDate.plusDays(1).atStartOfDay(ZoneId.of(plant.getTimezone())).toInstant();
         Page<WorkOrder> page = workOrderRepository.search(
-                plantId, status, productItemId, trimToNull(search), pageable);
+                plantId, status, productItemId, trimToNull(search), createdFrom, createdTo, pageable);
         // One allocation lookup and one reservation lookup for the whole page, never one per row
         // (rule C14). Both must stay outside page.map(...) — inside it they become N+1 while
         // producing byte-identical output, which is exactly the failure C15 asks to be asserted.
@@ -213,15 +237,28 @@ public class WorkOrderService {
      * A blocked work order already has reservations attached to its component lines; changing
      * {@code plannedQuantity} recalculates {@code requiredQuantity} and could make
      * {@code required < reserved}, breaking that invariant. Release the reservations first.
+     *
+     * <p>G8: {@code expectedVersion} is required; a source-linked draft refuses a new quantity or output
+     * warehouse with {@code SOURCE_LOCKED} (FE Q7) — those are what the planning quota and the sales
+     * order allocation were sized on. Component warehouses stay editable on a source-linked draft: the
+     * conversion never captured any, so there is nothing of the source's to protect.
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_WORK_ORDER_MANAGE', #workOrderId)")
     @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public WorkOrderResponse update(UUID workOrderId, WorkOrderUpdateRequest request) {
+    public WorkOrderResponse update(UUID workOrderId, WorkOrderUpdateRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(workOrderId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.WORK_ORDER_UPDATE, fingerprint).isPresent()) {
+            return toResponse(findWorkOrder(workOrderId));
+        }
         WorkOrder workOrder = findWorkOrder(workOrderId);
+        WorkOrderVersions.ensure(workOrder, request.expectedVersion(), "expectedVersion");
         ensureDraft(workOrder);
+        ensureSourceFieldsUntouched(workOrder, request);
+        idempotencyRecords.record(key, WorkOrderCommand.WORK_ORDER_UPDATE, workOrderId, fingerprint);
 
         if (request.outputWarehouseId() != null) {
             workOrder.setOutputWarehouse(organizationLookupService.getActiveWarehouseInPlant(
@@ -242,7 +279,9 @@ public class WorkOrderService {
         if (request.notes() != null) {
             workOrder.setNotes(trimToNull(request.notes()));
         }
-        return toResponse(workOrderRepository.save(workOrder));
+        applyComponentWarehouses(workOrder, request.componentWarehouses());
+        workOrder.touch();
+        return toResponse(workOrderRepository.saveAndFlush(workOrder));
     }
 
     /**
@@ -255,14 +294,23 @@ public class WorkOrderService {
     @Auditable(action = AuditAction.WORK_ORDER_UPDATED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public WorkOrderResponse plan(UUID workOrderId) {
+    public WorkOrderResponse plan(UUID workOrderId, WorkOrderPlanRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(workOrderId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.WORK_ORDER_PLAN, fingerprint).isPresent()) {
+            return toResponse(findWorkOrder(workOrderId));
+        }
         WorkOrder workOrder = findWorkOrder(workOrderId);
+        WorkOrderVersions.ensure(workOrder, request == null ? null : request.expectedWorkOrderVersion(),
+                "expectedWorkOrderVersion");
         if (!workOrder.canPlan()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only draft work orders can be planned");
         }
+        idempotencyRecords.record(key, WorkOrderCommand.WORK_ORDER_PLAN, workOrderId, fingerprint);
+        applyComponentWarehouses(workOrder, request.componentWarehouses());
         workOrder.plan();
-        return toResponse(workOrderRepository.save(workOrder));
+        return toResponse(workOrderRepository.saveAndFlush(workOrder));
     }
 
     @Transactional
@@ -270,17 +318,26 @@ public class WorkOrderService {
     @Auditable(action = AuditAction.WORK_ORDER_RELEASED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public WorkOrderResponse release(UUID workOrderId) {
+    public WorkOrderResponse release(UUID workOrderId, WorkOrderVersionRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(workOrderId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.WORK_ORDER_RELEASE, fingerprint).isPresent()) {
+            return toResponse(findWorkOrder(workOrderId));
+        }
         WorkOrder workOrder = findWorkOrder(workOrderId);
+        WorkOrderVersions.ensure(workOrder, request == null ? null : request.expectedWorkOrderVersion(),
+                "expectedWorkOrderVersion");
         ensureReleasable(workOrder);
         if (workOrder.getComponentLines().isEmpty()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Cannot release work order without component requirements");
         }
+        idempotencyRecords.record(key, WorkOrderCommand.WORK_ORDER_RELEASE, workOrderId, fingerprint);
         releaseGate.ensureMaterialReady(workOrderId);
-        workOrder.release(Instant.now());
-        scheduleOperations(workOrder);
-        WorkOrder saved = workOrderRepository.save(workOrder);
+        Instant now = Instant.now();
+        workOrder.release(now);
+        scheduleOperations(workOrder, now);
+        WorkOrder saved = workOrderRepository.saveAndFlush(workOrder);
         wipTransactionService.recordStart(saved);
         return toResponse(saved);
     }
@@ -294,34 +351,20 @@ public class WorkOrderService {
      * exactly like {@code ProductionExecutionService}/{@code MrpCalculationService} reuse other
      * modules' lookup services rather than duplicating their logic (rule C7).
      *
-     * <p>This is "infinite capacity" scheduling — it does not know or care whether another work
-     * order is already loading the same work center that day. Reporting that overload is the
-     * Capacity Board's job (a separate read), not this method's; static CRP decouples the two on
-     * purpose (NEXT_PHASE_PLAN.md C2-8).
-     *
-     * <p>Operations whose Work Center has no calendar attached get continuous-time scheduling (no
-     * gaps skipped) — there is nothing to consult. Operations with no Work Center at all (legacy
-     * routing rows predating C2-6, {@code B_wc2}) are left unscheduled and are invisible to the
-     * Capacity Board, by design.
+     * <p>The formula itself lives in {@link WorkOrderScheduler} (G8a), shared with the work order's
+     * schedule preview so the preview can never promise what release would not commit. G8a also
+     * records which schedule this is (D9): the Capacity Board reads these operations directly, and the
+     * revision lets a client tell the committed schedule from one it previewed earlier.
      */
-    private void scheduleOperations(WorkOrder workOrder) {
-        ZoneId zone = ZoneId.of(workOrder.getPlant().getTimezone());
-        Instant cursor = workOrder.getPlannedStartAt() != null ? workOrder.getPlannedStartAt() : Instant.now();
-        for (WorkOrderOperation operation : workOrder.getOperations()) {
-            long durationMinutes = operation.getSetupMinutes()
-                    .add(operation.getRunMinutesPerUnit().multiply(workOrder.getPlannedQuantity()))
-                    .setScale(0, RoundingMode.CEILING)
-                    .longValueExact();
-            WorkCenter workCenter = operation.getWorkCenter();
-            Instant start = cursor;
-            Instant end = (workCenter != null && workCenter.getWorkCalendar() != null)
-                    ? workCalendarLookupService.computeEndInstant(
-                            workCenter.getWorkCalendar().getWorkCalendarId(), start, zone, durationMinutes)
-                    : start.plus(durationMinutes, ChronoUnit.MINUTES);
-            operation.setPlannedStartAt(start);
-            operation.setPlannedEndAt(end);
-            cursor = end;
+    private void scheduleOperations(WorkOrder workOrder, Instant now) {
+        Instant start = workOrder.getPlannedStartAt() != null ? workOrder.getPlannedStartAt() : now;
+        WorkOrderScheduler.Schedule schedule = scheduler.compute(workOrder, start, workOrder.getPlannedQuantity());
+        for (WorkOrderScheduler.Slot slot : schedule.slots()) {
+            slot.operation().setPlannedStartAt(slot.start());
+            slot.operation().setPlannedEndAt(slot.end());
         }
+        workOrder.commitSchedule(schedule.calendarRevision(), schedule.timeZone(),
+                now.truncatedTo(ChronoUnit.MICROS));
     }
 
     @Transactional
@@ -329,7 +372,12 @@ public class WorkOrderService {
     @Auditable(action = AuditAction.WORK_ORDER_CANCELLED, entityType = "WorkOrder", entityIdExpression = "workOrderId.toString()",
                companyId = "#result?.companyId()",
                plantId = "#result?.plantId()")
-    public WorkOrderResponse cancel(UUID workOrderId, WorkOrderCancelRequest request) {
+    public WorkOrderResponse cancel(UUID workOrderId, WorkOrderCancelRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(workOrderId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.WORK_ORDER_CANCEL, fingerprint).isPresent()) {
+            return toResponse(findWorkOrder(workOrderId));
+        }
         WorkOrder workOrder = findWorkOrder(workOrderId);
         // Fail before any state check (C9): a caller who forgot the reason should be told that,
         // not told the work order is in the wrong status.
@@ -338,6 +386,7 @@ public class WorkOrderService {
             throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED,
                     "Cancel reason is required");
         }
+        WorkOrderVersions.ensure(workOrder, request.expectedWorkOrderVersion(), "expectedWorkOrderVersion");
         if (workOrder.getStatus() != WorkOrderStatus.DRAFT
                 && workOrder.getStatus() != WorkOrderStatus.PLANNED
                 && workOrder.getStatus() != WorkOrderStatus.BLOCKED
@@ -349,9 +398,20 @@ public class WorkOrderService {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Work order with issued or produced quantity cannot be cancelled");
         }
+        // G8a (FE R06): a request still waiting for a manager is activity too — cancelling under it would
+        // leave a decision that could no longer be posted.
+        if (materialIssueRepository.existsByWorkOrderWorkOrderIdAndStatus(workOrderId, MaterialIssueStatus.PENDING_APPROVAL)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Work order with a material issue pending approval cannot be cancelled; reject or cancel it first");
+        }
+        idempotencyRecords.record(key, WorkOrderCommand.WORK_ORDER_CANCEL, workOrderId, fingerprint);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         materialReservationService.cancelActiveReservations(workOrder);
-        workOrder.cancel(Instant.now(), reason);
-        return toResponse(workOrderRepository.save(workOrder));
+        // G8a (FE R06/Q21): the planning quota comes back once. The sales order allocation needs no write:
+        // coverage already ignores a cancelled work order (G6a), and the row stays as trace.
+        planningLinkService.releaseWorkOrder(workOrderId, reason, now, auditorAware.getCurrentAuditor().orElse(null));
+        workOrder.cancel(now, reason);
+        return toResponse(workOrderRepository.saveAndFlush(workOrder));
     }
 
     /**
@@ -373,7 +433,7 @@ public class WorkOrderService {
         }
         materialReservationService.cancelActiveReservations(workOrder);
         workOrder.close(Instant.now());
-        return toResponse(workOrderRepository.save(workOrder));
+        return toResponse(workOrderRepository.saveAndFlush(workOrder));
     }
 
     @Transactional
@@ -395,6 +455,8 @@ public class WorkOrderService {
                         request.quantity(),
                         request.reason(),
                         null))), idempotencyKey);
+        // The response carries version (G8): flush so it is the version just written, not the one read.
+        workOrderRepository.flush();
         return toResponse(findWorkOrder(workOrderId));
     }
 
@@ -419,6 +481,7 @@ public class WorkOrderService {
                 request.quantity(),
                 request.reason(),
                 null), idempotencyKey);
+        workOrderRepository.flush();
         return toResponse(findWorkOrder(workOrderId));
     }
 
@@ -549,6 +612,80 @@ public class WorkOrderService {
         return plannedQuantity
                 .multiply(bomLine.getQuantityPer())
                 .multiply(BigDecimal.ONE.add(bomLine.getScrapRate()));
+    }
+
+    /**
+     * G8a (D2): sets the warehouse of each listed component item on every line of that item. Validated as
+     * a whole before anything is applied (C9): the item must be a component of this work order, listed
+     * once, and the warehouse active in its plant. A component that already holds an {@code ACTIVE}
+     * reservation in another warehouse is refused — release it first, or the line would carry stock held
+     * outside the one warehouse it now says it uses.
+     */
+    private void applyComponentWarehouses(WorkOrder workOrder, List<ComponentWarehouseRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return;
+        }
+        Set<UUID> componentItems = new HashSet<>();
+        workOrder.getComponentLines().forEach(line -> componentItems.add(line.getComponentItem().getItemId()));
+        Map<String, String> errors = new LinkedHashMap<>();
+        Set<UUID> seen = new HashSet<>();
+        for (int i = 0; i < requests.size(); i++) {
+            UUID itemId = requests.get(i).itemId();
+            if (!componentItems.contains(itemId)) {
+                errors.put("componentWarehouses[" + i + "].itemId", "is not a component of this work order");
+            } else if (!seen.add(itemId)) {
+                errors.put("componentWarehouses[" + i + "].itemId", "is listed more than once");
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT, errors);
+        }
+        Map<UUID, Warehouse> warehouseByItem = new HashMap<>();
+        for (ComponentWarehouseRequest request : requests) {
+            warehouseByItem.put(request.itemId(), organizationLookupService.getActiveWarehouseInPlant(
+                    request.warehouseId(), workOrder.getPlant().getPlantId()));
+        }
+        if (workOrder.getWorkOrderId() != null) {
+            boolean reservedElsewhere = reservationRepository
+                    .findByWorkOrderWorkOrderIdAndStatus(workOrder.getWorkOrderId(), MaterialReservationStatus.ACTIVE)
+                    .stream()
+                    .anyMatch(reservation -> {
+                        Warehouse target = warehouseByItem.get(reservation.getItem().getItemId());
+                        return target != null
+                                && !target.getWarehouseId().equals(reservation.getWarehouse().getWarehouseId())
+                                && reservation.remainingQuantity().signum() > 0;
+                    });
+            if (reservedElsewhere) {
+                throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                        "A component already has active reservations in another warehouse; release them "
+                                + "before changing its warehouse");
+            }
+        }
+        for (WorkOrderComponentLine line : workOrder.getComponentLines()) {
+            Warehouse warehouse = warehouseByItem.get(line.getComponentItem().getItemId());
+            if (warehouse != null) {
+                line.setWarehouse(warehouse);
+            }
+        }
+    }
+
+    /** FE Q7: what the planning quota and the sales order allocation were sized on cannot change. */
+    private void ensureSourceFieldsUntouched(WorkOrder workOrder, WorkOrderUpdateRequest request) {
+        if (!workOrder.isSourceLinked()) {
+            return;
+        }
+        Map<String, String> locked = new LinkedHashMap<>();
+        if (request.plannedQuantity() != null
+                && request.plannedQuantity().compareTo(workOrder.getPlannedQuantity()) != 0) {
+            locked.put("plannedQuantity", "comes from planning and cannot be changed");
+        }
+        if (request.outputWarehouseId() != null
+                && !request.outputWarehouseId().equals(workOrder.getOutputWarehouse().getWarehouseId())) {
+            locked.put("outputWarehouseId", "comes from planning and cannot be changed");
+        }
+        if (!locked.isEmpty()) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.SOURCE_LOCKED, locked);
+        }
     }
 
     private WorkOrderComponentLine findComponentLine(WorkOrder workOrder, UUID componentLineId) {

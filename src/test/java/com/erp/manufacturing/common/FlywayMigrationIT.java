@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("78");
+        assertThat(current.getVersion().getVersion()).isEqualTo("79");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -366,7 +366,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
              Statement statement = connection.createStatement();
              ResultSet rows = statement.executeQuery("""
                      SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
-                     WHERE conname IN ('chk_gr_lines_qc_within_received', 'chk_purchase_qc_reject_reason',
+                     WHERE connamespace = 'public'::regnamespace
+                       AND conname IN ('chk_gr_lines_qc_within_received', 'chk_purchase_qc_reject_reason',
                                        'chk_purchase_qc_quantities', 'chk_stock_movements_type')
                      """)) {
             java.util.Map<String, String> definitions = new java.util.HashMap<>();
@@ -379,6 +380,54 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             assertThat(definitions.get("chk_purchase_qc_quantities")).contains("> (0)");
             assertThat(definitions.get("chk_stock_movements_type"))
                     .contains("LOT_SPLIT_OUT").contains("LOT_SPLIT_IN").contains("TRANSFER_IN").contains("REVERSAL");
+        }
+    }
+
+    /**
+     * G8a / {@code V79}: a component line may name its warehouse (nullable, so every existing line keeps
+     * reserving across the plant), a work order starts with schedule revision 0 and refuses a negative one,
+     * and an Idempotency-Key is unique per work order command.
+     */
+    @Test
+    void migrate_v79_addsComponentWarehouseScheduleContextAndWorkOrderIdempotency() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            try (ResultSet rows = statement.executeQuery("""
+                    SELECT table_name, column_name, is_nullable, column_default FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND ((table_name = 'work_order_component_lines' AND column_name = 'warehouse_id')
+                        OR (table_name = 'work_orders' AND column_name IN ('schedule_revision',
+                            'schedule_calendar_revision', 'schedule_time_zone', 'schedule_captured_at')))
+                    """)) {
+                java.util.Map<String, String> nullable = new java.util.HashMap<>();
+                java.util.Map<String, String> defaults = new java.util.HashMap<>();
+                while (rows.next()) {
+                    nullable.put(rows.getString("column_name"), rows.getString("is_nullable"));
+                    defaults.put(rows.getString("column_name"), rows.getString("column_default"));
+                }
+                assertThat(nullable).containsEntry("warehouse_id", "YES")
+                        .containsEntry("schedule_revision", "NO")
+                        .containsEntry("schedule_calendar_revision", "YES")
+                        .containsEntry("schedule_time_zone", "YES")
+                        .containsEntry("schedule_captured_at", "YES");
+                assertThat(defaults.get("schedule_revision")).isEqualTo("0");
+            }
+            try (ResultSet rows = statement.executeQuery("""
+                    SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+                    WHERE connamespace = 'public'::regnamespace
+                      AND conname IN ('chk_work_orders_schedule_revision', 'uk_work_order_idempotency_key_command')
+                    """)) {
+                java.util.Map<String, String> definitions = new java.util.HashMap<>();
+                while (rows.next()) {
+                    definitions.put(rows.getString("conname"), rows.getString("def"));
+                }
+                assertThat(definitions.get("chk_work_orders_schedule_revision")).contains("schedule_revision >= 0");
+                assertThat(definitions.get("uk_work_order_idempotency_key_command"))
+                        .contains("UNIQUE (idempotency_key, command)");
+            }
         }
     }
 
@@ -701,7 +750,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
              Statement statement = connection.createStatement();
              ResultSet rs = statement.executeQuery("""
                      SELECT pg_get_constraintdef(oid) FROM pg_constraint
-                     WHERE conname = 'chk_stock_movements_type'
+                     WHERE connamespace = 'public'::regnamespace
+                       AND conname = 'chk_stock_movements_type'
                      """)) {
             assertThat(rs.next()).isTrue();
             assertThat(rs.getString(1)).contains("'RECEIVE'", "'ISSUE'", "'ADJUST_IN'", "'ADJUST_OUT'",

@@ -1,7 +1,14 @@
 package com.erp.manufacturing.module.workorder.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
+import com.erp.manufacturing.module.planning.service.WorkOrderPlanningLinkService;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.exception.MultiErrorException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
@@ -51,6 +58,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,6 +83,10 @@ class WorkOrderServiceTest {
     @Mock MaterialReservationRepository reservationRepository;
     @Mock WorkOrderReleaseGate releaseGate;
     @Mock WorkCalendarLookupService workCalendarLookupService;
+    @Mock MaterialIssueRepository materialIssueRepository;
+    @Mock WorkOrderPlanningLinkService planningLinkService;
+    @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
+    @Mock SecurityAuditorAware auditorAware;
 
     WorkOrderService service;
 
@@ -93,7 +105,12 @@ class WorkOrderServiceTest {
                 allocationService,
                 reservationRepository,
                 releaseGate,
-                workCalendarLookupService,
+                new WorkOrderScheduler(workCalendarLookupService),
+                materialIssueRepository,
+                planningLinkService,
+                new WorkOrderIdempotency(idempotencyRecordRepository,
+                        new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
+                auditorAware,
                 new WorkOrderMapper());
     }
 
@@ -146,13 +163,13 @@ class WorkOrderServiceTest {
         WorkOrder second = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("20"));
         UUID plantId = first.getPlant().getPlantId();
         when(organizationLookupService.getActivePlant(plantId)).thenReturn(first.getPlant());
-        when(workOrderRepository.search(eq(plantId), any(), any(), any(), any()))
+        when(workOrderRepository.search(eq(plantId), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(first, second)));
         when(allocationService.findByWorkOrderIds(any())).thenReturn(Map.of());
         when(reservationRepository.sumActiveRemainingByWorkOrderIds(any())).thenReturn(List.of(
                 componentQuantity(first.getComponentLines().get(0).getComponentLineId(), new BigDecimal("4"))));
 
-        var page = service.list(plantId, null, null, null, PageRequest.of(0, 20));
+        var page = service.list(plantId, null, null, null, null, null, PageRequest.of(0, 20));
 
         assertThat(page.content()).hasSize(2);
         assertThat(page.content().get(0).componentLines().get(0).reservedQuantity()).isEqualByComparingTo("4");
@@ -255,7 +272,7 @@ class WorkOrderServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.MISSING_ROUTING));
 
-        verify(workOrderRepository, never()).save(any());
+        verify(workOrderRepository, never()).saveAndFlush(any());
     }
 
     /**
@@ -322,7 +339,7 @@ class WorkOrderServiceTest {
                 .thenReturn(Optional.of(workOrder));
 
         assertThatThrownBy(() -> service.update(workOrder.getWorkOrderId(),
-                new WorkOrderUpdateRequest(null, new BigDecimal("12"), null, null, null)))
+                new WorkOrderUpdateRequest(null, new BigDecimal("12"), null, null, null, 0L, null), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -333,9 +350,9 @@ class WorkOrderServiceTest {
         WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
-        service.release(workOrder.getWorkOrderId());
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
         assertThat(workOrder.getReleasedAt()).isNotNull();
@@ -355,7 +372,7 @@ class WorkOrderServiceTest {
                     "Cannot release: 1 component(s) not fully reserved");
         }).when(releaseGate).ensureMaterialReady(workOrder.getWorkOrderId());
 
-        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId()))
+        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -371,9 +388,9 @@ class WorkOrderServiceTest {
         workOrder.block(Instant.now(), "1/1 components short on reservation");
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
-        service.release(workOrder.getWorkOrderId());
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
         assertThat(workOrder.getBlockedAt()).isNull();
@@ -386,7 +403,7 @@ class WorkOrderServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
 
-        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId()))
+        assertThatThrownBy(() -> service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -409,9 +426,9 @@ class WorkOrderServiceTest {
         workOrder.getOperations().add(operation(workOrder, 2, workCenter, "0", "1"));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
-        service.release(workOrder.getWorkOrderId());
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
 
         WorkOrderOperation first = workOrder.getOperations().get(0);
         WorkOrderOperation second = workOrder.getOperations().get(1);
@@ -451,9 +468,9 @@ class WorkOrderServiceTest {
                 .thenReturn(scheduledEnd);
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
-        service.release(workOrder.getWorkOrderId());
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
 
         WorkOrderOperation operation = workOrder.getOperations().get(0);
         assertThat(operation.getPlannedStartAt()).isEqualTo(anchor);
@@ -468,10 +485,10 @@ class WorkOrderServiceTest {
         workOrder.getOperations().add(operation(workOrder, 1, workCenter, "0", "0"));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
         Instant before = Instant.now();
-        service.release(workOrder.getWorkOrderId());
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
         Instant after = Instant.now();
 
         Instant scheduledStart = workOrder.getOperations().get(0).getPlannedStartAt();
@@ -484,9 +501,9 @@ class WorkOrderServiceTest {
         workOrder.block(Instant.now(), "1/1 components short on reservation");
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
-        service.cancel(workOrder.getWorkOrderId(), new WorkOrderCancelRequest("Customer withdrew the order"));
+        service.cancel(workOrder.getWorkOrderId(), new WorkOrderCancelRequest("Customer withdrew the order", 0L), null);
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CANCELLED);
         assertThat(workOrder.getCancelledAt()).isNotNull();
@@ -505,13 +522,13 @@ class WorkOrderServiceTest {
                 .thenReturn(Optional.of(workOrder));
         UUID workOrderId = workOrder.getWorkOrderId();
 
-        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("   ")))
+        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("   ", 0L), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.APPROVAL_REASON_REQUIRED));
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.DRAFT);
-        verify(workOrderRepository, never()).save(any());
+        verify(workOrderRepository, never()).saveAndFlush(any());
         verifyNoInteractions(materialReservationService);
     }
 
@@ -550,7 +567,7 @@ class WorkOrderServiceTest {
                 .thenReturn(Optional.of(workOrder));
 
         UUID workOrderId = workOrder.getWorkOrderId();
-        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("Scrapped")))
+        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest("Scrapped", 0L), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -566,7 +583,7 @@ class WorkOrderServiceTest {
         WorkOrder workOrder = workOrder(WorkOrderStatus.COMPLETED, new BigDecimal("10"));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
-        when(workOrderRepository.save(workOrder)).thenReturn(workOrder);
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
         service.close(workOrder.getWorkOrderId());
 
@@ -588,7 +605,7 @@ class WorkOrderServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
-        verify(workOrderRepository, never()).save(any());
+        verify(workOrderRepository, never()).saveAndFlush(any());
         verifyNoInteractions(materialReservationService);
     }
 
@@ -604,6 +621,270 @@ class WorkOrderServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
         verifyNoInteractions(materialReservationService);
+    }
+
+    // ── G8a ────────────────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void update_staleExpectedVersion_throwsConcurrentModificationBeforeAnyWrite() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.update(workOrder.getWorkOrderId(),
+                new WorkOrderUpdateRequest(null, new BigDecimal("12"), null, null, null, 4L, null), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
+
+        assertThat(workOrder.getPlannedQuantity()).isEqualByComparingTo("10");
+        verify(workOrderRepository, never()).saveAndFlush(any());
+    }
+
+    /** FE Q7: what the planning quota and the sales order allocation were sized on cannot change. */
+    @Test
+    void update_sourceLinkedDraft_newQuantityOrOutputWarehouse_throwsSourceLockedPerField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlanningProposalId(UUID.randomUUID());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                UUID.randomUUID(), new BigDecimal("12"), null, null, null, 0L, null), null))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    MultiErrorException error = (MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.SOURCE_LOCKED);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("plannedQuantity", "outputWarehouseId");
+                });
+        verify(workOrderRepository, never()).saveAndFlush(any());
+    }
+
+    /** Sending the locked fields back unchanged is not a change — notes and dates stay editable. */
+    @Test
+    void update_sourceLinkedDraft_sameQuantity_isAllowed_andMovesTheVersionOn() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlanningProposalId(UUID.randomUUID());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+        Instant before = workOrder.getUpdatedAt();
+
+        service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                null, new BigDecimal("10.000000"), null, null, "Rush", 0L, null), null);
+
+        assertThat(workOrder.getNotes()).isEqualTo("Rush");
+        // touch(): the row is dirty even when nothing scalar changed, so @Version moves on (B112).
+        assertThat(workOrder.getUpdatedAt()).isNotEqualTo(before);
+        verify(workOrderRepository).saveAndFlush(workOrder);
+    }
+
+    /** D2: keyed by component item, applied to every line of that item. */
+    @Test
+    void update_componentWarehouses_setsTheWarehouseOnEveryLineOfThatItem() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        WorkOrderComponentLine first = workOrder.getComponentLines().get(0);
+        WorkOrderComponentLine second = WorkOrderComponentLine.builder()
+                .componentLineId(UUID.randomUUID()).workOrder(workOrder).bomLine(first.getBomLine())
+                .componentItem(first.getComponentItem()).lineNo(20).quantityPer(BigDecimal.ONE)
+                .scrapRate(BigDecimal.ZERO).requiredQuantity(BigDecimal.TEN).issuedQuantity(BigDecimal.ZERO).build();
+        workOrder.getComponentLines().add(second);
+        Warehouse raw = warehouse(UUID.randomUUID(), workOrder.getPlant(), OrganizationStatus.ACTIVE);
+        UUID itemId = first.getComponentItem().getItemId();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(raw.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(raw);
+        when(reservationRepository.findByWorkOrderWorkOrderIdAndStatus(any(), any())).thenReturn(List.of());
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        WorkOrderResponse response = service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                null, null, null, null, null, 0L, List.of(new ComponentWarehouseRequest(itemId, raw.getWarehouseId()))), null);
+
+        assertThat(first.getWarehouse()).isSameAs(raw);
+        assertThat(second.getWarehouse()).isSameAs(raw);
+        assertThat(response.componentLines()).extracting(WorkOrderComponentLineResponse::warehouseId)
+                .containsOnly(raw.getWarehouseId());
+    }
+
+    @Test
+    void update_componentWarehouseForAnItemThatIsNotAComponent_isRejectedOnItsField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                null, null, null, null, null, 0L,
+                List.of(new ComponentWarehouseRequest(UUID.randomUUID(), UUID.randomUUID()))), null))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors())
+                        .containsOnlyKeys("componentWarehouses[0].itemId"));
+        verifyNoInteractions(organizationLookupService);
+    }
+
+    /** Stock already held in another warehouse would sit outside the one warehouse the line now claims. */
+    @Test
+    void update_componentWarehouse_whileReservedInAnotherWarehouse_throwsStateConflict() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse target = warehouse(UUID.randomUUID(), workOrder.getPlant(), OrganizationStatus.ACTIVE);
+        Warehouse elsewhere = warehouse(UUID.randomUUID(), workOrder.getPlant(), OrganizationStatus.ACTIVE);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(target.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(target);
+        when(reservationRepository.findByWorkOrderWorkOrderIdAndStatus(workOrder.getWorkOrderId(),
+                com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus.ACTIVE))
+                .thenReturn(List.of(com.erp.manufacturing.module.workorder.domain.MaterialReservation.builder()
+                        .workOrder(workOrder).componentLine(line).item(line.getComponentItem()).warehouse(elsewhere)
+                        .quantity(new BigDecimal("4")).consumedQuantity(BigDecimal.ZERO)
+                        .status(com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus.ACTIVE).build()));
+
+        assertThatThrownBy(() -> service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                null, null, null, null, null, 0L,
+                List.of(new ComponentWarehouseRequest(line.getComponentItem().getItemId(), target.getWarehouseId()))), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        assertThat(line.getWarehouse()).isNull();
+    }
+
+    @Test
+    void plan_withoutAVersion_isRefusedNamingTheField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.plan(workOrder.getWorkOrderId(), null, null))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors())
+                        .containsOnlyKeys("expectedWorkOrderVersion"));
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.DRAFT);
+    }
+
+    /** D9: release records which schedule it committed — revision, calendar fingerprint, plant zone. */
+    @Test
+    void release_commitsScheduleRevisionCalendarRevisionAndTimeZone() {
+        Instant anchor = Instant.parse("2026-08-10T08:00:00Z");
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlannedStartAt(anchor);
+        WorkCalendar calendar = WorkCalendar.builder().workCalendarId(UUID.randomUUID()).plant(workOrder.getPlant())
+                .code("CAL").name("Cal").effectiveFrom(LocalDate.of(2026, 1, 1)).status(OrganizationStatus.ACTIVE).build();
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter(workOrder.getPlant(), calendar), "5", "2"));
+        when(workCalendarLookupService.computeEndInstant(any(), any(), any(), anyLong())).thenReturn(anchor.plusSeconds(3600));
+        when(workCalendarLookupService.calendarRevision(Set.of(calendar.getWorkCalendarId()))).thenReturn("0123456789abcdef");
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        WorkOrderResponse response = service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
+
+        assertThat(response.scheduleRevision()).isEqualTo(1);
+        assertThat(response.calendarRevision()).isEqualTo("0123456789abcdef");
+        assertThat(response.scheduleTimeZone()).isEqualTo(workOrder.getPlant().getTimezone());
+        assertThat(response.scheduleCapturedAt()).isNotNull();
+        assertThat(response.operations().get(0).workMinutes()).isEqualTo(25L);
+    }
+
+    /** FE R06: a decision still waiting for a manager is activity — nothing is released. */
+    @Test
+    void cancel_withAnIssuePendingApproval_throwsStateConflictAndReleasesNothing() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(materialIssueRepository.existsByWorkOrderWorkOrderIdAndStatus(workOrder.getWorkOrderId(),
+                com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus.PENDING_APPROVAL)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.cancel(workOrder.getWorkOrderId(),
+                new WorkOrderCancelRequest("No longer needed", 0L), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verifyNoInteractions(materialReservationService, planningLinkService);
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.RELEASED);
+    }
+
+    /** FE R06/Q21: the planning quota comes back with the cancel, carrying the reason. */
+    @Test
+    void cancel_unstartedWorkOrder_releasesItsPlanningQuotaWithTheReason() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+        UUID actor = UUID.randomUUID();
+        when(auditorAware.getCurrentAuditor()).thenReturn(Optional.of(actor));
+
+        service.cancel(workOrder.getWorkOrderId(), new WorkOrderCancelRequest("Customer withdrew", 0L), null);
+
+        verify(planningLinkService).releaseWorkOrder(eq(workOrder.getWorkOrderId()), eq("Customer withdrew"),
+                any(Instant.class), eq(actor));
+        verify(materialReservationService).cancelActiveReservations(workOrder);
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CANCELLED);
+    }
+
+    /** The reason is still checked first (C9); the version right after it. */
+    @Test
+    void cancel_withAReasonButNoVersion_isRefusedNamingTheVersionField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.cancel(workOrder.getWorkOrderId(),
+                new WorkOrderCancelRequest("No longer needed"), null))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors())
+                        .containsOnlyKeys("expectedWorkOrderVersion"));
+        verifyNoInteractions(planningLinkService);
+    }
+
+    /** Plant-local days: 15 Oct in Asia/Ho_Chi_Minh starts at 14 Oct 17:00 UTC; the end is exclusive. */
+    @Test
+    void list_dateRange_isTurnedIntoPlantLocalHalfOpenInstants() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        Plant plant = workOrder.getPlant();
+        plant.setTimezone("Asia/Ho_Chi_Minh");
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        when(workOrderRepository.search(any(), any(), any(), any(), any(), any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        service.list(plant.getPlantId(), null, null, null, LocalDate.of(2026, 10, 15), LocalDate.of(2026, 10, 15),
+                PageRequest.of(0, 20));
+
+        verify(workOrderRepository).search(eq(plant.getPlantId()), isNull(), isNull(), isNull(),
+                eq(Instant.parse("2026-10-14T17:00:00Z")), eq(Instant.parse("2026-10-15T17:00:00Z")), any());
+    }
+
+    @Test
+    void list_toDateBeforeFromDate_isRefusedBeforeQuerying() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(organizationLookupService.getActivePlant(workOrder.getPlant().getPlantId())).thenReturn(workOrder.getPlant());
+
+        assertThatThrownBy(() -> service.list(workOrder.getPlant().getPlantId(), null, null, null,
+                LocalDate.of(2026, 10, 15), LocalDate.of(2026, 10, 14), PageRequest.of(0, 20)))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys("toDate"));
+        verify(workOrderRepository, never()).search(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    /** R22: a retried plan with the same key answers with the current work order and writes nothing. */
+    @Test
+    void plan_replayedKeyWithSamePayload_returnsTheCurrentWorkOrderWithoutPlanningAgain() throws Exception {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        // The first plan moved the version on; the retried body still carries the old one. The replay must
+        // be recognised before the version check, or a network retry would be answered 409.
+        workOrder.setVersion(1L);
+        WorkOrderPlanRequest request = new WorkOrderPlanRequest(0L, null);
+        IdempotencySupport support = new IdempotencySupport(new ObjectMapper().findAndRegisterModules());
+        String hash = support.payloadHash(new WorkOrderIdempotency.Fingerprint(workOrder.getWorkOrderId(), request));
+        when(idempotencyRecordRepository.findByIdempotencyKeyAndCommand("PLAN-1",
+                com.erp.manufacturing.module.workorder.domain.WorkOrderCommand.WORK_ORDER_PLAN))
+                .thenReturn(Optional.of(com.erp.manufacturing.module.workorder.domain.WorkOrderIdempotencyRecord.builder()
+                        .idempotencyKey("PLAN-1").resourceId(workOrder.getWorkOrderId()).payloadHash(hash).build()));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+
+        WorkOrderResponse response = service.plan(workOrder.getWorkOrderId(), request, "PLAN-1");
+
+        assertThat(response.status()).isEqualTo("PLANNED");
+        verify(workOrderRepository, never()).saveAndFlush(any());
+        verify(idempotencyRecordRepository, never()).saveAndFlush(any());
     }
 
     private WorkOrder workOrder(WorkOrderStatus status, BigDecimal plannedQuantity) {
@@ -629,6 +910,7 @@ class WorkOrderServiceTest {
                 .status(status)
                 .componentLines(new ArrayList<>())
                 .build();
+        workOrder.setVersion(0L);
         workOrder.getComponentLines().add(WorkOrderComponentLine.builder()
                 .componentLineId(UUID.randomUUID())
                 .workOrder(workOrder)

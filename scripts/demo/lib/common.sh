@@ -74,6 +74,12 @@ call() {
     echo "$resp"
 }
 
+# wo_cmd WO_ID VERB — a work order command (plan, reserve, release) sent with the version just read.
+# G8 (D5): expectedWorkOrderVersion is required on every work order command; reading it fresh each
+# time matters because a refused release persists BLOCKED in its own transaction and moves it on.
+wo_version() { call GET "/v1/work-orders/$1" | extract "d['result']['version']"; }
+wo_cmd() { call POST "/v1/work-orders/$1/$2" "{\"expectedWorkOrderVersion\":$(wo_version "$1")}"; }
+
 # call_expect EXPECTED_CODE METHOD PATH [BODY] [EXTRA_CURL_ARGS...]
 #
 # For the steps that MUST fail. Three of them exist and none is optional:

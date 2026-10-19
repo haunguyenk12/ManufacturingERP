@@ -15,6 +15,7 @@ import com.erp.manufacturing.module.workorder.domain.ProductionReceipt;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptLine;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
+import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -268,6 +269,38 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
                 .isInstanceOf(ObjectOptimisticLockingFailureException.class);
     }
 
+    /**
+     * G8 (D5): changing only a child row of a work order — here an operation, in production reservations,
+     * issue lines and component lines — leaves the work order's {@code @Version} where it was, because the
+     * collections are inverse (the trap B112 found on sales order lines). {@code touch()} is what makes the
+     * row dirty, so every command moves the version on by exactly one and two commands sent with the same
+     * expected version cannot both pass. Only real Hibernate shows this; a mock repository has no version.
+     */
+    @Test
+    void childOnlyChange_leavesTheVersion_andTouchMovesItOnByExactlyOne() {
+        Fixture fixture = persistFixture();
+        WorkOrder persisted = persistWorkOrder(fixture, "WO-TOUCH", WorkOrderStatus.DRAFT,
+                BigDecimal.TEN, BigDecimal.ZERO);
+        WorkOrderOperation operation = WorkOrderOperation.builder()
+                .workOrder(persisted).sequence(10).name("Cut").workCenterCode("WC-1").build();
+        operation.setCreatedAt(Instant.now());
+        operation.setUpdatedAt(Instant.now());
+        entityManager.persistAndFlush(operation);
+        entityManager.clear();
+
+        WorkOrder loaded = repository.findById(persisted.getWorkOrderId()).orElseThrow();
+        long before = loaded.getVersion();
+        loaded.getOperations().get(0).setName("Cut and deburr");
+        repository.saveAndFlush(loaded);
+        assertThat(repository.findById(persisted.getWorkOrderId()).orElseThrow().getVersion()).isEqualTo(before);
+
+        loaded.getOperations().get(0).setName("Cut, deburr and wash");
+        loaded.touch();
+        repository.saveAndFlush(loaded);
+        entityManager.clear();
+        assertThat(repository.findById(persisted.getWorkOrderId()).orElseThrow().getVersion()).isEqualTo(before + 1);
+    }
+
     @Test
     void search_matchesTheWorkOrderNumber() {
         Fixture fixture = persistFixture();
@@ -276,7 +309,7 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
         persistWorkOrder(fixture, "WO-BETA-1", WorkOrderStatus.DRAFT, BigDecimal.TEN, BigDecimal.ZERO);
 
         List<WorkOrder> found = repository
-                .search(fixture.plant.getPlantId(), null, null, "alpha", PageRequest.of(0, 20))
+                .search(fixture.plant.getPlantId(), null, null, "alpha", null, null, PageRequest.of(0, 20))
                 .getContent();
 
         assertThat(found).extracting(WorkOrder::getWorkOrderId).containsExactly(wanted.getWorkOrderId());
@@ -292,7 +325,7 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
 
         List<WorkOrder> found = repository
                 .search(fixture.plant.getPlantId(), null, null,
-                        fixture.product.getCode().substring(0, 12), PageRequest.of(0, 20))
+                        fixture.product.getCode().substring(0, 12), null, null, PageRequest.of(0, 20))
                 .getContent();
 
         // Both work orders share the fixture's product, so an SKU match returns both.
@@ -307,8 +340,38 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
         persistWorkOrder(fixture, "WO-1", WorkOrderStatus.DRAFT, BigDecimal.TEN, BigDecimal.ZERO);
         persistWorkOrder(fixture, "WO-2", WorkOrderStatus.COMPLETED, BigDecimal.TEN, BigDecimal.TEN);
 
-        assertThat(repository.search(fixture.plant.getPlantId(), null, null, null, PageRequest.of(0, 20)))
+        assertThat(repository.search(fixture.plant.getPlantId(), null, null, null, null, null, PageRequest.of(0, 20)))
                 .hasSize(2);
+    }
+
+    /**
+     * G8a: the created range is half-open {@code [from, to)} — the service turns plant-local dates into the
+     * two instants. A work order created exactly on {@code to} belongs to the next day and stays out; one
+     * on {@code from} stays in. Also proves the {@code cast(... as timestamp) is null} side binds on real
+     * Postgres with both bounds present and with one of them null.
+     */
+    @Test
+    void search_createdRange_isHalfOpenOnCreatedAt() {
+        Fixture fixture = persistFixture();
+        WorkOrder onFrom = persistWorkOrder(fixture, "WO-D1", WorkOrderStatus.DRAFT, BigDecimal.TEN, BigDecimal.ZERO);
+        WorkOrder onTo = persistWorkOrder(fixture, "WO-D2", WorkOrderStatus.DRAFT, BigDecimal.TEN, BigDecimal.ZERO);
+        Instant from = Instant.parse("2026-10-14T17:00:00Z");
+        Instant to = Instant.parse("2026-10-15T17:00:00Z");
+        entityManager.flush();
+        entityManager.getEntityManager().createNativeQuery(
+                        "UPDATE work_orders SET created_at = :at WHERE work_order_id = :id")
+                .setParameter("at", java.sql.Timestamp.from(from)).setParameter("id", onFrom.getWorkOrderId())
+                .executeUpdate();
+        entityManager.getEntityManager().createNativeQuery(
+                        "UPDATE work_orders SET created_at = :at WHERE work_order_id = :id")
+                .setParameter("at", java.sql.Timestamp.from(to)).setParameter("id", onTo.getWorkOrderId())
+                .executeUpdate();
+        entityManager.clear();
+
+        assertThat(repository.search(fixture.plant.getPlantId(), null, null, null, from, to, PageRequest.of(0, 20)))
+                .extracting(WorkOrder::getWorkOrderId).containsExactly(onFrom.getWorkOrderId());
+        assertThat(repository.search(fixture.plant.getPlantId(), null, null, null, to, null, PageRequest.of(0, 20)))
+                .extracting(WorkOrder::getWorkOrderId).containsExactly(onTo.getWorkOrderId());
     }
 
     private List<WorkOrder> receiptCandidates(Fixture fixture) {

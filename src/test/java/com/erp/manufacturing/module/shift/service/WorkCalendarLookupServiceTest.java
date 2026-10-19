@@ -103,6 +103,32 @@ class WorkCalendarLookupServiceTest {
         assertThat(sum(tuesday)).isEqualByComparingTo("840"); // 06:00–20:00
     }
 
+    /**
+     * G8a (D9): the calendar revision is a fingerprint of content, so it stays the same while nothing a
+     * schedule depends on changes — and moves when a break moves, even though a break is a child row whose
+     * edit need not touch any version column.
+     */
+    @Test
+    void calendarRevision_isStableForTheSameContent_andMovesWhenABreakMoves() {
+        Shift shift = shift(LocalTime.of(8, 0), LocalTime.of(17, 0), LocalTime.of(12, 0), LocalTime.of(13, 0));
+        WorkCalendar calendar = calendar(shift, Weekday.TUESDAY);
+        when(repository.findWithWeeklyShiftsByWorkCalendarId(calendar.getWorkCalendarId()))
+                .thenReturn(Optional.of(calendar));
+
+        String first = service.calendarRevision(List.of(calendar.getWorkCalendarId()));
+        String again = service.calendarRevision(List.of(calendar.getWorkCalendarId()));
+        shift.getBreaks().get(0).setStartTime(LocalTime.of(11, 30));
+        String moved = service.calendarRevision(List.of(calendar.getWorkCalendarId()));
+
+        assertThat(first).hasSize(16).isEqualTo(again);
+        assertThat(moved).isNotEqualTo(first);
+    }
+
+    @Test
+    void calendarRevision_withoutCalendars_isNull() {
+        assertThat(service.calendarRevision(List.of())).isNull();
+    }
+
     private List<TimeInterval> intervals(WorkCalendar calendar, LocalDate day) {
         when(repository.findWithWeeklyShiftsByWorkCalendarId(calendar.getWorkCalendarId()))
                 .thenReturn(Optional.of(calendar));

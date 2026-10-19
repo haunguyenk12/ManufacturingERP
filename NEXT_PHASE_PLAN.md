@@ -100,8 +100,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(chưa chốt)* — `G7` ✅ **BE xong cả 3 phần** (2026-10-18/19): `G7a` vòng đời PO (v1), `G7b` phiếu nhận nháp + vào `HOLD` (v2), `G7c` QC mua + lô con (v3, `BE_RESPONSE_GD_07_2026-10-18_v3.md`). Xem **§14** |
-| **Chờ FE** | `G7` (§14) — ✅ BE xong 2026-10-19, bản ghi `CLAUDE.md §0.57`–`§0.59`. `G6` (§13) — ✅ BE xong cả 3 phần 2026-10-17/18, bản ghi `CLAUDE.md §0.54`–`§0.56`. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
+| **Đang chạy** | **`G8` — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang** (`FE_HANDOFF_GD_08_2026-10-14.md`, P1) — 🔄 **D0–D12 chốt 2026-10-19** (tách 4 phần làm liền; còn lại theo khuyến nghị; **D11 hoãn**). **`G8a` ✅ BE xong 2026-10-19** (`BE_RESPONSE_GD_08_2026-10-19.md` v1) · **tiếp theo `G8b`** (cấp vật tư) → `G8c` (công đoạn) → `G8d` (dở dang + hoàn vật tư) — xem **§15** |
+| **Chờ FE** | `G7` (§14) — ✅ BE xong cả 3 phần 2026-10-18/19, bản ghi `CLAUDE.md §0.57`–`§0.59`. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
 
@@ -124,7 +124,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 11 | **`G4` — FE handoff Giai đoạn 4 (tồn kho, lô, chuyển kho)** | ✅ **BE xong (2026-10-15)** — chờ FE nghiệm thu | Nguồn `FE_HANDOFF_GD_04_2026-10-12.md`, P1. Quyết định lớn nhất: có làm định giá tồn kho (moving average) hay không — đụng vùng `P7` (D1). Chi tiết **§11** |
 | 12 | **`G5` — FE handoff Giai đoạn 5 (định mức, quy trình, công suất)** | 📝 **Đã lập kế hoạch — chờ chốt §12.2** | Nguồn `FE_HANDOFF_GD_05_2026-10-13.md`, P1. File FE đề xuất **đảo ngược 4 quyết định thiết kế đã chốt** ở `F4`/`C2-7`/`C2-8`/`F10` — phải chốt từng cái trước khi viết dòng nào. Chi tiết **§12** |
 | 13 | **`G6` — FE handoff Giai đoạn 6 (đơn bán hàng + hoạch định vật tư)** | ✅ **BE xong 2026-10-17/18 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_06_2026-10-14.md`, P1. Mở lại hai thứ đã **cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5`) và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc WO). Chi tiết **§13** |
-| 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | 🔄 **Đang chạy — `G7a` ✅ `G7b` ✅ 2026-10-18** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
+| 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | ✅ **BE xong cả 3 phần 2026-10-18/19 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
+| 15 | **`G8` — FE handoff Giai đoạn 8 (lệnh sản xuất, cấp vật tư, công đoạn, dở dang)** | 🔄 **Đang chạy — `G8a` ✅ 2026-10-19** | Nguồn `FE_HANDOFF_GD_08_2026-10-14.md`, P1. Còn `G8b`/`G8c`/`G8d`. Chi tiết **§15** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -928,6 +929,16 @@ Phạm vi đã rà: `PurchaseOrderController`, `GoodsReceiptController`, `GoodsR
 
 🔴 **Mỗi gói tự nghiệm thu đủ** (`mvn -o clean verify` + mutation + smoke + một bản `_vN` cho FE) nếu `D0` = tách — đúng cách `G6a`/`G6b`/`G6c` đã làm.
 
+### 15.3a Kết quả `G8a` *(2026-10-19)*
+
+Migration **`V79`**; bất biến **`B207`–`B211`** (`module/workorder/CLAUDE.md`); bản ghi `CLAUDE.md §0.60`; trả lời FE `BE_RESPONSE_GD_08_2026-10-19.md` (v1).
+Đã làm: `componentWarehouses` (create/PATCH/plan) + giữ tồn chỉ ở kho dòng (D2) · version bắt buộc + `touch()` + `Idempotency-Key` tuỳ chọn cho
+PATCH/plan/release/cancel/reserve/giữ tay/bỏ giữ (D5) · lịch đã chốt (`scheduleRevision`/`calendarRevision`/`scheduleTimeZone`/`scheduleCapturedAt`,
+`workMinutes`) + `POST /work-orders/{W}/schedule-preview` chung công thức release (D9) · `POST /work-orders/{W}/release-reservations` · khoảng ngày
+trên list · huỷ: chặn phiếu chờ duyệt + trả quota ledger một lần · khoá nguồn WO MAKE (Q7). **Không làm ở `G8a` (để `G8b`):** issue thường phải dùng
+reservation của dòng; version trên phiếu cấp. Nghiệm thu: `mvn -o clean verify` 1785 + 256, mutation 16/16, smoke HTTP 39/39 (lượt `210812`).
+🔴 Baseline sạch lộ flake `migrate_v78_*` có từ G7c (truy vấn catalog không lọc schema) — đã sửa trong phase.
+
 ### 14.3a Kết quả `G7a` *(2026-10-18)*
 
 ✅ Xong. Bản ghi đầy đủ `CLAUDE.md §0.57`, bất biến `B187`–`B192`, trả lời FE `BE_RESPONSE_GD_07_2026-10-18.md` (v1). Lệch kế hoạch có chủ đích:
@@ -987,6 +998,111 @@ có chủ đích:
 ### 14.5 Ngoài phạm vi *(theo FE §1.2 + quyết định BE)*
 
 PR/RFQ, cổng nhà cung cấp, hoá đơn/thanh toán, thuế/chiết khấu/phí/tỷ giá/landed cost; trả hàng/hoàn tiền; đảo ngược phiếu nhận/QC **đã POSTED** (trừ đường `REVERSAL` cũ giữ theo `D3`); nhận dư/dung sai; sửa PO sau xác nhận; nhập PO từ Excel; số sê-ri; cấp hàng xuyên nhà máy; tự tạo PO bù hoặc tự phát hành WO. Không đổi phiếu nhập/QC **sản xuất** thành endpoint mua hàng (QC sản xuất một phần là GĐ9). Không đụng WO/xuất vật tư/thực thi/WIP (GĐ8), và không trả lời thay các câu còn mở của GĐ6 (Q10/Q16/Q26/Q27/Q28). **Giá trị tồn + bình quân di động: ngoài phạm vi theo khuyến nghị `D8`** — nếu user chọn làm thì là `G7d` riêng.
+
+---
+
+## 15. `G8` — FE handoff Giai đoạn 8: Lệnh sản xuất, cấp vật tư, công đoạn và dở dang 🔄 ĐANG CHẠY — `G8a` ✅ 2026-10-19
+
+Nguồn: `FE_HANDOFF_GD_08_2026-10-14.md` (v1, P1, 717 dòng). FE/mock đã xong: nháp lệnh sản xuất + xem trước lịch, kho cho **từng dòng** vật tư, cấp vật tư nhiều dòng với duyệt bổ sung, **xác nhận đầu vào và chuyển sản lượng giữa công đoạn**, **ghi kết quả + xử lý lại (retry)**, **vật tư thực dùng theo từng dòng cấp**, kết thúc công đoạn / hoàn thành lệnh có lý do hụt, màn hình **dở dang**, và **hoàn vật tư**. BE phải (1) trả lời Q1–Q37 §5, (2) đối chiếu R01–R22 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_08_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào.
+
+> 🔴 **Handoff lớn nhất tới nay, vượt cả `G7`:** 22 yêu cầu, **37 câu hỏi**, 40 ca nghiệm thu, và nó **đổi mô hình miền** của `module/workorder` chứ không chỉ thêm endpoint. Ba thứ dưới đây là lý do:
+> 1. **Công đoạn hiện KHÔNG có trạng thái và KHÔNG có bộ đếm nào.** `WorkOrderOperation` có đúng 11 field: id, WO, nguồn routing, thứ tự, tên, trung tâm, phút setup/run, lịch, lý do điều chỉnh. Mọi con số sản lượng được **dẫn xuất** từ `production_executions`. FE đòi `status` + `inputQuantity`/`freshProcessed`/`freshRemaining`/`good`/`scrap`/`historicalRework`/`pendingRework`/`transferred`/`transferable` — tức một **sổ đầu vào + chuyển giao + nhóm xử lý lại** chưa từng tồn tại, cộng một máy trạng thái cấp công đoạn.
+> 2. **Dòng vật tư của lệnh KHÔNG có kho.** `WorkOrderComponentLine` chỉ có `quantityPer`/`scrapRate`/`requiredQuantity`/`issuedQuantity`. Giữ tồn hiện phân giải theo **phạm vi nhà máy** (`§0.45` #6 — có chủ đích: thiếu ở *mọi* kho của nhà máy mới là thiếu thật). FE đòi kho theo **từng dòng** và "không bao giờ lấy kho khác dù còn hàng" — đổi hành vi giữ tồn, không phải thêm field.
+> 3. **Hoàn vật tư: `grep MaterialReturn` toàn repo = 0 kết quả.** Không entity, không bảng, không loại biến động, không quyền. Phần này là một module con mới trọn vẹn.
+>
+> 🔴 **Hai thứ FE đòi mà repo đã CỐ Ý loại bỏ hai lần — phải chốt lại, không âm thầm làm:**
+> - **Giá trị cấp/dùng/hoàn/dở dang.** Công thức §3.1 của FE dựa trên "giá bình quân di động theo policy GĐ4" — **policy đó không tồn tại**: `stock_movements`/`stock_balances` không có cột giá nào, `P3` (§0.31 #2) loại Material Price Variance đúng vì lý do đó, và `G7 D8` (2026-10-18) **vừa hoãn** lớp giá trị tồn. Chính FE cũng cho `value = null` (Q35) ⇒ khuyến nghị trả `null`, xem `D10`.
+> - **`COMPLETED` do người dùng ra lệnh.** Hiện `COMPLETED` **tự** sinh khi sản lượng tích luỹ chạm kế hoạch (`B53`, `§0.5`), và `CLOSED` là trạng thái khoá hoàn toàn do `P6` chốt với user. FE đòi `POST .../complete-production` có lý do hụt và nói rõ "không tự đóng". Đây là đổi `B53` — xem `D6`.
+>
+> ✅ **Tin tốt, lớn hơn tưởng:** đường cấp vật tư **đã có phần lớn**. `MaterialIssueStatus` đã đủ `PENDING_APPROVAL`/`POSTED`/`REJECTED`/`CANCELLED`; `MaterialIssueLine` đã có `reasonCode`, `issueReason`, `sourceExecution`, `overIssue`, `overrideReason`, `requestedLotCode`; endpoint lô `POST /work-orders/{W}/material-issues` + `approve` + `reject` đã có. Phần thiếu là *hẹp*: huỷ của người tạo, chi tiết một phiếu, ứng viên nguồn, `expectedVersion`.
+
+### 15.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-19 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: toàn bộ 43 mapping của 4 controller trong `module/workorder`; cột của `WorkOrderOperation`, `ProductionExecution`, `WorkOrderComponentLine`, `MaterialIssue`, `MaterialIssueLine`; `MaterialIssueStatus`, `WipTransactionType`; grep `MaterialReturn` toàn `src/main`; grep quyền `PERM_PRODUCTION_EXECUTION_*`/`PERM_WIP_*`/`PERM_MATERIAL_*` trong migration. **Chưa rà:** `WorkOrderService` (`plan`/`release`/`cancel`/`close`/`scheduleOperations`) chi tiết; `MaterialIssueService.postNew` (luật `PENDING_APPROVAL` hiện tại — điều kiện nào đẩy cả phiếu sang chờ duyệt); `MaterialReservationService.reserveAutomatically` (FEFO + phạm vi kho); `ProductionExecutionService.reportNew` (gate `B54`/`B75`); `WipTransactionService`; `WorkOrderCostAccumulator` (chồng lấn với "vật tư thực dùng" của `D4`); `WorkOrderDemandAllocationService` (cần cho R18/Q20/Q21); `CapacityBoardService` đọc lịch đã chốt tới đâu (R03).
+
+| Nhóm | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| Đọc WO (R21) | List thêm `search`/khoảng ngày | `GET /v1/plants/{P}/work-orders` đã có `search` (`F7`), **thiếu** khoảng ngày | **CODE** nhỏ |
+| Nháp MAKE canonical (R01) | Giữ cùng ID/nguồn/phân bổ | ✅ **Đã đúng** — `createFromMrp` + ledger `G6b`, `WorkOrderDemandAllocation` (`F6`) | **Trả lời** |
+| Kho cho từng dòng vật tư (R02, R04, Q8) | `componentWarehouses` lúc tạo/`plan`; giữ tồn **chỉ** ở kho đó | 🔴 `WorkOrderComponentLine` **không có** cột kho; `reserveAutomatically` phân giải **phạm vi nhà máy** có chủ đích | **CODE** + migration, 🔴 `D2` |
+| Ảnh chụp thiết kế (R02, Q5) | Chụp BOM/routing lúc `plan`, bất biến | ✅ **Đã đúng** — `B12` (BOM lúc create), `B49` (routing snapshot) | **Trả lời**; 🔴 lệch: repo chụp lúc **create**, FE nói lúc **plan** |
+| Lịch đã chốt (R03) | `scheduleRevision`/`calendarRevision`/`timeZone`/`capturedAt` + `workMinutes` từng dòng | Lịch sinh ở `release()` (`B89`); **không có** revision/`capturedAt`/`workMinutes` trên wire | **CODE** |
+| Xem trước lịch của WO (§3.3) | `POST /work-orders/{W}/schedule-preview` | `G5` có `POST /v1/plants/{P}/capacity/preview` (theo nhà máy). Cấp WO: **không có** | **CODE** |
+| `expectedVersion` (R22, D5) | Bắt buộc trên **mọi** lệnh WO/phiếu cấp | `@Version` có trên entity (`BaseEntity`), **không** lệnh nào của `module/workorder` nhận | **CODE** |
+| Giữ tồn một phần (R04, Q12) | Thiếu ⇒ giữ phần được + `BLOCKED` | ✅ **Đã đúng** — "thành công một phần là có chủ đích" (`§0.9`), `BLOCKED` persist thật (`D9`) | **Trả lời** |
+| Giải phóng phần chưa cấp (§3.3) | `POST /work-orders/{W}/release-reservations` | Có `cancelActiveReservations` **nội bộ** (gọi từ `cancel`/`close`), **không** endpoint | **CODE** nhỏ |
+| Cấp vật tư nhiều dòng + chờ duyệt (R07, R08, R09) | 1–500 dòng, một dòng vượt BOM ⇒ **cả phiếu** chờ duyệt, duyệt kiểm lại | ✅ Phần lớn **đã có** — `PENDING_APPROVAL`, `approve`/`reject`, `reasonCode`/`sourceExecution`/`overIssue` trên dòng | **Trả lời + CODE** nhỏ (`expectedVersion`, kiểm lại lúc duyệt) |
+| Huỷ phiếu chờ của người tạo (§1.4) | `POST .../material-issues/{I}/cancel`, chỉ người tạo | `CANCELLED` **có** trong enum, **không** endpoint nào dẫn tới | **CODE** |
+| Chi tiết một phiếu cấp + ứng viên nguồn (§3.3) | `GET /material-issues/{I}`, `GET .../material-issue-candidates` | Chỉ có list (`GET /v1/material-issues`) | **CODE** |
+| **Trạng thái + sổ đầu vào của công đoạn** (R10, R14) | `status`, `input`, `transferable`, `transferred`, `POST .../operations/{O}/input`, `.../finish` | 🔴 `WorkOrderOperation` **không có** trạng thái/bộ đếm nào; không endpoint nào | **CODE** — phần lớn nhất, 🔴 `D1` |
+| **Xử lý lại (retry) + nhóm chờ** (R11, Q17) | `sourceExecutionId`, `retryUsed`, `pendingRework` ≠ `historicalRework` | 🔴 `ProductionExecution` **không có** `sourceExecutionId`; `reworkQuantity` hiện là một số cộng dồn, không phân biệt lượt/nhóm chờ | **CODE** + 🔴 `D7` |
+| **Vật tư thực dùng** (R13, Q18) | `consumption[] {issueLineId, quantity}` ghi cùng execution | 🔴 Không có gì. ⚠️ Chồng lấn `WorkOrderCostAccumulator` (`P3`) — nó cộng chi phí vật tư **lúc cấp**, không lúc dùng | **CODE** + `D4` |
+| Sản lượng cuối = công đoạn cuối (R12) | `finalGood` chỉ từ công đoạn cuối | 🔴 Hiện `actualGoodQuantity` của WO cộng **mọi** lần báo, không phân biệt công đoạn (`§0.5`) | **CODE**, đổi số liệu |
+| Hoàn thành WO có lý do hụt (R14, Q4, Q23) | `POST .../complete-production` + lý do nếu hụt, **không** tự đóng | 🔴 `COMPLETED` **tự** sinh (`B53`); `close` của `P6` là `CLOSED` khoá hoàn toàn | **CODE** + 🔴 `D6` |
+| **Dở dang** (R15) | `GET /plants/{P}/wip`, `GET /work-orders/{W}/wip` theo `section` | Có sổ `wip_transactions` + 2 endpoint ghi/đọc thô (`/wip-transactions`). **Không** có projection theo mục | **CODE** + `D8` |
+| **Hoàn vật tư** (R16, R17) | 4 endpoint, nguồn là dòng cấp, nguyên tử, không khôi phục giữ tồn | 🔴 **Không có gì** — grep = 0 | **CODE** + migration, `D3` |
+| Liên kết biến động kho (R17) | `sourceType`/`materialIssueId`/`materialReturnId`/`sourceIssueLineId` trên biến động | `StockMovement` có `referenceType`/`referenceId` **dạng text tự do** (`§0.43` #8 đã ghi là nợ) | **CODE** nhỏ hoặc trả lời |
+| Nguồn cung WO cho MRP (R18, Q20) | Dùng sản lượng cuối **thực tế** − phiếu nhập đã duyệt | `WorkOrderSupplyService` tính theo kế hoạch; `availableToReceipt` có sẵn (`B16`) | **CODE** + `D11` |
+| Hạn ngạch khi huỷ WO (R06, Q21) | Trả quota chuyển đổi + phân bổ đơn bán **đúng một lần** | `G6b` đã làm cho huỷ **đơn mua**; huỷ **WO** thì chưa | **CODE** |
+| 3 quyền mới (§1.4, Q1, Q34) | `PERM_WIP_READ`, `PERM_MATERIAL_RETURN_READ`/`_MANAGE` | Có `PERM_WIP_MANAGE`, **không** có `PERM_WIP_READ`; không có quyền hoàn vật tư | **CODE** + migration seed, `C10` kích hoạt |
+| `capabilities` trên projection (§3.2) | Object cờ boolean + lý do từ chối | Không có ở bất kỳ module nào | **Trả lời — khuyến nghị không làm** (`D12`) |
+| Lệch múi giờ ≤ 60s (Q31) | `actualEndedAt` cho lệch 60 giây | `F7` đã ép `@NotNull` + validate thứ tự; **không** có dung sai | **CODE** nhỏ |
+| Lý do 5–2000 ký tự (Q33) | Chuẩn hoá mọi lý do GĐ8 | Hiện chỉ "không rỗng" (`APPROVAL_REASON_REQUIRED`); `G5` đã có tiền lệ ≥ 5 cho điều chỉnh lịch | **CODE** nhỏ |
+| `X-Trace-Id`, số/ngày/phân trang (R20, R21, Q24, Q29, Q32) | — | ✅ **Đã có** (`TraceIdFilter`, `@Digits(13,6)` từ `G4`, `PageableFactory`, múi giờ nhà máy từ `C2-8`) | **Trả lời** |
+
+### 15.2 Quyết định phải chốt với user trước khi code ✅ *(chốt 2026-10-19, `AskUserQuestion`: D0 = (b) tách 4 làm liền; D2 = (a) dòng cũ `NULL` = cả nhà máy; **D11 = hoãn** — giữ nguồn cung WO theo kế hoạch; D1, D3–D10, D12 theo cột "Khuyến nghị BE")*
+
+| # | Quyết định | Hai phương án | Khuyến nghị BE |
+|---|---|---|---|
+| **D0** | **Tách phase hay làm một lượt** | (a) một lượt `G8`; (b) tách **4**: `G8a` nháp WO + kho từng dòng + lịch → `G8b` cấp vật tư (hoàn thiện phần hẹp) → `G8c` công đoạn: đầu vào/chuyển giao/retry/vật tư dùng/hoàn thành → `G8d` dở dang + hoàn vật tư | 🔴 **(b)**, đúng tiền lệ `D0` của `G6`/`G7`. Lớn hơn `G7`: 22 yêu cầu, 37 câu hỏi, 40 ca, **cộng** ba thứ chưa tồn tại. `G8c` một mình đổi mô hình miền — không gộp nó với bất cứ gì |
+| **D1** | 🔴 **Máy trạng thái + sổ đầu vào cấp công đoạn** | (a) thêm trạng thái + bộ đếm lên `work_order_operations` + bảng chuyển giao riêng, **dẫn xuất vẫn là nguồn cho số cũ**; (b) tính mọi thứ live từ `production_executions`, không thêm cột | **(a)**. (b) không diễn đạt được "đầu vào đã xác nhận" — một đại lượng **không** suy được từ lần báo sản lượng nào (FE Q14 nói rõ: không suy sản lượng từ lượng vật tư). Nhưng đây là thay đổi lớn nhất của phase: mọi số sản lượng hiện đang dẫn xuất, thêm cột là thêm **nguồn thứ hai** ⇒ phải có bất biến "cột là ảnh chụp của sổ, sổ là chân lý" + IT chứng minh |
+| **D2** | 🔴 **Kho cho từng dòng vật tư** | (a) thêm `warehouse_id` lên `work_order_component_lines` + giữ tồn chỉ ở kho đó; (b) giữ phạm vi nhà máy như hiện tại | **(a)**, nhưng **có điều kiện**: `§0.45` #6 ghi rõ phạm vi nhà máy là có chủ đích, và `WorkOrderService.release` gate 100% readiness (`B13`/gate 1a) sẽ **chặt hơn hẳn** — một lệnh hôm nay release được có thể thành `BLOCKED` vì hàng nằm kho khác. Dữ liệu cũ: **không backfill**, dòng cũ `NULL` = "mọi kho của nhà máy" (hành vi cũ) |
+| **D3** | **Hoàn vật tư** | (a) entity + bảng `material_returns`/`_lines` trong `module/workorder` + 2 loại biến động mới; (b) tái dùng `adjust` của inventory | **(a)** — (b) mất hẳn liên kết về dòng cấp gốc (R16 đòi "nguyên nguồn"), và `§0.43` #8 đã ghi `referenceType` dạng text là nợ. Hoàn **không** khôi phục giữ tồn, **không** giảm `grossIssued` (Q11) |
+| **D4** | **Vật tư thực dùng** (`consumption[]`) | (a) bảng nối `production_execution_consumptions` (dòng cấp → lượng), **không** đụng tồn kho; (b) không làm, suy theo BOM | **(a)**; (b) chính FE cấm (Q18: không `Good × BOM`). 🔴 Phải đối chiếu với `WorkOrderCostAccumulator` (`P3`) — nó cộng chi phí vật tư **lúc cấp**; nếu thêm "giá trị đã dùng" mà không nói rõ hai thứ khác nhau thì sẽ có **hai con số chi phí vật tư** cho cùng một lệnh |
+| **D5** | `expectedVersion` trên mọi lệnh | (a) bắt buộc, như `G7a`; (b) tuỳ chọn | **(a)** — `G7a` đã làm đúng thế cho đơn mua, và `§0.40` #2 là bài học: không có nó thì hai lệnh đồng thời cùng ghi đè im lặng |
+| **D6** | 🔴 **`COMPLETED` tự động vs ra lệnh** | (a) thêm `POST .../complete-production` (có lý do hụt) **và giữ** `COMPLETED` tự động khi đạt kế hoạch; (b) bỏ tự động, chỉ còn ra lệnh | **(a)**. (b) đổi `B53` — một bất biến có dữ liệu lịch sử và được `§0.5` ghi là quyết định; `D11` cũng đã từ chối "hoãn `complete()`" vì WO sẽ kẹt `IN_PROGRESS` vô thời hạn. Với (a), `complete-production` là đường **cho trường hợp hụt**; `CLOSED` của `P6` không đụng |
+| **D7** | **Nhóm xử lý lại (retry)** | (a) `source_execution_id` + `retry_used` trên `production_executions`, `pendingRework` = tổng `rework − retryUsed`; (b) không làm, giữ `reworkQuantity` một số | **(a)** — nhưng nghĩa của `reworkQuantity` hiện tại **đổi vai**: nó trở thành "lượt đã ghi" (historical), còn "chờ xử lý" là số dẫn xuất mới. Mọi chỗ đọc `actualReworkQuantity` phải rà (`§11.3`) |
+| **D8** | **Dở dang** | (a) projection đọc theo `section`, tính live từ sổ có sẵn; (b) bảng tổng hợp riêng | **(a)** — cùng lối `CapacityBoardService`/`MrpCalculationService` (không lưu kết quả trung gian). Cộng `PERM_WIP_READ` mới (hiện chỉ có `_MANAGE`) |
+| **D9** | **Lịch đã chốt + xem trước cấp WO** | (a) `scheduleRevision`/`calendarRevision`/`capturedAt` lên `work_orders` + endpoint xem trước riêng cho WO; (b) chỉ trả lịch, không revision | **(a)** — R03 đòi "công suất đọc lịch đã chốt **trực tiếp**", và `§0.53` #6 đã ghi release và xem trước **khác công thức** (release không chia `capacityUnits`); không có revision thì FE không phân biệt được lịch nào đang hiển thị |
+| **D10** | 🔴 **Giá trị cấp/dùng/hoàn/dở dang** | (a) **hoãn** — trả `null`/vắng mặt (đúng Q35 + R19); (b) dựng lớp giá bình quân di động | **(a) hoãn.** `P3` loại một lần, `G7 D8` hoãn một lần nữa cách đây **một ngày**. Làm (b) ở đây là dựng lớp actual-costing trong một phase vốn đã lớn nhất; nếu user muốn thì đó là phase riêng, **trước** `G8d` (hoàn vật tư cần giá để trả `returnValue`) |
+| **D11** | **Nguồn cung WO cho MRP theo sản lượng thực** | (a) đổi `WorkOrderSupplyService` sang `finalGood − phiếu nhập đã duyệt` cho WO **terminal**; (b) giữ theo kế hoạch | **(a)**, nhưng 🔴 **đổi số MRP** — lần thứ ba trong tuần (`G6b` đã đổi hai lần). Phải đo A/B trên `D26-OMNIPLANT` và báo FE, đúng cách `G6b` làm |
+| **D12** | `capabilities` trên mọi projection | (a) **không làm**; (b) trả object cờ + lý do từ chối | **(a)** — FE tự nói "mutation vẫn phải kiểm lại ở server", nên đây là tiện lợi hiển thị. Chưa module nào trong repo có, và nó nhân đôi luật phân quyền ra tầng đọc (`§11.5`) |
+
+> **Bốn thứ KHÔNG hỏi vì code đã trả lời:** Q12 (giữ tồn một phần — `§0.9` đã thế), Q13 (`ISSUED` ↔ `CONSUMED` — enum hiện là `CONSUMED`, chỉ cần ánh xạ), Q24/Q29/Q32 (giới hạn số, `X-Trace-Id`, múi giờ nhà máy — đã có từ `G4`/`C2-8`), Q36 (chứng từ đã ghi là bất biến — repo chưa bao giờ có `PATCH`/`DELETE` cho chúng).
+>
+> 🔴 **Một lệch cần nêu trong bản trả lời FE, không phải quyết định:** FE Q5 nói "nháp thủ công chụp thiết kế lúc `plan`", nhưng repo chụp BOM **lúc create** (`B12`) và routing lúc create qua `createInternal` (`B49`/`§0.8` #3). Hành vi hiện tại **không** sai — chỉ khác thời điểm FE giả định.
+
+### 15.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+| Gói | Nội dung | Phụ thuộc |
+|---|---|---|
+| `G8-0` | Đọc nốt phần "chưa rà" §15.1 (ưu tiên `MaterialIssueService.postNew`, `reserveAutomatically`, `ProductionExecutionService`, `WorkOrderCostAccumulator`, `WorkOrderDemandAllocationService`) · baseline `mvn -o clean verify` trên **`git worktree` sạch** · chạy live WO/cấp vật tư/báo sản lượng hiện có để biết hành vi **trước** khi đổi | — |
+| `G8a` | **Nháp WO + kho từng dòng + lịch:** `componentWarehouses` (`D2`) · `expectedVersion` mọi lệnh (`D5`) · lịch đã chốt + revision (`D9`) · `schedule-preview` cấp WO · `release-reservations` · khoảng ngày trên list · trả quota khi huỷ WO (R06) | `D2`,`D5`,`D9` · migration **`V79`** |
+| `G8b` | **Cấp vật tư:** huỷ phiếu chờ của người tạo · `GET /material-issues/{I}` · ứng viên nguồn · kiểm lại lúc duyệt + `expectedIssueVersion` · tự duyệt cần cả hai quyền (Q3) · lý do 5–2000 (Q33) | `G8a` |
+| `G8c` | 🔴 **Công đoạn:** trạng thái + sổ đầu vào/chuyển giao (`D1`) · retry + nhóm chờ (`D7`) · vật tư thực dùng (`D4`) · sản lượng cuối = công đoạn cuối · `finish` + `complete-production` (`D6`) · dung sai 60s | `G8b`, `D1`,`D4`,`D6`,`D7` |
+| `G8d` | **Dở dang + hoàn vật tư:** projection theo `section` (`D8`) · entity + 4 endpoint hoàn vật tư (`D3`) · liên kết biến động kho · 3 quyền mới + seed (`C10`) | `G8c`, `D3`,`D8`,`D10` |
+| `G8e` | *(chỉ nếu `D11` = (a))* Nguồn cung WO theo sản lượng thực + đo A/B trên `D26-` | `G8c` |
+| `G8-9` | `mvn -o clean verify` + nghiệm thu mutation (nhắm: trần đầu vào, chuyển giao nguyên tử, trần nhóm retry, trần vật tư dùng theo từng dòng cấp, trần hoàn theo phần chưa dùng, quota huỷ đúng một lần) + smoke HTTP thật + `BE_RESPONSE_GD_08_<ngày>.md` + docs (`CLAUDE.md §0.60`, `module/workorder/CLAUDE.md`, `module/inventory/CLAUDE.md`, `roles-and-permissions.md`, `api-guide-for-frontend.md`) | tất cả |
+
+🔴 **Mỗi gói tự nghiệm thu đủ** (`mvn -o clean verify` + mutation + smoke + một bản `_vN` cho FE) nếu `D0` = tách — đúng cách `G6`/`G7` đã làm.
+
+### 15.4 Breaking change dự kiến
+
+| Thay đổi | Breaking? |
+|---|---|
+| Endpoint/field/quyền mới (xem trước lịch, đầu vào, kết thúc, dở dang, hoàn vật tư) | **Không** (additive) |
+| Kho cho từng dòng vật tư (`D2`) | **Có — về hành vi**: lệnh có hàng ở kho khác của cùng nhà máy nay `BLOCKED` thay vì release được. Dòng cũ `NULL` ⇒ giữ hành vi cũ |
+| `expectedVersion` bắt buộc | **Có** — lệnh trước đây không gửi gì nay 400 |
+| Sản lượng cuối = công đoạn cuối | **Có — về số liệu**: WO nhiều công đoạn nay báo số khác (hiện đang cộng mọi lần báo) |
+| `reworkQuantity` đổi vai (`D7`) | **Có — về nghĩa**: trở thành "lượt đã ghi", "chờ xử lý" là số mới |
+| Nguồn cung WO theo sản lượng thực (`D11`) | **Có — số MRP đổi**, nếu `D11` = (a) |
+| Lý do 5–2000 ký tự | **Có, hẹp** — lý do 1–4 ký tự nay 400 |
+| `COMPLETED` tự động | **Không đổi** nếu `D6` = (a) |
+| Giá trị dở dang/hoàn | **Không làm** nếu `D10` = (a) |
+
+### 15.5 Ngoài phạm vi *(theo FE §1.2 + quyết định BE)*
+
+Phiếu nhập sản xuất / `HOLD` / QC / truy xuất nguồn gốc kiểu mới của GĐ9 (repo **đã có** vòng đời phiếu nhập + QC từ `F2`/`D5` — GĐ9 là bản nâng cấp, không phải dựng mới); giao hàng/hoá đơn/thanh toán; MES/OEE; số sê-ri trong luồng này; quy trình song song/rẽ nhánh (Q15 — GĐ8 chỉ tuần tự); chuyển vật tư giữa kho để bù; vật tư thay thế ngoài BOM; chi phí nhân công/chung/kế toán/định giá phế đầy đủ; đảo/sửa chứng từ đã ghi (Q36); tự mua bù / tự lập WO bù / tự đóng WO; chính sách `fulfilled`/`open` của đơn bán còn mở từ GĐ6 (Q10/Q16/Q26/Q27 của **GĐ6**, không trả lời thay). **Giá trị tồn/dở dang: ngoài phạm vi theo khuyến nghị `D10`** — nếu user muốn làm thì là phase riêng, xếp **trước** `G8d`.
 
 ---
 
@@ -1121,6 +1237,17 @@ PR/RFQ, cổng nhà cung cấp, hoá đơn/thanh toán, thuế/chiết khấu/ph
   - [x] ~~`G7d`~~ — không làm: `D8` = hoãn (giá trị tồn trả `null`)
   - [x] `G7-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_07_*.md` (v1/v2/v3) + docs — mỗi gói tự nghiệm thu (D0 = tách)
   - [ ] FE nghiệm thu A01–A38
+- [ ] **`G8`** — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang *(đang chạy; `G8a` ✅ 2026-10-19, §15)*
+  - [x] `G8-0` đọc nốt phần "chưa rà" §15.1 (ưu tiên `MaterialIssueService.postNew`, `reserveAutomatically`, `ProductionExecutionService`, `WorkOrderCostAccumulator`) + baseline trên worktree sạch + chạy live WO/cấp vật tư/báo sản lượng hiện có
+  - [x] **Chốt `D0` — tách `G8a`/`G8b`/`G8c`/`G8d` hay làm một lượt**
+  - [x] Chốt 12 quyết định còn lại §15.2 *(2026-10-19: theo khuyến nghị, D11 hoãn)* — **`D1`** (trạng thái + sổ đầu vào của công đoạn), **`D2`** (kho từng dòng, đổi hành vi giữ tồn/release), **`D6`** (`COMPLETED` tự động vs ra lệnh, đụng `B53`) và **`D10`** (giá trị: hoãn lần thứ ba hay dựng) là bốn cái quyết định độ lớn
+  - [x] `G8a` Nháp WO: kho từng dòng, `expectedVersion`, lịch đã chốt + revision, xem trước lịch, giải phóng phần chưa cấp, trả quota khi huỷ (`V79`)
+  - [ ] `G8b` Cấp vật tư: huỷ phiếu chờ của người tạo, chi tiết một phiếu, ứng viên nguồn, kiểm lại lúc duyệt
+  - [ ] `G8c` Công đoạn: đầu vào/chuyển giao, retry + nhóm chờ, vật tư thực dùng, sản lượng cuối = công đoạn cuối, kết thúc + hoàn thành có lý do hụt
+  - [ ] `G8d` Dở dang + hoàn vật tư: projection theo mục, entity + 4 endpoint, 3 quyền mới
+  - [x] ~~`G8e`~~ *(D11 = hoãn, 2026-10-19 — không làm trong `G8`)*
+  - [ ] `G8-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_08_*.md` + docs
+  - [ ] FE nghiệm thu A01–A40
 
 ---
 
