@@ -90,6 +90,14 @@ public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, UUID
                                      @Param("receivedDateTo") LocalDate receivedDateTo,
                                      Pageable pageable);
 
+    /**
+     * G7c: {@code SELECT … FOR UPDATE} on the receipt row, id only — the purchase QC guard has already
+     * loaded the receipt into the request's EntityManager, so the caller re-reads it after this (B194).
+     */
+    @Query(value = "select goods_receipt_id from goods_receipts where goods_receipt_id = :goodsReceiptId for update",
+            nativeQuery = true)
+    Optional<UUID> lockRowByGoodsReceiptId(@Param("goodsReceiptId") UUID goodsReceiptId);
+
     /** Next value of {@code goods_receipt_number_seq} (V77). */
     @Query(value = "select nextval('goods_receipt_number_seq')", nativeQuery = true)
     long nextReceiptNumber();

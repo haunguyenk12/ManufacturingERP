@@ -316,6 +316,10 @@ class GoodsReceiptDraftServiceTest {
         assertThat(receipt.isQualityHeld()).isTrue();
         assertThat(receipt.getPostedBy()).isEqualTo(actor);
         assertThat(response.lines().get(0).lotStatus()).isEqualTo("HOLD");
+        // G7c: a posted, on-hold line is all pending; a tracked line's hold is its lot, not a bucket.
+        assertThat(response.lines().get(0).pendingQuantity()).isEqualByComparingTo("25");
+        assertThat(response.lines().get(0).acceptedQuantity()).isEqualByComparingTo("0");
+        assertThat(response.lines().get(0).qualityBucketId()).isNull();
         assertThat(response.purchaseOrderStatus()).isEqualTo("PARTIALLY_RECEIVED");
         assertThat(order.getLines().get(0).getReceivedQuantity()).isEqualByComparingTo("25");
         verify(purchaseOrderRepository).saveAndFlush(order);

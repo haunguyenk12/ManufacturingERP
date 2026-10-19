@@ -19,6 +19,7 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -45,6 +46,7 @@ public class InventoryLotService {
     private final StockMovementRepository movementRepository;
     private final InventoryMovementService movementService;
     private final LotQcOriginLookupService lotQcOriginLookupService;
+    private final PurchaseQcLookupService purchaseQcLookupService;
     private final InventoryMapper mapper;
     private final IdempotencySupport idempotency;
 
@@ -108,6 +110,17 @@ public class InventoryLotService {
             throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot is on hold from a production receipt and must be released via QC disposition");
         }
+        // G7c (R13): purchase QC owns a received lot until it is decided, and a rejected child lot for good.
+        if (lot.getStatus() == LotStatus.HOLD && request.newStatus() != LotStatus.HOLD
+                && purchaseQcLookupService.isAwaitingPurchaseQc(lotId)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot is on hold from a goods receipt and must be released via purchase QC");
+        }
+        if (lot.getStatus() == LotStatus.REJECTED
+                && PurchaseQcLookupService.LOT_SOURCE_TYPE.equals(lot.getSourceReferenceType())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot was rejected by purchase QC; its status cannot be changed");
+        }
         if (!replay && balanceRepository.existsByLotLotIdAndReservedQuantityGreaterThan(lotId, BigDecimal.ZERO)) {
             throw ExceptionFactory.custom(BusinessErrorCode.RESERVED_STOCK,
                     "Lot has reserved stock (work order or sales order); release the reservation first");
@@ -158,6 +171,9 @@ public class InventoryLotService {
     private StockMovement findOriginMovement(InventoryLot lot) {
         return movementRepository
                 .findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(lot.getLotId(), MovementType.RECEIVE)
+                // G7c: a child lot of a purchase QC decision was never received; it starts with its split.
+                .or(() -> movementRepository.findFirstByLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                        lot.getLotId(), MovementType.LOT_SPLIT_IN))
                 .orElse(null);
     }
 
@@ -172,6 +188,9 @@ public class InventoryLotService {
                 .or(() -> movementRepository
                         .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
                                 warehouseId, lot.getLotId(), MovementType.TRANSFER_IN))
+                .or(() -> movementRepository
+                        .findFirstByWarehouseWarehouseIdAndLotLotIdAndMovementTypeOrderByCreatedAtAsc(
+                                warehouseId, lot.getLotId(), MovementType.LOT_SPLIT_IN))
                 .orElse(null);
     }
 }

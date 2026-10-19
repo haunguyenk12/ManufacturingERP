@@ -1185,6 +1185,120 @@ class InventoryMovementServiceTest {
         }
     }
 
+    // ── G7c: splitLot ──────────────────────────────────────────────────────
+
+    private record SplitFixture(Item item, Warehouse warehouse, InventoryLot parent, StockBalance parentBalance) {}
+
+    private SplitFixture splitFixture(String parentQuantity) {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryLot parent = InventoryLot.builder().lotId(UUID.randomUUID()).item(item).lotCode("LOT-1")
+                .status(LotStatus.HOLD).receivedAt(java.time.Instant.parse("2026-10-18T01:00:00Z"))
+                .expiresAt(java.time.Instant.parse("2026-12-16T17:00:00Z")).build();
+        StockBalance parentBalance = StockBalance.builder().item(item).warehouse(warehouse).lot(parent)
+                .quantity(new BigDecimal(parentQuantity)).build();
+        lenient().when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        lenient().when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+        lenient().when(lotRepository.findById(parent.getLotId())).thenReturn(Optional.of(parent));
+        lenient().when(balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                item.getItemId(), warehouse.getWarehouseId(), parent.getLotId())).thenReturn(Optional.of(parentBalance));
+        lenient().when(lotRepository.save(any(InventoryLot.class))).thenAnswer(inv -> {
+            InventoryLot saved = inv.getArgument(0);
+            if (saved.getLotId() == null) {
+                saved.setLotId(UUID.randomUUID());
+            }
+            return saved;
+        });
+        lenient().when(movementRepository.save(any(StockMovement.class))).thenAnswer(inv -> inv.getArgument(0));
+        return new SplitFixture(item, warehouse, parent, parentBalance);
+    }
+
+    @Test
+    @DisplayName("G7c splitLot: moves the quantity into a child lot that inherits expiry, records parent + source, on-hand unchanged")
+    void splitLot_movesQuantityIntoChild_andWritesPairedMovements() {
+        SplitFixture f = splitFixture("0.100001");
+        UUID decisionId = UUID.randomUUID();
+        when(lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(f.item().getItemId(), "LOT-1-A1")).thenReturn(false);
+
+        LotSplitResult result = service.splitLot(new LotSplitCommand(f.item().getItemId(), f.warehouse().getWarehouseId(),
+                f.parent().getLotId(), "LOT-1-A1", LotStatus.AVAILABLE, new BigDecimal("0.05"),
+                "PURCHASE_QC_DECISION", decisionId, "ok"), "PQC-1:A");
+
+        InventoryLot child = result.childLot();
+        assertThat(child.getLotCode()).isEqualTo("LOT-1-A1");
+        assertThat(child.getStatus()).isEqualTo(LotStatus.AVAILABLE);
+        assertThat(child.getParentLot()).isSameAs(f.parent());
+        assertThat(child.getExpiresAt()).isEqualTo(f.parent().getExpiresAt());
+        assertThat(child.getSourceReferenceType()).isEqualTo("PURCHASE_QC_DECISION");
+        assertThat(child.getSourceReferenceId()).isEqualTo(decisionId);
+        assertThat(f.parentBalance().getQuantity()).isEqualByComparingTo("0.050001");
+
+        ArgumentCaptor<StockBalance> balances = ArgumentCaptor.forClass(StockBalance.class);
+        verify(balanceRepository, times(2)).save(balances.capture());
+        StockBalance childBalance = balances.getAllValues().get(1);
+        assertThat(childBalance.getLot()).isSameAs(child);
+        assertThat(childBalance.getQuantity()).isEqualByComparingTo("0.05");
+        // On-hand of the item in the warehouse: 0.050001 + 0.05 = the original 0.100001.
+        assertThat(f.parentBalance().getQuantity().add(childBalance.getQuantity())).isEqualByComparingTo("0.100001");
+
+        assertThat(result.outMovement().getMovementType()).isEqualTo(MovementType.LOT_SPLIT_OUT);
+        assertThat(result.outMovement().getDirection()).isEqualTo(MovementDirection.OUT);
+        assertThat(result.outMovement().getLot()).isSameAs(f.parent());
+        assertThat(result.inMovement().getMovementType()).isEqualTo(MovementType.LOT_SPLIT_IN);
+        assertThat(result.inMovement().getDirection()).isEqualTo(MovementDirection.IN);
+        assertThat(result.inMovement().getLot()).isSameAs(child);
+        assertThat(result.inMovement().getReferenceId()).isEqualTo(decisionId.toString());
+        assertThat(result.inMovement().getIdempotencyKey()).isEqualTo("PQC-1:A");
+    }
+
+    @Test
+    @DisplayName("G7c splitLot: a child code already used by the item (any case) is LOT_CODE_ALREADY_EXISTS, nothing moves")
+    void splitLot_existingChildCode_isRefused() {
+        SplitFixture f = splitFixture("10");
+        when(lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(f.item().getItemId(), "LOT-1-A1")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.splitLot(new LotSplitCommand(f.item().getItemId(), f.warehouse().getWarehouseId(),
+                f.parent().getLotId(), "LOT-1-A1", LotStatus.AVAILABLE, BigDecimal.ONE, "PURCHASE_QC_DECISION",
+                UUID.randomUUID(), null), "PQC-2:A"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS));
+        verify(lotRepository, never()).save(any());
+        verify(balanceRepository, never()).save(any());
+        assertThat(f.parentBalance().getQuantity()).isEqualByComparingTo("10");
+    }
+
+    @Test
+    @DisplayName("G7c splitLot: more than the parent holds is INSUFFICIENT_STOCK, no child is created")
+    void splitLot_moreThanTheParentHolds_isRefused() {
+        SplitFixture f = splitFixture("1");
+        when(lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(any(), anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.splitLot(new LotSplitCommand(f.item().getItemId(), f.warehouse().getWarehouseId(),
+                f.parent().getLotId(), "LOT-1-R1", LotStatus.REJECTED, new BigDecimal("1.000001"), "PURCHASE_QC_DECISION",
+                UUID.randomUUID(), "bad"), "PQC-3:R"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
+        verify(lotRepository, never()).save(any());
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("G7c splitLot: stock reserved on the parent lot cannot be split away — only quantity − reserved")
+    void splitLot_reservedPartOfTheParent_isNotSplittable() {
+        SplitFixture f = splitFixture("10");
+        f.parentBalance().reserve(new BigDecimal("8"));
+        when(lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(any(), anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.splitLot(new LotSplitCommand(f.item().getItemId(), f.warehouse().getWarehouseId(),
+                f.parent().getLotId(), "LOT-1-A1", LotStatus.AVAILABLE, new BigDecimal("3"), "PURCHASE_QC_DECISION",
+                UUID.randomUUID(), null), "PQC-4:A"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
+        assertThat(f.parentBalance().getQuantity()).isEqualByComparingTo("10");
+        verify(movementRepository, never()).save(any());
+    }
+
     private Item item(UUID itemId, UUID companyId, boolean lotTracked, ItemStatus status) {
         return Item.builder()
                 .itemId(itemId)

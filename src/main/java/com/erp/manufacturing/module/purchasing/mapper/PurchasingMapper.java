@@ -260,7 +260,17 @@ public class PurchasingMapper {
                 orderLine.getCurrencyCode(),
                 line.getExpiresOn(),
                 lot == null ? null : lot.getStatus().name(),
-                movementId == null ? List.of() : List.of(movementId));
+                movementId == null ? List.of() : List.of(movementId),
+                line.getAcceptedQuantity(),
+                line.getRejectedQuantity(),
+                awaitsPurchaseQc(line) ? line.pendingQuantity() : null,
+                awaitsPurchaseQc(line) && lot == null ? line.getGoodsReceiptLineId() : null);
+    }
+
+    /** G7c: QC figures only mean something on a POSTED receipt that went on hold (pre-G7b receipts never did). */
+    private static boolean awaitsPurchaseQc(GoodsReceiptLine line) {
+        GoodsReceipt receipt = line.getGoodsReceipt();
+        return receipt != null && receipt.getStatus() == GoodsReceiptStatus.POSTED && receipt.isQualityHeld();
     }
 
     /** G7b: {@code LOT_TRACKED} / {@code SERIAL_TRACKED} / {@code NON_TRACKED} (FE trackingPolicy). */

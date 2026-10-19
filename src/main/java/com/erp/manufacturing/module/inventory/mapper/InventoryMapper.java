@@ -164,7 +164,8 @@ public class InventoryMapper {
                 sourceMovement != null ? sourceMovement.getCreatedAt() : null,
                 lot.getVersion(),
                 lot.getCreatedAt(),
-                lot.getUpdatedAt());
+                lot.getUpdatedAt(),
+                lot.getParentLotId());
     }
 
     public InventoryLotDetailResponse toLotDetailResponse(InventoryLot lot, List<StockBalance> balances,
@@ -187,7 +188,8 @@ public class InventoryMapper {
                 lot.getVersion(),
                 lot.getCreatedAt(),
                 lot.getUpdatedAt(),
-                balances.stream().map(this::toLotBalanceResponse).toList());
+                balances.stream().map(this::toLotBalanceResponse).toList(),
+                lot.getParentLotId());
     }
 
     public InventoryLotBalanceResponse toLotBalanceResponse(StockBalance balance) {

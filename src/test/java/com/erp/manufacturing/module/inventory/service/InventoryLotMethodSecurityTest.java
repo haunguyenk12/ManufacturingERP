@@ -22,6 +22,7 @@ import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.domain.WarehouseType;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -281,10 +282,11 @@ class InventoryLotMethodSecurityTest {
                                                  StockMovementRepository movementRepository,
                                                  InventoryMovementService movementService,
                                                  LotQcOriginLookupService lotQcOriginLookupService,
+                                                 PurchaseQcLookupService purchaseQcLookupService,
                                                  InventoryMapper mapper) {
             return new InventoryLotService(
                     lotRepository, balanceRepository, movementRepository, movementService,
-                    lotQcOriginLookupService, mapper, new IdempotencySupport(new ObjectMapper()));
+                    lotQcOriginLookupService, purchaseQcLookupService, mapper, new IdempotencySupport(new ObjectMapper()));
         }
 
         @Bean
@@ -325,6 +327,11 @@ class InventoryLotMethodSecurityTest {
         @Bean
         LotQcOriginLookupService lotQcOriginLookupService() {
             return mock(LotQcOriginLookupService.class);
+        }
+
+        @Bean
+        PurchaseQcLookupService purchaseQcLookupService() {
+            return mock(PurchaseQcLookupService.class);
         }
     }
 }

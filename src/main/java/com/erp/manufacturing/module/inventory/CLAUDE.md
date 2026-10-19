@@ -217,3 +217,12 @@ Không đổi một dòng nào trong `module/inventory` ngoài hai lookup (`Item
    QC mua (`G7c`). Mọi số khả dụng (MRP, dashboard, gate xuất) tự trừ đúng, không cần sửa.
 2. Đảo nhập một phiếu mua không theo lô đã nhận vào hold phải `releaseQualityHold` **trước** `reverseReceive` — nếu không CHECK
    `reserved + qualityHold <= quantity` từ chối. Phía purchasing tự làm (B196); đừng "đơn giản hoá" bằng cách cho `reverseReceive` tự gỡ hold.
+
+## G7c — Tách lô cho QC mua, chặn đường vòng qua QC (2026-10-18)
+
+Migration `V78`. Phía purchasing ghi bất biến chính (`B199`–`B204` ở `module/purchasing/CLAUDE.md`); ở đây chỉ phần inventory sở hữu.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B205 | **`InventoryMovementService.splitLot`** chuyển một lượng từ lô cha sang lô con **mới** cùng vật tư–kho, trong một transaction: kiểm mã lô con chưa có (không phân biệt hoa thường ⇒ `LOT_CODE_ALREADY_EXISTS`), `quantity − reserved` của lô cha đủ (thiếu ⇒ `INSUFFICIENT_AVAILABLE_STOCK`; `qualityHold` không áp cho dòng có lô), lô con kế thừa `receivedAt`/`expiresAt`, mang `parent_lot_id` + nguồn. Hai dòng sổ cái `LOT_SPLIT_OUT` (lô cha, `OUT`) + `LOT_SPLIT_IN` (lô con, `IN`) **cùng** `Idempotency-Key` — hợp lệ vì `uk_stock_movements` là `(key, movement_type)` (`B69`); replay tra theo `LOT_SPLIT_IN`. Tồn thực tế của vật tư–kho **không đổi** | `InventoryMovementServiceTest.splitLot_*`, `PurchaseQualityIT.trackedDecision_*` |
+| B206 | **`parentLotId`** trên `GET /v1/inventory/lots` + `/{lotId}` (additive, cuối record); nguồn gốc của lô con là dòng `LOT_SPLIT_IN` khi lô không có `RECEIVE` nào. **`InventoryLotService.changeStatus` có thêm hai cổng** (R13): `HOLD` → khác khi `PurchaseQcLookupService.isAwaitingPurchaseQc` (hướng phụ thuộc `inventory → purchasing`, cùng khuôn `inventory → workorder` của `C2-2`), và lô `REJECTED` có `sourceReferenceType = PURCHASE_QC_DECISION` ⇒ cả hai `LOT_NOT_ELIGIBLE` | `InventoryLotServiceTest.changeStatus_holdEscapeBlockedWhilePurchaseQcPending`, `.changeStatus_purchaseQcRejectedChild_cannotBeReleased` |

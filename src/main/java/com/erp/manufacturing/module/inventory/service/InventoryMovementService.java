@@ -210,6 +210,94 @@ public class InventoryMovementService {
     }
 
     /**
+     * G7c: splits part of a lot into a new child lot in the same warehouse — a purchase QC decision
+     * moves the accepted quantity into an {@code AVAILABLE} child and the rejected quantity into a
+     * {@code REJECTED} child, leaving what is still pending on the parent. Writes a
+     * {@link MovementType#LOT_SPLIT_OUT} on the parent and a {@link MovementType#LOT_SPLIT_IN} on the
+     * child under the same key; on-hand of the item in the warehouse is unchanged.
+     *
+     * <p>Only unreserved quantity can be split: the parent is on hold, so nothing can have reserved it.
+     * The child code must be new for the item, ignoring case (FE Q28) — the caller picks it.
+     */
+    @Transactional
+    public LotSplitResult splitLot(LotSplitCommand command, String idempotencyKey) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        Optional<StockMovement> replayIn = findReplay(normalizedKey, MovementType.LOT_SPLIT_IN);
+        if (replayIn.isPresent()) {
+            StockMovement out = findReplay(normalizedKey, MovementType.LOT_SPLIT_OUT).orElse(null);
+            return new LotSplitResult(replayIn.get().getLot(), out, replayIn.get());
+        }
+
+        Item item = findActiveItem(command.itemId());
+        Warehouse warehouse = findActiveWarehouse(command.warehouseId());
+        ensureSameCompany(item, warehouse);
+        InventoryLot parent = findLotForItem(item, command.parentLotId());
+        BigDecimal quantity = requirePositive(command.quantity());
+        String childCode = requireLotCode(command.childLotCode());
+        if (lotRepository.existsByItemItemIdAndLotCodeIgnoreCase(item.getItemId(), childCode)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
+                    "Lot code already exists for this item: " + childCode);
+        }
+
+        StockBalance source = findBalance(item, warehouse, parent);
+        if (source.getQuantity().subtract(source.getReservedQuantity()).compareTo(quantity) < 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.INSUFFICIENT_STOCK,
+                    "Not enough unreserved stock in lot " + parent.getLotCode() + " to split " + quantity);
+        }
+        InventoryLot child = lotRepository.save(InventoryLot.builder()
+                .item(item)
+                .lotCode(childCode)
+                .status(command.childStatus())
+                .receivedAt(parent.getReceivedAt())
+                .expiresAt(parent.getExpiresAt())
+                .parentLot(parent)
+                .sourceReferenceType(trimToNull(command.sourceReferenceType()))
+                .sourceReferenceId(command.sourceReferenceId())
+                .build());
+        source.decrease(quantity);
+        StockBalance destination = findOrCreateBalance(item, warehouse, child);
+        destination.increase(quantity);
+        balanceRepository.save(source);
+        balanceRepository.save(destination);
+
+        String referenceType = trimToNull(command.sourceReferenceType());
+        String referenceId = command.sourceReferenceId() == null ? null : command.sourceReferenceId().toString();
+        String payloadHash = idempotency.payloadHash(command);
+        Instant now = Instant.now();
+        StockMovement out = movementRepository.save(StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
+                .item(item)
+                .warehouse(warehouse)
+                .lot(parent)
+                .movementType(MovementType.LOT_SPLIT_OUT)
+                .direction(MovementDirection.OUT)
+                .quantity(quantity)
+                .reason(trimToNull(command.reason()))
+                .referenceType(referenceType)
+                .referenceId(referenceId)
+                .idempotencyKey(normalizedKey)
+                .payloadHash(payloadHash)
+                .createdAt(now)
+                .build());
+        StockMovement in = movementRepository.save(StockMovement.builder()
+                .traceId(traceIdProvider.currentTraceId())
+                .item(item)
+                .warehouse(warehouse)
+                .lot(child)
+                .movementType(MovementType.LOT_SPLIT_IN)
+                .direction(MovementDirection.IN)
+                .quantity(quantity)
+                .reason(trimToNull(command.reason()))
+                .referenceType(referenceType)
+                .referenceId(referenceId)
+                .idempotencyKey(normalizedKey)
+                .payloadHash(payloadHash)
+                .createdAt(now)
+                .build());
+        return new LotSplitResult(child, out, in);
+    }
+
+    /**
      * Applies a QC disposition to a lot: the lot moves to {@code newStatus} and a
      * {@link MovementType#LOT_STATUS_CHANGE} row is appended to the ledger for traceability.
      * <p>

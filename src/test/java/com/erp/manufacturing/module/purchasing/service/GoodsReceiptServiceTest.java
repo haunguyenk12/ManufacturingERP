@@ -441,6 +441,23 @@ class GoodsReceiptServiceTest {
     }
 
     @Test
+    @DisplayName("G7c cancel POSTED: a receipt with purchase QC decisions cannot be reversed — nothing moves")
+    void cancelPosted_withQualityDecisions_isStateConflict() {
+        PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.PARTIALLY_RECEIVED, new BigDecimal("10"), new BigDecimal("4"));
+        PurchaseOrderLine orderLine = order.getLines().get(0);
+        GoodsReceiptLine line = receiptLine(order, "4", movement(orderLine.getItem(), order.getWarehouse(), new BigDecimal("4")));
+        GoodsReceipt receipt = receipt(order, GoodsReceiptStatus.POSTED, true, line);
+        line.recordQualityDecision(new BigDecimal("1"), BigDecimal.ZERO);
+
+        assertThatThrownBy(() -> service.cancel(receipt.getGoodsReceiptId(), null, null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        verifyNoInteractions(inventoryMovementService);
+        assertThat(receipt.getStatus()).isEqualTo(GoodsReceiptStatus.POSTED);
+        assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.PARTIALLY_RECEIVED);
+    }
+
+    @Test
     @DisplayName("G7b cancel POSTED before G7b (not on hold): no quality hold to release")
     void cancelLegacyPosted_doesNotReleaseAHoldItNeverMade() {
         PurchaseOrder order = purchaseOrder(PurchaseOrderStatus.PARTIALLY_RECEIVED, new BigDecimal("10"), new BigDecimal("4"));

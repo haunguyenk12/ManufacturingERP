@@ -268,6 +268,12 @@ sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nh�
 kẻ thua của hai lần post đồng thời) ⇒ `PLANNED_QUANTITY_EXCEEDED` field `lines[i].receivedQuantity`; mã lô đã có (không phân biệt hoa thường) ⇒
 `LOT_CODE_ALREADY_EXISTS`; đường cũ nhận vào lô không `HOLD` ⇒ `LOT_NOT_ELIGIBLE`; post phiếu không `DRAFT` ⇒ `STATE_CONFLICT`.
 
+**`G7c` (2026-10-18) — không thêm mã mới.** QC mua dùng mã sẵn có: cả hai lượng bằng 0 / loại thiếu lý do ⇒ `VALIDATION_ERROR` field
+`acceptedQuantity` / `reason`; vượt phần chờ ⇒ `PLANNED_QUANTITY_EXCEEDED` field `acceptedQuantity`; chấp nhận lô hết hạn ⇒ `LOT_NOT_ELIGIBLE`;
+version phiếu lệch ⇒ `CONCURRENT_MODIFICATION`; phiếu không `POSTED`/không nhận vào vùng chờ, hoặc đảo nhập phiếu đã có quyết định ⇒
+`STATE_CONFLICT`; đổi trạng thái lô đang chờ QC mua / lô con bị QC loại ⇒ `LOT_NOT_ELIGIBLE`. Mã FE đề xuất ánh xạ: `QC_QUANTITY_EXCEEDED` → `PLANNED_QUANTITY_EXCEEDED`; `QC_STATE_INVALID` → `STATE_CONFLICT`;
+`PURCHASE_QC_REQUIRED` / `LOT_EXPIRED` → `LOT_NOT_ELIGIBLE`; `REASON_REQUIRED` → `VALIDATION_ERROR` field `reason`.
+
 **`G6c` (2026-10-18) — không thêm mã mới.** Nhập đơn bán Excel (`kind=so`) dùng nguyên mã file-level của `G3` (`FILE_FORMAT`,
 `FILE_SIZE` 413, `TEMPLATE`, `EMPTY_FILE`, `ROW_LIMIT`, `IMPORT_REVALIDATION_FAILED`) và lỗi dòng `ImportErrorCode` sẵn có. Mã FE đề xuất ánh
 xạ: `INVALID_FILE` → `FILE_FORMAT`; `FILE_TOO_LARGE` → `FILE_SIZE`; `INVALID_TEMPLATE` → `TEMPLATE`; `IMPORT_ROW_LIMIT_EXCEEDED` → `ROW_LIMIT`;

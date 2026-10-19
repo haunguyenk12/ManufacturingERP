@@ -167,6 +167,8 @@ public enum AuditAction {
     /** G7b: draft goods receipt saved (created or edited) — no stock moved. */
     GOODS_RECEIPT_DRAFT_SAVED,
     GOODS_RECEIPT_CANCELLED,
+    /** G7c: purchase QC decision on a goods receipt line (accepted / rejected quantities). */
+    PURCHASE_QC_DECIDED,
     ITEM_CREATED,
     ITEM_UPDATED,
     ITEM_DEACTIVATED,

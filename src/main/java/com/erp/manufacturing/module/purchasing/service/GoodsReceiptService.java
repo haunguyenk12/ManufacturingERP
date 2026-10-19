@@ -64,8 +64,8 @@ public class GoodsReceiptService {
 
         // G7b (D11): lock the order before its lines are read, so concurrent receipts against the
         // same open quantity serialise instead of both passing the check.
-        PurchaseOrder order = poster.lockOrder(purchaseOrderId);
-        order = findOrder(purchaseOrderId);
+        poster.lockOrder(purchaseOrderId);
+        PurchaseOrder order = findOrder(purchaseOrderId);
         if (!order.canReceive()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only CONFIRMED or PARTIALLY_RECEIVED purchase orders can receive goods");
@@ -202,6 +202,12 @@ public class GoodsReceiptService {
         if (order.getStatus() == PurchaseOrderStatus.CLOSED) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Goods receipts of a CLOSED purchase order cannot be cancelled");
+        }
+        // G7c: purchase QC already moved part of the stock into child lots or out of the hold;
+        // reversing the receipt would take back stock that is no longer where the receipt put it.
+        if (receipt.getLines().stream().anyMatch(GoodsReceiptLine::hasQualityDecisions)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Goods receipt has purchase QC decisions and cannot be reversed");
         }
         // Re-load PO with lines so we can decrement receivedQuantity
         PurchaseOrder orderWithLines = purchaseOrderRepository.findWithDetailsByPurchaseOrderId(

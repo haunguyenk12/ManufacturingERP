@@ -46,5 +46,19 @@ public record InventoryLotResponse(
         Instant sourceAt,
         Long version,
         Instant createdAt,
-        Instant updatedAt
-) {}
+        Instant updatedAt,
+        UUID parentLotId
+) {
+    /** Pre-G7c arity: a lot with no parent. */
+    public InventoryLotResponse(UUID lotId, UUID itemId, String itemCode, String itemName, UUID warehouseId,
+                                String warehouseCode, String warehouseName, String lotCode, String status,
+                                BigDecimal onHandQuantity, BigDecimal reservedQuantity, BigDecimal availableQuantity,
+                                Instant receivedAt, Instant manufactureDate, Instant expiresAt,
+                                String sourceMovementType, String sourceReferenceType, String sourceReferenceId,
+                                Instant sourceAt, Long version, Instant createdAt, Instant updatedAt) {
+        this(lotId, itemId, itemCode, itemName, warehouseId, warehouseCode, warehouseName, lotCode, status,
+                onHandQuantity, reservedQuantity, availableQuantity, receivedAt, manufactureDate, expiresAt,
+                sourceMovementType, sourceReferenceType, sourceReferenceId, sourceAt, version, createdAt, updatedAt,
+                null);
+    }
+}

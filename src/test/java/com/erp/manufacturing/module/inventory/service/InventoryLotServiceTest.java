@@ -14,6 +14,7 @@ import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.*;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,7 @@ class InventoryLotServiceTest {
     @Mock StockMovementRepository movementRepository;
     @Mock InventoryMovementService movementService;
     @Mock LotQcOriginLookupService lotQcOriginLookupService;
+    @Mock PurchaseQcLookupService purchaseQcLookupService;
 
     // R3: the mapper carries real mapping logic, so it is a real instance, not a mock.
     InventoryLotService service;
@@ -59,7 +61,7 @@ class InventoryLotServiceTest {
     void setUp() {
         service = new InventoryLotService(
                 lotRepository, balanceRepository, movementRepository, movementService,
-                lotQcOriginLookupService, new InventoryMapper(),
+                lotQcOriginLookupService, purchaseQcLookupService, new InventoryMapper(),
                 new IdempotencySupport(new ObjectMapper()));
     }
 
@@ -229,6 +231,41 @@ class InventoryLotServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
 
+        verifyNoInteractions(movementService, balanceRepository);
+    }
+
+    @Test
+    @DisplayName("G7c changeStatus: a received lot still awaiting purchase QC cannot leave HOLD")
+    void changeStatus_holdEscapeBlockedWhilePurchaseQcPending() {
+        InventoryLot lot = lot(LotStatus.HOLD);
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+        when(purchaseQcLookupService.isAwaitingPurchaseQc(lotId)).thenReturn(true);
+
+        InventoryLotStatusChangeRequest request = new InventoryLotStatusChangeRequest(
+                warehouseId, LotStatus.AVAILABLE, "Skip purchase QC", null, null);
+
+        assertThatThrownBy(() -> service.changeStatus(lotId, request, "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+        verifyNoInteractions(movementService, balanceRepository);
+    }
+
+    @Test
+    @DisplayName("G7c changeStatus: a child lot rejected by purchase QC cannot be released")
+    void changeStatus_purchaseQcRejectedChild_cannotBeReleased() {
+        InventoryLot lot = lot(LotStatus.REJECTED);
+        lot.setSourceReferenceType(com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService.LOT_SOURCE_TYPE);
+        lot.setSourceReferenceId(UUID.randomUUID());
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+
+        InventoryLotStatusChangeRequest request = new InventoryLotStatusChangeRequest(
+                warehouseId, LotStatus.AVAILABLE, "Override QC", null, null);
+
+        assertThatThrownBy(() -> service.changeStatus(lotId, request, "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
         verifyNoInteractions(movementService, balanceRepository);
     }
 

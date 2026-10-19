@@ -1319,6 +1319,25 @@ Field mới trên PO: `code` (= `purchaseOrderNo`), `version`, `warehouseName`, 
 > 🔴 `remainingQuantity` trên dòng nay = `openQuantity` (trừ cả phần đã đóng). Chuyển BUY từ hoạch định cần thêm `PERM_PURCHASE_ORDER_MANAGE`.
 > 🔴 Phiếu nhận của PO `CLOSED` không huỷ được (`409 STATE_CONFLICT`). Id PO không tồn tại trả **403** (như mọi `/{id}`).
 
+### QC mua hàng theo số lượng — FE giai đoạn 7 phần 3 *(`G7c`, 2026-10-18)*
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Hàng đợi QC | `GET /v1/purchase-qc?companyId&plantId&warehouseId?&search?&receivedDateFrom?&receivedDateTo?&page&size` · `X-Plant-Id` phải khớp · `PERM_PURCHASE_QC_READ` | Mỗi dòng = **một dòng phiếu** `POSTED` còn `pendingQuantity > 0`. Field: mã phiếu/PO/NCC/kho, `goodsReceiptVersion` (gửi làm `expectedVersion`), `trackingPolicy`, `lotId`/`lotCode`/`lotExpiresAt`, `received`/`accepted`/`rejected`/`pendingQuantity`, `qualityBucketId` (= id dòng phiếu khi hàng không theo lô, `null` khi theo lô). `search`: mã phiếu, mã PO, mã/tên NCC, mã/tên vật tư, mã lô |
+| Ghi quyết định | `POST /v1/goods-receipts/{id}/lines/{lineId}/qc` — `{expectedVersion, acceptedQuantity, rejectedQuantity, reason?}` · `Idempotency-Key` tuỳ chọn · `PERM_PURCHASE_QC_MANAGE` | **200** `{decision, receiptVersion, receivedQuantity, acceptedQuantity, rejectedQuantity, pendingQuantity}`. Một phần được: nhiều quyết định mỗi dòng |
+| Lịch sử quyết định | `GET /v1/goods-receipts/{id}/quality-decisions?page&size` | `PURCHASE_QC_READ` **hoặc** `GOODS_RECEIPT_READ` **hoặc** `PURCHASE_ORDER_READ`; mới nhất trước |
+
+Quyết định (`decision`): `decisionId`, `acceptedQuantity`, `rejectedQuantity`, `reason`, `decidedBy`/`decidedByUsername`/`decidedAt`,
+`qualityBucketId`, `childLots[]{lotId, lotCode, parentLotId, status, quantity, expiresAt, movementId}`, `movementIds[]`. **Không** có giá.
+
+> 🔴 **Hàng theo lô:** phần chấp nhận sang lô con `AVAILABLE` (`<lô>-A1`, `-A2`…), phần loại sang lô con `REJECTED` (`<lô>-R1`…); phần còn chờ
+> ở lại lô gốc `HOLD`. Lô hết hạn **chỉ được loại**. **Hàng không theo lô:** phần chấp nhận rời vùng chờ, phần loại **ở lại** `qualityHoldQuantity`.
+> Tồn thực tế **không đổi** trong mọi trường hợp; PO không đổi.
+> 🔴 Lỗi: cả hai bằng 0 ⇒ `400` field `acceptedQuantity`; loại mà thiếu `reason` ⇒ `400` field `reason`; vượt phần chờ ⇒ `409 PLANNED_QUANTITY_EXCEEDED`
+> field `acceptedQuantity`; `expectedVersion` cũ ⇒ `409 CONCURRENT_MODIFICATION`; phiếu không `POSTED` hoặc nhận trước khi có vùng chờ ⇒ `409 STATE_CONFLICT`.
+> 🔴 Lô đang chờ QC mua không đổi trạng thái được qua `POST /v1/inventory/lots/{id}/status`, và lô con bị QC loại cũng không (`409 LOT_NOT_ELIGIBLE`).
+> Phiếu đã có quyết định QC **không huỷ (đảo nhập) được** (`409 STATE_CONFLICT`). Lô có thêm field `parentLotId`.
+
 ### Phiếu nhận nháp, nhận vào vùng chờ kiểm — FE giai đoạn 7 phần 2 *(`G7b`, 2026-10-18)*
 
 | Việc | Endpoint | Ghi chú |

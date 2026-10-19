@@ -30,5 +30,6 @@ public record InventoryLotDetailResponse(
         Long version,
         Instant createdAt,
         Instant updatedAt,
-        List<InventoryLotBalanceResponse> balances
+        List<InventoryLotBalanceResponse> balances,
+        UUID parentLotId
 ) {}

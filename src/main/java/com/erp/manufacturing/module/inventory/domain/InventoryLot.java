@@ -42,6 +42,22 @@ public class InventoryLot extends BaseEntity {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
+    /** G7c (V78): the lot this one was split from by a purchase QC decision; {@code null} for a received lot. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_lot_id")
+    private InventoryLot parentLot;
+
+    /** Read-only mirror of {@code parent_lot_id}, so list mappings never load the parent row. */
+    @Column(name = "parent_lot_id", insertable = false, updatable = false)
+    private UUID parentLotId;
+
+    /** G7c: what created a child lot ({@code PURCHASE_QC_DECISION}) and its id; {@code null} otherwise. */
+    @Column(name = "source_reference_type", length = 40)
+    private String sourceReferenceType;
+
+    @Column(name = "source_reference_id")
+    private UUID sourceReferenceId;
+
     public boolean canIssue() {
         return status == LotStatus.AVAILABLE;
     }

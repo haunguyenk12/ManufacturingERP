@@ -11,5 +11,9 @@ public enum MovementType {
     /** G4-2: source side of a stock transfer line. Always paired with a {@link #TRANSFER_IN}. */
     TRANSFER_OUT,
     /** G4-2: destination side of a stock transfer line. */
-    TRANSFER_IN
+    TRANSFER_IN,
+    /** G7c: quantity leaving a lot that a purchase QC decision splits into a child lot. Always paired with {@link #LOT_SPLIT_IN}. */
+    LOT_SPLIT_OUT,
+    /** G7c: the same quantity arriving in the child lot, same warehouse. On-hand is unchanged. */
+    LOT_SPLIT_IN
 }

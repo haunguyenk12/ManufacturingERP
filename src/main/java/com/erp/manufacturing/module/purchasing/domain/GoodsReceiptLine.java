@@ -59,4 +59,28 @@ public class GoodsReceiptLine extends BaseEntity {
     /** G7b: expiry of the new lot, a plant-local date; only lot-tracked lines may carry one. */
     @Column(name = "expires_on")
     private LocalDate expiresOn;
+
+    /** G7c (V78): running sum of the accepted quantity of every purchase QC decision on this line. */
+    @Column(name = "accepted_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal acceptedQuantity = BigDecimal.ZERO;
+
+    /** G7c (V78): running sum of the rejected quantity. {@code accepted + rejected <= received} is a CHECK. */
+    @Column(name = "rejected_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal rejectedQuantity = BigDecimal.ZERO;
+
+    /** What purchase QC has not decided yet: {@code received − accepted − rejected}. */
+    public BigDecimal pendingQuantity() {
+        return receivedQuantity.subtract(acceptedQuantity).subtract(rejectedQuantity);
+    }
+
+    public boolean hasQualityDecisions() {
+        return acceptedQuantity.signum() > 0 || rejectedQuantity.signum() > 0;
+    }
+
+    public void recordQualityDecision(BigDecimal accepted, BigDecimal rejected) {
+        this.acceptedQuantity = acceptedQuantity.add(accepted);
+        this.rejectedQuantity = rejectedQuantity.add(rejected);
+    }
 }

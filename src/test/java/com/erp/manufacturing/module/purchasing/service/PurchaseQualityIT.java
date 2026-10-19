@@ -1,0 +1,288 @@
+package com.erp.manufacturing.module.purchasing.service;
+
+import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
+import com.erp.manufacturing.common.context.TraceIdProvider;
+import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
+import com.erp.manufacturing.common.idempotency.IdempotencySupport;
+import com.erp.manufacturing.module.inventory.domain.*;
+import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import com.erp.manufacturing.module.organization.domain.*;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.purchasing.domain.*;
+import com.erp.manufacturing.module.purchasing.dto.*;
+import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
+import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptLineRepository;
+import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
+import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
+import com.erp.manufacturing.module.purchasing.repository.SupplierRepository;
+import com.erp.manufacturing.module.user.service.UserLookupService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.AuditorAware;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.*;
+import java.util.concurrent.*;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Purchase QC on a real database (G7c). Only Postgres answers what is checked here (rule R7): the lot
+ * split really keeps on-hand constant across parent and child balances, the non-tracked hold really
+ * stays for the rejected part, the queue query with every optional filter left out, and two decisions
+ * prepared on the same receipt version — with the receipt already in the EntityManager the way the
+ * {@code @PreAuthorize} guard leaves it under open-session-in-view (B194) — consume pending only once.
+ *
+ * <p>The {@code @DataJpaTest} wrapping transaction is off: each call commits on its own, as in production.
+ */
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
+@Import({PurchaseQualityService.class, GoodsReceiptDraftService.class, GoodsReceiptPoster.class, PurchasingIdempotency.class,
+        PurchasingMapper.class, IdempotencySupport.class, TraceIdProvider.class, InventoryMovementService.class,
+        ItemLookupService.class, OrganizationLookupService.class, UserLookupService.class, PurchaseQualityIT.Config.class})
+class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
+
+    private static final String ZONE = "Asia/Ho_Chi_Minh";
+    private static final int ROUNDS = 3;
+
+    @TestConfiguration
+    @EnableJpaAuditing(auditorAwareRef = "auditorAware")
+    static class Config {
+        @Bean
+        AuditorAware<UUID> auditorAware() {
+            return Optional::empty;
+        }
+
+        @Bean
+        ObjectMapper objectMapper() {
+            return new ObjectMapper().registerModule(new JavaTimeModule());
+        }
+    }
+
+    @Autowired PurchaseQualityService qualityService;
+    @Autowired GoodsReceiptDraftService receiptService;
+    @Autowired GoodsReceiptRepository receiptRepository;
+    @Autowired GoodsReceiptLineRepository receiptLineRepository;
+    @Autowired PurchaseOrderRepository orderRepository;
+    @Autowired SupplierRepository supplierRepository;
+    @Autowired ItemRepository itemRepository;
+    @Autowired CompanyRepository companyRepository;
+    @Autowired PlantRepository plantRepository;
+    @Autowired WarehouseRepository warehouseRepository;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired TransactionTemplate transactions;
+
+    private record Fixture(Company company, Plant plant, Warehouse warehouse, Supplier supplier, String suffix) {}
+
+    private Fixture fixture() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Company company = companyRepository.save(Company.builder().code("QC_" + suffix).name("Co").status(OrganizationStatus.ACTIVE).build());
+        Plant plant = plantRepository.save(Plant.builder().company(company).code("P_" + suffix).name("Plant").timezone(ZONE)
+                .status(OrganizationStatus.ACTIVE).build());
+        Warehouse warehouse = warehouseRepository.save(Warehouse.builder().plant(plant).code("W_" + suffix).name("Wh")
+                .type(WarehouseType.GENERAL).status(OrganizationStatus.ACTIVE).build());
+        Supplier supplier = supplierRepository.save(Supplier.builder().company(company).code("S_" + suffix).name("Acme Metal")
+                .status(SupplierStatus.ACTIVE).build());
+        return new Fixture(company, plant, warehouse, supplier, suffix);
+    }
+
+    private Item item(Fixture f, boolean lotTracked) {
+        return itemRepository.save(Item.builder().company(f.company()).code("I_" + UUID.randomUUID().toString().substring(0, 8))
+                .name("Raw").type(ItemType.RAW_MATERIAL).unit("KG").lotTracked(lotTracked).status(ItemStatus.ACTIVE).build());
+    }
+
+    private PurchaseOrder order(Fixture f, Item item, String ordered) {
+        LocalDate today = LocalDate.now(ZoneId.of(ZONE));
+        PurchaseOrder order = PurchaseOrder.builder().company(f.company()).plant(f.plant()).warehouse(f.warehouse())
+                .supplier(f.supplier()).purchaseOrderNo("PO-" + UUID.randomUUID().toString().substring(0, 8))
+                .status(PurchaseOrderStatus.CONFIRMED).orderDate(today.minusDays(2)).expectedDate(today).build();
+        order.getLines().add(PurchaseOrderLine.builder().purchaseOrder(order).item(item)
+                .orderedQuantity(new BigDecimal(ordered)).receivedQuantity(BigDecimal.ZERO)
+                .unitPrice(new BigDecimal("10")).currencyCode("VND").expectedDate(today).build());
+        return orderRepository.saveAndFlush(order);
+    }
+
+    /** A POSTED, on-hold receipt of one line; returns the posted response. */
+    private GoodsReceiptResponse posted(PurchaseOrder order, String quantity, String lotCode) {
+        UUID orderLineId = jdbc.queryForObject(
+                "select purchase_order_line_id from purchase_order_lines where purchase_order_id = ?",
+                UUID.class, order.getPurchaseOrderId());
+        LocalDate today = LocalDate.now(ZoneId.of(ZONE));
+        GoodsReceiptResponse draft = receiptService.createDraft(new GoodsReceiptDraftCreateRequest(order.getPurchaseOrderId(),
+                today, null, null, List.of(new GoodsReceiptDraftLineRequest(null, orderLineId, new BigDecimal(quantity), lotCode,
+                        lotCode == null ? null : today.plusDays(30)))), null);
+        return receiptService.post(draft.goodsReceiptId(), new GoodsReceiptVersionRequest(draft.version()), null);
+    }
+
+    private BigDecimal onHand(Item item) {
+        return jdbc.queryForObject("select coalesce(sum(quantity), 0) from stock_balances where item_id = ?",
+                BigDecimal.class, item.getItemId());
+    }
+
+    @Test
+    void trackedDecision_splitsIntoChildLots_onHandUnchanged_parentKeepsWhatIsPending() {
+        Fixture f = fixture();
+        Item item = item(f, true);
+        GoodsReceiptResponse receipt = posted(order(f, item, "1"), "0.100001", "LOT-" + f.suffix());
+        GoodsReceiptLineResponse line = receipt.lines().get(0);
+
+        PurchaseQcDecisionResult result = qualityService.decide(receipt.goodsReceiptId(), line.goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("0.05"), new BigDecimal("0.01"), "0.01 failed"),
+                null);
+
+        assertThat(result.pendingQuantity()).isEqualByComparingTo("0.040001");
+        assertThat(result.receiptVersion()).isEqualTo(receipt.version() + 1);
+        // The response itself names the parent — not only the stored column (smoke G7c found it null).
+        assertThat(result.decision().childLots()).extracting(PurchaseQcChildLotResponse::parentLotId)
+                .containsOnly(line.lotId());
+        List<Map<String, Object>> lots = jdbc.queryForList("""
+                select l.lot_code, l.status, l.parent_lot_id, l.source_reference_type, l.source_reference_id, l.expires_at, b.quantity
+                from inventory_lots l join stock_balances b on b.lot_id = l.lot_id
+                where l.item_id = ? order by l.lot_code
+                """, item.getItemId());
+        assertThat(lots).extracting(row -> row.get("lot_code"))
+                .containsExactly("LOT-" + f.suffix(), "LOT-" + f.suffix() + "-A1", "LOT-" + f.suffix() + "-R1");
+        assertThat((BigDecimal) lots.get(0).get("quantity")).isEqualByComparingTo("0.040001");
+        assertThat(lots.get(0).get("status")).isEqualTo("HOLD");
+        assertThat((BigDecimal) lots.get(1).get("quantity")).isEqualByComparingTo("0.05");
+        assertThat(lots.get(1).get("status")).isEqualTo("AVAILABLE");
+        assertThat((BigDecimal) lots.get(2).get("quantity")).isEqualByComparingTo("0.01");
+        assertThat(lots.get(2).get("status")).isEqualTo("REJECTED");
+        assertThat(lots.get(1).get("parent_lot_id")).isEqualTo(line.lotId());
+        assertThat(lots.get(2).get("source_reference_type")).isEqualTo("PURCHASE_QC_DECISION");
+        assertThat(lots.get(2).get("source_reference_id")).isEqualTo(result.decision().decisionId());
+        assertThat(lots.get(1).get("expires_at")).isEqualTo(lots.get(0).get("expires_at"));
+        assertThat(onHand(item)).isEqualByComparingTo("0.100001");
+        assertThat(jdbc.queryForObject("""
+                select count(*) from stock_movements
+                where item_id = ? and movement_type in ('LOT_SPLIT_OUT', 'LOT_SPLIT_IN') and reference_id = ?
+                """, Integer.class, item.getItemId(), result.decision().decisionId().toString())).isEqualTo(4);
+        Map<String, Object> stored = jdbc.queryForMap(
+                "select accepted_quantity, rejected_quantity from goods_receipt_lines where goods_receipt_line_id = ?",
+                line.goodsReceiptLineId());
+        assertThat((BigDecimal) stored.get("accepted_quantity")).isEqualByComparingTo("0.05");
+        assertThat((BigDecimal) stored.get("rejected_quantity")).isEqualByComparingTo("0.01");
+        assertThat(receiptLineRepository.existsPendingQualityForLot(line.lotId(), GoodsReceiptStatus.POSTED)).isTrue();
+
+        // A second decision takes what is still pending: the next free suffix, and the lot is no longer awaiting QC.
+        PurchaseQcDecisionResult second = qualityService.decide(receipt.goodsReceiptId(), line.goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(result.receiptVersion(), new BigDecimal("0.040001"), BigDecimal.ZERO, null), null);
+
+        assertThat(second.pendingQuantity()).isEqualByComparingTo("0");
+        assertThat(second.decision().childLots()).singleElement()
+                .satisfies(child -> assertThat(child.lotCode()).isEqualTo("LOT-" + f.suffix() + "-A2"));
+        assertThat(receiptLineRepository.existsPendingQualityForLot(line.lotId(), GoodsReceiptStatus.POSTED)).isFalse();
+        assertThat(onHand(item)).isEqualByComparingTo("0.100001");
+    }
+
+    @Test
+    void nonTrackedDecision_releasesAcceptedFromHold_rejectedStaysOnHold_queueDropsTheFinishedLine() {
+        Fixture f = fixture();
+        Item item = item(f, false);
+        GoodsReceiptResponse receipt = posted(order(f, item, "40"), "25", null);
+        UUID lineId = receipt.lines().get(0).goodsReceiptLineId();
+
+        var before = qualityService.queue(f.company().getCompanyId(), f.plant().getPlantId(), null, null, null, null,
+                PageRequest.of(0, 20));
+        assertThat(before.content()).extracting(PurchaseQcQueueLineResponse::goodsReceiptLineId).containsExactly(lineId);
+        assertThat(before.content().get(0).qualityBucketId()).isEqualTo(lineId);
+
+        PurchaseQcDecisionResult result = qualityService.decide(receipt.goodsReceiptId(), lineId,
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("20"), new BigDecimal("5"), "5 kg failed"), null);
+
+        assertThat(result.pendingQuantity()).isEqualByComparingTo("0");
+        Map<String, Object> balance = jdbc.queryForMap(
+                "select quantity, quality_hold_quantity from stock_balances where item_id = ?", item.getItemId());
+        assertThat((BigDecimal) balance.get("quantity")).isEqualByComparingTo("25");
+        assertThat((BigDecimal) balance.get("quality_hold_quantity")).isEqualByComparingTo("5");
+        assertThat(qualityService.queue(f.company().getCompanyId(), f.plant().getPlantId(), null, null, null, null,
+                PageRequest.of(0, 20)).content()).isEmpty();
+        assertThat(qualityService.decisions(receipt.goodsReceiptId(), PageRequest.of(0, 20)).content())
+                .singleElement().satisfies(decision -> {
+                    assertThat(decision.acceptedQuantity()).isEqualByComparingTo("20");
+                    assertThat(decision.childLots()).isEmpty();
+                });
+    }
+
+    /**
+     * FE A18: two decisions prepared on the same receipt version, each in a transaction that already
+     * holds the receipt graph (what the guard leaves under open-session-in-view). The receipt row lock
+     * plus the re-read make the second one see the first one's version: exactly one decision is kept,
+     * the other is a stale-version 409, and pending is consumed once.
+     */
+    @Test
+    void concurrentDecisions_onTheSameVersion_onlyOneIsKept() throws Exception {
+        for (int round = 0; round < ROUNDS; round++) {
+            Fixture f = fixture();
+            Item item = item(f, false);
+            GoodsReceiptResponse receipt = posted(order(f, item, "40"), "10", null);
+            UUID lineId = receipt.lines().get(0).goodsReceiptLineId();
+
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            CyclicBarrier bothLoaded = new CyclicBarrier(2);
+            List<Future<Object>> results = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                results.add(pool.submit(() -> {
+                    try {
+                        return transactions.execute(status -> {
+                            receiptRepository.findWithDetailsByGoodsReceiptId(receipt.goodsReceiptId())
+                                    .ifPresent(r -> r.getLines().forEach(l -> l.getReceivedQuantity()));
+                            await(bothLoaded);
+                            return qualityService.decide(receipt.goodsReceiptId(), lineId, new PurchaseQcDecisionRequest(
+                                    receipt.version(), new BigDecimal("6"), BigDecimal.ZERO, null), null);
+                        });
+                    } catch (RuntimeException ex) {
+                        return ex;
+                    }
+                }));
+            }
+            List<Object> outcomes = new ArrayList<>();
+            for (Future<Object> result : results) {
+                outcomes.add(result.get(30, TimeUnit.SECONDS));
+            }
+            pool.shutdown();
+
+            assertThat(outcomes).filteredOn(PurchaseQcDecisionResult.class::isInstance).hasSize(1);
+            assertThat(outcomes).filteredOn(Exception.class::isInstance).singleElement().satisfies(ex -> {
+                assertThat(ex).isInstanceOf(AppException.class);
+                assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION);
+            });
+            assertThat(jdbc.queryForObject("select accepted_quantity from goods_receipt_lines where goods_receipt_line_id = ?",
+                    BigDecimal.class, lineId)).isEqualByComparingTo("6");
+            assertThat(jdbc.queryForObject("select quality_hold_quantity from stock_balances where item_id = ?",
+                    BigDecimal.class, item.getItemId())).isEqualByComparingTo("4");
+            assertThat(jdbc.queryForObject("select count(*) from purchase_quality_decisions where goods_receipt_line_id = ?",
+                    Integer.class, lineId)).isEqualTo(1);
+        }
+    }
+
+    private static void await(CyclicBarrier barrier) {
+        try {
+            barrier.await(30, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+}

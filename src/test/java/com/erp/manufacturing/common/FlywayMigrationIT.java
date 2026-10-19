@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("77");
+        assertThat(current.getVersion().getVersion()).isEqualTo("78");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -328,6 +328,58 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(grantedCostingPermissions("MANAGER"))
                 .containsExactlyInAnyOrder("PERM_COSTING_READ", "PERM_COSTING_MANAGE");
         assertThat(grantedCostingPermissions("OPERATOR")).isEmpty();
+    }
+
+    /**
+     * G7c / {@code V78}: purchase QC permissions go to ADMIN and MANAGER only (FE Q24), the receipt line
+     * cannot have more decided than received, a rejected decision needs a reason, and the ledger accepts
+     * the lot-split movement types.
+     */
+    @Test
+    void migrate_v78_grantsPurchaseQcToAdminAndManagerOnly_andGuardsTheQcQuantities() throws Exception {
+        migratePublicSchema();
+
+        for (String role : new String[] {"ADMIN", "MANAGER", "OPERATOR"}) {
+            Set<String> granted = new TreeSet<>();
+            try (Connection connection = DriverManager.getConnection(
+                    POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+                 Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery("""
+                         SELECT p.code FROM role_permissions rp
+                         JOIN roles r ON r.role_id = rp.role_id
+                         JOIN permissions p ON p.permission_id = rp.permission_id
+                         WHERE r.code = '%s' AND p.code IN ('PERM_PURCHASE_QC_READ', 'PERM_PURCHASE_QC_MANAGE')
+                         """.formatted(role))) {
+                while (rows.next()) {
+                    granted.add(rows.getString("code"));
+                }
+            }
+            if (role.equals("OPERATOR")) {
+                assertThat(granted).isEmpty();
+            } else {
+                assertThat(granted).containsExactlyInAnyOrder("PERM_PURCHASE_QC_READ", "PERM_PURCHASE_QC_MANAGE");
+            }
+        }
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+                     WHERE conname IN ('chk_gr_lines_qc_within_received', 'chk_purchase_qc_reject_reason',
+                                       'chk_purchase_qc_quantities', 'chk_stock_movements_type')
+                     """)) {
+            java.util.Map<String, String> definitions = new java.util.HashMap<>();
+            while (rows.next()) {
+                definitions.put(rows.getString("conname"), rows.getString("def"));
+            }
+            assertThat(definitions.get("chk_gr_lines_qc_within_received"))
+                    .contains("accepted_quantity + rejected_quantity").contains("<= received_quantity");
+            assertThat(definitions.get("chk_purchase_qc_reject_reason")).contains("rejected_quantity = (0)");
+            assertThat(definitions.get("chk_purchase_qc_quantities")).contains("> (0)");
+            assertThat(definitions.get("chk_stock_movements_type"))
+                    .contains("LOT_SPLIT_OUT").contains("LOT_SPLIT_IN").contains("TRANSFER_IN").contains("REVERSAL");
+        }
     }
 
     private Set<String> grantedCostingPermissions(String roleCode) throws Exception {

@@ -100,8 +100,8 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G7` — FE handoff Giai đoạn 7: đơn mua hàng, nhận hàng và QC** (`FE_HANDOFF_GD_07_2026-10-14.md`, P1) — 🔄 **đang chạy**: user chốt D0 = tách `G7a`/`G7b`/`G7c` làm liền, D1–D12 theo khuyến nghị (2026-10-18). ✅ **`G7a` xong** (2026-10-18, `BE_RESPONSE_GD_07_2026-10-18.md` v1), ✅ **`G7b` xong** (2026-10-18, `_v2`) — `G7c` tiếp theo. Xem **§14**. 🔴 Khác mọi handoff trước: `module/purchasing` **đã có** (PO + phiếu nhận + nguồn cung MRP), nên phần lớn là **mở rộng và đổi vòng đời**; nhưng **QC mua hàng** và **giá trị tồn kho** thì repo chưa có gì |
-| **Chờ FE** | `G6` (§13) — ✅ BE xong cả 3 phần 2026-10-17/18, bản ghi `CLAUDE.md §0.54`–`§0.56`. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
+| **Đang chạy** | *(chưa chốt)* — `G7` ✅ **BE xong cả 3 phần** (2026-10-18/19): `G7a` vòng đời PO (v1), `G7b` phiếu nhận nháp + vào `HOLD` (v2), `G7c` QC mua + lô con (v3, `BE_RESPONSE_GD_07_2026-10-18_v3.md`). Xem **§14** |
+| **Chờ FE** | `G7` (§14) — ✅ BE xong 2026-10-19, bản ghi `CLAUDE.md §0.57`–`§0.59`. `G6` (§13) — ✅ BE xong cả 3 phần 2026-10-17/18, bản ghi `CLAUDE.md §0.54`–`§0.56`. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
 
@@ -851,7 +851,7 @@ Xác nhận/nhận một phần/QC đơn mua đầy đủ (GĐ7); sẵn sàng v�
 
 ---
 
-## 14. `G7` — FE handoff Giai đoạn 7: Đơn mua hàng, nhận hàng và QC 🔄 ĐANG CHẠY — `G7a` ✅ `G7b` ✅ 2026-10-18
+## 14. `G7` — FE handoff Giai đoạn 7: Đơn mua hàng, nhận hàng và QC ✅ BE HOÀN THÀNH — `G7a` ✅ `G7b` ✅ 2026-10-18 · `G7c` ✅ 2026-10-19
 
 Nguồn: `FE_HANDOFF_GD_07_2026-10-14.md` (v1, P1, 597 dòng). FE/mock đã xong: đơn mua hàng thủ công + nháp BUY của `G6b`, nhận hàng **từng phần vào vùng chờ kiểm (HOLD)**, **QC theo lượng** (đạt/loại/còn chờ, nhiều đợt), lô con theo lineage, và nguồn cung PO cho MRP. BE phải (1) trả lời Q1–Q31 §5, (2) đối chiếu R01–R20 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_07_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào — §2 ghi rõ **cả năm mảnh bằng chứng live đều "không có"**.
 
@@ -953,6 +953,23 @@ Phạm vi đã rà: `PurchaseOrderController`, `GoodsReceiptController`, `GoodsR
    `reserved + qualityHold <= quantity` từ chối; phiếu cũ (trước `V77`) không có hold nên không được gỡ.
 4. **Script seed demo** (`demo-capstone2`, `VIETBIKE`) gọi đường nhận cũ — nay hàng vào `HOLD`. **Chưa chạy lại** các script đó.
 5. **Smoke tìm thêm:** đảo nhập phiếu `POSTED` (và post đường cũ) ghi bằng `save` rồi map response ⇒ `version` trả về cũ (bẫy §0.39, lộ ra vì G7b mới đưa `version` lên phiếu nhận). Đổi sang `saveAndFlush`.
+
+### 14.3c Kết quả `G7c` *(2026-10-19)*
+
+✅ Xong. Bản ghi đầy đủ `CLAUDE.md §0.59`, bất biến `B199`–`B204` (purchasing) + `B205`–`B206` (inventory), trả lời FE
+`BE_RESPONSE_GD_07_2026-10-18_v3.md`. Migration **`V78`** + `PERM_PURCHASE_QC_READ`/`_MANAGE` (ADMIN + MANAGER). Không mã lỗi mới. Lệch kế hoạch
+có chủ đích:
+
+1. **Không có bucket "đã loại" riêng cho hàng không theo lô** (D7): phần loại ở lại `qualityHoldQuantity`, truy theo `qualityBucketId` = id dòng phiếu.
+   Thêm một cột tồn mới là đổi mọi tổng tồn — rộng hơn phạm vi QC.
+2. **Chặn đi vòng QC chỉ phủ đổi trạng thái lô** (R13) + đảo nhập phiếu đã QC. `POST /v1/inventory/adjust` trên lô `HOLD` vẫn chạy (có từ trước G7)
+   — ghi là giới hạn trong v3 §6.
+3. **Khoá phiếu đúng khuôn `B194`** (native id lock → find → khởi tạo dòng → refresh) ngay từ đầu, nhờ bài học G7b: smoke lần đầu đã ra
+   `200` + `409 CONCURRENT_MODIFICATION` đúng.
+4. **Smoke tìm thêm:** `childLots[].parentLotId` trong response lệnh QC là `null` (cột phản chiếu chỉ-đọc chưa có giá trị trên lô con vừa tạo) —
+   IT chỉ kiểm cột DB nên xanh. Sửa + assertion trên response.
+5. **Mutation lộ hai lỗ hổng test trước khi gửi:** `splitLot` trừ phần đã giữ chỗ chưa test nào chứng minh (thêm case); nhánh "QC xong ⇒ lô hết chờ"
+   của `existsPendingQualityForLot` chưa IT nào chạm (thêm quyết định thứ hai vào IT).
 
 ### 14.4 Breaking change dự kiến
 
@@ -1099,10 +1116,10 @@ PR/RFQ, cổng nhà cung cấp, hoá đơn/thanh toán, thuế/chiết khấu/ph
   - [x] **Chốt `D0` — tách `G7a`/`G7b`/`G7c`, làm liền** (2026-10-18)
   - [x] Chốt 12 quyết định còn lại §14.2 — tất cả theo khuyến nghị (D3 giữ `REVERSAL`, D4 `HOLD` cả hai đường, D8 hoãn)
   - [x] `G7a` Vòng đời PO: `CLOSED`, đổi tên trạng thái, nháp server cấp mã, `PATCH`, `close`, lý do, `expectedVersion`, `search`, `sources[]`, idempotency, trả quota khi huỷ (`V76`) — `B187`–`B192`; 1686 + 243, mutation 12/13 (M11 = code thừa đã gỡ), smoke `211857`, v1. Bốn quyền mới dời sang `G7b`/`G7c` (§14.3a)
-  - [ ] `G7b` Phiếu nhận: `DRAFT`, nhận vào `HOLD`, danh sách toàn nhà máy + ứng viên PO, khoá bi quan dòng PO
-  - [ ] `G7c` QC mua: bảng quyết định bất biến, lô con có `parent_lot_id`, vùng chờ hàng không theo lô, hàng đợi QC
+  - [x] `G7b` Phiếu nhận: `DRAFT`, nhận vào `HOLD`, danh sách toàn nhà máy + ứng viên PO, khoá dòng PO (`V77`) — `B193`–`B198`; 1721 + 249, mutation 18/18, smoke `233219`, v2 (§14.3b)
+  - [x] `G7c` QC mua: bảng quyết định bất biến, lô con có `parent_lot_id`, vùng chờ hàng không theo lô, hàng đợi QC (`V78`) — `B199`–`B206`; 1749 + 253, mutation 17/17, smoke `132237`, v3 (§14.3c)
   - [x] ~~`G7d`~~ — không làm: `D8` = hoãn (giá trị tồn trả `null`)
-  - [ ] `G7-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_07_*.md` + docs
+  - [x] `G7-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_07_*.md` (v1/v2/v3) + docs — mỗi gói tự nghiệm thu (D0 = tách)
   - [ ] FE nghiệm thu A01–A38
 
 ---

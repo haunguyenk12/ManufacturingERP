@@ -120,7 +120,8 @@ class InventoryLotControllerTest {
                 Instant.parse("2026-08-01T00:00:00Z"), 0L,
                 Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z"),
                 List.of(new InventoryLotBalanceResponse(
-                        warehouseId, "WH1", "Warehouse 1", new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("10"))));
+                        warehouseId, "WH1", "Warehouse 1", new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("10"))),
+                null);
         when(lotService.get(lotId, warehouseId)).thenReturn(response);
 
         mockMvc.perform(get("/v1/inventory/lots/" + lotId)
