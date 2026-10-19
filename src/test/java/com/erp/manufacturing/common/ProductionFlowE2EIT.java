@@ -254,6 +254,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // ── 6. Issue the reserved component ─────────────────────────────────────────────────────
         String issueKey = "E2E-ISSUE-" + fixture.suffix;
+        long versionBeforeIssue = workOrderVersion(workOrderId);
         JsonNode issue = result(post("/v1/material-issues")
                 .header("Idempotency-Key", issueKey)
                 .content(json(Map.of(
@@ -262,6 +263,10 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "quantity", COMPONENT_REQUIREMENT))), 201);
         assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId))
                 .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
+        // G8b: the first issue also moves RELEASED -> IN_PROGRESS. Both changes go out in ONE update — touching the
+        // work order again after the issue's flush had already written the status moved the version on by two.
+        assertThat(issue.get("workOrderVersion").asLong()).isEqualTo(versionBeforeIssue + 1);
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeIssue + 1);
 
         // ── 7. Shop floor reports good output — this, not the receipt, advances the work order ──
         String executionKey = "E2E-EXEC-" + fixture.suffix;

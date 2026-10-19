@@ -18,7 +18,6 @@ import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueFlatRequest;
-import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueDecisionRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssuePostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueResponse;
@@ -26,7 +25,15 @@ import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMappe
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.MultiErrorException;
+import com.erp.manufacturing.module.inventory.domain.StockBalance;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueDetailResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueVersionedDecisionRequest;
+import com.erp.manufacturing.module.workorder.service.ReasonRules;
+import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
 import com.erp.manufacturing.module.workorder.service.WorkOrderPermissionGuard;
+import com.erp.manufacturing.module.workorder.service.WorkOrderVersions;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -67,6 +74,7 @@ public class MaterialIssueService {
     private final UserLookupService userLookupService;
     private final WorkOrderCostAccumulatorService costAccumulatorService;
     private final InventoryLotLookupService inventoryLotLookupService;
+    private final WorkOrderIdempotency idempotencyRecords;
 
     @Autowired(required = false)
     private ProductionExecutionRepository productionExecutionRepository;
@@ -78,7 +86,7 @@ public class MaterialIssueService {
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', #workOrderId)")
     @Auditable(action = AuditAction.MATERIAL_ISSUE_POSTED, entityType = "MaterialIssue", entityIdExpression = "issueId.toString()")
     public MaterialIssueResponse post(UUID workOrderId, MaterialIssuePostRequest request, String idempotencyKey) {
-        return postInternal(workOrderId, request, idempotencyKey);
+        return postInternal(workOrderId, request, idempotencyKey, true);
     }
 
     /**
@@ -112,15 +120,96 @@ public class MaterialIssueService {
                         null))), idempotencyKey);
     }
 
+    /** The single-line paths ({@code component-issues}, flat {@code POST /material-issues}): no version (G8b). */
     @Transactional
     public MaterialIssueResponse postInternal(UUID workOrderId, MaterialIssuePostRequest request, String idempotencyKey) {
+        return postInternal(workOrderId, request, idempotencyKey, false);
+    }
+
+    private MaterialIssueResponse postInternal(UUID workOrderId, MaterialIssuePostRequest request, String idempotencyKey,
+                                               boolean versionRequired) {
         String normalizedKey = idempotency.normalizeKey(idempotencyKey);
         return materialIssueRepository.findWithLinesByIdempotencyKey(normalizedKey)
                 .map(existing -> {
                     idempotency.ensureSamePayload(existing.getPayloadHash(), request);
                     return toResponse(existing);
                 })
-                .orElseGet(() -> postNew(workOrderId, request, normalizedKey));
+                .orElseGet(() -> postNew(workOrderId, request, normalizedKey, versionRequired));
+    }
+
+    /**
+     * One issue with what a manager needs to decide on it (G8b, FE §3.3): per component, the requirement,
+     * what has been issued so far (gross — returns never reduce it, FE Q11), what this document asks for,
+     * how far that goes over the BOM, and the stock its sources hold right now. The availability is a
+     * snapshot — approval checks the stock again inside its own transaction.
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@workOrderPermissionGuard.hasMaterialIssueAccess(authentication, "
+            + "{'PERM_MATERIAL_ISSUE_MANAGE', 'PERM_MATERIAL_ISSUE_APPROVE', 'PERM_MATERIAL_ISSUE_OVERRIDE'}, #issueId)")
+    public MaterialIssueDetailResponse getDetail(UUID issueId) {
+        MaterialIssue issue = materialIssueRepository.findWithLinesByIssueId(issueId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Material issue", issueId));
+        Instant asOf = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Map<UUID, List<MaterialIssueLine>> byComponent = new java.util.LinkedHashMap<>();
+        issue.getLines().stream()
+                .sorted(java.util.Comparator.comparing(line -> line.getComponentLine().getLineNo()))
+                .forEach(line -> byComponent.computeIfAbsent(line.getComponentLine().getComponentLineId(),
+                        id -> new java.util.ArrayList<>()).add(line));
+        List<MaterialIssueDetailResponse.DecisionContext> context = new java.util.ArrayList<>();
+        for (List<MaterialIssueLine> lines : byComponent.values()) {
+            WorkOrderComponentLine component = lines.get(0).getComponentLine();
+            BigDecimal batch = lines.stream().map(MaterialIssueLine::getQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal extra = issue.isPendingApproval()
+                    ? component.getIssuedQuantity().add(batch).subtract(component.getRequiredQuantity()).max(BigDecimal.ZERO)
+                    : null;
+            context.add(new MaterialIssueDetailResponse.DecisionContext(
+                    component.getComponentLineId(), component.getComponentItem().getItemId(),
+                    component.getComponentItem().getCode(), component.getComponentItem().getUnit(),
+                    component.getRequiredQuantity(), component.getIssuedQuantity(), batch, extra,
+                    currentAvailability(lines), asOf));
+        }
+        return new MaterialIssueDetailResponse(toResponse(issue), context);
+    }
+
+    /**
+     * What the sources named by these lines hold now: an active reservation's unissued part, or the free
+     * quantity of the balance (item, warehouse, lot). Each source counted once. A lot named only by code is
+     * not resolved here — it counts as zero rather than as a guess.
+     */
+    private BigDecimal currentAvailability(List<MaterialIssueLine> lines) {
+        BigDecimal total = BigDecimal.ZERO;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (MaterialIssueLine line : lines) {
+            MaterialReservation reservation = line.getReservation();
+            if (reservation != null) {
+                if (seen.add("R" + reservation.getReservationId()) && reservation.getStatus() == MaterialReservationStatus.ACTIVE) {
+                    total = total.add(reservation.remainingQuantity());
+                }
+                continue;
+            }
+            UUID lotId = line.getLot() != null ? line.getLot().getLotId() : line.getRequestedLotId();
+            if (lotId == null && line.getComponentLine().getComponentItem().isLotTracked()) {
+                continue;
+            }
+            if (!seen.add("B" + line.getWarehouse().getWarehouseId() + ":" + lotId)) {
+                continue;
+            }
+            total = total.add(freeQuantity(line.getComponentLine(), line.getWarehouse(), lotId));
+        }
+        return total;
+    }
+
+    private BigDecimal freeQuantity(WorkOrderComponentLine component, Warehouse warehouse, UUID lotId) {
+        try {
+            StockBalance balance = support.findStockBalance(component.getComponentItem(), warehouse, lotId);
+            if (balance.getLot() != null && !balance.getLot().canIssue()) {
+                return BigDecimal.ZERO;
+            }
+            return balance.availableQuantity().max(BigDecimal.ZERO);
+        } catch (com.erp.manufacturing.common.exception.AppException noBalance) {
+            return BigDecimal.ZERO;
+        }
     }
 
     /**
@@ -133,7 +222,8 @@ public class MaterialIssueService {
      *        (the trap recorded in CLAUDE.md §0.19). The controller passes {@code null} instead.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', #workOrderId)")
+    @PreAuthorize("@workOrderPermissionGuard.hasAnyWorkOrderAccess(authentication, "
+            + "{'PERM_MATERIAL_ISSUE_MANAGE', 'PERM_MATERIAL_ISSUE_APPROVE', 'PERM_MATERIAL_ISSUE_OVERRIDE'}, #workOrderId)")
     public PageResult<MaterialIssueResponse> list(UUID workOrderId, MaterialIssueStatus status, Pageable pageable) {
         support.findWorkOrder(workOrderId);
         return toPage(materialIssueRepository.findByWorkOrder(workOrderId, status, pageable));
@@ -149,12 +239,26 @@ public class MaterialIssueService {
      *
      * @param status optional filter; {@code PENDING_APPROVAL} is the plant-wide Over-BOM approval
      *        queue a manager works from.
+     *
+     * <p>G8b: readable with {@code MANAGE}, {@code APPROVE} or {@code OVERRIDE} (FE §1.4 — the approval
+     * queue must open for a manager who never posts issues); {@code search} matches the issue code or the
+     * work order number; {@code fromDate}/{@code toDate} are plant-local days on {@code requestedAt}.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', 'PLANT', #plantId)")
-    public PageResult<MaterialIssueResponse> listByPlant(UUID plantId, UUID workOrderId,
-                                                         MaterialIssueStatus status, Pageable pageable) {
-        return toPage(materialIssueRepository.findByPlant(plantId, workOrderId, status, pageable));
+    @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', 'PLANT', #plantId)"
+            + " or @permissionGuard.hasResourceAccess(authentication, 'PERM_MATERIAL_ISSUE_APPROVE', 'PLANT', #plantId)"
+            + " or @permissionGuard.hasResourceAccess(authentication, 'PERM_MATERIAL_ISSUE_OVERRIDE', 'PLANT', #plantId)")
+    public PageResult<MaterialIssueResponse> listByPlant(UUID plantId, UUID workOrderId, MaterialIssueStatus status,
+                                                         String search, java.time.LocalDate fromDate,
+                                                         java.time.LocalDate toDate, Pageable pageable) {
+        if (fromDate != null && toDate != null && toDate.isBefore(fromDate)) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT, Map.of("toDate", "must not be before fromDate"));
+        }
+        java.time.ZoneId zone = (fromDate == null && toDate == null) ? null : support.plantZone(plantId);
+        Instant requestedFrom = fromDate == null ? null : fromDate.atStartOfDay(zone).toInstant();
+        Instant requestedTo = toDate == null ? null : toDate.plusDays(1).atStartOfDay(zone).toInstant();
+        return toPage(materialIssueRepository.findByPlant(plantId, workOrderId, status, support.trimToNull(search),
+                requestedFrom, requestedTo, pageable));
     }
 
     /**
@@ -206,10 +310,22 @@ public class MaterialIssueService {
 
     private MaterialIssueResponse postNew(UUID workOrderId,
                                           MaterialIssuePostRequest request,
-                                          String normalizedKey) {
+                                          String normalizedKey,
+                                          boolean versionRequired) {
         WorkOrder workOrder = support.findWorkOrder(workOrderId);
+        if (versionRequired) {
+            WorkOrderVersions.ensure(workOrder, request.expectedWorkOrderVersion(), "expectedWorkOrderVersion");
+        }
         support.ensureExecutable(workOrder);
-        if (requiresOverBomApproval(workOrder, request)) {
+        validateLineRules(workOrder, request);
+        String overLine = firstOverBomLine(workOrder, request);
+        if (overLine != null) {
+            if (Boolean.FALSE.equals(request.supplemental())) {
+                // FE §1.4 step 5: a normal issue never goes over the BOM — the user switches to a supplemental
+                // request with a reason instead of the server quietly turning it into one.
+                throw ExceptionFactory.withErrors(BusinessErrorCode.OVER_BOM_APPROVAL_REQUIRED, Map.of(overLine,
+                        "goes over the BOM requirement; send it as a supplemental issue with a reason"));
+            }
             return requestOverBomIssue(workOrder, request, normalizedKey);
         }
         Instant now = Instant.now();
@@ -220,9 +336,14 @@ public class MaterialIssueService {
                 .payloadHash(idempotency.payloadHash(request))
                 .traceId(traceIdProvider.currentTraceId())
                 .note(support.trimToNull(request.note()))
+                .supplemental(Boolean.TRUE.equals(request.supplemental()))
                 .requestedAt(now)
                 .postedAt(now)
                 .build();
+        // Change the work order once, before anything can flush it: a posted issue starts production. Touching it
+        // again after the issue's flush would move the version on by two (see WorkOrderExecutionSupport.flushTouched).
+        workOrder.markInProgress();
+        workOrder.touch();
 
         BigDecimal totalIssued = BigDecimal.ZERO;
         int index = 0;
@@ -289,9 +410,124 @@ public class MaterialIssueService {
             totalIssued = totalIssued.add(quantity);
         }
 
-        MaterialIssue saved = materialIssueRepository.save(issue);
+        MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
         wipTransactionService.recordMaterialIssued(workOrder, totalIssued, saved.getIssueId());
+        // G8 (D5): the work order version moves on with the issue — exactly once — flushed so the response carries it.
+        support.flushTouched(workOrder);
         return toResponse(saved);
+    }
+
+    /**
+     * G8b request rules that need the work order, checked for the whole request before anything is written
+     * (C9). Errors name the line: {@code lines[i].field}.
+     *
+     * <ul>
+     *   <li>a supplemental request takes free stock — no {@code reservationId} — and every line carries a
+     *       {@code reasonCode} and an {@code overrideReason} (FE §1.4 step 5);</li>
+     *   <li>a normal line without a reservation comes from the component's own warehouse when the line has
+     *       one (D2); a supplemental line may use any active warehouse of the plant (FE Q8);</li>
+     *   <li>{@code sourceExecutionId} only with {@code reasonCode = REWORK} (FE §1.4 step 5, A16);</li>
+     *   <li>a reason, when given, is 5–2000 characters (FE Q33).</li>
+     * </ul>
+     */
+    private void validateLineRules(WorkOrder workOrder, MaterialIssuePostRequest request) {
+        boolean supplemental = Boolean.TRUE.equals(request.supplemental());
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < request.lines().size(); i++) {
+            MaterialIssueLineRequest line = request.lines().get(i);
+            String prefix = "lines[" + i + "].";
+            if (supplemental) {
+                if (line.reservationId() != null) {
+                    errors.put(prefix + "reservationId", "a supplemental line takes free stock, not a reservation");
+                }
+                if (line.reasonCode() == null) {
+                    errors.put(prefix + "reasonCode", "is required on a supplemental line");
+                }
+                if (!StringUtils.hasText(line.overrideReason())) {
+                    errors.put(prefix + "overrideReason", "is required on a supplemental line");
+                }
+            } else if (line.reservationId() == null) {
+                WorkOrderComponentLine component = support.findComponentLine(workOrder, line.componentLineId());
+                if (component.getWarehouse() != null && !component.getWarehouse().getWarehouseId().equals(line.warehouseId())) {
+                    errors.put(prefix + "warehouseId", "the component is issued from warehouse "
+                            + component.getWarehouse().getCode() + " only; use a supplemental issue for another warehouse");
+                }
+            }
+            if (line.sourceExecutionId() != null && line.reasonCode() != MaterialIssueReasonCode.REWORK) {
+                errors.put(prefix + "reasonCode", "must be REWORK when sourceExecutionId is given");
+            }
+            if (StringUtils.hasText(line.overrideReason())) {
+                String trimmed = line.overrideReason().trim();
+                if (trimmed.length() < ReasonRules.MIN || trimmed.length() > ReasonRules.MAX) {
+                    errors.putIfAbsent(prefix + "overrideReason", "must be between " + ReasonRules.MIN + " and "
+                            + ReasonRules.MAX + " characters");
+                }
+            }
+        }
+        if (!errors.isEmpty()) {
+            boolean scope = errors.keySet().stream().allMatch(key -> key.endsWith("warehouseId"));
+            throw ExceptionFactory.withErrors(scope ? BusinessErrorCode.RESOURCE_SCOPE_MISMATCH
+                    : ValidationErrorCode.INVALID_INPUT, errors);
+        }
+    }
+
+    /**
+     * Over-BOM is judged per component on the whole request (FE §1.4 step 6): gross issued so far plus every
+     * line of this request for that component, against the requirement. Two lines that each fit but together
+     * do not are over — before G8b they were checked one at a time and the second one failed instead.
+     *
+     * @return the {@code lines[i].quantity} field of the first line of an over component, or {@code null}
+     */
+    private String firstOverBomLine(WorkOrder workOrder, MaterialIssuePostRequest request) {
+        Map<UUID, BigDecimal> requested = requestedByComponent(workOrder, request);
+        for (int i = 0; i < request.lines().size(); i++) {
+            WorkOrderComponentLine component = support.findComponentLine(workOrder, request.lines().get(i).componentLineId());
+            if (requested.get(component.getComponentLineId()).compareTo(component.remainingQuantity()) > 0) {
+                return "lines[" + i + "].quantity";
+            }
+        }
+        return null;
+    }
+
+    private Map<UUID, BigDecimal> requestedByComponent(WorkOrder workOrder, MaterialIssuePostRequest request) {
+        Map<UUID, BigDecimal> requested = new java.util.HashMap<>();
+        for (MaterialIssueLineRequest line : request.lines()) {
+            WorkOrderComponentLine component = support.findComponentLine(workOrder, line.componentLineId());
+            requested.merge(component.getComponentLineId(), support.requirePositive(line.quantity(), "Issue quantity"),
+                    BigDecimal::add);
+        }
+        return requested;
+    }
+
+    /**
+     * FE Q10: a pending request does not hold stock, but its free-stock sources must hold enough when it is
+     * made — a request that could not be posted now is refused instead of waiting for a manager. Lines of the
+     * same source are added up first. A lot named only by code is left to the approval check.
+     */
+    private void ensureSourcesHoldEnough(WorkOrder workOrder, MaterialIssuePostRequest request) {
+        Map<String, BigDecimal> requested = new java.util.LinkedHashMap<>();
+        Map<String, Integer> firstLine = new java.util.HashMap<>();
+        for (int i = 0; i < request.lines().size(); i++) {
+            MaterialIssueLineRequest line = request.lines().get(i);
+            WorkOrderComponentLine component = support.findComponentLine(workOrder, line.componentLineId());
+            if (line.reservationId() != null || (line.lotId() == null && component.getComponentItem().isLotTracked())) {
+                continue;
+            }
+            // One source is (item, warehouse, lot): two component lines of the same item draw on the same stock.
+            String key = component.getComponentItem().getItemId() + ":" + line.warehouseId() + ":" + line.lotId();
+            requested.merge(key, line.quantity(), BigDecimal::add);
+            firstLine.putIfAbsent(key, i);
+        }
+        for (Map.Entry<String, BigDecimal> entry : requested.entrySet()) {
+            MaterialIssueLineRequest line = request.lines().get(firstLine.get(entry.getKey()));
+            WorkOrderComponentLine component = support.findComponentLine(workOrder, line.componentLineId());
+            Warehouse warehouse = support.findActiveWarehouseInPlant(line.warehouseId(), workOrder.getPlant());
+            if (freeQuantity(component, warehouse, line.lotId()).compareTo(entry.getValue()) < 0) {
+                throw ExceptionFactory.withErrors(BusinessErrorCode.INSUFFICIENT_STOCK, Map.of(
+                        "lines[" + firstLine.get(entry.getKey()) + "].quantity",
+                        "the source holds less free stock than requested"));
+            }
+        }
     }
 
     /**
@@ -313,14 +549,6 @@ public class MaterialIssueService {
                 "Over-BOM material must be requested and approved before stock is posted");
     }
 
-    private boolean requiresOverBomApproval(WorkOrder workOrder, MaterialIssuePostRequest request) {
-        return request.lines().stream().anyMatch(line -> {
-            WorkOrderComponentLine component = support.findComponentLine(workOrder, line.componentLineId());
-            return support.requirePositive(line.quantity(), "Issue quantity")
-                    .compareTo(component.remainingQuantity()) > 0;
-        });
-    }
-
     private MaterialIssueResponse requestOverBomIssue(WorkOrder workOrder,
                                                        MaterialIssuePostRequest request,
                                                        String normalizedKey) {
@@ -332,14 +560,18 @@ public class MaterialIssueService {
                 .payloadHash(idempotency.payloadHash(request))
                 .traceId(traceIdProvider.currentTraceId())
                 .note(support.trimToNull(request.note()))
+                .supplemental(Boolean.TRUE.equals(request.supplemental()))
                 .requestedAt(now)
                 .build();
+        Map<UUID, BigDecimal> requestedByComponent = requestedByComponent(workOrder, request);
 
         for (MaterialIssueLineRequest lineRequest : request.lines()) {
             WorkOrderComponentLine component = support.findComponentLine(workOrder, lineRequest.componentLineId());
             Warehouse warehouse = support.findActiveWarehouseInPlant(lineRequest.warehouseId(), workOrder.getPlant());
             BigDecimal quantity = support.requirePositive(lineRequest.quantity(), "Issue quantity");
-            boolean overIssue = quantity.compareTo(component.remainingQuantity()) > 0;
+            // Every line of a component that goes over is marked, the whole request judged together (G8b).
+            boolean overIssue = requestedByComponent.get(component.getComponentLineId())
+                    .compareTo(component.remainingQuantity()) > 0;
             if (overIssue && (!StringUtils.hasText(lineRequest.overrideReason()) || lineRequest.reasonCode() == null)) {
                 throw ExceptionFactory.custom(ValidationErrorCode.MISSING_REQUIRED_FIELD,
                         "reasonCode and overrideReason are required for an Over-BOM request");
@@ -373,7 +605,10 @@ public class MaterialIssueService {
                     .sourceExecution(resolveSourceExecution(workOrder, lineRequest.sourceExecutionId()))
                     .build());
         }
-        return toResponse(materialIssueRepository.save(issue));
+        ensureSourcesHoldEnough(workOrder, request);
+        MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
+        support.touchAndFlush(workOrder);
+        return toResponse(saved);
     }
 
     /**
@@ -402,10 +637,29 @@ public class MaterialIssueService {
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_APPROVE', #workOrderId)")
     @Auditable(action = AuditAction.MATERIAL_ISSUE_APPROVED, entityType = "MaterialIssue", entityIdExpression = "issueId.toString()")
-    public MaterialIssueResponse approve(UUID workOrderId, UUID issueId) {
+    public MaterialIssueResponse approve(UUID workOrderId, UUID issueId, MaterialIssueVersionedDecisionRequest request,
+                                         String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(issueId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.ISSUE_APPROVE, fingerprint).isPresent()) {
+            return toResponse(findIssue(issueId));
+        }
         MaterialIssue issue = findPendingIssue(workOrderId, issueId);
         WorkOrder workOrder = issue.getWorkOrder();
+        ensureVersions(issue, request);
+        ReasonRules.lengthChecked(request.reason(), "reason");
         support.ensureExecutable(workOrder);
+        // FE Q3: approving your own request needs OVERRIDE on top of APPROVE — never a role-name bypass.
+        UUID actor = auditorAware == null ? null : auditorAware.getCurrentAuditor().orElse(null);
+        if (actor != null && actor.equals(issue.getCreatedBy()) && !workOrderPermissionGuard.hasWorkOrderAccess(
+                SecurityContextHolder.getContext().getAuthentication(), OVERRIDE_PERMISSION, workOrderId)) {
+            throw ExceptionFactory.custom(AuthErrorCode.ACCESS_DENIED,
+                    "Approving your own material issue request also requires PERM_MATERIAL_ISSUE_OVERRIDE");
+        }
+        idempotencyRecords.record(key, WorkOrderCommand.ISSUE_APPROVE, issueId, fingerprint);
+        // Same as posting: change the work order once, before the movements can flush it.
+        workOrder.markInProgress();
+        workOrder.touch();
         BigDecimal totalIssued = BigDecimal.ZERO;
         int index = 0;
         for (MaterialIssueLine line : issue.getLines()) {
@@ -451,26 +705,91 @@ public class MaterialIssueService {
             }
             totalIssued = totalIssued.add(line.getQuantity());
         }
-        issue.markPosted(Instant.now(), auditorAware == null
-                ? null : auditorAware.getCurrentAuditor().orElse(null));
-        MaterialIssue saved = materialIssueRepository.save(issue);
+        issue.markPosted(Instant.now(), actor);
+        MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
         wipTransactionService.recordMaterialIssued(workOrder, totalIssued, saved.getIssueId());
+        support.flushTouched(workOrder);
         return toResponse(saved);
     }
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_APPROVE', #workOrderId)")
     @Auditable(action = AuditAction.MATERIAL_ISSUE_REJECTED, entityType = "MaterialIssue", entityIdExpression = "issueId.toString()")
-    public MaterialIssueResponse reject(UUID workOrderId, UUID issueId, MaterialIssueDecisionRequest request) {
-        MaterialIssue issue = findPendingIssue(workOrderId, issueId);
-        String reason = request == null ? null : support.trimToNull(request.reason());
-        if (reason == null) {
-            throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED,
-                    "Reject reason is required");
+    public MaterialIssueResponse reject(UUID workOrderId, UUID issueId, MaterialIssueVersionedDecisionRequest request,
+                                        String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(issueId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.ISSUE_REJECT, fingerprint).isPresent()) {
+            return toResponse(findIssue(issueId));
         }
+        MaterialIssue issue = findPendingIssue(workOrderId, issueId);
+        String reason = requiredReason(request, "Reject reason is required");
+        ensureVersions(issue, request);
+        idempotencyRecords.record(key, WorkOrderCommand.ISSUE_REJECT, issueId, fingerprint);
         issue.reject(Instant.now(), auditorAware == null
                 ? null : auditorAware.getCurrentAuditor().orElse(null), reason);
-        return toResponse(materialIssueRepository.save(issue));
+        MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
+        support.touchAndFlush(issue.getWorkOrder());
+        return toResponse(saved);
+    }
+
+    /**
+     * The requester withdraws their own pending request (G8b, FE §1.4): {@code PENDING_APPROVAL →
+     * CANCELLED}, a reason, no stock effect — nothing was ever posted. Anyone else, even with
+     * {@code MANAGE}, is refused: a manager declines a request by rejecting it.
+     */
+    @Transactional
+    @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', #workOrderId)")
+    @Auditable(action = AuditAction.MATERIAL_ISSUE_CANCELLED, entityType = "MaterialIssue", entityIdExpression = "issueId.toString()")
+    public MaterialIssueResponse cancelByRequester(UUID workOrderId, UUID issueId,
+                                                   MaterialIssueVersionedDecisionRequest request, String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(issueId, request);
+        if (idempotencyRecords.replay(key, WorkOrderCommand.ISSUE_CANCEL, fingerprint).isPresent()) {
+            return toResponse(findIssue(issueId));
+        }
+        MaterialIssue issue = findPendingIssue(workOrderId, issueId);
+        String reason = requiredReason(request, "Cancel reason is required");
+        ensureVersions(issue, request);
+        UUID actor = auditorAware == null ? null : auditorAware.getCurrentAuditor().orElse(null);
+        if (actor == null || !actor.equals(issue.getCreatedBy())) {
+            throw ExceptionFactory.custom(AuthErrorCode.ACCESS_DENIED,
+                    "Only the person who made the request can cancel it; a manager rejects it instead");
+        }
+        idempotencyRecords.record(key, WorkOrderCommand.ISSUE_CANCEL, issueId, fingerprint);
+        issue.cancelByRequester(Instant.now(), actor, reason);
+        MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
+        support.touchAndFlush(issue.getWorkOrder());
+        return toResponse(saved);
+    }
+
+    /** Missing ⇒ the specific {@code APPROVAL_REASON_REQUIRED}; present but outside 5–2000 ⇒ field error (Q33). */
+    private String requiredReason(MaterialIssueVersionedDecisionRequest request, String missingMessage) {
+        String reason = ReasonRules.lengthChecked(request == null ? null : request.reason(), "reason");
+        if (reason == null) {
+            throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED, missingMessage);
+        }
+        return reason;
+    }
+
+    /** Both versions read together on the decision screen (D5): the work order's and the issue's. */
+    private void ensureVersions(MaterialIssue issue, MaterialIssueVersionedDecisionRequest request) {
+        WorkOrderVersions.ensure(issue.getWorkOrder(), request == null ? null : request.expectedWorkOrderVersion(),
+                "expectedWorkOrderVersion");
+        if (request.expectedIssueVersion() == null) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("expectedIssueVersion", "must not be null"));
+        }
+        if (!Objects.equals(issue.getVersion(), request.expectedIssueVersion())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CONCURRENT_MODIFICATION, "Material issue version is "
+                    + issue.getVersion() + ", not " + request.expectedIssueVersion() + "; reload it");
+        }
+    }
+
+    private MaterialIssue findIssue(UUID issueId) {
+        return materialIssueRepository.findWithLinesByIssueId(issueId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Material issue", issueId));
     }
 
     private MaterialIssue findPendingIssue(UUID workOrderId, UUID issueId) {

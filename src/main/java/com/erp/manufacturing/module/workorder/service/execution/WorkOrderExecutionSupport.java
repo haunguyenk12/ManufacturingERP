@@ -45,6 +45,27 @@ class WorkOrderExecutionSupport {
         return workOrderRepository.saveAndFlush(workOrder);
     }
 
+    /**
+     * Flushes a work order that the command already {@link WorkOrder#touch() touched} before its first write. A
+     * command that also changes the work order itself (an issue moving it RELEASED → IN_PROGRESS) must make every
+     * change before any flush and touch it once: touching again after an intermediate flush — the issue's own
+     * {@code saveAndFlush} writes the dirty work order with it — would move the version on a second time (G8b).
+     */
+    WorkOrder flushTouched(WorkOrder workOrder) {
+        return workOrderRepository.saveAndFlush(workOrder);
+    }
+
+    /** The plant's time zone, for turning plant-local business dates into instants (G8b list filters). */
+    java.time.ZoneId plantZone(UUID plantId) {
+        return java.time.ZoneId.of(organizationLookupService.getActivePlant(plantId).getTimezone());
+    }
+
+    /** Every warehouse of the plant (G8b supplemental sources, FE Q8). */
+    java.util.List<UUID> plantWarehouseIds(Plant plant) {
+        return organizationLookupService.resolveScope(
+                com.erp.manufacturing.module.organization.domain.ScopeResourceType.PLANT, plant.getPlantId()).warehouseIds();
+    }
+
     void ensureExecutable(WorkOrder workOrder) {
         if (!workOrder.canExecute()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,

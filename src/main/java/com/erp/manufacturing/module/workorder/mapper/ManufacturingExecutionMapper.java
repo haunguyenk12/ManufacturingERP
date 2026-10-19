@@ -75,7 +75,12 @@ public class ManufacturingExecutionMapper {
                 issue.getRequestedAt(),
                 issue.getDecidedAt(),
                 issue.getDecidedBy(),
-                issue.getRejectionReason());
+                issue.getRejectionReason(),
+                issue.getVersion(),
+                issue.getWorkOrder().getVersion(),
+                issue.isSupplemental(),
+                issue.getCreatedBy(),
+                issue.getCancellationReason());
     }
 
     public MaterialIssueResponse toResponse(MaterialIssue issue,

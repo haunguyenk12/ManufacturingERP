@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G8` — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang** (`FE_HANDOFF_GD_08_2026-10-14.md`, P1) — 🔄 **D0–D12 chốt 2026-10-19** (tách 4 phần làm liền; còn lại theo khuyến nghị; **D11 hoãn**). **`G8a` ✅ BE xong 2026-10-19** (`BE_RESPONSE_GD_08_2026-10-19.md` v1) · **tiếp theo `G8b`** (cấp vật tư) → `G8c` (công đoạn) → `G8d` (dở dang + hoàn vật tư) — xem **§15** |
+| **Đang chạy** | **`G8` — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang** (`FE_HANDOFF_GD_08_2026-10-14.md`, P1) — 🔄 **D0–D12 chốt 2026-10-19** (tách 4 phần làm liền; còn lại theo khuyến nghị; **D11 hoãn**). **`G8a` ✅** (v1) · **`G8b` ✅** (`_v2`) — BE xong 2026-10-19 · **tiếp theo `G8c`** (công đoạn) → `G8d` (dở dang + hoàn vật tư) — xem **§15** |
 | **Chờ FE** | `G7` (§14) — ✅ BE xong cả 3 phần 2026-10-18/19, bản ghi `CLAUDE.md §0.57`–`§0.59`. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -125,7 +125,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 12 | **`G5` — FE handoff Giai đoạn 5 (định mức, quy trình, công suất)** | 📝 **Đã lập kế hoạch — chờ chốt §12.2** | Nguồn `FE_HANDOFF_GD_05_2026-10-13.md`, P1. File FE đề xuất **đảo ngược 4 quyết định thiết kế đã chốt** ở `F4`/`C2-7`/`C2-8`/`F10` — phải chốt từng cái trước khi viết dòng nào. Chi tiết **§12** |
 | 13 | **`G6` — FE handoff Giai đoạn 6 (đơn bán hàng + hoạch định vật tư)** | ✅ **BE xong 2026-10-17/18 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_06_2026-10-14.md`, P1. Mở lại hai thứ đã **cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5`) và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc WO). Chi tiết **§13** |
 | 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | ✅ **BE xong cả 3 phần 2026-10-18/19 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
-| 15 | **`G8` — FE handoff Giai đoạn 8 (lệnh sản xuất, cấp vật tư, công đoạn, dở dang)** | 🔄 **Đang chạy — `G8a` ✅ 2026-10-19** | Nguồn `FE_HANDOFF_GD_08_2026-10-14.md`, P1. Còn `G8b`/`G8c`/`G8d`. Chi tiết **§15** |
+| 15 | **`G8` — FE handoff Giai đoạn 8 (lệnh sản xuất, cấp vật tư, công đoạn, dở dang)** | 🔄 **Đang chạy — `G8a` ✅ + `G8b` ✅ 2026-10-19** | Nguồn `FE_HANDOFF_GD_08_2026-10-14.md`, P1. Còn `G8c`/`G8d`. Chi tiết **§15** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -929,6 +929,16 @@ Phạm vi đã rà: `PurchaseOrderController`, `GoodsReceiptController`, `GoodsR
 
 🔴 **Mỗi gói tự nghiệm thu đủ** (`mvn -o clean verify` + mutation + smoke + một bản `_vN` cho FE) nếu `D0` = tách — đúng cách `G6a`/`G6b`/`G6c` đã làm.
 
+### 15.3b Kết quả `G8b` *(2026-10-19)*
+
+Migration **`V80`**; bất biến **`B212`–`B216`** (`module/workorder/CLAUDE.md`); bản ghi `CLAUDE.md §0.61`; trả lời FE `BE_RESPONSE_GD_08_2026-10-19_v2.md`.
+Đã làm: version bắt buộc trên phiếu nhiều dòng + hai version khi duyệt/từ chối/huỷ (D5) · phiếu bổ sung (`supplemental`, tồn tự do mọi kho nhà máy,
+lý do từng dòng) · vượt định mức theo vật tư trên cả phiếu · kiểm tồn nguồn lúc tạo phiếu chờ (Q10) · tự duyệt cần thêm `OVERRIDE` (Q3) · huỷ của người
+tạo · `GET /material-issues/{I}` + `decisionContext[]` · ứng viên nguồn `NORMAL`/`SUPPLEMENTAL` · đọc phiếu cho `MANAGE`/`APPROVE`/`OVERRIDE` (Q2) ·
+`search` + khoảng ngày · lý do 5–2000 (Q33, cả huỷ WO). Nghiệm thu: `mvn -o clean verify` 1816 + 258, mutation 20/20, smoke HTTP 32/32 (lượt `220914`).
+🔴 Smoke lượt đầu lộ **version WO +2** khi phiếu đầu tiên chuyển WO sang `IN_PROGRESS` — sửa ở post + duyệt, guard ở `ProductionFlowE2EIT`. **Áp cho
+`G8c`:** báo sản lượng/hoàn thành cũng đổi trạng thái WO — phải `touch()` trước mọi flush, cuối `flushTouched`.
+
 ### 15.3a Kết quả `G8a` *(2026-10-19)*
 
 Migration **`V79`**; bất biến **`B207`–`B211`** (`module/workorder/CLAUDE.md`); bản ghi `CLAUDE.md §0.60`; trả lời FE `BE_RESPONSE_GD_08_2026-10-19.md` (v1).
@@ -1001,7 +1011,7 @@ PR/RFQ, cổng nhà cung cấp, hoá đơn/thanh toán, thuế/chiết khấu/ph
 
 ---
 
-## 15. `G8` — FE handoff Giai đoạn 8: Lệnh sản xuất, cấp vật tư, công đoạn và dở dang 🔄 ĐANG CHẠY — `G8a` ✅ 2026-10-19
+## 15. `G8` — FE handoff Giai đoạn 8: Lệnh sản xuất, cấp vật tư, công đoạn và dở dang 🔄 ĐANG CHẠY — `G8a` ✅ + `G8b` ✅ 2026-10-19
 
 Nguồn: `FE_HANDOFF_GD_08_2026-10-14.md` (v1, P1, 717 dòng). FE/mock đã xong: nháp lệnh sản xuất + xem trước lịch, kho cho **từng dòng** vật tư, cấp vật tư nhiều dòng với duyệt bổ sung, **xác nhận đầu vào và chuyển sản lượng giữa công đoạn**, **ghi kết quả + xử lý lại (retry)**, **vật tư thực dùng theo từng dòng cấp**, kết thúc công đoạn / hoàn thành lệnh có lý do hụt, màn hình **dở dang**, và **hoàn vật tư**. BE phải (1) trả lời Q1–Q37 §5, (2) đối chiếu R01–R22 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_08_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào.
 
@@ -1237,12 +1247,12 @@ Phiếu nhập sản xuất / `HOLD` / QC / truy xuất nguồn gốc kiểu m�
   - [x] ~~`G7d`~~ — không làm: `D8` = hoãn (giá trị tồn trả `null`)
   - [x] `G7-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_07_*.md` (v1/v2/v3) + docs — mỗi gói tự nghiệm thu (D0 = tách)
   - [ ] FE nghiệm thu A01–A38
-- [ ] **`G8`** — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang *(đang chạy; `G8a` ✅ 2026-10-19, §15)*
+- [ ] **`G8`** — FE handoff Giai đoạn 8: lệnh sản xuất, cấp vật tư, công đoạn và dở dang *(đang chạy; `G8a` ✅ + `G8b` ✅ 2026-10-19, §15)*
   - [x] `G8-0` đọc nốt phần "chưa rà" §15.1 (ưu tiên `MaterialIssueService.postNew`, `reserveAutomatically`, `ProductionExecutionService`, `WorkOrderCostAccumulator`) + baseline trên worktree sạch + chạy live WO/cấp vật tư/báo sản lượng hiện có
   - [x] **Chốt `D0` — tách `G8a`/`G8b`/`G8c`/`G8d` hay làm một lượt**
   - [x] Chốt 12 quyết định còn lại §15.2 *(2026-10-19: theo khuyến nghị, D11 hoãn)* — **`D1`** (trạng thái + sổ đầu vào của công đoạn), **`D2`** (kho từng dòng, đổi hành vi giữ tồn/release), **`D6`** (`COMPLETED` tự động vs ra lệnh, đụng `B53`) và **`D10`** (giá trị: hoãn lần thứ ba hay dựng) là bốn cái quyết định độ lớn
   - [x] `G8a` Nháp WO: kho từng dòng, `expectedVersion`, lịch đã chốt + revision, xem trước lịch, giải phóng phần chưa cấp, trả quota khi huỷ (`V79`)
-  - [ ] `G8b` Cấp vật tư: huỷ phiếu chờ của người tạo, chi tiết một phiếu, ứng viên nguồn, kiểm lại lúc duyệt
+  - [x] `G8b` Cấp vật tư: huỷ phiếu chờ của người tạo, chi tiết một phiếu, ứng viên nguồn, kiểm lại lúc duyệt (`V80`) — `B212`–`B216`; 1816 + 258, mutation 20/20, smoke `220914`, v2 (§15.3b)
   - [ ] `G8c` Công đoạn: đầu vào/chuyển giao, retry + nhóm chờ, vật tư thực dùng, sản lượng cuối = công đoạn cuối, kết thúc + hoàn thành có lý do hụt
   - [ ] `G8d` Dở dang + hoàn vật tư: projection theo mục, entity + 4 endpoint, 3 quyền mới
   - [x] ~~`G8e`~~ *(D11 = hoãn, 2026-10-19 — không làm trong `G8`)*

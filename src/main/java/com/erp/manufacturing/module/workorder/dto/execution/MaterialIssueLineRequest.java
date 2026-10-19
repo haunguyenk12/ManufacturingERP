@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.workorder.dto.execution;
 
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -16,10 +17,10 @@ public record MaterialIssueLineRequest(
         UUID lotId,
         @Size(max = 120) String lotNumber,
         @Schema(hidden = true) UUID serialId,
-        @NotNull @Positive BigDecimal quantity,
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal quantity,
         @Size(max = 1000) String reason,
         /** Required when quantity exceeds the component's remaining BOM requirement. */
-        @Size(max = 1000) String overrideReason,
+        @Size(max = 2000) String overrideReason,
         MaterialIssueReasonCode reasonCode,
         UUID sourceExecutionId
 ) {

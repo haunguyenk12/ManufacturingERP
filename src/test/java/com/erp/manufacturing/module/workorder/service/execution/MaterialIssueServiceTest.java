@@ -1,5 +1,11 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import org.springframework.test.util.ReflectionTestUtils;
+import com.erp.manufacturing.common.audit.SecurityAuditorAware;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
+import com.erp.manufacturing.common.exception.MultiErrorException;
+import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +25,7 @@ import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
-import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueDecisionRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueVersionedDecisionRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueLineResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssuePostRequest;
@@ -72,6 +78,7 @@ class MaterialIssueServiceTest {
     @Mock UserLookupService userLookupService;
     @Mock WorkOrderCostAccumulatorService costAccumulatorService;
     @Mock InventoryLotLookupService inventoryLotLookupService;
+    @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
 
     MaterialIssueService service;
 
@@ -92,7 +99,9 @@ class MaterialIssueServiceTest {
                 new TraceIdProvider(),
                 userLookupService,
                 costAccumulatorService,
-                inventoryLotLookupService);
+                inventoryLotLookupService,
+                new WorkOrderIdempotency(idempotencyRecordRepository,
+                        new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
     }
 
     @AfterEach
@@ -213,6 +222,334 @@ class MaterialIssueServiceTest {
         assertThat(page.content().get(0).lines().get(0).lotNumber()).isEqualTo("LOT-REAL");
     }
 
+    // ── G8b ────────────────────────────────────────────────────────────────────────────────────────
+
+    private void stubForPost(WorkOrder workOrder, Warehouse warehouse, String key) {
+        when(issueRepository.findWithLinesByIdempotencyKey(key)).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        lenient().when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(),
+                workOrder.getPlant().getPlantId())).thenReturn(warehouse);
+    }
+
+    private MaterialIssueLineRequest line(WorkOrderComponentLine component, UUID reservationId, Warehouse warehouse,
+                                          String quantity, MaterialIssueReasonCode reasonCode, String overrideReason,
+                                          UUID sourceExecutionId) {
+        return new MaterialIssueLineRequest(component.getComponentLineId(), reservationId, warehouse.getWarehouseId(),
+                null, null, null, new BigDecimal(quantity), null, overrideReason, reasonCode, sourceExecutionId);
+    }
+
+    private void actingAs(UUID userId) {
+        SecurityAuditorAware auditor = mock(SecurityAuditorAware.class);
+        when(auditor.getCurrentAuditor()).thenReturn(Optional.of(userId));
+        ReflectionTestUtils.setField(service, "auditorAware", auditor);
+        authenticate();
+    }
+
+    @Test
+    void post_withoutAWorkOrderVersion_isRefusedNamingTheField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-NOVERSION");
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "2", null, null, null)), null, null), "KEY-NOVERSION"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys("expectedWorkOrderVersion"));
+        verifyNoInteractions(movementService);
+    }
+
+    /** FE §1.4 step 6: two lines that each fit but together go over the BOM make the whole request pending. */
+    @Test
+    void post_twoLinesThatTogetherGoOverTheBom_turnTheWholeRequestPending() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-TWO");
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        freeStockIsPlentiful();
+
+        MaterialIssueResponse response = service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "6", MaterialIssueReasonCode.PROCESS_LOSS, "Loss in cutting", null),
+                line(component, null, warehouse, "6", MaterialIssueReasonCode.PROCESS_LOSS, "Loss in cutting", null)),
+                0L, null), "KEY-TWO");
+
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
+        assertThat(response.lines()).allSatisfy(l -> assertThat(l.overIssue()).isTrue());
+        verifyNoInteractions(movementService);
+        assertThat(component.getIssuedQuantity()).isZero();
+    }
+
+    @Test
+    void post_normalIssueOverTheBom_isRefusedInsteadOfTurningPending() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-NORMALOVER");
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "11", MaterialIssueReasonCode.OTHER, "Extra for safety", null)),
+                0L, false), "KEY-NORMALOVER"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    MultiErrorException error = (MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.OVER_BOM_APPROVAL_REQUIRED);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("lines[0].quantity");
+                });
+        verify(issueRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void post_supplementalLines_needFreeStockAndAReasonCodeAndAReason() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-SUPP");
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, UUID.randomUUID(), warehouse, "1", null, null, null)), 0L, true), "KEY-SUPP"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys(
+                        "lines[0].reservationId", "lines[0].reasonCode", "lines[0].overrideReason"));
+        verifyNoInteractions(movementService);
+    }
+
+    /** D2: a normal line without a reservation comes from the component's own warehouse. */
+    @Test
+    void post_normalLineFromAnotherWarehouseThanTheComponents_isAScopeMismatch() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse own = warehouse(UUID.randomUUID(), workOrder.getPlant());
+        component.setWarehouse(own);
+        Warehouse other = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, other, "KEY-WH");
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, other, "1", null, null, null)), 0L, null), "KEY-WH"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    MultiErrorException error = (MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("lines[0].warehouseId");
+                });
+        verifyNoInteractions(movementService);
+    }
+
+    @Test
+    void post_sourceExecutionWithoutReworkReason_andAReasonTooShort_areFieldErrors() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-RULES");
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "1", MaterialIssueReasonCode.DAMAGE, "abc", UUID.randomUUID())),
+                0L, null), "KEY-RULES"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors())
+                        .containsOnlyKeys("lines[0].reasonCode", "lines[0].overrideReason"));
+    }
+
+    /** FE Q10: a pending request does not hold stock, but its source must hold enough when it is made. */
+    @Test
+    void post_pendingRequestWhoseSourceHoldsTooLittle_isRefusedOnTheLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-SHORT");
+        when(inventoryAvailabilityService.getStockBalanceForIssue(any(), any(), any())).thenReturn(StockBalance.builder()
+                .quantity(new BigDecimal("11")).reservedQuantity(BigDecimal.ZERO).build());
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "12", MaterialIssueReasonCode.SETUP_LOSS, "Setup scrap", null)),
+                0L, null), "KEY-SHORT"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    MultiErrorException error = (MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("lines[0].quantity");
+                });
+        verify(issueRepository, never()).saveAndFlush(any());
+    }
+
+    /** Two lines drawing on the same source are added up: 6 and 6 each fit in 11, together they do not. */
+    @Test
+    void post_pendingRequestWhoseLinesTogetherDrainTheSource_isRefusedOnTheFirstLine() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        stubForPost(workOrder, warehouse, "KEY-SUM");
+        when(inventoryAvailabilityService.getStockBalanceForIssue(any(), any(), any())).thenReturn(StockBalance.builder()
+                .quantity(new BigDecimal("11")).reservedQuantity(BigDecimal.ZERO).build());
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("x", List.of(
+                line(component, null, warehouse, "6", MaterialIssueReasonCode.SETUP_LOSS, "Setup scrap", null),
+                line(component, null, warehouse, "6", MaterialIssueReasonCode.SETUP_LOSS, "Setup scrap", null)),
+                0L, null), "KEY-SUM"))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> {
+                    MultiErrorException error = (MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("lines[0].quantity");
+                });
+        verify(issueRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void approve_staleIssueVersion_isAConcurrentModificationBeforeAnyStockMoves() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        MaterialIssue pending = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.approve(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 3L, null), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.CONCURRENT_MODIFICATION));
+        verifyNoInteractions(movementService);
+    }
+
+    /**
+     * R22: a retried approval with the same key answers with the current issue. The first approval moved both
+     * versions on, so the replay has to be recognised before the version check — and before the "still
+     * pending" check — or a network retry would be answered 409.
+     */
+    @Test
+    void approve_replayedKeyAfterTheIssueWasPosted_returnsItWithoutPostingAgain() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.setVersion(4L);
+        MaterialIssue posted = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        posted.markPosted(Instant.now(), null);
+        posted.setVersion(1L);
+        MaterialIssueVersionedDecisionRequest request = new MaterialIssueVersionedDecisionRequest(3L, 0L, null);
+        String hash = new IdempotencySupport(new ObjectMapper().findAndRegisterModules())
+                .payloadHash(new WorkOrderIdempotency.Fingerprint(posted.getIssueId(), request));
+        when(idempotencyRecordRepository.findByIdempotencyKeyAndCommand("APPROVE-1",
+                com.erp.manufacturing.module.workorder.domain.WorkOrderCommand.ISSUE_APPROVE))
+                .thenReturn(Optional.of(com.erp.manufacturing.module.workorder.domain.WorkOrderIdempotencyRecord.builder()
+                        .idempotencyKey("APPROVE-1").resourceId(posted.getIssueId()).payloadHash(hash).build()));
+        when(issueRepository.findWithLinesByIssueId(posted.getIssueId())).thenReturn(Optional.of(posted));
+
+        var response = service.approve(workOrder.getWorkOrderId(), posted.getIssueId(), request, "APPROVE-1");
+
+        assertThat(response.status()).isEqualTo("POSTED");
+        verifyNoInteractions(movementService);
+        verify(issueRepository, never()).saveAndFlush(any());
+        verify(idempotencyRecordRepository, never()).saveAndFlush(any());
+    }
+
+    /** FE Q3: approving your own request needs OVERRIDE on top of APPROVE. */
+    @Test
+    void approve_ownRequestWithoutOverride_isDeniedBeforeAnyStockMoves() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        MaterialIssue pending = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        UUID me = UUID.randomUUID();
+        pending.setCreatedBy(me);
+        actingAs(me);
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_OVERRIDE"), eq(workOrder.getWorkOrderId())))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> service.approve(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(AuthErrorCode.ACCESS_DENIED));
+        verifyNoInteractions(movementService);
+        assertThat(pending.getStatus()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL);
+    }
+
+    @Test
+    void cancel_byTheRequester_withdrawsWithoutStockEffect_andMovesTheVersionOn() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        MaterialIssue pending = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        UUID me = UUID.randomUUID();
+        pending.setCreatedBy(me);
+        actingAs(me);
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MaterialIssueResponse response = service.cancelByRequester(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, "  Not needed after all  "), null);
+
+        assertThat(response.status()).isEqualTo(MaterialIssueStatus.CANCELLED.name());
+        assertThat(response.cancellationReason()).isEqualTo("Not needed after all");
+        assertThat(workOrder.getUpdatedAt()).isNotNull();
+        verify(workOrderRepository).saveAndFlush(workOrder);
+        verifyNoInteractions(movementService, wipTransactionService, costAccumulatorService);
+    }
+
+    @Test
+    void cancel_bySomeoneElse_isDenied() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        MaterialIssue pending = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        pending.setCreatedBy(UUID.randomUUID());
+        actingAs(UUID.randomUUID());
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.cancelByRequester(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, "Not needed after all"), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(AuthErrorCode.ACCESS_DENIED));
+        assertThat(pending.getStatus()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL);
+    }
+
+    /** FE Q33: a reason that is there but under 5 characters is a field error, not "missing". */
+    @Test
+    void reject_reasonUnderFiveCharacters_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        MaterialIssue pending = pendingIssue(workOrder, workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(),
+                new BigDecimal("12"));
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.reject(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, "no"), null))
+                .isInstanceOf(MultiErrorException.class)
+                .satisfies(ex -> assertThat(((MultiErrorException) ex).getFieldErrors()).containsOnlyKeys("reason"));
+    }
+
+    /** Decision context: requirement 10, gross 4, request 12 ⇒ extra 6; free stock 30 at the source. */
+    @Test
+    void getDetail_reportsTheDecisionContextOfAPendingRequest() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        component.setIssuedQuantity(new BigDecimal("4"));
+        MaterialIssue pending = pendingIssue(workOrder, component, workOrder.getOutputWarehouse(), new BigDecimal("12"));
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(inventoryAvailabilityService.getStockBalanceForIssue(any(), any(), any())).thenReturn(StockBalance.builder()
+                .quantity(new BigDecimal("35")).reservedQuantity(new BigDecimal("5")).build());
+
+        var detail = service.getDetail(pending.getIssueId());
+
+        var context = detail.decisionContext().get(0);
+        assertThat(context.requiredQuantity()).isEqualByComparingTo("10");
+        assertThat(context.grossIssuedQuantity()).isEqualByComparingTo("4");
+        assertThat(context.batchRequestedQuantity()).isEqualByComparingTo("12");
+        assertThat(context.extraRequestedQuantity()).isEqualByComparingTo("6");
+        assertThat(context.currentAvailability()).isEqualByComparingTo("30");
+        assertThat(detail.issue().version()).isEqualTo(0L);
+    }
+
+    /** Once posted there is nothing left to decide: the "extra over the BOM" figure is null, not a stale number. */
+    @Test
+    void getDetail_ofAPostedIssue_reportsNoExtraOverTheBom() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine component = workOrder.getComponentLines().get(0);
+        component.setIssuedQuantity(new BigDecimal("16"));
+        MaterialIssue posted = pendingIssue(workOrder, component, workOrder.getOutputWarehouse(), new BigDecimal("12"));
+        posted.markPosted(Instant.now(), null);
+        when(issueRepository.findWithLinesByIssueId(posted.getIssueId())).thenReturn(Optional.of(posted));
+        freeStockIsPlentiful();
+
+        var context = service.getDetail(posted.getIssueId()).decisionContext().get(0);
+
+        assertThat(context.extraRequestedQuantity()).isNull();
+        assertThat(context.batchRequestedQuantity()).isEqualByComparingTo("12");
+    }
+
     private MaterialIssue pendingIssueNamingLotById(WorkOrder workOrder,
                                                     WorkOrderComponentLine componentLine,
                                                     UUID lotId) {
@@ -276,7 +613,7 @@ class MaterialIssueServiceTest {
                 .thenReturn(reservation);
         when(movementService.issueReserved(any(InventoryIssueCommand.class), eq("KEY-ISSUE:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
                 new MaterialIssueLineRequest(
@@ -288,7 +625,7 @@ class MaterialIssueServiceTest {
                         null,
                         new BigDecimal("4"),
                         "Issue reserved",
-                        null))), "KEY-ISSUE");
+                        null)), 0L, null), "KEY-ISSUE");
 
         assertThat(reservation.getConsumedQuantity()).isEqualByComparingTo("4");
         assertThat(reservation.getStatus()).isEqualTo(MaterialReservationStatus.ACTIVE);
@@ -328,19 +665,19 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
         when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-SERIAL:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         MaterialIssueLineRequest lineRequest = new MaterialIssueLineRequest(
                 line.getComponentLineId(), null, warehouse.getWarehouseId(), null, null,
                 serialId, BigDecimal.ONE, null, null);
-        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest)), "KEY-SERIAL");
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest), 0L, null), "KEY-SERIAL");
 
         ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
         verify(movementService).issue(commandCaptor.capture(), eq("KEY-SERIAL:L1"));
         assertThat(commandCaptor.getValue().serialId()).isEqualTo(serialId);
 
         ArgumentCaptor<MaterialIssue> issueCaptor = ArgumentCaptor.forClass(MaterialIssue.class);
-        verify(issueRepository).save(issueCaptor.capture());
+        verify(issueRepository).saveAndFlush(issueCaptor.capture());
         assertThat(issueCaptor.getValue().getLines().get(0).getSerial().getSerialId()).isEqualTo(serialId);
     }
 
@@ -371,12 +708,12 @@ class MaterialIssueServiceTest {
                 .thenReturn(reservation);
         when(movementService.issueReserved(any(InventoryIssueCommand.class), eq("KEY-SERIAL-RES:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         MaterialIssueLineRequest lineRequest = new MaterialIssueLineRequest(
                 line.getComponentLineId(), reservation.getReservationId(), warehouse.getWarehouseId(), null, null,
                 serialId, BigDecimal.ONE, null, null);
-        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest)), "KEY-SERIAL-RES");
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest), 0L, null), "KEY-SERIAL-RES");
 
         ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
         verify(movementService).issueReserved(commandCaptor.capture(), eq("KEY-SERIAL-RES:L1"));
@@ -396,7 +733,7 @@ class MaterialIssueServiceTest {
 
         UUID workOrderId = workOrder.getWorkOrderId();
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, BigDecimal.ONE, null)));
+                issueLine(line, warehouse, BigDecimal.ONE, null)), 0L, null);
 
         assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-BLOCKED"))
                 .isInstanceOf(AppException.class)
@@ -404,7 +741,7 @@ class MaterialIssueServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService);
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
     }
 
     /** P6: a CLOSED work order must not be able to issue material — it is locked completely. */
@@ -419,7 +756,7 @@ class MaterialIssueServiceTest {
 
         UUID workOrderId = workOrder.getWorkOrderId();
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, BigDecimal.ONE, null)));
+                issueLine(line, warehouse, BigDecimal.ONE, null)), 0L, null);
 
         assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-CLOSED"))
                 .isInstanceOf(AppException.class)
@@ -427,7 +764,7 @@ class MaterialIssueServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService);
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -443,13 +780,13 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
         when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-WITHIN:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("10"), null))), "KEY-WITHIN");
+                issueLine(line, warehouse, new BigDecimal("10"), null)), 0L, null), "KEY-WITHIN");
 
         ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
-        verify(issueRepository).save(captor.capture());
+        verify(issueRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getLines().get(0).isOverIssue()).isFalse();
         verifyNoInteractions(workOrderPermissionGuard);
     }
@@ -467,10 +804,10 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
         when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-COST:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("4"), null))), "KEY-COST");
+                issueLine(line, warehouse, new BigDecimal("4"), null)), 0L, null), "KEY-COST");
 
         verify(costAccumulatorService).accumulateMaterialCost(workOrder, line.getComponentItem(), new BigDecimal("4"));
     }
@@ -484,7 +821,7 @@ class MaterialIssueServiceTest {
 
         when(issueRepository.findWithLinesByIdempotencyKey("KEY-REPLAY")).thenReturn(Optional.of(existing));
 
-        service.postInternal(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of()), "KEY-REPLAY");
+        service.postInternal(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(), 0L, null), "KEY-REPLAY");
 
         verifyNoInteractions(costAccumulatorService);
     }
@@ -500,10 +837,11 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        freeStockIsPlentiful(); // G8b (FE Q10): a pending request's source must hold the stock now
 
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("99"), "Needs rework")));
+                issueLine(line, warehouse, new BigDecimal("99"), "Needs rework")), 0L, null);
         UUID workOrderId = workOrder.getWorkOrderId();
 
         MaterialIssueResponse response = service.post(workOrderId, request, "KEY-OVER");
@@ -526,7 +864,7 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
 
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("12"), "   ")));
+                issueLine(line, warehouse, new BigDecimal("12"), "   ")), 0L, null);
         UUID workOrderId = workOrder.getWorkOrderId();
 
         assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-BLANK"))
@@ -535,7 +873,7 @@ class MaterialIssueServiceTest {
                         .isEqualTo(ValidationErrorCode.MISSING_REQUIRED_FIELD));
 
         verify(movementService, never()).issue(any(), anyString());
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -549,13 +887,14 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        freeStockIsPlentiful(); // G8b (FE Q10): a pending request's source must hold the stock now
 
         MaterialIssueResponse response = service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("12"), " Scrap rework "))), "KEY-APPROVED");
+                issueLine(line, warehouse, new BigDecimal("12"), " Scrap rework ")), 0L, null), "KEY-APPROVED");
 
         ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
-        verify(issueRepository).save(captor.capture());
+        verify(issueRepository).saveAndFlush(captor.capture());
         MaterialIssueLine savedLine = captor.getValue().getLines().get(0);
         assertThat(savedLine.isOverIssue()).isTrue();
         assertThat(savedLine.getOverrideReason()).isEqualTo("Scrap rework");
@@ -586,7 +925,7 @@ class MaterialIssueServiceTest {
                 warehouse.getWarehouseId(), workOrder.getPlant().getPlantId())).thenReturn(warehouse);
 
         MaterialIssuePostRequest request = new MaterialIssuePostRequest("Issue", List.of(
-                issueLine(line, warehouse, new BigDecimal("25"), "Rework")));
+                issueLine(line, warehouse, new BigDecimal("25"), "Rework")), 0L, null);
         UUID workOrderId = workOrder.getWorkOrderId();
 
         assertThatThrownBy(() -> service.post(workOrderId, request, "KEY-NOLOT"))
@@ -594,7 +933,7 @@ class MaterialIssueServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.LOT_REQUIRED));
 
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService);
     }
 
@@ -613,17 +952,18 @@ class MaterialIssueServiceTest {
                 .thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(
                 warehouse.getWarehouseId(), workOrder.getPlant().getPlantId())).thenReturn(warehouse);
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        freeStockIsPlentiful(); // G8b (FE Q10): a pending request's source must hold the stock now
 
         MaterialIssueResponse response = service.post(workOrder.getWorkOrderId(),
                 new MaterialIssuePostRequest("Issue", List.of(new MaterialIssueLineRequest(
                         line.getComponentLineId(), null, warehouse.getWarehouseId(), lotId, null, null,
-                        new BigDecimal("25"), null, "Rework", MaterialIssueReasonCode.REWORK, null))),
+                        new BigDecimal("25"), null, "Rework", MaterialIssueReasonCode.REWORK, null)), 0L, null),
                 "KEY-WITHLOT");
 
         assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
         ArgumentCaptor<MaterialIssue> captor = ArgumentCaptor.forClass(MaterialIssue.class);
-        verify(issueRepository).save(captor.capture());
+        verify(issueRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getLines().get(0).getRequestedLotId()).isEqualTo(lotId);
         verifyNoInteractions(movementService);
     }
@@ -644,9 +984,9 @@ class MaterialIssueServiceTest {
         when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
         when(movementService.issue(any(InventoryIssueCommand.class), eq(pending.getIdempotencyKey() + ":approve:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        MaterialIssueResponse response = service.approve(workOrder.getWorkOrderId(), pending.getIssueId());
+        MaterialIssueResponse response = service.approve(workOrder.getWorkOrderId(), pending.getIssueId(), new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null);
 
         assertThat(response.status()).isEqualTo(MaterialIssueStatus.POSTED.name());
         assertThat(line.getIssuedQuantity()).isEqualByComparingTo("12");
@@ -665,13 +1005,13 @@ class MaterialIssueServiceTest {
 
         when(issueRepository.findWithLinesByIssueId(issueId)).thenReturn(Optional.of(posted));
 
-        assertThatThrownBy(() -> service.approve(workOrderId, issueId))
+        assertThatThrownBy(() -> service.approve(workOrderId, issueId, new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService, wipTransactionService, costAccumulatorService);
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
     }
 
     /** DEC-09 requires a reason on reject; a silent rejection leaves the operator no explanation. */
@@ -682,17 +1022,17 @@ class MaterialIssueServiceTest {
         MaterialIssue pending = pendingIssue(workOrder, line, workOrder.getOutputWarehouse(), new BigDecimal("12"));
         UUID workOrderId = workOrder.getWorkOrderId();
         UUID issueId = pending.getIssueId();
-        MaterialIssueDecisionRequest blank = new MaterialIssueDecisionRequest("   ");
+        MaterialIssueVersionedDecisionRequest blank = new MaterialIssueVersionedDecisionRequest(0L, 0L, "   ");
 
         when(issueRepository.findWithLinesByIssueId(issueId)).thenReturn(Optional.of(pending));
 
-        assertThatThrownBy(() -> service.reject(workOrderId, issueId, blank))
+        assertThatThrownBy(() -> service.reject(workOrderId, issueId, blank, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.APPROVAL_REASON_REQUIRED));
 
         assertThat(pending.getStatus()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL);
-        verify(issueRepository, never()).save(any());
+        verify(issueRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService);
     }
 
@@ -703,15 +1043,22 @@ class MaterialIssueServiceTest {
         MaterialIssue pending = pendingIssue(workOrder, line, workOrder.getOutputWarehouse(), new BigDecimal("12"));
 
         when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
-        when(issueRepository.save(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         MaterialIssueResponse response = service.reject(workOrder.getWorkOrderId(), pending.getIssueId(),
-                new MaterialIssueDecisionRequest("  Not justified  "));
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, "  Not justified  "), null);
 
         assertThat(response.status()).isEqualTo(MaterialIssueStatus.REJECTED.name());
         assertThat(pending.getRejectionReason()).isEqualTo("Not justified");
         assertThat(line.getIssuedQuantity()).isZero();
         verifyNoInteractions(movementService, wipTransactionService, costAccumulatorService);
+    }
+
+    /** G8b: the stock pre-check of a pending request finds more than enough free stock at every source. */
+    private void freeStockIsPlentiful() {
+        lenient().when(inventoryAvailabilityService.getStockBalanceForIssue(any(), any(), any()))
+                .thenAnswer(invocation -> StockBalance.builder()
+                        .quantity(new BigDecimal("1000")).reservedQuantity(BigDecimal.ZERO).build());
     }
 
     private MaterialIssue pendingIssue(WorkOrder workOrder,
@@ -726,6 +1073,7 @@ class MaterialIssueServiceTest {
                 .idempotencyKey("KEY-PENDING")
                 .lines(new ArrayList<>())
                 .build();
+        issue.setVersion(0L);
         issue.getLines().add(MaterialIssueLine.builder()
                 .issueLineId(UUID.randomUUID())
                 .issue(issue)
@@ -812,6 +1160,7 @@ class MaterialIssueServiceTest {
                 .status(status)
                 .componentLines(new ArrayList<>())
                 .build();
+        workOrder.setVersion(0L);
         workOrder.getComponentLines().add(WorkOrderComponentLine.builder()
                 .componentLineId(UUID.randomUUID())
                 .workOrder(workOrder)

@@ -74,6 +74,15 @@ public class MaterialIssue extends BaseEntity {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    /** G8b (V80): requested as a supplemental issue — free stock, a reason on every line. */
+    @Column(name = "supplemental", nullable = false)
+    @Builder.Default
+    private boolean supplemental = false;
+
+    /** G8b (V80): why the requester withdrew a pending request; never a manager's reason. */
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
+    private String cancellationReason;
+
     @OneToMany(mappedBy = "issue", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<MaterialIssueLine> lines = new ArrayList<>();
@@ -106,6 +115,14 @@ public class MaterialIssue extends BaseEntity {
         postedAt = now;
         decidedAt = now;
         decidedBy = actor;
+    }
+
+    /** G8b: the requester withdraws a pending request. No stock effect — nothing was ever posted. */
+    public void cancelByRequester(Instant now, UUID actor, String reason) {
+        status = MaterialIssueStatus.CANCELLED;
+        decidedAt = now;
+        decidedBy = actor;
+        cancellationReason = reason;
     }
 
     public void reject(Instant now, UUID actor, String reason) {

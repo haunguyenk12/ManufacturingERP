@@ -381,7 +381,8 @@ public class WorkOrderService {
         WorkOrder workOrder = findWorkOrder(workOrderId);
         // Fail before any state check (C9): a caller who forgot the reason should be told that,
         // not told the work order is in the wrong status.
-        String reason = trimToNull(request == null ? null : request.reason());
+        // G8b (FE Q33): present but shorter than 5 or longer than 2000 characters is a field error.
+        String reason = ReasonRules.lengthChecked(request == null ? null : request.reason(), "reason");
         if (reason == null) {
             throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED,
                     "Cancel reason is required");

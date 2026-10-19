@@ -53,7 +53,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         MaterialIssue first = persistIssue(persistWorkOrder(fixture));
         MaterialIssue second = persistIssue(persistWorkOrder(fixture));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactlyInAnyOrder(first.getIssueId(), second.getIssueId());
     }
@@ -66,7 +66,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(persistWorkOrder(fixture));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), wanted.getWorkOrderId(), null, PageRequest.of(0, 20)))
+                fixture.plant.getPlantId(), wanted.getWorkOrderId(), null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(mine.getIssueId());
     }
@@ -80,7 +80,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         MaterialIssue mine = persistIssue(persistWorkOrder(fixture));
         persistIssue(persistWorkOrder(other));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(mine.getIssueId());
     }
@@ -99,7 +99,7 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(persistWorkOrder(fixture));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), foreign.getWorkOrderId(), null, PageRequest.of(0, 20)))
+                fixture.plant.getPlantId(), foreign.getWorkOrderId(), null, null, null, null, PageRequest.of(0, 20)))
                 .isEmpty();
     }
 
@@ -204,14 +204,14 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(workOrder, MaterialIssueStatus.REJECTED);
 
         UUID plantId = fixture.plant.getPlantId();
-        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.PENDING_APPROVAL,
+        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.PENDING_APPROVAL, null, null, null,
                 PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(pending.getIssueId());
-        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.POSTED, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(plantId, null, MaterialIssueStatus.POSTED, null, null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(posted.getIssueId());
-        assertThat(repository.findByPlant(plantId, null, null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(plantId, null, null, null, null, null, PageRequest.of(0, 20)))
                 .hasSize(3);
     }
 
@@ -224,9 +224,47 @@ class MaterialIssueRepositoryIT extends AbstractPostgresIntegrationTest {
         persistIssue(persistWorkOrder(other), MaterialIssueStatus.PENDING_APPROVAL);
 
         assertThat(repository.findByPlant(fixture.plant.getPlantId(), null,
-                MaterialIssueStatus.PENDING_APPROVAL, PageRequest.of(0, 20)))
+                MaterialIssueStatus.PENDING_APPROVAL, null, null, null, PageRequest.of(0, 20)))
                 .extracting(MaterialIssue::getIssueId)
                 .containsExactly(mine.getIssueId());
+    }
+
+    /**
+     * G8b: free text matches the document code or the work order number (case-insensitive), a missing
+     * term returns everything (the {@code lower(bytea)} trap of CLAUDE.md §0.24), and the day range is a
+     * half-open window on {@code requestedAt}.
+     */
+    @Test
+    void findByPlant_searchesCodeAndWorkOrderNumber_andFiltersARequestedAtWindow() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        MaterialIssue early = persistIssue(workOrder, MaterialIssueStatus.PENDING_APPROVAL);
+        MaterialIssue late = persistIssue(workOrder, MaterialIssueStatus.PENDING_APPROVAL);
+        Instant noon = Instant.parse("2026-10-19T12:00:00Z");
+        entityManager.getEntityManager().createQuery(
+                        "update MaterialIssue i set i.requestedAt = :at where i.issueId = :id")
+                .setParameter("at", noon.minusSeconds(3600)).setParameter("id", early.getIssueId()).executeUpdate();
+        entityManager.getEntityManager().createQuery(
+                        "update MaterialIssue i set i.requestedAt = :at where i.issueId = :id")
+                .setParameter("at", noon.plusSeconds(3600)).setParameter("id", late.getIssueId()).executeUpdate();
+        entityManager.clear();
+        UUID plantId = fixture.plant.getPlantId();
+
+        assertThat(repository.findByPlant(plantId, null, null, late.getCode().toLowerCase(), null, null,
+                PageRequest.of(0, 20))).extracting(MaterialIssue::getIssueId).containsExactly(late.getIssueId());
+        assertThat(repository.findByPlant(plantId, null, null, workOrder.getWorkOrderNo().toLowerCase(), null, null,
+                PageRequest.of(0, 20))).hasSize(2);
+        assertThat(repository.findByPlant(plantId, null, null, "NO-SUCH-DOCUMENT", null, null,
+                PageRequest.of(0, 20))).isEmpty();
+        assertThat(repository.findByPlant(plantId, null, null, null, noon, null, PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId).containsExactly(late.getIssueId());
+        assertThat(repository.findByPlant(plantId, null, null, null, null, noon, PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId).containsExactly(early.getIssueId());
+        assertThat(repository.findByPlant(plantId, null, null, null, noon.plusSeconds(3600), null, PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId).containsExactly(late.getIssueId());
+        // Half-open: an issue requested exactly at the end of the window belongs to the next day.
+        assertThat(repository.findByPlant(plantId, null, null, null, null, noon.plusSeconds(3600), PageRequest.of(0, 20)))
+                .extracting(MaterialIssue::getIssueId).containsExactly(early.getIssueId());
     }
 
     @Test

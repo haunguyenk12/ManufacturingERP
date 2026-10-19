@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -77,6 +78,8 @@ class ManufacturingExecutionControllerTest {
     @Autowired
     MockMvc mockMvc;
 
+    @MockBean
+    com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService materialIssueCandidateService;
     @MockBean
     MaterialReservationService reservationService;
     @MockBean
@@ -334,7 +337,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("flat material issues: plant-scoped list forwards the optional workOrderId (spec §4.1)")
     void listMaterialIssuesByPlant_forwardsTheWorkOrderFilter() throws Exception {
-        when(materialIssueService.listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), any()))
+        when(materialIssueService.listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/material-issues")
@@ -343,14 +346,14 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
-        verify(materialIssueService).listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), any());
+        verify(materialIssueService).listByPlant(eq(PLANT_ID), eq(WORK_ORDER_ID), isNull(), isNull(), isNull(), isNull(), any());
     }
 
     @Test
     @DisplayName("flat material issues: status=PENDING_APPROVAL reaches the service as the approval queue")
     void listMaterialIssuesByPlant_forwardsTheStatusFilter() throws Exception {
         when(materialIssueService.listByPlant(
-                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), any()))
+                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/material-issues")
@@ -360,7 +363,7 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
 
         verify(materialIssueService).listByPlant(
-                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), any());
+                eq(PLANT_ID), isNull(), eq(MaterialIssueStatus.PENDING_APPROVAL), isNull(), isNull(), isNull(), any());
     }
 
     @Test
@@ -465,5 +468,89 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.result.totalPages").value(1))
                 .andExpect(jsonPath("$.result.first").value(true))
                 .andExpect(jsonPath("$.result.last").value(true));
+    }
+
+    @Test
+    @DisplayName("G8b cancel: forwards both versions, the reason and the Idempotency-Key")
+    void cancelMaterialIssue_forwardsBodyAndKey() throws Exception {
+        UUID issueId = UUID.randomUUID();
+        when(materialIssueService.cancelByRequester(eq(WORK_ORDER_ID), eq(issueId), any(), eq("KEY-C")))
+                .thenReturn(new com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueResponse(
+                        issueId, "MI-1", WORK_ORDER_ID, "WO-1", "CANCELLED", null, null, null, null, null,
+                        List.of(), null, null, null, null));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/material-issues/" + issueId + "/cancel")
+                        .header("Idempotency-Key", "KEY-C")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":3,\"expectedIssueVersion\":1,\"reason\":\"Wrong lot\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("CANCELLED"));
+
+        verify(materialIssueService).cancelByRequester(eq(WORK_ORDER_ID), eq(issueId),
+                argThat(r -> r.expectedWorkOrderVersion() == 3L && r.expectedIssueVersion() == 1L
+                        && "Wrong lot".equals(r.reason())), eq("KEY-C"));
+    }
+
+    @Test
+    @DisplayName("G8b approve: a missing issue version is a 400 naming the field, before the service")
+    void approveMaterialIssue_withoutIssueVersion_returns400() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/material-issues/" + UUID.randomUUID() + "/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":3}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("expectedIssueVersion"));
+
+        verifyNoInteractions(materialIssueService);
+    }
+
+    @Test
+    @DisplayName("G8b detail: GET /v1/material-issues/{id} returns the issue with its decision context")
+    void getMaterialIssue_returnsDetail() throws Exception {
+        UUID issueId = UUID.randomUUID();
+        when(materialIssueService.getDetail(issueId)).thenReturn(
+                new com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueDetailResponse(
+                        new com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueResponse(
+                                issueId, "MI-1", WORK_ORDER_ID, "WO-1", "PENDING_APPROVAL", null, null, null, null,
+                                null, List.of(), null, null, null, null),
+                        List.of()));
+
+        mockMvc.perform(get("/v1/material-issues/" + issueId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.issue.status").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.result.decisionContext").isArray());
+    }
+
+    @Test
+    @DisplayName("G8b candidates: mode and component reach the service; NORMAL is the default")
+    void materialIssueCandidates_forwardsModeAndComponent() throws Exception {
+        UUID componentLineId = UUID.randomUUID();
+        when(materialIssueCandidateService.candidates(eq(WORK_ORDER_ID), eq(componentLineId),
+                eq(com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService.Mode.SUPPLEMENTAL),
+                any())).thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+        when(materialIssueCandidateService.candidates(eq(WORK_ORDER_ID), isNull(),
+                eq(com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService.Mode.NORMAL),
+                any())).thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/material-issue-candidates")
+                        .param("componentLineId", componentLineId.toString())
+                        .param("mode", "SUPPLEMENTAL"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/material-issue-candidates"))
+                .andExpect(status().isOk());
+
+        verify(materialIssueCandidateService).candidates(eq(WORK_ORDER_ID), isNull(),
+                eq(com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService.Mode.NORMAL),
+                any());
+    }
+
+    @Test
+    @DisplayName("G8b candidates: an unknown mode is a 400, not an ignored parameter")
+    void materialIssueCandidates_unknownMode_returns400() throws Exception {
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/material-issue-candidates").param("mode", "ALL"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(materialIssueCandidateService);
     }
 }

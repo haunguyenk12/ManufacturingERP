@@ -737,7 +737,7 @@ print(json.dumps([{'componentLineId': r['componentLineId'],
                    'reason': 'Issue to production'} for r in c]))
 ")
     call POST "/v1/work-orders/$wo/material-issues" \
-        "{\"note\":\"Material issued against the bill of materials\",\"lines\":$lines}" \
+        "{\"note\":\"Material issued against the bill of materials\",\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"lines\":$lines}" \
         -H "Idempotency-Key: $key" >/dev/null
 }
 

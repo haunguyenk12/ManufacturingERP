@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("79");
+        assertThat(current.getVersion().getVersion()).isEqualTo("80");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -428,6 +428,33 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                 assertThat(definitions.get("uk_work_order_idempotency_key_command"))
                         .contains("UNIQUE (idempotency_key, command)");
             }
+        }
+    }
+
+    /**
+     * G8b / {@code V80}: every existing issue is a normal (not supplemental) request, and a requester's
+     * withdrawal reason has its own nullable column.
+     */
+    @Test
+    void migrate_v80_addsSupplementalFlagAndCancellationReasonToMaterialIssues() throws Exception {
+        migratePublicSchema();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT column_name, is_nullable, column_default FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'material_issues'
+                       AND column_name IN ('supplemental', 'cancellation_reason')
+                     """)) {
+            java.util.Map<String, String> nullable = new java.util.HashMap<>();
+            java.util.Map<String, String> defaults = new java.util.HashMap<>();
+            while (rows.next()) {
+                nullable.put(rows.getString("column_name"), rows.getString("is_nullable"));
+                defaults.put(rows.getString("column_name"), rows.getString("column_default"));
+            }
+            assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
+            assertThat(defaults.get("supplemental")).isEqualTo("false");
         }
     }
 

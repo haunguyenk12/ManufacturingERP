@@ -606,6 +606,23 @@ Từ `BLOCKED` vẫn **reserve tiếp được** để thoát ra — đó là đ
 > serial-tracked phải là `quantity: 1` kèm `serialId` cụ thể, nên phải đi qua `lines[]` với **N dòng**
 > cho N đơn vị (mỗi dòng gọi `movementService.issue` một serial riêng).
 
+#### 🔴 G8b (2026-10-19) — phiếu cấp nhiều dòng: version, phiếu bổ sung, huỷ của người tạo
+
+- `POST /work-orders/{W}/material-issues` **bắt buộc** `expectedWorkOrderVersion` (thiếu ⇒ `400` field; lệch ⇒ `409 CONCURRENT_MODIFICATION`).
+  Body thêm `supplemental` (tuỳ chọn): `false` + vượt định mức ⇒ **`409 OVER_BOM_APPROVAL_REQUIRED`** field `lines[i].quantity` (không tự thành
+  phiếu chờ); `true` ⇒ phiếu bổ sung — không nêu `reservationId`, mỗi dòng cần `reasonCode` + `overrideReason` (5–2000 ký tự), lấy tồn tự do ở
+  **mọi** kho `ACTIVE` của nhà máy; vượt định mức thì **cả phiếu** chờ duyệt. Vắng `supplemental` = hành vi cũ (vượt ⇒ chờ duyệt).
+- Vượt định mức xét **theo dòng vật tư trên cả phiếu** (đã cấp + mọi dòng của phiếu), không từng dòng.
+- Dòng thường không reservation phải lấy đúng kho của dòng vật tư (nếu dòng có kho) ⇒ `422 RESOURCE_SCOPE_MISMATCH` field `lines[i].warehouseId`.
+- Phiếu chờ không giữ tồn nhưng nguồn phải đủ tồn tự do lúc tạo ⇒ `409 INSUFFICIENT_AVAILABLE_STOCK` field `lines[i].quantity`.
+- Duyệt / từ chối / huỷ: body `{expectedWorkOrderVersion, expectedIssueVersion, reason?}` — **cả hai** version bắt buộc; `Idempotency-Key` tuỳ chọn.
+  Từ chối và huỷ cần `reason` 5–2000 ký tự. **Tự duyệt** phiếu của mình cần thêm `PERM_MATERIAL_ISSUE_OVERRIDE` (thiếu ⇒ `403`).
+- **Mới:** `POST /work-orders/{W}/material-issues/{I}/cancel` — chỉ người tạo, `PENDING_APPROVAL → CANCELLED`, không biến động kho (người khác ⇒ `403`).
+- **Mới:** `GET /material-issues/{I}` → `{issue, decisionContext[]}` (required / gross / batch / `extraRequestedQuantity` chỉ khi chờ duyệt / tồn hiện tại).
+- **Mới:** `GET /work-orders/{W}/material-issue-candidates?componentLineId=&mode=NORMAL|SUPPLEMENTAL` — nguồn cấp + số gợi ý.
+- `MaterialIssueResponse` thêm `version`, `workOrderVersion`, `supplemental`, `requestedByUserId`, `cancellationReason`.
+- Đọc phiếu (list, chi tiết) mở cho `MANAGE` **hoặc** `APPROVE` **hoặc** `OVERRIDE`. List nhà máy thêm `search` + `fromDate`/`toDate` (ngày nhà máy trên `requestedAt`).
+
 #### 🔴 Xuất vượt định mức (Over-BOM) nay là hai bước — `DEC-09`
 
 Trước đây một dòng vượt định mức kèm `overrideReason` **ghi tồn kho ngay**. Nay **không**:
@@ -651,7 +668,9 @@ Xem lịch sử: `GET /api/v1/material-issues?plantId={…}&workOrderId={…}` (
 | `409 INSUFFICIENT_AVAILABLE_STOCK` | Kho không đủ (kiểm lại **lúc duyệt**, không chỉ lúc đề nghị) |
 | `409 STATE_CONFLICT` | WO không ở `RELEASED`/`IN_PROGRESS`, hoặc chứng từ đã được quyết định rồi |
 | `409 OVER_BOM_APPROVAL_REQUIRED` | Nhiều dòng cùng một component cộng lại vượt định mức giữa chừng — gửi lại thành một đề nghị Over-BOM |
-| `400 APPROVAL_REASON_REQUIRED` | `reject` thiếu `reason` |
+| `400 APPROVAL_REASON_REQUIRED` | `reject`/`cancel` thiếu `reason` |
+| `400 VALIDATION_ERROR` field `reason` | lý do ngắn hơn 5 hoặc dài hơn 2000 ký tự (G8b) |
+| `403 PERMISSION_DENIED` | tự duyệt không có `OVERRIDE`; huỷ phiếu của người khác (G8b) |
 
 ---
 
@@ -860,7 +879,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Xuất 1 dòng | `POST /material-issues` | `PERM_MATERIAL_ISSUE_MANAGE` |
 | Xuất nhiều dòng / đề nghị Over-BOM | `POST /work-orders/{id}/material-issues` | `PERM_MATERIAL_ISSUE_MANAGE` |
 | Duyệt / từ chối đề nghị Over-BOM | `POST /work-orders/{id}/material-issues/{issueId}/approve\|reject` | **`PERM_MATERIAL_ISSUE_APPROVE`** (ADMIN + MANAGER) |
-| Lịch sử xuất (plant) | `GET /material-issues?plantId=&workOrderId=` | `PERM_MATERIAL_ISSUE_MANAGE` |
+| Huỷ đề nghị của chính mình (G8b) | `POST /work-orders/{id}/material-issues/{issueId}/cancel` | `PERM_MATERIAL_ISSUE_MANAGE` (chỉ người tạo) |
+| Lịch sử xuất (plant) / chi tiết phiếu | `GET /material-issues?plantId=&workOrderId=&search=&fromDate=&toDate=` · `GET /material-issues/{issueId}` | `MANAGE` **hoặc** `APPROVE` **hoặc** `OVERRIDE` (G8b) |
+| Ứng viên nguồn cấp (G8b) | `GET /work-orders/{id}/material-issue-candidates` | `PERM_MATERIAL_ISSUE_MANAGE` |
 | Candidate báo sản lượng | `GET /production-executions/candidates?plantId=` | `PERM_PRODUCTION_EXECUTION_READ` |
 | Báo sản lượng | `POST /work-orders/{id}/production-executions` | `PERM_PRODUCTION_EXECUTION_MANAGE` |
 | Lịch sử báo sản lượng | `GET /production-executions?workOrderId=` | `PERM_PRODUCTION_EXECUTION_READ` |

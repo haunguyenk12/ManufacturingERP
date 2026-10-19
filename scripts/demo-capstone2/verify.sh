@@ -194,7 +194,7 @@ out = [{'componentLineId': r['componentLineId'],
 print(json.dumps(out))
 ")
 ISSUE=$(call POST "/v1/work-orders/$WO/material-issues" \
-    "{\"note\":\"Xuất vật tư theo định mức\",\"lines\":$ISSUE_LINES}" \
+    "{\"note\":\"Xuất vật tư theo định mức\",\"expectedWorkOrderVersion\":$(wo_version "$WO"),\"lines\":$ISSUE_LINES}" \
     -H "Idempotency-Key: D26-VERIFY-ISSUE")
 info "phiếu xuất: $(echo "$ISSUE" | rid code)"
 pf "SMOKE-4" "xuất đủ 4 dòng thành phần" \

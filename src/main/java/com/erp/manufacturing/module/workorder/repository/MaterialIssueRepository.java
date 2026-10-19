@@ -9,10 +9,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface MaterialIssueRepository extends JpaRepository<MaterialIssue, UUID> {
+
+    /** G8b: resolves the work order of an issue for the permission guard, without loading the document. */
+    @Query("select i.workOrder.workOrderId from MaterialIssue i where i.issueId = :issueId")
+    Optional<UUID> findWorkOrderIdByIssueId(@Param("issueId") UUID issueId);
 
     /** G8a: a work order with an issue still waiting for a decision cannot be cancelled (FE R06). */
     boolean existsByWorkOrderWorkOrderIdAndStatus(UUID workOrderId, MaterialIssueStatus status);
@@ -60,16 +65,30 @@ public interface MaterialIssueRepository extends JpaRepository<MaterialIssue, UU
             where w.plant.plantId = :plantId
               and (:workOrderId is null or w.workOrderId = :workOrderId)
               and (:status is null or i.status = :status)
+              and (cast(:search as string) is null
+                   or lower(i.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:requestedFrom as timestamp) is null or i.requestedAt >= :requestedFrom)
+              and (cast(:requestedTo as timestamp) is null or i.requestedAt < :requestedTo)
             """,
             countQuery = """
             select count(i)
             from MaterialIssue i
-            where i.workOrder.plant.plantId = :plantId
-              and (:workOrderId is null or i.workOrder.workOrderId = :workOrderId)
+            join i.workOrder w
+            where w.plant.plantId = :plantId
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
               and (:status is null or i.status = :status)
+              and (cast(:search as string) is null
+                   or lower(i.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:requestedFrom as timestamp) is null or i.requestedAt >= :requestedFrom)
+              and (cast(:requestedTo as timestamp) is null or i.requestedAt < :requestedTo)
             """)
     Page<MaterialIssue> findByPlant(@Param("plantId") UUID plantId,
                                     @Param("workOrderId") UUID workOrderId,
                                     @Param("status") MaterialIssueStatus status,
+                                    @Param("search") String search,
+                                    @Param("requestedFrom") Instant requestedFrom,
+                                    @Param("requestedTo") Instant requestedTo,
                                     Pageable pageable);
 }

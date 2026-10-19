@@ -57,6 +57,7 @@ class ManufacturingExecutionMethodSecurityTest {
 
     @Autowired MaterialReservationService reservationService;
     @Autowired MaterialIssueService materialIssueService;
+    @Autowired MaterialIssueCandidateService candidateService;
     @Autowired ProductionReceiptService receiptService;
     @Autowired WipTransactionService wipTransactionService;
     @Autowired WorkOrderVarianceService varianceService;
@@ -316,11 +317,53 @@ class ManufacturingExecutionMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq("PLANT"), eq(plantId))).thenReturn(false);
 
-        assertThatThrownBy(() -> materialIssueService.listByPlant(plantId, null, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> materialIssueService.listByPlant(plantId, null, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verify(permissionGuard).hasResourceAccess(
                 any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq("PLANT"), eq(plantId));
+    }
+
+    /** G8b cancel: only the requester's permission to post issues, never approve alone. */
+    @Test
+    void cancelMaterialIssue_deniedWhenManagePermissionMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> materialIssueService.cancelByRequester(workOrderId, UUID.randomUUID(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, "Picked the wrong lot"), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq(workOrderId));
+    }
+
+    /** G8b detail: readable by whoever may post, approve or override — the guard receives all three. */
+    @Test
+    void materialIssueDetail_deniedWhenNoneOfTheThreePermissionsIsHeld() {
+        UUID issueId = UUID.randomUUID();
+        List<String> expected = List.of("PERM_MATERIAL_ISSUE_MANAGE", "PERM_MATERIAL_ISSUE_APPROVE",
+                "PERM_MATERIAL_ISSUE_OVERRIDE");
+        when(workOrderPermissionGuard.hasMaterialIssueAccess(any(), eq(expected), eq(issueId))).thenReturn(false);
+
+        assertThatThrownBy(() -> materialIssueService.getDetail(issueId)).isInstanceOf(AccessDeniedException.class);
+
+        verify(workOrderPermissionGuard).hasMaterialIssueAccess(any(), eq(expected), eq(issueId));
+    }
+
+    @Test
+    void materialIssueCandidates_deniedWhenManagePermissionMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> candidateService.candidates(workOrderId, null,
+                MaterialIssueCandidateService.Mode.NORMAL, PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq(workOrderId));
     }
 
     @Configuration
@@ -355,7 +398,16 @@ class ManufacturingExecutionMethodSecurityTest {
                     issueRepository, issueLineRepository, reservationService, movementService,
                     wipTransactionService, workOrderPermissionGuard, support,
                     new IdempotencySupport(new ObjectMapper()), mapper, new TraceIdProvider(),
-                    userLookupService, costAccumulatorService, inventoryLotLookupService);
+                    userLookupService, costAccumulatorService, inventoryLotLookupService,
+                    new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
+                            new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
+        }
+
+        @Bean
+        MaterialIssueCandidateService materialIssueCandidateService(MaterialReservationRepository reservationRepository,
+                                                                    StockBalanceRepository stockBalanceRepository,
+                                                                    WorkOrderExecutionSupport support) {
+            return new MaterialIssueCandidateService(reservationRepository, stockBalanceRepository, support);
         }
 
         @Bean

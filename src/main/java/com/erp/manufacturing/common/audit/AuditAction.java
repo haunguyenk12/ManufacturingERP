@@ -87,6 +87,7 @@ public enum AuditAction {
     MATERIAL_ISSUE_POSTED,
     MATERIAL_ISSUE_APPROVED,
     MATERIAL_ISSUE_REJECTED,
+    MATERIAL_ISSUE_CANCELLED,
     PRODUCTION_RECEIPT_CREATED,
     PRODUCTION_RECEIPT_SUBMITTED,
     /** Kept under the original name so historical audit_logs rows stay searchable after the

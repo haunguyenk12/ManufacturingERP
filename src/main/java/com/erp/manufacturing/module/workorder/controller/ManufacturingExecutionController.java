@@ -8,6 +8,7 @@ import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
 import com.erp.manufacturing.module.workorder.dto.variance.*;
 import com.erp.manufacturing.module.workorder.service.*;
+import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionExecutionService;
@@ -33,6 +34,7 @@ import java.util.UUID;
 public class ManufacturingExecutionController {
 
     private final MaterialReservationService reservationService;
+    private final MaterialIssueCandidateService materialIssueCandidateService;
     private final MaterialIssueService materialIssueService;
     private final WipTransactionService wipTransactionService;
     private final ProductionExecutionService productionExecutionService;
@@ -132,20 +134,61 @@ public class ManufacturingExecutionController {
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/material-issues/{issueId}/approve")
-    @Operation(summary = "Approve an Over-BOM material request and atomically post stock")
+    @Operation(summary = "Approve an Over-BOM material request and atomically post stock",
+            description = "G8b: body {expectedWorkOrderVersion, expectedIssueVersion, reason?} — both versions "
+                    + "required. Approving your own request also needs PERM_MATERIAL_ISSUE_OVERRIDE.")
     public ResponseEntity<ApiResponse<MaterialIssueResponse>> approveMaterialIssue(
             @PathVariable UUID workOrderId,
-            @PathVariable UUID issueId) {
-        return ResponseEntity.ok(ApiResponse.ok(materialIssueService.approve(workOrderId, issueId)));
+            @PathVariable UUID issueId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody MaterialIssueVersionedDecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(materialIssueService.approve(workOrderId, issueId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/material-issues/{issueId}/reject")
-    @Operation(summary = "Reject an Over-BOM material request without stock impact")
+    @Operation(summary = "Reject an Over-BOM material request without stock impact",
+            description = "G8b: body {expectedWorkOrderVersion, expectedIssueVersion, reason} — reason 5–2000 characters.")
     public ResponseEntity<ApiResponse<MaterialIssueResponse>> rejectMaterialIssue(
             @PathVariable UUID workOrderId,
             @PathVariable UUID issueId,
-            @Valid @RequestBody MaterialIssueDecisionRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(materialIssueService.reject(workOrderId, issueId, request)));
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody MaterialIssueVersionedDecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(materialIssueService.reject(workOrderId, issueId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/material-issues/{issueId}/cancel")
+    @Operation(summary = "Withdraw your own pending material request",
+            description = "G8b: only the requester; PENDING_APPROVAL → CANCELLED, no stock effect. Body "
+                    + "{expectedWorkOrderVersion, expectedIssueVersion, reason} — reason 5–2000 characters.")
+    public ResponseEntity<ApiResponse<MaterialIssueResponse>> cancelMaterialIssue(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID issueId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody MaterialIssueVersionedDecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                materialIssueService.cancelByRequester(workOrderId, issueId, request, idempotencyKey)));
+    }
+
+    @GetMapping("/v1/material-issues/{issueId}")
+    @Operation(summary = "One material issue with its decision context",
+            description = "G8b: the issue plus, per component, requirement / gross issued / requested / extra over "
+                    + "the BOM / current availability of its sources. Readable with MANAGE, APPROVE or OVERRIDE.")
+    public ResponseEntity<ApiResponse<MaterialIssueDetailResponse>> getMaterialIssue(@PathVariable UUID issueId) {
+        return ResponseEntity.ok(ApiResponse.ok(materialIssueService.getDetail(issueId)));
+    }
+
+    @GetMapping("/v1/work-orders/{workOrderId}/material-issue-candidates")
+    @Operation(summary = "Where each component can be issued from",
+            description = "G8b: mode=NORMAL (default) lists the work order's own active reservations with a "
+                    + "quick-fill amount; mode=SUPPLEMENTAL lists free, eligible stock in every warehouse of the plant.")
+    public ResponseEntity<ApiResponse<PageResult<MaterialIssueCandidateResponse>>> materialIssueCandidates(
+            @PathVariable UUID workOrderId,
+            @RequestParam(required = false) UUID componentLineId,
+            @RequestParam(defaultValue = "NORMAL") MaterialIssueCandidateService.Mode mode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(materialIssueCandidateService.candidates(
+                workOrderId, componentLineId, mode, PageableFactory.of(page, size, "createdAt", "desc"))));
     }
 
     /**
@@ -164,13 +207,19 @@ public class ManufacturingExecutionController {
             @RequestParam UUID plantId,
             @RequestParam(required = false) UUID workOrderId,
             @RequestParam(required = false) MaterialIssueStatus status,
+            // G8b: issue code or work order number; plant-local days on requestedAt, both ends inclusive.
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate fromDate,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate toDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "requestedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(materialIssueService.listByPlant(
-                plantId, workOrderId, status, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, workOrderId, status, search, fromDate, toDate, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     /**

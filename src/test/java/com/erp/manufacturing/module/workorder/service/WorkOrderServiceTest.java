@@ -532,6 +532,24 @@ class WorkOrderServiceTest {
         verifyNoInteractions(materialReservationService);
     }
 
+    /** G8b (FE Q33): a cancel reason is 5–2000 characters after trimming; a short one names the field. */
+    @Test
+    void cancel_withATooShortReason_failsOnTheReasonFieldBeforeTouchingAnything() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.cancel(workOrderId, new WorkOrderCancelRequest(" bad ", 0L), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.INVALID_INPUT));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.DRAFT);
+        verify(workOrderRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(materialReservationService);
+    }
+
     @Test
     void issueComponent_delegatesToMaterialIssueDocumentService() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
