@@ -72,4 +72,21 @@ public interface ProductionExecutionRepository extends JpaRepository<ProductionE
             group by e.sourceExecutionId
             """)
     List<KeyedQuantityProjection> sumRetryProcessedBySource(@Param("sourceExecutionIds") Collection<UUID> sourceExecutionIds);
+
+    /**
+     * G8d: rework recorded and rework processed again by retries, per work order of a WIP page — one query for the
+     * page (C14). Pending rework of a work order = {@code rework − retryProcessed}: every retry processes rework of a
+     * source of the same work order, never more than that source had pending.
+     */
+    @Query("""
+            select e.workOrder.workOrderId as workOrderId,
+                   coalesce(sum(e.reworkQuantity), 0) as rework,
+                   coalesce(sum(case when e.sourceExecutionId is not null
+                                     then e.goodQuantity + e.scrapQuantity + e.reworkQuantity
+                                     else cast(0 as BigDecimal) end), 0) as retryProcessed
+            from ProductionExecution e
+            where e.workOrder.workOrderId in :workOrderIds
+            group by e.workOrder.workOrderId
+            """)
+    List<WorkOrderReworkTotals> sumReworkByWorkOrderIds(@Param("workOrderIds") Collection<UUID> workOrderIds);
 }

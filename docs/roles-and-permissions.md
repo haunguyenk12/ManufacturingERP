@@ -237,6 +237,9 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_PRODUCTION_RECEIPT_APPROVE` | Duyệt / Từ chối Production Receipt đang chờ (Gate 1c) |
 | `PERM_PRODUCTION_EXECUTION_MANAGE` | Báo cáo sản lượng xưởng (`F5`, `V33`) – MANAGER cũng có để sửa/bổ sung thay ca |
 | `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng (`F5`, `V33`) |
+| `PERM_WIP_READ` | **[G8d, `V82`]** Xem dở dang: `GET /v1/plants/{P}/wip`, `GET /v1/work-orders/{W}/wip` — vật tư (cấp / đã dùng / đã hoàn / chưa dùng), công đoạn, làm lại chờ, thành phẩm chờ nhập kho. Chỉ đọc, không mở thao tác nào. ADMIN + MANAGER |
+| `PERM_MATERIAL_RETURN_READ` | **[G8d, `V82`]** Xem phiếu hoàn vật tư (danh sách theo nhà máy, chi tiết). `_MANAGE` cũng đọc được. ADMIN + MANAGER |
+| `PERM_MATERIAL_RETURN_MANAGE` | **[G8d, `V82`]** Hoàn vật tư chưa dùng về đúng kho/lô nguồn của dòng cấp (`POST /v1/work-orders/{W}/material-returns`) + xem ứng viên hoàn. ADMIN + MANAGER — OPERATOR **không** được cấp ngầm (FE Q34) |
 
 ### Quality Control
 | Quyền | Mô tả |

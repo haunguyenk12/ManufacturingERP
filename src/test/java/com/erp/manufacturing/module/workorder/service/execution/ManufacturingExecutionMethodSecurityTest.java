@@ -612,7 +612,8 @@ class ManufacturingExecutionMethodSecurityTest {
             return new ProductionExecutionService(executionRepository, operationRepository, workOrderRepository,
                     wipTransactionService, support, mapper, new IdempotencySupport(new ObjectMapper()),
                     new TraceIdProvider(), auditorAware, userLookupService, costAccumulatorService, ledger,
-                    consumptionRepository, issueLineRepository);
+                    consumptionRepository, issueLineRepository,
+                    mock(com.erp.manufacturing.module.workorder.repository.MaterialReturnLineRepository.class));
         }
 
         @Bean

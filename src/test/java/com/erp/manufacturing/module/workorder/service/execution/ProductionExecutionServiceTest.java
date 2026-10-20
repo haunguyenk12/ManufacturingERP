@@ -87,6 +87,7 @@ class ProductionExecutionServiceTest {
     @Mock WorkOrderOperationInputRepository inputRepository;
     @Mock ProductionExecutionConsumptionRepository consumptionRepository;
     @Mock MaterialIssueLineRepository issueLineRepository;
+    @Mock com.erp.manufacturing.module.workorder.repository.MaterialReturnLineRepository returnLineRepository;
 
     ProductionExecutionService service;
 
@@ -108,7 +109,8 @@ class ProductionExecutionServiceTest {
                 costAccumulatorService,
                 new OperationLedger(operationRepository, inputRepository, executionRepository),
                 consumptionRepository,
-                issueLineRepository);
+                issueLineRepository,
+                returnLineRepository);
     }
 
     /**
@@ -624,6 +626,29 @@ class ProductionExecutionServiceTest {
                             .containsKey("consumption[0].quantity");
                 });
         verify(executionRepository, never()).save(any());
+        verify(consumptionRepository, never()).saveAll(any());
+    }
+
+    /** G8d (FE §1.4 step 9): material returned to the warehouse is no longer there to use — 8 issued, 3 used, 2 returned. */
+    @Test
+    void report_consumptionOfMaterialAlreadyReturned_isOverTheCap() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        MaterialIssueLine line = postedIssueLine(workOrder, MaterialIssueStatus.POSTED, "8");
+        when(issueLineRepository.findWithIssueByIssueLineIdIn(anyCollection())).thenReturn(List.of(line));
+        when(consumptionRepository.sumByIssueLineIds(anyCollection())).thenReturn(List.of(keyed(line.getIssueLineId(), "3")));
+        when(returnLineRepository.sumBySourceIssueLineIds(anyCollection())).thenReturn(List.of(keyed(line.getIssueLineId(), "2")));
+        when(executionRepository.findWithDetailsByIdempotencyKey("KEY-CONS-RET")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+
+        assertThatThrownBy(() -> service.report(workOrder.getWorkOrderId(), new ProductionExecutionPostRequest(null,
+                BigDecimal.ONE, null, null, null, null, null, 0L, null,
+                List.of(new ExecutionConsumptionRequest(line.getIssueLineId(), new BigDecimal("4")))), "KEY-CONS-RET"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> {
+                    assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED);
+                    assertThat(((com.erp.manufacturing.common.exception.MultiErrorException) ex).getFieldErrors())
+                            .containsEntry("consumption[0].quantity", "only 3 of this issue line is left unconsumed");
+                });
         verify(consumptionRepository, never()).saveAll(any());
     }
 

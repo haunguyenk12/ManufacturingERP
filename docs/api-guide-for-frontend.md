@@ -731,6 +731,19 @@ WO có quy trình (routing) nay đi **từng công đoạn, tuần tự**:
   xử lý lại, vật tư dùng ⇒ `409 PRODUCTION_INPUT_UNKNOWN`; báo sản lượng giữ luật cũ.
 - WO **không** có quy trình: không cần đầu vào, `workOrderOperationId` để trống, trần vẫn là kế hoạch.
 
+#### G8d (2026-10-20) — dở dang và hoàn vật tư
+
+| Việc | Gọi gì | Ghi chú |
+|---|---|---|
+| Dở dang theo nhà máy | `GET /plants/{P}/wip?status&workOrderId&search&fromDate&toDate&page&size` | Không `status` ⇒ `RELEASED`/`IN_PROGRESS`/`COMPLETED`. Mỗi dòng: thành phẩm (`finalGoodQuantity`, `availableToReceipt`, `terminalShortfallQuantity`), phế, làm lại (lịch sử + chờ). `X-Plant-Id` cross-check |
+| Dở dang một lệnh | `GET /work-orders/{W}/wip?section=MATERIALS\|OPERATIONS\|REWORK\|AWAITING_RECEIPT` | Bỏ `section` ⇒ mọi phần; phần không hỏi ⇒ `null`. `materials[]` theo **dòng cấp**: `issuedQuantity`, `consumedQuantity`, `returnedQuantity`, `unusedQuantity = cấp − dùng − hoàn`, `returnableQuantity` (= chưa dùng nếu nguồn nhận lại được, `0` nếu không — `ineligibleReason`). `HISTORY` **không** có (⇒ `400`) |
+| Ứng viên hoàn | `GET /work-orders/{W}/material-return-candidates?page&size` | Dòng cấp còn chưa dùng, cùng hình dạng `materials[]` |
+| Hoàn vật tư | `POST /work-orders/{W}/material-returns` `{expectedWorkOrderVersion, reason, lines[1..500]{sourceIssueLineId, quantity}}` · `Idempotency-Key` **bắt buộc** | WO `IN_PROGRESS`/`COMPLETED`. Hàng về **đúng** kho + lô của dòng cấp (biến động `RECEIVE`, `referenceType = MATERIAL_RETURN`). Mục cùng dòng cộng lại rồi so `cấp − dùng − hoàn` (vượt ⇒ `409 PLANNED_QUANTITY_EXCEEDED` field `lines[i].quantity`). Lô `HOLD`/`REJECTED`/hết hạn ⇒ `409 LOT_NOT_ELIGIBLE`; kho/vật tư ngừng ⇒ `422 RESOURCE_INACTIVE`; dòng cấp của lệnh khác ⇒ `422 RESOURCE_SCOPE_MISMATCH`; WO báo trước G8c ⇒ `409 PRODUCTION_INPUT_UNKNOWN`. Không giảm "đã cấp" của dòng vật tư, không khôi phục giữ tồn |
+| Danh sách / chi tiết phiếu hoàn | `GET /material-returns?plantId&workOrderId&search&fromDate&toDate` · `GET /material-returns/{R}` | Mã `MR-…`; ngày theo giờ nhà máy trên `postedAt` |
+
+- Sau khi hoàn, vật tư đã hoàn **không** còn dùng được: trần `consumption[]` của báo sản lượng nay là `cấp − dùng − hoàn`.
+- Không trường giá trị nào (giá cấp/dùng/hoàn/dở dang) — chưa làm (quyết định D10).
+
 ---
 
 ### Bước 8 — Nhập kho thành phẩm (Production Receipt, 3 bước)
@@ -909,6 +922,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Công đoạn: đọc (G8c) | `GET /work-orders/{id}/operations` | `PERM_PRODUCTION_EXECUTION_READ` **hoặc** `_MANAGE` |
 | Công đoạn: đầu vào / kết thúc (G8c) | `POST /work-orders/{id}/operations/{opId}/input` · `/finish` | `PERM_PRODUCTION_EXECUTION_MANAGE` |
 | Hoàn thành sản xuất (G8c) | `POST /work-orders/{id}/complete-production` | `PERM_WORK_ORDER_MANAGE` (+ `PERM_MATERIAL_ISSUE_APPROVE` khi hụt) |
+| Dở dang (G8d) | `GET /plants/{plantId}/wip` · `GET /work-orders/{id}/wip` | `PERM_WIP_READ` |
+| Hoàn vật tư: tạo / ứng viên (G8d) | `POST /work-orders/{id}/material-returns` · `GET /work-orders/{id}/material-return-candidates` | `PERM_MATERIAL_RETURN_MANAGE` |
+| Hoàn vật tư: đọc (G8d) | `GET /material-returns` · `GET /material-returns/{id}` | `PERM_MATERIAL_RETURN_READ` **hoặc** `_MANAGE` |
 | Lịch sử báo sản lượng | `GET /production-executions?workOrderId=` | `PERM_PRODUCTION_EXECUTION_READ` |
 | Candidate nhập kho | `GET /production-receipts/candidates?plantId=` | `PERM_PRODUCTION_RECEIPT_MANAGE` |
 | Tạo/submit receipt | `POST /work-orders/{id}/production-receipts[/{rid}/submit]` | `PERM_PRODUCTION_RECEIPT_MANAGE` |

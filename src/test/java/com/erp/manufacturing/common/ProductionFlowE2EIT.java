@@ -295,6 +295,31 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(ORDERED_QUANTITY.subtract(GOOD_REPORTED));
         assertThat(operation.get("status").asText()).isEqualTo("IN_PROGRESS");
 
+        // ── 7b. G8d: unused material goes back to its own source — 20 issued, 1 used ⇒ 19 unused; 4 go back ──
+        BigDecimal returned = new BigDecimal("4");
+        long versionBeforeReturn = workOrderVersion(workOrderId);
+        String returnKey = "E2E-RETURN-" + fixture.suffix;
+        String returnBody = json(Map.of("expectedWorkOrderVersion", versionBeforeReturn,
+                "reason", "Unused offcut back to stock",
+                "lines", List.of(Map.of("sourceIssueLineId", issueLineId, "quantity", returned))));
+        JsonNode materialReturn = result(post("/v1/work-orders/{id}/material-returns", workOrderId)
+                .header("Idempotency-Key", returnKey).content(returnBody), 201);
+        assertThat(materialReturn.get("workOrderVersion").asLong()).isEqualTo(versionBeforeReturn + 1);
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeReturn + 1);
+        BigDecimal componentAfterReturn = COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT).add(returned);
+        assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId)).isEqualByComparingTo(componentAfterReturn);
+        // R9: the same key and body replays the first return — no second receipt into stock.
+        JsonNode replayedReturn = result(post("/v1/work-orders/{id}/material-returns", workOrderId)
+                .header("Idempotency-Key", returnKey).content(returnBody), 201);
+        assertThat(replayedReturn.get("materialReturnId").asText()).isEqualTo(materialReturn.get("materialReturnId").asText());
+        assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId)).isEqualByComparingTo(componentAfterReturn);
+        JsonNode material = result(get("/v1/work-orders/{id}/wip", workOrderId).param("section", "MATERIALS"), 200)
+                .get("materials").get(0);
+        assertThat(new BigDecimal(material.get("issuedQuantity").asText())).isEqualByComparingTo(COMPONENT_REQUIREMENT);
+        assertThat(new BigDecimal(material.get("consumedQuantity").asText())).isEqualByComparingTo(BigDecimal.ONE);
+        assertThat(new BigDecimal(material.get("returnedQuantity").asText())).isEqualByComparingTo(returned);
+        assertThat(new BigDecimal(material.get("unusedQuantity").asText())).isEqualByComparingTo("15");
+
         // F10 / debt H: both document numbers come from @PrePersist against a real INSERT — a code
         // assigned after save() would be missing from the statement and hit the NOT NULL column
         // (CLAUDE.md §0.12 #5). Mocked repositories never fire the callback.
@@ -389,16 +414,15 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "quantity", GOOD_REPORTED))), 201);
 
         assertThat(stockMovementRepository.count()).isEqualTo(movementsAfterFlow);
-        assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId))
-                .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
+        assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId)).isEqualByComparingTo(componentAfterReturn);
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(GOOD_REPORTED);
         assertThat(new BigDecimal(result(get("/v1/work-orders/{id}", workOrderId), 200)
                 .get("actualGoodQuantity").asText())).isEqualByComparingTo(GOOD_REPORTED);
-        // The whole flow writes exactly three ledger rows: ISSUE of the component, RECEIVE of the
-        // output, and the LOT_STATUS_CHANGE that QC records with direction NONE (F2, B39) — a
-        // traceability row that moves no quantity.
-        assertThat(stockMovementRepository.count() - movementsBefore).isEqualTo(3L);
+        // The whole flow writes exactly four ledger rows: ISSUE of the component, RECEIVE of the returned
+        // material (G8d, once despite the replay), RECEIVE of the output, and the LOT_STATUS_CHANGE that QC
+        // records with direction NONE (F2, B39) — a traceability row that moves no quantity.
+        assertThat(stockMovementRepository.count() - movementsBefore).isEqualTo(4L);
     }
 
     /**

@@ -61,6 +61,44 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
                            Pageable pageable);
 
     /**
+     * G8d work-in-progress list: {@link #search} narrowed to a set of statuses. {@code productItem} is a
+     * {@code @ManyToOne}, so fetching it alongside paging is safe (rule C13 forbids collections only).
+     */
+    @Query(value = """
+            select w
+            from WorkOrder w
+            join fetch w.productItem p
+            where w.plant.plantId = :plantId
+              and w.status in :statuses
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:search as string) is null
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.code) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:createdFrom as timestamp) is null or w.createdAt >= :createdFrom)
+              and (cast(:createdTo as timestamp) is null or w.createdAt < :createdTo)
+            """,
+            countQuery = """
+            select count(w)
+            from WorkOrder w
+            join w.productItem p
+            where w.plant.plantId = :plantId
+              and w.status in :statuses
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:search as string) is null
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(p.code) like lower(concat('%', cast(:search as string), '%')))
+              and (cast(:createdFrom as timestamp) is null or w.createdAt >= :createdFrom)
+              and (cast(:createdTo as timestamp) is null or w.createdAt < :createdTo)
+            """)
+    Page<WorkOrder> searchWip(@Param("plantId") UUID plantId,
+                              @Param("statuses") Collection<WorkOrderStatus> statuses,
+                              @Param("workOrderId") UUID workOrderId,
+                              @Param("search") String search,
+                              @Param("createdFrom") Instant createdFrom,
+                              @Param("createdTo") Instant createdTo,
+                              Pageable pageable);
+
+    /**
      * Work orders the shop floor may still report production against (spec §5.1, invariant B75).
      *
      * <p>Two conditions, not one. The status filter is the obvious half; the quantity filter is the

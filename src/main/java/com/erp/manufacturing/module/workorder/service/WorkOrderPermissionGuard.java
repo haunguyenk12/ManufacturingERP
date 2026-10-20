@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.workorder.service;
 
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialReturnRepository;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ public class WorkOrderPermissionGuard {
     private final WorkOrderRepository workOrderRepository;
     private final PermissionGuard permissionGuard;
     private final MaterialIssueRepository materialIssueRepository;
+    private final MaterialReturnRepository materialReturnRepository;
 
     @Transactional(readOnly = true)
     public boolean hasWorkOrderAccess(Authentication authentication, String permissionCode, UUID workOrderId) {
@@ -56,6 +58,17 @@ public class WorkOrderPermissionGuard {
             return false;
         }
         return materialIssueRepository.findWorkOrderIdByIssueId(issueId)
+                .map(workOrderId -> hasAnyWorkOrderAccess(authentication, permissionCodes, workOrderId))
+                .orElse(false);
+    }
+
+    /** G8d: the same check for an endpoint identified by the material return alone. */
+    @Transactional(readOnly = true)
+    public boolean hasMaterialReturnAccess(Authentication authentication, List<String> permissionCodes, UUID materialReturnId) {
+        if (materialReturnId == null) {
+            return false;
+        }
+        return materialReturnRepository.findWorkOrderIdByMaterialReturnId(materialReturnId)
                 .map(workOrderId -> hasAnyWorkOrderAccess(authentication, permissionCodes, workOrderId))
                 .orElse(false);
     }

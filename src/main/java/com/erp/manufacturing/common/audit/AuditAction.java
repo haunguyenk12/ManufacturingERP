@@ -103,6 +103,8 @@ public enum AuditAction {
     OPERATION_FINISHED,
     /** G8c: production of a work order completed by command, possibly below the plan. */
     WORK_ORDER_PRODUCTION_COMPLETED,
+    /** G8d: unused issued material returned to its source. */
+    MATERIAL_RETURN_POSTED,
     WIP_TRANSACTION_RECORDED,
     SCRAP_REPORTED,
     REWORK_REPORTED,

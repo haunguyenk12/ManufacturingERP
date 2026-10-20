@@ -26,6 +26,7 @@ import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionR
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
 import com.erp.manufacturing.module.workorder.repository.KeyedQuantityProjection;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialReturnLineRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionConsumptionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
@@ -86,6 +87,7 @@ public class ProductionExecutionService {
     private final OperationLedger ledger;
     private final ProductionExecutionConsumptionRepository consumptionRepository;
     private final MaterialIssueLineRepository issueLineRepository;
+    private final MaterialReturnLineRepository returnLineRepository;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_EXECUTION_MANAGE', #workOrderId)")
@@ -340,6 +342,8 @@ public class ProductionExecutionService {
                 .collect(Collectors.toMap(MaterialIssueLine::getIssueLineId, Function.identity()));
         Map<UUID, BigDecimal> consumed = consumptionRepository.sumByIssueLineIds(requested.keySet()).stream()
                 .collect(Collectors.toMap(KeyedQuantityProjection::getRefId, KeyedQuantityProjection::getQuantity));
+        Map<UUID, BigDecimal> returned = returnLineRepository.sumBySourceIssueLineIds(requested.keySet()).stream()
+                .collect(Collectors.toMap(KeyedQuantityProjection::getRefId, KeyedQuantityProjection::getQuantity));
         List<ProductionExecutionConsumption> rows = new ArrayList<>();
         for (Map.Entry<UUID, BigDecimal> entry : requested.entrySet()) {
             int index = firstIndex.get(entry.getKey());
@@ -352,7 +356,10 @@ public class ProductionExecutionService {
                 throw ExceptionFactory.withErrors(BusinessErrorCode.STATE_CONFLICT,
                         Map.of("consumption[" + index + "].issueLineId", "the material issue is not posted"));
             }
-            BigDecimal left = line.getQuantity().subtract(consumed.getOrDefault(entry.getKey(), BigDecimal.ZERO));
+            // G8d: material returned to the warehouse is no longer at the line (FE §1.4 step 9).
+            BigDecimal left = line.getQuantity()
+                    .subtract(consumed.getOrDefault(entry.getKey(), BigDecimal.ZERO))
+                    .subtract(returned.getOrDefault(entry.getKey(), BigDecimal.ZERO));
             if (entry.getValue().compareTo(left) > 0) {
                 throw ExceptionFactory.withErrors(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
                         Map.of("consumption[" + index + "].quantity",

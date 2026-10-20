@@ -27,6 +27,24 @@ public interface MaterialIssueLineRepository extends JpaRepository<MaterialIssue
             """)
     List<MaterialIssueLine> findWithIssueByIssueLineIdIn(@Param("issueLineIds") Collection<UUID> issueLineIds);
 
+    /**
+     * G8d: every posted issue line of a work order with what the WIP and return screens show — issue, component, item,
+     * warehouse, lot, serial — in one query (C14). All to-one paths, so the join-fetch is safe.
+     */
+    @Query("""
+            select l from MaterialIssueLine l
+            join fetch l.issue i
+            join fetch l.componentLine c
+            join fetch l.item
+            join fetch l.warehouse
+            left join fetch l.lot
+            left join fetch l.serial
+            where i.workOrder.workOrderId = :workOrderId
+              and i.status = com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus.POSTED
+            order by c.lineNo, i.postedAt, l.issueLineId
+            """)
+    List<MaterialIssueLine> findPostedByWorkOrder(@Param("workOrderId") UUID workOrderId);
+
     @Query("""
             select l.componentLine.componentLineId as componentLineId,
                    coalesce(sum(l.quantity), 0) as quantity

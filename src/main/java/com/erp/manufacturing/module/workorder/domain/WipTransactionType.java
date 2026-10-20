@@ -3,6 +3,8 @@ package com.erp.manufacturing.module.workorder.domain;
 public enum WipTransactionType {
     START,
     MATERIAL_ISSUED,
+    /** G8d: unused material returned to the warehouse it was issued from. */
+    MATERIAL_RETURNED,
     /** The shop floor produced good output (Production Execution). */
     OUTPUT_COMPLETED,
     /**

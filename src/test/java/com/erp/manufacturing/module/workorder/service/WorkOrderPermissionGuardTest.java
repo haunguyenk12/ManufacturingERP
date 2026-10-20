@@ -4,6 +4,7 @@ import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialReturnRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +32,7 @@ class WorkOrderPermissionGuardTest {
     @Mock WorkOrderRepository workOrderRepository;
     @Mock PermissionGuard permissionGuard;
     @Mock MaterialIssueRepository materialIssueRepository;
+    @Mock MaterialReturnRepository materialReturnRepository;
     @InjectMocks WorkOrderPermissionGuard guard;
 
     private final Authentication auth = new UsernamePasswordAuthenticationToken("user", null, List.of());
@@ -77,5 +79,28 @@ class WorkOrderPermissionGuardTest {
         assertThat(guard.hasMaterialIssueAccess(auth, codes, null)).isFalse();
         verifyNoInteractions(materialIssueRepository);
         verify(permissionGuard, org.mockito.Mockito.never()).hasResourceAccess(any(), any(), any(), any());
+    }
+
+    /** G8d: a return is authorised on its work order's plant, like an issue. */
+    @Test
+    void materialReturnAccess_isGrantedWhenAnyCodeHoldsOnTheWorkOrdersPlant() {
+        UUID returnId = UUID.randomUUID();
+        UUID workOrderId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        when(materialReturnRepository.findWorkOrderIdByMaterialReturnId(returnId)).thenReturn(Optional.of(workOrderId));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrderId)).thenReturn(Optional.of(
+                WorkOrder.builder().workOrderId(workOrderId).plant(Plant.builder().plantId(plantId).build()).build()));
+        when(permissionGuard.hasResourceAccess(auth, "PERM_MATERIAL_RETURN_READ", "PLANT", plantId)).thenReturn(true);
+
+        assertThat(guard.hasMaterialReturnAccess(auth, List.of("PERM_MATERIAL_RETURN_READ"), returnId)).isTrue();
+    }
+
+    @Test
+    void materialReturnAccess_unknownReturn_isDeniedWithoutAPermissionLookup() {
+        UUID returnId = UUID.randomUUID();
+        when(materialReturnRepository.findWorkOrderIdByMaterialReturnId(returnId)).thenReturn(Optional.empty());
+
+        assertThat(guard.hasMaterialReturnAccess(auth, List.of("PERM_MATERIAL_RETURN_READ"), returnId)).isFalse();
+        verifyNoInteractions(permissionGuard, workOrderRepository);
     }
 }

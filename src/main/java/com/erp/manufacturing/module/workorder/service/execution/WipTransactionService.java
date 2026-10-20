@@ -112,6 +112,21 @@ public class WipTransactionService {
                 null));
     }
 
+    /** G8d: unused material returned to its source — the ledger keeps every material movement of the work order. */
+    @Transactional
+    public void recordMaterialReturned(WorkOrder workOrder, BigDecimal quantity, UUID materialReturnId) {
+        wipTransactionRepository.save(build(
+                workOrder,
+                WipTransactionType.MATERIAL_RETURNED,
+                null,
+                null,
+                quantity,
+                MaterialReturnService.MATERIAL_RETURN_REFERENCE_TYPE,
+                materialReturnId.toString(),
+                Instant.now(),
+                null));
+    }
+
     /**
      * Warehousing of finished output. Since F5 this is a <em>different</em> event from
      * {@code OUTPUT_COMPLETED}, which the shop floor raises when it actually produces the goods.

@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("81");
+        assertThat(current.getVersion().getVersion()).isEqualTo("82");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -455,6 +455,57 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
             assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
             assertThat(defaults.get("supplemental")).isEqualTo("false");
+        }
+    }
+
+    /**
+     * G8d / {@code V82}: the three new permissions go to ADMIN and MANAGER only (FE Q34, never OPERATOR implicitly); the WIP
+     * ledger accepts MATERIAL_RETURNED; a return line cannot carry a zero quantity and a return is POSTED only.
+     */
+    @Test
+    void migrate_v82_grantsWipAndReturnPermissionsToAdminAndManagerOnly_andGuardsReturns() throws Exception {
+        migratePublicSchema();
+
+        for (String role : new String[] {"ADMIN", "MANAGER", "OPERATOR"}) {
+            Set<String> granted = new TreeSet<>();
+            try (Connection connection = DriverManager.getConnection(
+                    POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+                 Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery("""
+                         SELECT p.code FROM role_permissions rp
+                         JOIN roles r ON r.role_id = rp.role_id
+                         JOIN permissions p ON p.permission_id = rp.permission_id
+                         WHERE r.code = '%s'
+                           AND p.code IN ('PERM_WIP_READ', 'PERM_MATERIAL_RETURN_READ', 'PERM_MATERIAL_RETURN_MANAGE')
+                         """.formatted(role))) {
+                while (rows.next()) {
+                    granted.add(rows.getString("code"));
+                }
+            }
+            if (role.equals("OPERATOR")) {
+                assertThat(granted).isEmpty();
+            } else {
+                assertThat(granted).containsExactlyInAnyOrder(
+                        "PERM_WIP_READ", "PERM_MATERIAL_RETURN_READ", "PERM_MATERIAL_RETURN_MANAGE");
+            }
+        }
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+                     WHERE connamespace = 'public'::regnamespace
+                       AND conname IN ('chk_wip_transactions_type', 'chk_material_return_lines_quantity',
+                                       'chk_material_returns_status')
+                     """)) {
+            java.util.Map<String, String> definitions = new java.util.HashMap<>();
+            while (rows.next()) {
+                definitions.put(rows.getString("conname"), rows.getString("def"));
+            }
+            assertThat(definitions.get("chk_wip_transactions_type")).contains("MATERIAL_RETURNED").contains("MATERIAL_ISSUED");
+            assertThat(definitions.get("chk_material_return_lines_quantity")).contains("> (0)");
+            assertThat(definitions.get("chk_material_returns_status")).contains("POSTED");
         }
     }
 
