@@ -97,6 +97,16 @@ public enum BusinessErrorCode implements ErrorCode {
      */
     PENDING_GOODS_RECEIPT     ("PENDING_GOODS_RECEIPT",     "A draft goods receipt is still pending for this purchase order", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
+    /**
+     * G8c (FE Q14): the first operation of a work order takes input only after material was issued to it. Not
+     * STATE_CONFLICT: reloading does not help — a material issue has to be posted first.
+     */
+    MATERIAL_ISSUE_REQUIRED   ("MATERIAL_ISSUE_REQUIRED",   "Issue material to the work order before confirming operation input", HttpStatus.CONFLICT),
+    /**
+     * G8c (FE Q22): the work order had production reported before inputs and consumption were recorded, so the
+     * server cannot work out the caps an operation command needs. Neither retrying nor reloading changes that.
+     */
+    PRODUCTION_INPUT_UNKNOWN  ("PRODUCTION_INPUT_UNKNOWN",  "Operation input and consumption of this work order were not recorded", HttpStatus.CONFLICT),
 
     // ── Inventory / Stock ──────────────────────────────────────────────────
     /** Spec §8.2 puts this at 409; F1 only aligned the wire code, F5 aligned the status (debt #9). */

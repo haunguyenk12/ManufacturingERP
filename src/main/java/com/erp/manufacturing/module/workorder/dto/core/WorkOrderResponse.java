@@ -94,8 +94,55 @@ public record WorkOrderResponse(
         String calendarRevision,
         /** The plant's time zone when the schedule was committed. */
         String scheduleTimeZone,
-        Instant scheduleCapturedAt
+        Instant scheduleCapturedAt,
+        /**
+         * G8c (FE Q22): operation inputs were recorded for this work order. {@code false} for one that had production
+         * reported before V81 — its operation inputs and caps are then {@code null}, never guessed.
+         */
+        boolean inputKnown,
+        /** G8c: material consumption was recorded for this work order; same evidence rule as {@link #inputKnown()}. */
+        boolean consumptionKnown,
+        /**
+         * G8c (FE R12): good of the last operation — the figure completion, receipts and the plan cap read.
+         * {@code null} when {@code inputKnown} is {@code false}: before V81 good of every operation was added up.
+         */
+        BigDecimal finalGoodQuantity,
+        /** G8c: every rework ever recorded, retries included — {@link #actualReworkQuantity()} under its FE name. */
+        BigDecimal historicalReworkQuantity,
+        /** G8c (FE R14): {@code max(0, planned − final good)} captured at completion; {@code null} before it. */
+        BigDecimal terminalShortfallQuantity,
+        /** G8c: why a manager accepted completing below the plan. */
+        String shortfallReason
 ) {
+
+    /** Shape before G8c. */
+    public WorkOrderResponse(
+            UUID workOrderId, UUID companyId, UUID plantId, String plantCode, String workOrderNo,
+            UUID productItemId, String productItemCode, String productItemName, String outputUom, UUID bomId,
+            String bomRevision, Instant bomCapturedAt, UUID sourceRoutingId, String sourceRoutingCode,
+            String sourceRoutingVersion, Instant routingCapturedAt, UUID planningRunId,
+            String planningRunCode, UUID planningProposalId, UUID outputWarehouseId,
+            String outputWarehouseCode, BigDecimal plannedQuantity, BigDecimal completedQuantity,
+            BigDecimal remainingQuantity, BigDecimal actualGoodQuantity, BigDecimal actualScrapQuantity,
+            BigDecimal actualReworkQuantity, BigDecimal availableToReceipt, String status,
+            Instant plannedStartAt, Instant plannedEndAt, Instant releasedAt, Instant executionStartedAt,
+            Instant executionCompletedAt, Instant completedAt, Instant cancelledAt, String cancelReason,
+            Instant blockedAt, String blockReason, String notes, Instant createdAt, Instant updatedAt,
+            List<WorkOrderComponentLineResponse> componentLines, List<WorkOrderOperationResponse> operations,
+            List<WorkOrderDemandAllocationResponse> allocations, Instant closedAt, Long version,
+            Integer scheduleRevision, String calendarRevision, String scheduleTimeZone, Instant scheduleCapturedAt) {
+        this(
+                workOrderId, companyId, plantId, plantCode, workOrderNo, productItemId, productItemCode,
+                productItemName, outputUom, bomId, bomRevision, bomCapturedAt, sourceRoutingId,
+                sourceRoutingCode, sourceRoutingVersion, routingCapturedAt, planningRunId, planningRunCode,
+                planningProposalId, outputWarehouseId, outputWarehouseCode, plannedQuantity,
+                completedQuantity, remainingQuantity, actualGoodQuantity, actualScrapQuantity,
+                actualReworkQuantity, availableToReceipt, status, plannedStartAt, plannedEndAt, releasedAt,
+                executionStartedAt, executionCompletedAt, completedAt, cancelledAt, cancelReason, blockedAt,
+                blockReason, notes, createdAt, updatedAt, componentLines, operations, allocations, closedAt,
+                version, scheduleRevision, calendarRevision, scheduleTimeZone, scheduleCapturedAt,
+                true, true, actualGoodQuantity, actualReworkQuantity, null, null);
+    }
 
     /** Shape before G8a — callers that build a work order response without version and schedule context. */
     public WorkOrderResponse(
@@ -121,6 +168,6 @@ public record WorkOrderResponse(
                 actualReworkQuantity, availableToReceipt, status, plannedStartAt, plannedEndAt, releasedAt,
                 executionStartedAt, executionCompletedAt, completedAt, cancelledAt, cancelReason, blockedAt,
                 blockReason, notes, createdAt, updatedAt, componentLines, operations, allocations, closedAt,
-                null, null, null, null, null);
+                null, null, null, null, null, true, true, actualGoodQuantity, actualReworkQuantity, null, null);
     }
 }

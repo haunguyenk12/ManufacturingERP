@@ -16,6 +16,17 @@ public interface MaterialIssueLineRepository extends JpaRepository<MaterialIssue
     @EntityGraph(attributePaths = {"issue", "componentLine", "reservation", "item", "warehouse", "lot", "stockMovement"})
     List<MaterialIssueLine> findByIssueIssueIdIn(Collection<UUID> issueIds);
 
+    /**
+     * G8c: the issue lines an execution says it consumed, with their issue — so the caller can check each belongs to
+     * the work order and was posted, in one query for the whole batch (C14).
+     */
+    @Query("""
+            select l from MaterialIssueLine l
+            join fetch l.issue i
+            where l.issueLineId in :issueLineIds
+            """)
+    List<MaterialIssueLine> findWithIssueByIssueLineIdIn(@Param("issueLineIds") Collection<UUID> issueLineIds);
+
     @Query("""
             select l.componentLine.componentLineId as componentLineId,
                    coalesce(sum(l.quantity), 0) as quantity

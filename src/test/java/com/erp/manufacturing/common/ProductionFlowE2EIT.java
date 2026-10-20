@@ -268,13 +268,32 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(issue.get("workOrderVersion").asLong()).isEqualTo(versionBeforeIssue + 1);
         assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeIssue + 1);
 
+        // ── 7a. G8c: the first operation takes its input from the plan, now that material was issued ──
+        UUID operationId = confirmFirstOperationInput(workOrderId, ORDERED_QUANTITY);
+        UUID issueLineId = uuid(issue.get("lines").get(0), "issueLineId");
+
         // ── 7. Shop floor reports good output — this, not the receipt, advances the work order ──
         String executionKey = "E2E-EXEC-" + fixture.suffix;
+        long versionBeforeExecution = workOrderVersion(workOrderId);
+        String executionBody = json(Map.of("goodQuantity", GOOD_REPORTED,
+                "actualStartedAt", EXEC_STARTED_AT,
+                "actualEndedAt", EXEC_ENDED_AT,
+                "expectedWorkOrderVersion", versionBeforeExecution,
+                "workOrderOperationId", operationId,
+                "consumption", List.of(Map.of("issueLineId", issueLineId, "quantity", BigDecimal.ONE))));
         JsonNode execution = result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", executionKey)
-                .content(json(Map.of("goodQuantity", GOOD_REPORTED,
-                        "actualStartedAt", EXEC_STARTED_AT,
-                        "actualEndedAt", EXEC_ENDED_AT))), 201);
+                .content(executionBody), 201);
+        // G8c (B212): one report, one version step — and the consumption is recorded, not posted to stock.
+        assertThat(execution.get("workOrderVersion").asLong()).isEqualTo(versionBeforeExecution + 1);
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeExecution + 1);
+        assertThat(execution.get("consumption").size()).isEqualTo(1);
+        assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId))
+                .isEqualByComparingTo(COMPONENT_ON_HAND.subtract(COMPONENT_REQUIREMENT));
+        JsonNode operation = result(get("/v1/work-orders/{id}/operations", workOrderId), 200).get(0);
+        assertThat(new BigDecimal(operation.get("freshRemainingQuantity").asText()))
+                .isEqualByComparingTo(ORDERED_QUANTITY.subtract(GOOD_REPORTED));
+        assertThat(operation.get("status").asText()).isEqualTo("IN_PROGRESS");
 
         // F10 / debt H: both document numbers come from @PrePersist against a real INSERT — a code
         // assigned after save() would be missing from the statement and hit the NOT NULL column
@@ -361,9 +380,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", executionKey)
-                .content(json(Map.of("goodQuantity", GOOD_REPORTED,
-                        "actualStartedAt", EXEC_STARTED_AT,
-                        "actualEndedAt", EXEC_ENDED_AT))), 201);
+                .content(executionBody), 201);
         result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", receiptKey)
                 .content(json(Map.of(
@@ -508,13 +525,24 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(new BigDecimal(allocation.get("allocatedQuantity").asText()))
                 .isEqualByComparingTo(ORDERED_QUANTITY);
 
-        result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
+        JsonNode nonLotReservations = result(post("/v1/work-orders/{id}/reserve", workOrderId)
+                .content(versionBody(workOrderId)), 201);
         result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
+        // G8c: an MRP work order carries its routing, so its single operation needs material issued and input confirmed.
+        result(post("/v1/material-issues")
+                .header("Idempotency-Key", "E2E-NOLOT-ISSUE-" + fixture.suffix)
+                .content(json(Map.of(
+                        "workOrderId", workOrderId,
+                        "reservationId", uuid(nonLotReservations.get(0), "reservationId"),
+                        "quantity", new BigDecimal(nonLotReservations.get(0).get("quantity").asText())))), 201);
+        UUID nonLotOperationId = confirmFirstOperationInput(workOrderId, ORDERED_QUANTITY);
         result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-NOLOT-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", ORDERED_QUANTITY,
                         "actualStartedAt", EXEC_STARTED_AT,
-                        "actualEndedAt", EXEC_ENDED_AT))), 201);
+                        "actualEndedAt", EXEC_ENDED_AT,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "workOrderOperationId", nonLotOperationId))), 201);
         // Debt #25 in one assertion: reporting the full plan completes the work order (B53), and the
         // goods still have to be warehoused afterwards. Before D11 the next three calls were 409.
         assertThat(result(get("/v1/work-orders/{id}", workOrderId), 200).get("status").asText())
@@ -573,13 +601,24 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "productItemId", product.itemId,
                         "outputWarehouseId", fixture.warehouseId,
                         "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
-        result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
+        JsonNode rejectReservations = result(post("/v1/work-orders/{id}/reserve", workOrderId)
+                .content(versionBody(workOrderId)), 201);
         result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
+        // G8c: a manual work order snapshots the active routing too, so its operation needs issue + input first.
+        result(post("/v1/material-issues")
+                .header("Idempotency-Key", "E2E-REJ-ISSUE-" + fixture.suffix)
+                .content(json(Map.of(
+                        "workOrderId", workOrderId,
+                        "reservationId", uuid(rejectReservations.get(0), "reservationId"),
+                        "quantity", new BigDecimal(rejectReservations.get(0).get("quantity").asText())))), 201);
+        UUID rejectOperationId = confirmFirstOperationInput(workOrderId, GOOD_REPORTED);
         result(post("/v1/work-orders/{id}/production-executions", workOrderId)
                 .header("Idempotency-Key", "E2E-REJ-EXEC-" + fixture.suffix)
                 .content(json(Map.of("goodQuantity", GOOD_REPORTED,
                         "actualStartedAt", EXEC_STARTED_AT,
-                        "actualEndedAt", EXEC_ENDED_AT))), 201);
+                        "actualEndedAt", EXEC_ENDED_AT,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "workOrderOperationId", rejectOperationId))), 201);
 
         UUID receiptId = uuid(result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", "E2E-REJ-RECEIPT-" + fixture.suffix)
@@ -781,6 +820,16 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
     private String versionBody(UUID workOrderId) throws Exception {
         return json(Map.of("expectedWorkOrderVersion", workOrderVersion(workOrderId)));
+    }
+
+    /** G8c: confirms input of the work order's first operation and returns its id. */
+    private UUID confirmFirstOperationInput(UUID workOrderId, BigDecimal quantity) throws Exception {
+        UUID operationId = uuid(result(get("/v1/work-orders/{id}/operations", workOrderId), 200).get(0),
+                "workOrderOperationId");
+        JsonNode input = result(post("/v1/work-orders/{id}/operations/{op}/input", workOrderId, operationId)
+                .content(json(Map.of("expectedWorkOrderVersion", workOrderVersion(workOrderId), "quantity", quantity))), 200);
+        assertThat(new BigDecimal(input.get("inputQuantity").asText())).isEqualByComparingTo(quantity);
+        return operationId;
     }
 
     private JsonNode result(MockHttpServletRequestBuilder builder, int expectedStatus) throws Exception {

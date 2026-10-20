@@ -85,6 +85,16 @@ public class WorkOrderOperation extends BaseEntity {
     @Column(name = "planned_end_at")
     private Instant plannedEndAt;
 
+    /**
+     * G8c (FE R14): the explicit finish of this operation. Everything else about its progress is derived from the
+     * input ledger and the executions recorded against it — this is the one fact that cannot be derived.
+     */
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "completed_by")
+    private UUID completedBy;
+
     /** Last-reason-wins, same shape as {@code WorkOrder.blockReason}/{@code cancelReason}. */
     @Column(name = "schedule_adjustment_reason", columnDefinition = "TEXT")
     private String scheduleAdjustmentReason;
@@ -98,6 +108,15 @@ public class WorkOrderOperation extends BaseEntity {
         return setupMinutes.add(runMinutesPerUnit.multiply(plannedQuantity))
                 .setScale(0, java.math.RoundingMode.CEILING)
                 .longValueExact();
+    }
+
+    public boolean isCompleted() {
+        return completedAt != null;
+    }
+
+    public void finish(Instant now, UUID actor) {
+        completedAt = now;
+        completedBy = actor;
     }
 
     /** Stage label used on the WIP ledger when a transaction is reported against this operation. */

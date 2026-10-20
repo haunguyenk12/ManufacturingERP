@@ -61,6 +61,9 @@ class ManufacturingExecutionMethodSecurityTest {
     @Autowired ProductionReceiptService receiptService;
     @Autowired WipTransactionService wipTransactionService;
     @Autowired WorkOrderVarianceService varianceService;
+    @Autowired ProductionExecutionService productionExecutionService;
+    @Autowired OperationService operationService;
+    @Autowired OperationLedger operationLedger;
     @Autowired WorkOrderPermissionGuard workOrderPermissionGuard;
     @Autowired PermissionGuard permissionGuard;
     @Autowired WorkOrderRepository workOrderRepository;
@@ -71,7 +74,7 @@ class ManufacturingExecutionMethodSecurityTest {
     @BeforeEach
     void setUp() {
         reset(workOrderPermissionGuard, permissionGuard, support, reservationRepository,
-                productionReceiptRepository, workOrderRepository);
+                productionReceiptRepository, workOrderRepository, operationLedger);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, java.util.List.of()));
     }
@@ -366,6 +369,88 @@ class ManufacturingExecutionMethodSecurityTest {
         verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_MATERIAL_ISSUE_MANAGE"), eq(workOrderId));
     }
 
+    // ── G8c ─────────────────────────────────────────────────────────────────────────────────
+
+    /** The report path had no method-security test before G8c; it is the command that now also records consumption. */
+    @Test
+    void reportProduction_deniedWhenExecutionManageMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> productionExecutionService.report(workOrderId, new ProductionExecutionPostRequest(
+                null, BigDecimal.ONE, null, null, null, null, null, 0L, null, null), "KEY-PE"))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId));
+    }
+
+    @Test
+    void listOperations_deniedWhenNeitherExecutionPermissionIsHeld() {
+        UUID workOrderId = UUID.randomUUID();
+        List<String> expected = List.of("PERM_PRODUCTION_EXECUTION_READ", "PERM_PRODUCTION_EXECUTION_MANAGE");
+        when(workOrderPermissionGuard.hasAnyWorkOrderAccess(any(), eq(expected), eq(workOrderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> operationService.list(workOrderId)).isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support, operationLedger);
+        verify(workOrderPermissionGuard).hasAnyWorkOrderAccess(any(), eq(expected), eq(workOrderId));
+    }
+
+    @Test
+    void listOperations_allowedWithEitherExecutionPermission() {
+        UUID workOrderId = UUID.randomUUID();
+        List<String> expected = List.of("PERM_PRODUCTION_EXECUTION_READ", "PERM_PRODUCTION_EXECUTION_MANAGE");
+        when(workOrderPermissionGuard.hasAnyWorkOrderAccess(any(), eq(expected), eq(workOrderId))).thenReturn(true);
+        when(operationLedger.load(workOrderId)).thenReturn(List.of());
+
+        assertThatCode(() -> operationService.list(workOrderId)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void operationInput_deniedWhenExecutionManageMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> operationService.recordInput(workOrderId, UUID.randomUUID(),
+                new com.erp.manufacturing.module.workorder.dto.operation.OperationInputRequest(0L, BigDecimal.ONE), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support, operationLedger);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId));
+    }
+
+    @Test
+    void operationFinish_deniedWhenExecutionManageMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> operationService.finish(workOrderId, UUID.randomUUID(),
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support, operationLedger);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_PRODUCTION_EXECUTION_MANAGE"), eq(workOrderId));
+    }
+
+    /** Completion is a work order command; the shortfall approval is checked inside, on top of it (FE Q4). */
+    @Test
+    void completeProduction_deniedWhenWorkOrderManageMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> operationService.completeProduction(workOrderId,
+                new com.erp.manufacturing.module.workorder.dto.operation.ProductionCompletionRequest(0L, "Ran out of steel"), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(support, operationLedger);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_WORK_ORDER_MANAGE"), eq(workOrderId));
+    }
+
     @Configuration
     @EnableMethodSecurity
     static class Config {
@@ -504,5 +589,44 @@ class ManufacturingExecutionMethodSecurityTest {
         @Bean ProductionReceiptLineRepository productionReceiptLineRepository() { return mock(ProductionReceiptLineRepository.class); }
         @Bean WipTransactionRepository wipTransactionRepository() { return mock(WipTransactionRepository.class); }
         @Bean WorkOrderRepository workOrderRepository() { return mock(WorkOrderRepository.class); }
+
+        @Bean OperationLedger operationLedger() { return mock(OperationLedger.class); }
+        @Bean WorkOrderOperationInputRepository workOrderOperationInputRepository() { return mock(WorkOrderOperationInputRepository.class); }
+        @Bean ProductionExecutionConsumptionRepository productionExecutionConsumptionRepository() {
+            return mock(ProductionExecutionConsumptionRepository.class);
+        }
+
+        @Bean
+        ProductionExecutionService productionExecutionService(ProductionExecutionRepository executionRepository,
+                                                              WorkOrderOperationRepository operationRepository,
+                                                              WorkOrderRepository workOrderRepository,
+                                                              WipTransactionService wipTransactionService,
+                                                              WorkOrderExecutionSupport support,
+                                                              ManufacturingExecutionMapper mapper,
+                                                              SecurityAuditorAware auditorAware,
+                                                              UserLookupService userLookupService,
+                                                              WorkOrderCostAccumulatorService costAccumulatorService,
+                                                              OperationLedger ledger,
+                                                              ProductionExecutionConsumptionRepository consumptionRepository,
+                                                              MaterialIssueLineRepository issueLineRepository) {
+            return new ProductionExecutionService(executionRepository, operationRepository, workOrderRepository,
+                    wipTransactionService, support, mapper, new IdempotencySupport(new ObjectMapper()),
+                    new TraceIdProvider(), auditorAware, userLookupService, costAccumulatorService, ledger,
+                    consumptionRepository, issueLineRepository);
+        }
+
+        @Bean
+        OperationService operationService(OperationLedger ledger,
+                                          WorkOrderExecutionSupport support,
+                                          WorkOrderOperationInputRepository inputRepository,
+                                          MaterialIssueLineRepository issueLineRepository,
+                                          MaterialIssueRepository issueRepository,
+                                          WorkOrderPermissionGuard workOrderPermissionGuard,
+                                          SecurityAuditorAware auditorAware) {
+            return new OperationService(ledger, support, inputRepository, issueLineRepository, issueRepository,
+                    new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
+                            new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
+                    workOrderPermissionGuard, auditorAware);
+        }
     }
 }

@@ -5,7 +5,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,4 +39,37 @@ public interface ProductionExecutionRepository extends JpaRepository<ProductionE
 
     /** G5 (FE Q16): output was already reported against this operation, i.e. it has started. */
     boolean existsByOperationWorkOrderOperationId(UUID workOrderOperationId);
+
+    /**
+     * G8c: what each operation of a work order has recorded, fresh work and retries of rework apart. The pools of an
+     * operation are derived from this and the input ledger — never stored as counters that could drift from them.
+     */
+    @Query("""
+            select e.operation.workOrderOperationId as operationId,
+                   coalesce(sum(e.goodQuantity), 0) as good,
+                   coalesce(sum(e.scrapQuantity), 0) as scrap,
+                   coalesce(sum(e.reworkQuantity), 0) as rework,
+                   coalesce(sum(case when e.sourceExecutionId is null
+                                     then e.goodQuantity + e.scrapQuantity + e.reworkQuantity
+                                     else cast(0 as BigDecimal) end), 0) as freshProcessed,
+                   coalesce(sum(case when e.sourceExecutionId is not null
+                                     then e.goodQuantity + e.scrapQuantity + e.reworkQuantity
+                                     else cast(0 as BigDecimal) end), 0) as retryProcessed,
+                   count(e) as executionCount
+            from ProductionExecution e
+            where e.workOrder.workOrderId = :workOrderId
+              and e.operation is not null
+            group by e.operation.workOrderOperationId
+            """)
+    List<OperationExecutionTotals> sumByOperation(@Param("workOrderId") UUID workOrderId);
+
+    /** G8c: how much of each source execution's rework later executions already processed again. */
+    @Query("""
+            select e.sourceExecutionId as refId,
+                   coalesce(sum(e.goodQuantity + e.scrapQuantity + e.reworkQuantity), 0) as quantity
+            from ProductionExecution e
+            where e.sourceExecutionId in :sourceExecutionIds
+            group by e.sourceExecutionId
+            """)
+    List<KeyedQuantityProjection> sumRetryProcessedBySource(@Param("sourceExecutionIds") Collection<UUID> sourceExecutionIds);
 }

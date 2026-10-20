@@ -97,6 +97,12 @@ public enum AuditAction {
     QC_DISPOSITION_RECORDED,
     /** Shop-floor good/scrap/rework report (F5) — the event that now advances a work order. */
     PRODUCTION_EXECUTION_REPORTED,
+    /** G8c: confirmed input of an operation (from the plan, or transferred from its predecessor). */
+    OPERATION_INPUT_RECORDED,
+    /** G8c: an operation was finished. */
+    OPERATION_FINISHED,
+    /** G8c: production of a work order completed by command, possibly below the plan. */
+    WORK_ORDER_PRODUCTION_COMPLETED,
     WIP_TRANSACTION_RECORDED,
     SCRAP_REPORTED,
     REWORK_REPORTED,

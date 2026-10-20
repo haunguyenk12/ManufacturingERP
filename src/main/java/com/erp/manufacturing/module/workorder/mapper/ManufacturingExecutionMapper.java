@@ -177,8 +177,14 @@ public class ManufacturingExecutionMapper {
      * {@link #toCandidateResponse} defers to {@link WorkOrder#remainingPlannedQuantity()}).
      */
     public ProductionExecutionResponse toResponse(ProductionExecution execution,
-                                                  Map<UUID, String> usernames) {
+                                                  Map<UUID, String> usernames,
+                                                  Map<UUID, BigDecimal> retryUsedBySource,
+                                                  Map<UUID, List<ExecutionConsumptionResponse>> consumptionByExecution) {
         WorkOrderOperation operation = execution.getOperation();
+        // Immutable maps throw on get(null); an execution not yet given an id has neither retries nor consumption.
+        UUID executionId = execution.getProductionExecutionId();
+        BigDecimal retryUsed = executionId == null ? BigDecimal.ZERO
+                : retryUsedBySource.getOrDefault(executionId, BigDecimal.ZERO);
         WorkOrder workOrder = execution.getWorkOrder();
         return new ProductionExecutionResponse(
                 execution.getProductionExecutionId(),
@@ -207,7 +213,15 @@ public class ManufacturingExecutionMapper {
                 workOrder.remainingPlannedQuantity(),
                 workOrder.completionPercent(),
                 workOrder.getStatus().name(),
-                execution.getCreatedAt());
+                execution.getCreatedAt(),
+                execution.getSourceExecutionId(),
+                execution.processedQuantity(),
+                retryUsed,
+                execution.getReworkQuantity().subtract(retryUsed),
+                executionId == null ? List.of() : consumptionByExecution.getOrDefault(executionId, List.of()),
+                execution.getActualStartedAt() == null || execution.getActualEndedAt() == null ? null
+                        : java.time.Duration.between(execution.getActualStartedAt(), execution.getActualEndedAt()).toMinutes(),
+                workOrder.getVersion());
     }
 
     /**

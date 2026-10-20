@@ -98,7 +98,13 @@ public class WorkOrderMapper {
                         ? null : workOrder.getScheduleRevision(),
                 workOrder.getScheduleCalendarRevision(),
                 workOrder.getScheduleTimeZone(),
-                workOrder.getScheduleCapturedAt());
+                workOrder.getScheduleCapturedAt(),
+                workOrder.isOperationTracking(),
+                workOrder.isOperationTracking(),
+                workOrder.isOperationTracking() ? workOrder.getActualGoodQuantity() : null,
+                workOrder.getActualReworkQuantity(),
+                workOrder.getTerminalShortfallQuantity(),
+                workOrder.getShortfallReason());
     }
 
     public WorkOrderOperationResponse toResponse(WorkOrderOperation operation) {

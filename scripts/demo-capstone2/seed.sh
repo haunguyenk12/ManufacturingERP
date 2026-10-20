@@ -173,7 +173,7 @@ for required in \
     /v1/plants/{plantId}/work-orders /v1/work-orders/{workOrderId}/reserve \
     /v1/work-orders/{workOrderId}/release /v1/work-orders/{workOrderId}/close \
     /v1/work-orders/{workOrderId}/material-issues \
-    /v1/work-orders/{workOrderId}/production-executions \
+    /v1/work-orders/{workOrderId}/production-executions     /v1/work-orders/{workOrderId}/operations     /v1/work-orders/{workOrderId}/operations/{operationId}/input     /v1/work-orders/{workOrderId}/operations/{operationId}/finish \
     /v1/work-orders/{workOrderId}/production-receipts \
     /v1/plants/{plantId}/capacity-board \
     /users/v1 /access/v1/roles /access/v1/scopes /access/v1/assignments /auth/v1/me
@@ -744,26 +744,41 @@ print(json.dumps([{'componentLineId': r['componentLineId'],
 # planned_qty WO_ID — số lượng kế hoạch (số nguyên) của một lệnh sản xuất.
 planned_qty() { call GET "/v1/work-orders/$1" | extract "int(float(d['result']['plannedQuantity']))"; }
 
-# last_operation_id WO_ID — công đoạn CUỐI trong ảnh chụp quy trình của lệnh sản xuất.
+# report_output WO_ID SỐ_LƯỢNG KHOÁ — ghi sản lượng tốt (phế 0, làm lại 0) qua MỌI công đoạn.
 #
-# Phiếu ghi sản lượng gắn vào một công đoạn cụ thể, nếu không thì màn hình ghi sản lượng bỏ
-# trống cả ba cột công đoạn / thứ tự / tổ sản xuất. Chọn công đoạn cuối vì sản lượng tốt chỉ
-# thành hình sau bước cuối cùng (đóng gói / kiểm tra cuối) — gắn vào công đoạn đầu sẽ đọc như
-# thể hàng ra lò ngay tại khâu chuẩn bị.
-last_operation_id() {
-    call GET "/v1/work-orders/$1" \
-        | extract "(sorted(d['result']['operations'], key=lambda o: o['sequence'])[-1]['workOrderOperationId'] if d['result'].get('operations') else '')"
-}
-
-# report_output WO_ID SỐ_LƯỢNG KHOÁ — ghi sản lượng tốt (phế 0, làm lại 0).
+# G8c: quy trình là tuần tự. Công đoạn đầu nhận đầu vào từ kế hoạch (cần phiếu xuất vật tư đã ghi —
+# issue_all chạy trước), công đoạn sau nhận chuyển giao sản lượng tốt của công đoạn trước khi công
+# đoạn đó đã kết thúc. Chỉ sản lượng tốt của công đoạn CUỐI là sản lượng tốt của lệnh (B219), nên
+# muốn nhập kho SỐ_LƯỢNG thì phải đi hết chuỗi. Công đoạn đầu chỉ kết thúc khi đã nhận ĐỦ kế hoạch
+# (FE A25) và công đoạn trước công đoạn cuối phải chuyển hết sản lượng tốt mới kết thúc được, nên các
+# công đoạn đó làm đủ kế hoạch; chỉ công đoạn cuối nhận SỐ_LƯỢNG. Công đoạn cuối chỉ kết thúc khi lệnh
+# đã COMPLETED — lệnh làm một phần dừng ở IN_PROGRESS với công đoạn cuối còn mở.
 report_output() {
-    local op
-    op=$(last_operation_id "$1")
-    local oppart=""
-    [ -n "$op" ] && oppart="\"workOrderOperationId\":\"$op\","
-    call POST "/v1/work-orders/$1/production-executions" \
-        "{$oppart\"goodQuantity\":$2,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\"}" \
-        -H "Idempotency-Key: $3" >/dev/null
+    local wo="$1" qty="$2" key="$3" ops op n i=0 step planned
+    ops=$(call GET "/v1/work-orders/$wo/operations" | extract "' '.join(o['workOrderOperationId'] for o in d['result'])")
+    if [ -z "$ops" ]; then
+        call POST "/v1/work-orders/$wo/production-executions" \
+            "{\"goodQuantity\":$qty,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")}" \
+            -H "Idempotency-Key: $key" >/dev/null
+        return
+    fi
+    n=$(echo "$ops" | wc -w)
+    planned=$(planned_qty "$wo")
+    for op in $ops; do
+        i=$((i + 1))
+        step=$planned
+        [ "$i" -eq "$n" ] && step=$qty
+        call POST "/v1/work-orders/$wo/operations/$op/input" \
+            "{\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"quantity\":$step}" \
+            -H "Idempotency-Key: $key-IN$i" >/dev/null
+        call POST "/v1/work-orders/$wo/production-executions" \
+            "{\"workOrderOperationId\":\"$op\",\"goodQuantity\":$step,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")}" \
+            -H "Idempotency-Key: $key-OP$i" >/dev/null
+        if [ "$i" -lt "$n" ] || [ "$(call GET "/v1/work-orders/$wo" | rid status)" = "COMPLETED" ]; then
+            call POST "/v1/work-orders/$wo/operations/$op/finish" \
+                "{\"expectedWorkOrderVersion\":$(wo_version "$wo")}" -H "Idempotency-Key: $key-FIN$i" >/dev/null
+        fi
+    done
 }
 
 # receipt_and_qc WO_ID SỐ_LƯỢNG LÔ KHOÁ [QC]

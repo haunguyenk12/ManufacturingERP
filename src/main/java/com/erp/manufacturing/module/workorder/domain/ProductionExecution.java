@@ -53,6 +53,13 @@ public class ProductionExecution extends BaseEntity {
     @JoinColumn(name = "work_order_operation_id")
     private WorkOrderOperation operation;
 
+    /**
+     * G8c (FE R11, D7): the earlier execution of the same operation whose rework this execution processes again.
+     * {@code null} for fresh work. A source's rework still waiting = its rework minus everything recorded against it.
+     */
+    @Column(name = "source_execution_id")
+    private UUID sourceExecutionId;
+
     @Column(name = "good_quantity", nullable = false, precision = 19, scale = 6)
     @Builder.Default
     private BigDecimal goodQuantity = BigDecimal.ZERO;
@@ -100,6 +107,11 @@ public class ProductionExecution extends BaseEntity {
      * <p>Must stay the same formula as the {@code V40} backfill
      * ({@code 'PE-' || upper(substring(production_execution_id::text, 1, 8))}).
      */
+    /** Good + scrap + rework: how much of the operation's input or rework pool this execution used. */
+    public BigDecimal processedQuantity() {
+        return goodQuantity.add(scrapQuantity).add(reworkQuantity);
+    }
+
     @PrePersist
     public void assignCode() {
         if (code == null) {

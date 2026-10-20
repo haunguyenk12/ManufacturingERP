@@ -202,11 +202,22 @@ pf "SMOKE-4" "xuất đủ 4 dòng thành phần" \
 pf "SMOKE-4" "tổng lượng xuất = 50 (10+10+20+10)" \
     "$(echo "$ISSUE" | extract "'%g' % sum(float(l['quantity']) for l in d['result']['lines'])")" "50"
 
-# Ghi sản lượng: tốt 10, phế 0, làm lại 0 (§12 bước 5).
-EXEC=$(call POST "/v1/work-orders/$WO/production-executions" \
-    "{\"goodQuantity\":10,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 4)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Ghi sản lượng ca ngày\"}" \
-    -H "Idempotency-Key: D26-VERIFY-EXEC")
-info "phiếu ghi sản lượng: $(echo "$EXEC" | rid code)"
+# Ghi sản lượng: tốt 10, phế 0, làm lại 0 (§12 bước 5) — G8c: qua từng công đoạn theo thứ tự,
+# mỗi công đoạn nhận đầu vào (công đoạn sau = chuyển giao từ công đoạn trước) rồi mới báo sản lượng.
+OPS=$(call GET "/v1/work-orders/$WO/operations" | extract "' '.join(o['workOrderOperationId'] for o in d['result'])")
+STEP=0
+for OP in $OPS; do
+    STEP=$((STEP + 1))
+    call POST "/v1/work-orders/$WO/operations/$OP/input" \
+        "{\"expectedWorkOrderVersion\":$(wo_version "$WO"),\"quantity\":10}" \
+        -H "Idempotency-Key: D26-VERIFY-IN$STEP" >/dev/null
+    EXEC=$(call POST "/v1/work-orders/$WO/production-executions" \
+        "{\"workOrderOperationId\":\"$OP\",\"goodQuantity\":10,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 4)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Ghi sản lượng ca ngày\",\"expectedWorkOrderVersion\":$(wo_version "$WO")}" \
+        -H "Idempotency-Key: D26-VERIFY-EXEC$STEP")
+    call POST "/v1/work-orders/$WO/operations/$OP/finish" \
+        "{\"expectedWorkOrderVersion\":$(wo_version "$WO")}" -H "Idempotency-Key: D26-VERIFY-FIN$STEP" >/dev/null
+done
+info "phiếu ghi sản lượng (công đoạn cuối): $(echo "$EXEC" | rid code)"
 pf "SMOKE-5" "lệnh sản xuất -> COMPLETED (sản lượng tốt chạm kế hoạch)" \
     "$(call GET "/v1/work-orders/$WO" | rid status)" "COMPLETED"
 

@@ -210,6 +210,23 @@ public class WorkOrder extends BaseEntity {
     @Column(name = "schedule_captured_at")
     private Instant scheduleCapturedAt;
 
+    /**
+     * G8c: every execution of this work order went through the operation ledger (inputs, pools, consumption).
+     * {@code false} for work orders that already had executions before {@code V81} — their inputs and consumption
+     * were never recorded, so they are reported as unknown and keep the pre-G8c reporting rules (FE Q22).
+     */
+    @Column(name = "operation_tracking", nullable = false)
+    @Builder.Default
+    private boolean operationTracking = true;
+
+    /** G8c: plan minus final good when production was completed; null before completion (FE R14). */
+    @Column(name = "terminal_shortfall_quantity", precision = 19, scale = 6)
+    private BigDecimal terminalShortfallQuantity;
+
+    /** G8c: why a manager accepted completing below the plan. */
+    @Column(name = "shortfall_reason", columnDefinition = "TEXT")
+    private String shortfallReason;
+
     @OneToMany(mappedBy = "workOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("lineNo ASC")
     @Builder.Default
@@ -365,10 +382,22 @@ public class WorkOrder extends BaseEntity {
      * leave it alone — it marks when production began, not when it was last touched.
      */
     public void reportProduction(BigDecimal good, BigDecimal scrap, BigDecimal rework, Instant now) {
+        reportProduction(good, scrap, rework, true, now);
+    }
+
+    /**
+     * G8c (FE R12): {@link #actualGoodQuantity} is the work order's <em>final</em> good — the good of its last
+     * operation. Good reported on an earlier operation is work in progress handed to the next one, so it does not
+     * count here ({@code countsAsFinalGood = false}). Scrap and rework stay totals over every operation.
+     */
+    public void reportProduction(BigDecimal good, BigDecimal scrap, BigDecimal rework, boolean countsAsFinalGood,
+                                 Instant now) {
         if (executionStartedAt == null) {
             executionStartedAt = now;
         }
-        actualGoodQuantity = actualGoodQuantity.add(good);
+        if (countsAsFinalGood) {
+            actualGoodQuantity = actualGoodQuantity.add(good);
+        }
         actualScrapQuantity = actualScrapQuantity.add(scrap);
         actualReworkQuantity = actualReworkQuantity.add(rework);
         markInProgress();
@@ -393,6 +422,19 @@ public class WorkOrder extends BaseEntity {
     public void complete(Instant now) {
         status = WorkOrderStatus.COMPLETED;
         completedAt = now;
+        if (terminalShortfallQuantity == null) {
+            terminalShortfallQuantity = BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * G8c (FE R14): completion by command, possibly below the plan. The shortfall and its reason are captured once;
+     * nothing is received, closed or posted to stock.
+     */
+    public void completeProduction(BigDecimal shortfall, String reason, Instant now) {
+        terminalShortfallQuantity = shortfall;
+        shortfallReason = reason;
+        complete(now);
     }
 
     public void cancel(Instant now, String reason) {

@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("80");
+        assertThat(current.getVersion().getVersion()).isEqualTo("81");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -455,6 +455,79 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
             assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
             assertThat(defaults.get("supplemental")).isEqualTo("false");
+        }
+    }
+
+    /**
+     * G8c / {@code V81}: a work order that already had production reported keeps {@code operation_tracking = false}
+     * — its operation inputs and consumption were never recorded, so they stay unknown (FE Q22) — while one with no
+     * execution yet is tracked from now on. Seeded at V80 so the backfill runs on real rows.
+     */
+    @Test
+    void migrate_v81_marksWorkOrdersWithEarlierExecutionsAsUntracked() throws Exception {
+        String schema = "flyway_v81_tracking";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("80")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111118101";
+        String plant = "22222222-2222-4222-8222-222222228101";
+        String warehouse = "33333333-3333-4333-8333-333333338101";
+        String item = "55555555-5555-4555-8555-555555558101";
+        String bom = "66666666-6666-4666-8666-666666668101";
+        String reported = "77777777-7777-4777-8777-777777778101";
+        String fresh = "77777777-7777-4777-8777-777777778102";
+        String workOrder = "insert into work_orders (work_order_id, company_id, plant_id, work_order_no, product_item_id,"
+                + " bom_id, bom_revision, output_warehouse_id, planned_quantity, status) values ('%s', '" + company
+                + "', '" + plant + "', '%s', '" + item + "', '" + bom + "', 'A', '" + warehouse + "', 10, 'IN_PROGRESS')";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V81', 'V81')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name) values ('%s', '%s', 'P', 'P')"
+                    .formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'FG', 'FG', 'FINISHED_GOOD', 'EA')".formatted(item, company));
+            statement.execute("insert into bom_headers (bom_id, company_id, parent_item_id, revision, bom_code, version_number)"
+                    + " values ('%s', '%s', '%s', 'A', 'FG-A', 1)".formatted(bom, company, item));
+            statement.execute(workOrder.formatted(reported, "WO-REPORTED"));
+            statement.execute(workOrder.formatted(fresh, "WO-FRESH"));
+            statement.execute("insert into production_executions (work_order_id, good_quantity, idempotency_key, code)"
+                    + " values ('%s', 4, 'V81-EXEC', 'PE-V81')".formatted(reported));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("81")
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            java.util.Map<String, Boolean> tracking = new java.util.HashMap<>();
+            try (ResultSet rs = statement.executeQuery(
+                    "select work_order_no, operation_tracking, terminal_shortfall_quantity from work_orders")) {
+                while (rs.next()) {
+                    tracking.put(rs.getString(1), rs.getBoolean(2));
+                    // Not backfilled: no shortfall was ever captured for a work order before V81.
+                    assertThat(rs.getBigDecimal(3)).isNull();
+                }
+            }
+            assertThat(tracking).containsEntry("WO-REPORTED", false).containsEntry("WO-FRESH", true);
+            assertThatThrownBy(() -> statement.execute(
+                    "update work_orders set terminal_shortfall_quantity = -1 where work_order_no = 'WO-FRESH'"))
+                    .hasMessageContaining("chk_work_orders_terminal_shortfall");
         }
     }
 

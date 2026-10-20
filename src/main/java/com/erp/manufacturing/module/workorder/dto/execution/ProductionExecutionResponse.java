@@ -2,6 +2,7 @@ package com.erp.manufacturing.module.workorder.dto.execution;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -57,5 +58,19 @@ public record ProductionExecutionResponse(
         /** {@code actualGood / planned} as a percentage, scale 2, HALF_UP (spec §5.2). */
         BigDecimal workOrderCompletionPercent,
         String workOrderStatus,
-        Instant createdAt
+        Instant createdAt,
+        /** G8c: the earlier execution whose rework this one processed again; {@code null} for fresh work. */
+        UUID sourceExecutionId,
+        /** G8c: good + scrap + rework — how much of a pool this execution used. */
+        BigDecimal processedQuantity,
+        /** G8c: how much of this execution's rework later retries processed. */
+        BigDecimal retryUsedQuantity,
+        /** G8c: {@code rework − retry used} — what retries may still take from this execution. */
+        BigDecimal pendingReworkQuantity,
+        /** G8c: material recorded as actually used; empty when none was recorded. */
+        List<ExecutionConsumptionResponse> consumption,
+        /** G8c: wall minutes between the actual start and end. */
+        Long durationMinutes,
+        /** G8c: the work order version after this report — the next command's expected version. */
+        Long workOrderVersion
 ) {}

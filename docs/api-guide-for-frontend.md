@@ -709,6 +709,28 @@ Response trả sẵn khối tổng để cập nhật màn hình ngay, khỏi re
 > Khi cộng dồn good = planned, WO tự chuyển `COMPLETED`. **Nhưng hàng vẫn chưa vào kho** — vẫn phải
 > làm tiếp bước 8. `COMPLETED` **không** chặn receipt.
 
+#### 🔴 G8c (2026-10-20) — công đoạn: đầu vào, chuyển giao, retry, vật tư thực dùng, hoàn thành có hụt
+
+WO có quy trình (routing) nay đi **từng công đoạn, tuần tự**:
+
+| Bước | Gọi gì | Ghi chú |
+|---|---|---|
+| Đọc công đoạn | `GET /work-orders/{W}/operations` | Mỗi công đoạn: `status` (`PENDING`/`READY`/`IN_PROGRESS`/`COMPLETED`), `inputQuantity`, `freshProcessedQuantity`, `freshRemainingQuantity`, `goodQuantity`, `scrapQuantity`, `historicalReworkQuantity`, `pendingReworkQuantity`, `transferredQuantity`/`transferableQuantity` (`null` ở công đoạn cuối), `workOrderVersion` |
+| Xác nhận đầu vào | `POST /work-orders/{W}/operations/{O}/input` `{expectedWorkOrderVersion, quantity}` · `Idempotency-Key?` | Công đoạn đầu: cần ≥ 1 phiếu cấp `POSTED` (`409 MATERIAL_ISSUE_REQUIRED`), tổng ≤ kế hoạch. Công đoạn sau: chỉ khi công đoạn trước đã kết thúc (`409 OPERATION_SEQUENCE_CONFLICT`), tối đa `transferableQuantity` của công đoạn trước. Vượt ⇒ `409 PLANNED_QUANTITY_EXCEEDED` field `quantity` |
+| Báo sản lượng | `POST /work-orders/{W}/production-executions` | **Bắt buộc** `expectedWorkOrderVersion`; WO có công đoạn **bắt buộc** `workOrderOperationId`. Lượt mới: `good+scrap+rework ≤ freshRemainingQuantity`. Lượt xử lý lại: `sourceExecutionId` (cùng WO + công đoạn, khác ⇒ `422 RESOURCE_SCOPE_MISMATCH`), tối đa `pendingReworkQuantity` của lượt nguồn. `consumption[] {issueLineId, quantity}` (≤ 500, có thể rỗng): dòng cấp `POSTED` của chính WO, mục cùng dòng **cộng lại** rồi so `đã cấp − đã dùng` (vượt ⇒ `409` field `consumption[i].quantity`) — **không** biến động kho |
+| Kết thúc công đoạn | `POST /work-orders/{W}/operations/{O}/finish` `{expectedWorkOrderVersion}` | Cần `freshRemaining = 0`, `pendingRework = 0`; công đoạn đầu: đầu vào **đúng bằng** kế hoạch (thiếu thì ghi phế); công đoạn sau: mọi good của công đoạn trước đã chuyển vào. Công đoạn trước kết thúc với good 0 ⇒ công đoạn sau kết thúc được với 0 |
+| Hoàn thành thiếu | `POST /work-orders/{W}/complete-production` `{expectedWorkOrderVersion, reason?}` | WO `RELEASED`/`IN_PROGRESS`, mọi công đoạn đã kết thúc, không phiếu chờ. Hụt > 0 cần `reason` 5–2000 **và** `PERM_MATERIAL_ISSUE_APPROVE` (thiếu ⇒ `403`). Không nhập kho / đóng / biến động |
+
+- 🔴 **`actualGoodQuantity` của WO = good của công đoạn CUỐI** (trước G8c: cộng mọi lần báo). Good công đoạn trước là dở dang. Phế/làm lại
+  vẫn là tổng mọi công đoạn. Đạt kế hoạch ở công đoạn cuối vẫn tự `COMPLETED`.
+- `actualEndedAt` được lệch tối đa **60 giây** sau giờ server; xa hơn ⇒ `400` field `actualEndedAt`.
+- Response báo sản lượng thêm `sourceExecutionId`, `processedQuantity`, `retryUsedQuantity`, `pendingReworkQuantity`, `consumption[]`,
+  `durationMinutes`, `workOrderVersion`. `WorkOrderResponse` thêm `inputKnown`, `consumptionKnown`, `finalGoodQuantity`,
+  `historicalReworkQuantity`, `terminalShortfallQuantity`, `shortfallReason`.
+- WO đã báo sản lượng **trước** khi deploy G8c: `inputKnown = false`, đầu vào / cap / `finalGoodQuantity` = `null` (không đoán); đầu vào,
+  xử lý lại, vật tư dùng ⇒ `409 PRODUCTION_INPUT_UNKNOWN`; báo sản lượng giữ luật cũ.
+- WO **không** có quy trình: không cần đầu vào, `workOrderOperationId` để trống, trần vẫn là kế hoạch.
+
 ---
 
 ### Bước 8 — Nhập kho thành phẩm (Production Receipt, 3 bước)
@@ -884,6 +906,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Ứng viên nguồn cấp (G8b) | `GET /work-orders/{id}/material-issue-candidates` | `PERM_MATERIAL_ISSUE_MANAGE` |
 | Candidate báo sản lượng | `GET /production-executions/candidates?plantId=` | `PERM_PRODUCTION_EXECUTION_READ` |
 | Báo sản lượng | `POST /work-orders/{id}/production-executions` | `PERM_PRODUCTION_EXECUTION_MANAGE` |
+| Công đoạn: đọc (G8c) | `GET /work-orders/{id}/operations` | `PERM_PRODUCTION_EXECUTION_READ` **hoặc** `_MANAGE` |
+| Công đoạn: đầu vào / kết thúc (G8c) | `POST /work-orders/{id}/operations/{opId}/input` · `/finish` | `PERM_PRODUCTION_EXECUTION_MANAGE` |
+| Hoàn thành sản xuất (G8c) | `POST /work-orders/{id}/complete-production` | `PERM_WORK_ORDER_MANAGE` (+ `PERM_MATERIAL_ISSUE_APPROVE` khi hụt) |
 | Lịch sử báo sản lượng | `GET /production-executions?workOrderId=` | `PERM_PRODUCTION_EXECUTION_READ` |
 | Candidate nhập kho | `GET /production-receipts/candidates?plantId=` | `PERM_PRODUCTION_RECEIPT_MANAGE` |
 | Tạo/submit receipt | `POST /work-orders/{id}/production-receipts[/{rid}/submit]` | `PERM_PRODUCTION_RECEIPT_MANAGE` |

@@ -6,11 +6,16 @@ import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
+import com.erp.manufacturing.module.workorder.dto.operation.OperationInputRequest;
+import com.erp.manufacturing.module.workorder.dto.operation.ProductionCompletionRequest;
+import com.erp.manufacturing.module.workorder.dto.operation.ProductionCompletionResponse;
+import com.erp.manufacturing.module.workorder.dto.operation.WorkOrderOperationProgressResponse;
 import com.erp.manufacturing.module.workorder.dto.variance.*;
 import com.erp.manufacturing.module.workorder.service.*;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueCandidateService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
+import com.erp.manufacturing.module.workorder.service.execution.OperationService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionExecutionService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionReceiptService;
 import com.erp.manufacturing.module.workorder.service.execution.WipTransactionService;
@@ -38,6 +43,7 @@ public class ManufacturingExecutionController {
     private final MaterialIssueService materialIssueService;
     private final WipTransactionService wipTransactionService;
     private final ProductionExecutionService productionExecutionService;
+    private final OperationService operationService;
     private final ProductionReceiptService productionReceiptService;
     private final WorkOrderVarianceService varianceService;
     /**
@@ -282,8 +288,11 @@ public class ManufacturingExecutionController {
     @PostMapping("/v1/work-orders/{workOrderId}/production-executions")
     @Operation(summary = "Report shop floor production",
             description = "Records good/scrap/rework quantities. This — not the production receipt — "
-                    + "is what advances and completes the work order. Fails with 409 "
-                    + "PLANNED_QUANTITY_EXCEEDED when cumulative good would exceed the plan.")
+                    + "is what advances and completes the work order. G8c: expectedWorkOrderVersion is "
+                    + "required; on a work order with operations, workOrderOperationId is required, fresh work "
+                    + "draws on the operation's confirmed input and a retry (sourceExecutionId) on its source's "
+                    + "pending rework, only the last operation's good is final good, and consumption[] draws on "
+                    + "the work order's own posted issue lines. Over a cap ⇒ 409 PLANNED_QUANTITY_EXCEEDED.")
     public ResponseEntity<ApiResponse<ProductionExecutionResponse>> reportProduction(
             @PathVariable UUID workOrderId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -302,6 +311,55 @@ public class ManufacturingExecutionController {
             @RequestParam(defaultValue = "desc") String sortDir) {
         return ResponseEntity.ok(ApiResponse.ok(productionExecutionService.list(
                 workOrderId, PageableFactory.of(page, size, sortBy, sortDir))));
+    }
+
+    @GetMapping("/v1/work-orders/{workOrderId}/operations")
+    @Operation(summary = "Operations of a work order with their pools",
+            description = "G8c: status, confirmed input, fresh remaining, good/scrap, historical and pending "
+                    + "rework, transferred and transferable good. Input and caps are null when inputKnown is false.")
+    public ResponseEntity<ApiResponse<List<WorkOrderOperationProgressResponse>>> listOperations(
+            @PathVariable UUID workOrderId) {
+        return ResponseEntity.ok(ApiResponse.ok(operationService.list(workOrderId)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/operations/{operationId}/input")
+    @Operation(summary = "Confirm input of an operation",
+            description = "G8c: the first operation takes input from the plan once material was issued "
+                    + "(409 MATERIAL_ISSUE_REQUIRED); a later one takes a transfer of its finished predecessor's "
+                    + "good (409 OPERATION_SEQUENCE_CONFLICT otherwise). Over the cap ⇒ 409 PLANNED_QUANTITY_EXCEEDED.")
+    public ResponseEntity<ApiResponse<WorkOrderOperationProgressResponse>> recordOperationInput(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID operationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody OperationInputRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                operationService.recordInput(workOrderId, operationId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/operations/{operationId}/finish")
+    @Operation(summary = "Finish an operation",
+            description = "G8c: allowed once its input and pending rework are used up and every good unit of the "
+                    + "predecessor was transferred in (409 STATE_CONFLICT otherwise).")
+    public ResponseEntity<ApiResponse<WorkOrderOperationProgressResponse>> finishOperation(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID operationId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody WorkOrderVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                operationService.finish(workOrderId, operationId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/complete-production")
+    @Operation(summary = "Complete production of a work order",
+            description = "G8c: for completing below the plan — reaching the plan completes it on its own. Every "
+                    + "operation must be finished and no issue pending. A shortfall needs a 5–2000 character reason "
+                    + "and PERM_MATERIAL_ISSUE_APPROVE. Nothing is received, closed or posted to stock.")
+    public ResponseEntity<ApiResponse<ProductionCompletionResponse>> completeProduction(
+            @PathVariable UUID workOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionCompletionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                operationService.completeProduction(workOrderId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/wip-transactions")

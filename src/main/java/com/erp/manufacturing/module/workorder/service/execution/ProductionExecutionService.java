@@ -10,18 +10,28 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.user.service.UserLookupService;
+import com.erp.manufacturing.module.workorder.domain.MaterialIssueLine;
+import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
 import com.erp.manufacturing.module.workorder.domain.ProductionExecution;
+import com.erp.manufacturing.module.workorder.domain.ProductionExecutionConsumption;
 import com.erp.manufacturing.module.workorder.domain.WipTransactionType;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
+import com.erp.manufacturing.module.workorder.dto.execution.ExecutionConsumptionRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ExecutionConsumptionResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionCandidateResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionPostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionResponse;
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
+import com.erp.manufacturing.module.workorder.repository.KeyedQuantityProjection;
+import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionExecutionConsumptionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
+import com.erp.manufacturing.module.workorder.service.WorkOrderVersions;
+import com.erp.manufacturing.module.workorder.service.execution.OperationLedger.OperationState;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -30,11 +40,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Production Execution — the shop-floor report (spec §5).
@@ -54,6 +69,9 @@ public class ProductionExecutionService {
     private static final List<WorkOrderStatus> EXECUTION_CANDIDATE_STATUSES =
             List.of(WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS);
 
+    /** G8c (FE Q31): a tablet's clock may run up to a minute ahead of the server. */
+    static final Duration END_TIME_TOLERANCE = Duration.ofSeconds(60);
+
     private final ProductionExecutionRepository executionRepository;
     private final WorkOrderOperationRepository operationRepository;
     private final WorkOrderRepository workOrderRepository;
@@ -65,6 +83,9 @@ public class ProductionExecutionService {
     private final SecurityAuditorAware auditorAware;
     private final UserLookupService userLookupService;
     private final WorkOrderCostAccumulatorService costAccumulatorService;
+    private final OperationLedger ledger;
+    private final ProductionExecutionConsumptionRepository consumptionRepository;
+    private final MaterialIssueLineRepository issueLineRepository;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_EXECUTION_MANAGE', #workOrderId)")
@@ -104,12 +125,15 @@ public class ProductionExecutionService {
         support.findWorkOrder(workOrderId);
         Page<ProductionExecution> page = executionRepository.findByWorkOrderWorkOrderId(workOrderId, pageable);
         Map<UUID, String> usernames = usernamesOf(page.getContent());
-        return PageResult.from(page.map(execution -> mapper.toResponse(execution, usernames)));
+        Map<UUID, BigDecimal> retryUsed = retryUsedOf(page.getContent());
+        Map<UUID, List<ExecutionConsumptionResponse>> consumption = consumptionOf(page.getContent());
+        return PageResult.from(page.map(execution -> mapper.toResponse(execution, usernames, retryUsed, consumption)));
     }
 
-    /** Resolves the operator username of a single execution in one query. */
+    /** Resolves the operator username, retry use and consumption of a single execution — one query each. */
     private ProductionExecutionResponse toResponse(ProductionExecution execution) {
-        return mapper.toResponse(execution, usernamesOf(List.of(execution)));
+        List<ProductionExecution> one = List.of(execution);
+        return mapper.toResponse(execution, usernamesOf(one), retryUsedOf(one), consumptionOf(one));
     }
 
     /** One query for the whole page (rule C14) — never one lookup per row. */
@@ -120,35 +144,120 @@ public class ProductionExecutionService {
                 .toList());
     }
 
+    /** G8c: how much of each execution's rework later retries processed — one query for the page (C14). */
+    private Map<UUID, BigDecimal> retryUsedOf(List<ProductionExecution> executions) {
+        List<UUID> ids = idsOf(executions);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return executionRepository.sumRetryProcessedBySource(ids).stream()
+                .collect(Collectors.toMap(KeyedQuantityProjection::getRefId, KeyedQuantityProjection::getQuantity));
+    }
+
+    /** G8c: recorded consumption of each execution — one query for the page (C14). */
+    private Map<UUID, List<ExecutionConsumptionResponse>> consumptionOf(List<ProductionExecution> executions) {
+        List<UUID> ids = idsOf(executions);
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return consumptionRepository.findByProductionExecutionProductionExecutionIdIn(ids).stream()
+                .collect(Collectors.groupingBy(row -> row.getProductionExecution().getProductionExecutionId(),
+                        Collectors.mapping(row -> new ExecutionConsumptionResponse(row.getIssueLineId(), row.getQuantity()),
+                                Collectors.toList())));
+    }
+
+    private static List<UUID> idsOf(List<ProductionExecution> executions) {
+        return executions.stream().map(ProductionExecution::getProductionExecutionId).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * G8c rules (FE R10–R13, D4, D7), on top of the F5 ones:
+     * <ul>
+     *   <li>{@code expectedWorkOrderVersion} is required (D5); a replay was already answered by {@link #report}.</li>
+     *   <li>A work order with operations reports against one of them, whose predecessor must be finished.</li>
+     *   <li>Fresh work uses the operation's confirmed input ({@code input − fresh processed}); a retry uses its
+     *       source's pending rework — two pools, never one (B218).</li>
+     *   <li>Only the last operation's good is the work order's final good (B219).</li>
+     *   <li>Consumption draws on the work order's own posted issue lines, duplicates added up first (B220).</li>
+     *   <li>A work order that had production reported before V81 keeps the F5 rules and accepts neither a retry
+     *       nor consumption: its inputs were never recorded (FE Q22).</li>
+     * </ul>
+     * Every change to the work order is made and {@link WorkOrder#touch() touched} before the first write, and it is
+     * flushed once at the end, so a report moves it on exactly one version (B212).
+     */
     private ProductionExecutionResponse reportNew(UUID workOrderId,
                                                   ProductionExecutionPostRequest request,
                                                   String normalizedKey) {
         WorkOrder workOrder = support.findWorkOrder(workOrderId);
+        WorkOrderVersions.ensure(workOrder, request.expectedWorkOrderVersion(), "expectedWorkOrderVersion");
         support.ensureExecutable(workOrder);
 
         BigDecimal good = nonNegative(request.goodQuantity(), "Good quantity");
         BigDecimal scrap = nonNegative(request.scrapQuantity(), "Scrap quantity");
         BigDecimal rework = nonNegative(request.reworkQuantity(), "Rework quantity");
-        if (good.add(scrap).add(rework).compareTo(BigDecimal.ZERO) == 0) {
+        BigDecimal processed = good.add(scrap).add(rework);
+        if (processed.compareTo(BigDecimal.ZERO) == 0) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.NEGATIVE_QUANTITY,
                     "At least one of good, scrap, or rework quantity must be greater than zero");
         }
         ensureChronological(request);
 
-        // Cumulative good is capped by the plan: over-producing is a planning decision (raise the
-        // work order quantity), not something the shop floor may do silently.
-        if (good.compareTo(workOrder.remainingPlannedQuantity()) > 0) {
-            throw ExceptionFactory.custom(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
-                    "Cumulative good quantity would exceed the planned quantity of the work order");
+        List<ExecutionConsumptionRequest> consumption = request.consumptionOrEmpty();
+        WorkOrderOperation operation;
+        boolean countsAsFinalGood = true;
+        if (!workOrder.isOperationTracking()) {
+            if (request.sourceExecutionId() != null || !consumption.isEmpty()) {
+                throw ExceptionFactory.custom(BusinessErrorCode.PRODUCTION_INPUT_UNKNOWN,
+                        "Production of this work order was reported before inputs and consumption were recorded");
+            }
+            operation = resolveOperation(workOrderId, request.workOrderOperationId());
+            ensureWithinPlan(workOrder, good);
+        } else {
+            List<OperationState> states = ledger.load(workOrderId);
+            if (states.isEmpty()) {
+                operation = resolveOperation(workOrderId, request.workOrderOperationId());
+                ensureWithinPlan(workOrder, good);
+                if (request.sourceExecutionId() != null) {
+                    ensureWithinSource(workOrderId, null, request.sourceExecutionId(), processed);
+                }
+            } else {
+                if (request.workOrderOperationId() == null) {
+                    throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                            Map.of("workOrderOperationId", "is required on a work order with operations"));
+                }
+                OperationState state = OperationLedger.find(states, request.workOrderOperationId());
+                operation = state.operation();
+                if (operation.isCompleted()) {
+                    throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT, "The operation is already finished");
+                }
+                if (!state.predecessorCompleted()) {
+                    throw ExceptionFactory.custom(BusinessErrorCode.OPERATION_SEQUENCE_CONFLICT,
+                            "The previous operation must be finished before this one reports production");
+                }
+                if (request.sourceExecutionId() == null) {
+                    if (processed.compareTo(state.freshRemaining()) > 0) {
+                        throw ExceptionFactory.withErrors(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
+                                Map.of("goodQuantity", "good + scrap + rework exceeds the "
+                                        + state.freshRemaining().toPlainString() + " confirmed input left"));
+                    }
+                } else {
+                    ensureWithinSource(workOrderId, operation.getWorkOrderOperationId(),
+                            request.sourceExecutionId(), processed);
+                }
+                countsAsFinalGood = state.last();
+            }
         }
+        List<ProductionExecutionConsumption> consumptionRows = validateConsumption(workOrderId, consumption);
 
-        WorkOrderOperation operation = resolveOperation(workOrderId, request.workOrderOperationId());
         String traceId = traceIdProvider.currentTraceId();
         Instant now = Instant.now();
+        workOrder.reportProduction(good, scrap, rework, countsAsFinalGood, now);
+        workOrder.touch();
 
         ProductionExecution execution = executionRepository.save(ProductionExecution.builder()
                 .workOrder(workOrder)
                 .operation(operation)
+                .sourceExecutionId(request.sourceExecutionId())
                 .goodQuantity(good)
                 .scrapQuantity(scrap)
                 .reworkQuantity(rework)
@@ -160,6 +269,8 @@ public class ProductionExecutionService {
                 .payloadHash(idempotency.payloadHash(request))
                 .notes(support.trimToNull(request.notes()))
                 .build());
+        consumptionRows.forEach(row -> row.setProductionExecution(execution));
+        consumptionRepository.saveAll(consumptionRows);
 
         // The WIP ledger keeps recording everything, so WorkOrderVarianceService and the shop-floor
         // history stay intact (NEXT_PHASE_PLAN F5 §1.1 item 3).
@@ -167,12 +278,92 @@ public class ProductionExecutionService {
         recordWip(workOrder, operation, WipTransactionType.SCRAP_REPORTED, scrap, execution);
         recordWip(workOrder, operation, WipTransactionType.REWORK_REPORTED, rework, execution);
 
-        workOrder.reportProduction(good, scrap, rework, now);
-        workOrderRepository.save(workOrder);
-        if (good.compareTo(BigDecimal.ZERO) > 0) {
+        // Labour and overhead are absorbed per finished unit — and only the final good is a finished unit (B219).
+        if (countsAsFinalGood && good.compareTo(BigDecimal.ZERO) > 0) {
             costAccumulatorService.accumulateLaborOverheadCost(workOrder, good);
         }
+        support.flushTouched(workOrder);
         return toResponse(execution);
+    }
+
+    /** Cumulative final good is capped by the plan (B54): over-producing is a planning decision. */
+    private static void ensureWithinPlan(WorkOrder workOrder, BigDecimal good) {
+        if (good.compareTo(workOrder.remainingPlannedQuantity()) > 0) {
+            throw ExceptionFactory.custom(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
+                    "Cumulative good quantity would exceed the planned quantity of the work order");
+        }
+    }
+
+    /**
+     * A retry processes rework of an earlier execution of the same work order and operation (FE R11, D7), and at
+     * most what that execution still has pending: its rework minus everything already recorded against it.
+     */
+    private void ensureWithinSource(UUID workOrderId, UUID operationId, UUID sourceExecutionId, BigDecimal processed) {
+        ProductionExecution source = executionRepository.findById(sourceExecutionId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Production execution", sourceExecutionId));
+        UUID sourceOperationId = source.getOperation() == null ? null : source.getOperation().getWorkOrderOperationId();
+        if (!source.getWorkOrder().getWorkOrderId().equals(workOrderId) || !Objects.equals(sourceOperationId, operationId)) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
+                    Map.of("sourceExecutionId", "must be an execution of the same work order and operation"));
+        }
+        BigDecimal used = executionRepository.sumRetryProcessedBySource(List.of(sourceExecutionId)).stream()
+                .map(KeyedQuantityProjection::getQuantity)
+                .findFirst()
+                .orElse(BigDecimal.ZERO);
+        BigDecimal pending = source.getReworkQuantity().subtract(used);
+        if (processed.compareTo(pending) > 0) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
+                    Map.of("goodQuantity", "good + scrap + rework exceeds the " + pending.toPlainString()
+                            + " rework still pending on the source execution"));
+        }
+    }
+
+    /**
+     * FE R13: each line must be a posted issue line of this work order, and what is recorded against it — this
+     * execution's entries for the line added up first — may not pass {@code issued − consumed} (returns come with
+     * G8d). Nothing is posted to stock: the material left the warehouse when it was issued.
+     */
+    private List<ProductionExecutionConsumption> validateConsumption(UUID workOrderId,
+                                                                    List<ExecutionConsumptionRequest> entries) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, BigDecimal> requested = new LinkedHashMap<>();
+        Map<UUID, Integer> firstIndex = new LinkedHashMap<>();
+        for (int i = 0; i < entries.size(); i++) {
+            ExecutionConsumptionRequest entry = entries.get(i);
+            requested.merge(entry.issueLineId(), entry.quantity(), BigDecimal::add);
+            firstIndex.putIfAbsent(entry.issueLineId(), i);
+        }
+        Map<UUID, MaterialIssueLine> lines = issueLineRepository.findWithIssueByIssueLineIdIn(requested.keySet()).stream()
+                .collect(Collectors.toMap(MaterialIssueLine::getIssueLineId, Function.identity()));
+        Map<UUID, BigDecimal> consumed = consumptionRepository.sumByIssueLineIds(requested.keySet()).stream()
+                .collect(Collectors.toMap(KeyedQuantityProjection::getRefId, KeyedQuantityProjection::getQuantity));
+        List<ProductionExecutionConsumption> rows = new ArrayList<>();
+        for (Map.Entry<UUID, BigDecimal> entry : requested.entrySet()) {
+            int index = firstIndex.get(entry.getKey());
+            MaterialIssueLine line = lines.get(entry.getKey());
+            if (line == null || !line.getIssue().getWorkOrder().getWorkOrderId().equals(workOrderId)) {
+                throw ExceptionFactory.withErrors(BusinessErrorCode.RESOURCE_SCOPE_MISMATCH,
+                        Map.of("consumption[" + index + "].issueLineId", "must be an issue line of this work order"));
+            }
+            if (line.getIssue().getStatus() != MaterialIssueStatus.POSTED) {
+                throw ExceptionFactory.withErrors(BusinessErrorCode.STATE_CONFLICT,
+                        Map.of("consumption[" + index + "].issueLineId", "the material issue is not posted"));
+            }
+            BigDecimal left = line.getQuantity().subtract(consumed.getOrDefault(entry.getKey(), BigDecimal.ZERO));
+            if (entry.getValue().compareTo(left) > 0) {
+                throw ExceptionFactory.withErrors(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED,
+                        Map.of("consumption[" + index + "].quantity",
+                                "only " + left.toPlainString() + " of this issue line is left unconsumed"));
+            }
+            rows.add(ProductionExecutionConsumption.builder()
+                    .issueLineId(entry.getKey())
+                    .quantity(entry.getValue())
+                    .build());
+        }
+        return rows;
     }
 
     private void recordWip(WorkOrder workOrder,
@@ -206,6 +397,12 @@ public class ProductionExecutionService {
                 && request.actualEndedAt().isBefore(request.actualStartedAt())) {
             throw ExceptionFactory.custom(ValidationErrorCode.INVALID_INPUT,
                     "Actual end time cannot be before actual start time");
+        }
+        // G8c (FE Q31): an end time in the future is a typing or clock error, past a minute of tablet clock skew.
+        if (request.actualEndedAt() != null
+                && request.actualEndedAt().isAfter(Instant.now().plus(END_TIME_TOLERANCE))) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("actualEndedAt", "cannot be more than 60 seconds after the server time"));
         }
     }
 

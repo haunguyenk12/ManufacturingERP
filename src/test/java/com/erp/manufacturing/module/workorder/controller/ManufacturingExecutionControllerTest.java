@@ -88,6 +88,9 @@ class ManufacturingExecutionControllerTest {
     WipTransactionService wipTransactionService;
     @MockBean
     ProductionExecutionService productionExecutionService;
+
+    @MockBean
+    com.erp.manufacturing.module.workorder.service.execution.OperationService operationService;
     @MockBean
     ProductionReceiptService productionReceiptService;
     @MockBean
@@ -131,7 +134,8 @@ class ManufacturingExecutionControllerTest {
                 new BigDecimal("6.000000"), BigDecimal.ZERO, BigDecimal.ZERO,
                 new BigDecimal("6.000000"),
                 new BigDecimal("4.000000"), new BigDecimal("60.00"),
-                "IN_PROGRESS", Instant.now());
+                "IN_PROGRESS", Instant.now(),
+                null, new BigDecimal("6.000000"), BigDecimal.ZERO, BigDecimal.ZERO, java.util.List.of(), 480L, 5L);
     }
 
     /** Both timestamps are mandatory since F7 (spec §5.1) — a body without them is a 400. */
@@ -489,6 +493,105 @@ class ManufacturingExecutionControllerTest {
         verify(materialIssueService).cancelByRequester(eq(WORK_ORDER_ID), eq(issueId),
                 argThat(r -> r.expectedWorkOrderVersion() == 3L && r.expectedIssueVersion() == 1L
                         && "Wrong lot".equals(r.reason())), eq("KEY-C"));
+    }
+
+    // ── G8c: operations ─────────────────────────────────────────────────────────────────────
+
+    private com.erp.manufacturing.module.workorder.dto.operation.WorkOrderOperationProgressResponse progress(UUID operationId) {
+        return new com.erp.manufacturing.module.workorder.dto.operation.WorkOrderOperationProgressResponse(
+                operationId, 10, "Cut", "WC-01", "IN_PROGRESS", true,
+                new BigDecimal("10.000000"), new BigDecimal("8.000000"), new BigDecimal("2.000000"),
+                new BigDecimal("6.000000"), new BigDecimal("1.000000"), new BigDecimal("1.000000"),
+                new BigDecimal("1.000000"), BigDecimal.ZERO, new BigDecimal("6.000000"), 1L, null, null, 5L);
+    }
+
+    @Test
+    @DisplayName("G8c operations: list returns the pools of every operation")
+    void listOperations_returnsThePools() throws Exception {
+        UUID operationId = UUID.randomUUID();
+        when(operationService.list(WORK_ORDER_ID)).thenReturn(List.of(progress(operationId)));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/operations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result[0].workOrderOperationId").value(operationId.toString()))
+                .andExpect(jsonPath("$.result[0].freshRemainingQuantity").value(2))
+                .andExpect(jsonPath("$.result[0].pendingReworkQuantity").value(1))
+                .andExpect(jsonPath("$.result[0].workOrderVersion").value(5));
+    }
+
+    @Test
+    @DisplayName("G8c input: body and Idempotency-Key reach the service; 200")
+    void recordOperationInput_forwardsBodyAndKey() throws Exception {
+        UUID operationId = UUID.randomUUID();
+        when(operationService.recordInput(eq(WORK_ORDER_ID), eq(operationId), any(), eq("KEY-IN")))
+                .thenReturn(progress(operationId));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + operationId + "/input")
+                        .header("Idempotency-Key", "KEY-IN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":4,\"quantity\":\"10.000000\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("IN_PROGRESS"));
+
+        verify(operationService).recordInput(eq(WORK_ORDER_ID), eq(operationId),
+                argThat(r -> r.expectedWorkOrderVersion() == 4L && r.quantity().compareTo(BigDecimal.TEN) == 0),
+                eq("KEY-IN"));
+    }
+
+    @Test
+    @DisplayName("G8c input: a 7th decimal is a 400 before the service")
+    void recordOperationInput_sevenDecimals_returns400() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + UUID.randomUUID() + "/input")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":4,\"quantity\":1.1234567}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()));
+
+        verifyNoInteractions(operationService);
+    }
+
+    @Test
+    @DisplayName("G8c finish: a missing version is a 400 before the service")
+    void finishOperation_withoutVersion_returns400() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/operations/" + UUID.randomUUID() + "/finish")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("expectedWorkOrderVersion"));
+
+        verifyNoInteractions(operationService);
+    }
+
+    @Test
+    @DisplayName("G8c complete-production: a 403 from the shortfall check keeps the envelope")
+    void completeProduction_shortfallWithoutApproval_returns403() throws Exception {
+        when(operationService.completeProduction(eq(WORK_ORDER_ID), any(), eq("KEY-CP")))
+                .thenThrow(new AppException(com.erp.manufacturing.common.exception.AuthErrorCode.ACCESS_DENIED,
+                        "Completing below the plan also requires PERM_MATERIAL_ISSUE_APPROVE"));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/complete-production")
+                        .header("Idempotency-Key", "KEY-CP")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\":7,\"reason\":\"Material ran out\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(com.erp.manufacturing.common.exception.AuthErrorCode.ACCESS_DENIED.code()));
+    }
+
+    @Test
+    @DisplayName("G8c report: consumption with a 7th decimal is a 400 on that entry, before the service")
+    void reportProduction_consumptionSevenDecimals_returns400() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-executions")
+                        .header("Idempotency-Key", "EXEC-7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"expectedWorkOrderVersion":5,"goodQuantity":1,
+                                 "actualStartedAt":"2026-08-03T08:00:00Z","actualEndedAt":"2026-08-03T09:00:00Z",
+                                 "consumption":[{"issueLineId":"%s","quantity":1.1234567}]}
+                                """.formatted(UUID.randomUUID())))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(productionExecutionService);
     }
 
     @Test
