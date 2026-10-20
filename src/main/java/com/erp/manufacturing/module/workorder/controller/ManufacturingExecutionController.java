@@ -26,10 +26,12 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -386,44 +388,56 @@ public class ManufacturingExecutionController {
     @GetMapping("/v1/production-receipts/candidates")
     @Operation(summary = "List work orders with finished output still to be warehoused",
             description = "Spec §6.2. Returns RELEASED, IN_PROGRESS or COMPLETED work orders whose "
-                    + "produced good quantity has not yet been fully receipted, already net of "
-                    + "receipts still in DRAFT or PENDING_APPROVAL (invariant B76). COMPLETED is "
+                    + "receiptable good — min(planned, final good), G9a D12 — has not yet been fully receipted, "
+                    + "already net of receipts still in DRAFT or PENDING_APPROVAL (invariant B76). COMPLETED is "
                     + "included on purpose: the shop floor being done does not mean the goods "
-                    + "reached the racks.")
+                    + "reached the racks. Optional workOrderId and free-text search (work order code, item SKU/name).")
     public ResponseEntity<ApiResponse<PageResult<ProductionReceiptCandidateResponse>>> listReceiptCandidates(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @RequestParam UUID plantId,
+            @RequestParam(required = false) UUID workOrderId,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "plannedEndAt") String sortBy,
             @RequestParam(defaultValue = "asc") String sortDir) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.listCandidates(
-                plantId, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, workOrderId, search, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    /** Flat plant-scoped receipt list (spec §6.2); {@code status} is an optional filter. */
+    /** Flat plant-scoped receipt list (spec §6.2) with the G9a filters, all optional and combined with AND. */
     @GetMapping("/v1/production-receipts")
     @Operation(summary = "List production receipt documents across a plant",
-            description = "Spec §6.2. Flat form of "
-                    + "GET /work-orders/{workOrderId}/production-receipts.")
+            description = "Spec §6.2. Flat form of GET /work-orders/{workOrderId}/production-receipts. G9a filters: "
+                    + "workOrderId, destinationWarehouseId, receivedFrom/receivedTo (plant-local dates, inclusive) and "
+                    + "search (receipt code, work order code, item SKU/name, lot number). QC-only permissions read "
+                    + "APPROVED receipts only.")
     public ResponseEntity<ApiResponse<PageResult<ProductionReceiptResponse>>> listProductionReceiptsByPlant(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @RequestParam UUID plantId,
             @RequestParam(required = false) ProductionReceiptStatus status,
+            @RequestParam(required = false) UUID workOrderId,
+            @RequestParam(required = false) UUID destinationWarehouseId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedTo,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "postedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.listByPlant(
-                plantId, status, PageableFactory.of(page, size, sortBy, sortDir))));
+                plantId, status, workOrderId, destinationWarehouseId, receivedFrom, receivedTo, search,
+                PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts")
     @Operation(summary = "Create production receipt document",
             description = "Creates a DRAFT receipt. No stock movement is created and the work order "
-                    + "completed quantity is unchanged until the receipt is approved.")
+                    + "completed quantity is unchanged until the receipt is approved. G9a: expectedWorkOrderVersion "
+                    + "and receivedOn are required; the destination must be the work order's output warehouse; the "
+                    + "quantity may not exceed min(planned, final good) − approved − open claims.")
     public ResponseEntity<ApiResponse<ProductionReceiptResponse>> postProductionReceipt(
             @PathVariable UUID workOrderId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -444,33 +458,101 @@ public class ManufacturingExecutionController {
                 workOrderId, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
-    @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/submit")
-    @Operation(summary = "Submit draft production receipt for approval",
-            description = "Moves a DRAFT receipt to PENDING_APPROVAL. Still no inventory impact.")
-    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> submitProductionReceipt(
+    @GetMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}")
+    @Operation(summary = "Get one production receipt",
+            description = "G9a. Versions, quota of the work order (G/C/A/D/W/U) and the caller's allowed actions.")
+    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> getProductionReceipt(
             @PathVariable UUID workOrderId,
             @PathVariable UUID receiptId) {
-        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.submit(workOrderId, receiptId)));
+        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.get(workOrderId, receiptId)));
+    }
+
+    @GetMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/events")
+    @Operation(summary = "Lifecycle history of one production receipt",
+            description = "G9a. Created, submitted, withdrawn, approved, rejected, cancelled and QC steps, oldest first.")
+    public ResponseEntity<ApiResponse<PageResult<ProductionReceiptEventResponse>>> listProductionReceiptEvents(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.events(
+                workOrderId, receiptId, PageableFactory.of(page, size, "createdAt", "asc"))));
+    }
+
+    @PatchMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}")
+    @Operation(summary = "Edit a draft production receipt",
+            description = "G9a. Requester only. Quantity, lot number, dates and note; the source cannot change.")
+    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> updateProductionReceipt(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptUpdateRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.update(workOrderId, receiptId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/submit")
+    @Operation(summary = "Submit draft production receipt for approval",
+            description = "Moves a DRAFT receipt to PENDING_APPROVAL. Still no inventory impact. G9a: requester only, "
+                    + "body {expectedVersion, expectedWorkOrderVersion}.")
+    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> submitProductionReceipt(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.submit(workOrderId, receiptId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/withdraw")
+    @Operation(summary = "Withdraw a pending production receipt back to draft",
+            description = "G9a. Requester only, reason 5–2000 characters. The claimed output stays claimed.")
+    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> withdrawProductionReceipt(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptReasonRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.withdraw(workOrderId, receiptId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/cancel")
+    @Operation(summary = "Cancel a draft or pending production receipt",
+            description = "G9a. Requester only, reason 5–2000 characters. Terminal; the claimed output is free again.")
+    public ResponseEntity<ApiResponse<ProductionReceiptResponse>> cancelProductionReceipt(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptReasonRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.cancel(workOrderId, receiptId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/approve")
     @Operation(summary = "Approve pending production receipt",
             description = "Creates the RECEIVE stock movements and advances the work order. "
-                    + "Newly created output lots start in HOLD status.")
+                    + "Newly created output lots start in HOLD status. G9a: body {expectedVersion, "
+                    + "expectedWorkOrderVersion}; source, quota, lot number and dates are checked again.")
     public ResponseEntity<ApiResponse<ProductionReceiptResponse>> approveProductionReceipt(
             @PathVariable UUID workOrderId,
-            @PathVariable UUID receiptId) {
-        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.approve(workOrderId, receiptId)));
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptVersionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.approve(workOrderId, receiptId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/reject")
     @Operation(summary = "Reject pending production receipt",
-            description = "Closes the receipt without any inventory impact.")
+            description = "Closes the receipt without any inventory impact. G9a: both versions and a reason of "
+                    + "5–2000 characters.")
     public ResponseEntity<ApiResponse<ProductionReceiptResponse>> rejectProductionReceipt(
             @PathVariable UUID workOrderId,
             @PathVariable UUID receiptId,
-            @Valid @RequestBody ProductionReceiptRejectRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.reject(workOrderId, receiptId, request)));
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionReceiptReasonRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.reject(workOrderId, receiptId, request, idempotencyKey)));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/qc-disposition")

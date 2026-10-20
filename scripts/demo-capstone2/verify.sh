@@ -227,17 +227,16 @@ pf "SMOKE-5" "lệnh sản xuất -> COMPLETED (sản lượng tốt chạm kế
 stage_banner "D. Nhập kho thành phẩm, duyệt, phán quyết QC"
 
 RCP=$(call POST "/v1/work-orders/$WO/production-receipts" \
-    "{\"destinationWarehouseId\":\"$WH_FG_ID\",\"lotNumber\":\"$DEMO_OUTPUT_LOT\",\"quantity\":10,\"reason\":\"Nhập kho thành phẩm\",\"note\":\"Phiếu nhập kho trình diễn\"}" \
+    "{\"destinationWarehouseId\":\"$WH_FG_ID\",\"lotNumber\":\"$DEMO_OUTPUT_LOT\",\"quantity\":10,\"reason\":\"Nhập kho thành phẩm\",\"note\":\"Phiếu nhập kho trình diễn\",\"expectedWorkOrderVersion\":$(wo_version "$WO"),\"receivedOn\":\"$(plant_today)\"}" \
     -H "Idempotency-Key: D26-VERIFY-RECEIPT")
 RCP_ID=$(echo "$RCP" | rid receiptId)
 pf "SMOKE-6" "phiếu nhập kho khởi tạo ở DRAFT" "$(echo "$RCP" | rid status)" "DRAFT"
 
 pf "SMOKE-6" "sau submit -> PENDING_APPROVAL" \
-    "$(call POST "/v1/work-orders/$WO/production-receipts/$RCP_ID/submit" | rid status)" "PENDING_APPROVAL"
+    "$(call POST "/v1/work-orders/$WO/production-receipts/$RCP_ID/submit" "$(rcpt_versions "$WO" "$RCP_ID")" | rid status)" "PENDING_APPROVAL"
 
 # Phản hồi của approve mang luôn lotId và outputLotStatus, nên không phải tra lô theo mã.
-APPROVED=$(call POST "/v1/work-orders/$WO/production-receipts/$RCP_ID/approve" \
-    '{"reason":"Đã kiểm đếm đủ số lượng"}')
+APPROVED=$(call POST "/v1/work-orders/$WO/production-receipts/$RCP_ID/approve" "$(rcpt_versions "$WO" "$RCP_ID")")
 LOT_ID=$(echo "$APPROVED" | rid lotId)
 info "phiếu nhập kho -> APPROVED, lô $DEMO_OUTPUT_LOT ($LOT_ID)"
 

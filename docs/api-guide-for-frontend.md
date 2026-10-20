@@ -766,11 +766,31 @@ Body bước ① (**phẳng, không phải `lines[]`**):
   "lotNumber": "LOT-20260803-01",   // 🔴 BẮT BUỘC nếu item lotTracked = true
   "serialNumber": "SN-00042",       // 🔴 BẮT BUỘC nếu item serialTracked = true; quantity PHẢI = 1
   "quantity": 10,
-  "note": "…"
+  "note": "…",
+  "expectedWorkOrderVersion": 4,     // 🔴 G9a: BẮT BUỘC — version lệnh vừa đọc
+  "receivedOn": "2026-10-21",        // 🔴 G9a: BẮT BUỘC — ngày nhận, ≤ hôm nay của nhà máy
+  "expiresOn": "2027-01-19"          // G9a: tuỳ chọn, chỉ hàng theo lô; lô hết hạn 00:00 ngày đó (giờ nhà máy)
 }
 ```
 
-Từ chối: `POST .../{rid}/reject` body `{"reason": "…"}` (reason bắt buộc).
+Từ chối: `POST .../{rid}/reject` body `{"expectedVersion", "expectedWorkOrderVersion", "reason"}` (lý do 5–2000 ký tự).
+
+#### G9a (2026-10-21) — vòng đời đầy đủ, version, hạn mức nhập
+
+- **`destinationWarehouseId` phải là kho đầu ra của lệnh** (có trên ứng viên: `outputWarehouseId`), khác ⇒ `422 RESOURCE_SCOPE_MISMATCH`.
+- **Mọi lệnh sau khi tạo** gửi `{"expectedVersion": <version phiếu>, "expectedWorkOrderVersion": <version lệnh>}`:
+  `submit`, `approve` (bắt buộc body), `reject`/`withdraw`/`cancel` (+ `reason`), `PATCH` (+ field sửa). Thiếu ⇒ `400` theo field, lệch ⇒
+  `409 CONCURRENT_MODIFICATION`. Mỗi lệnh làm version **lệnh sản xuất** tăng đúng 1 — dùng `workOrderVersion` của response cho lệnh kế tiếp.
+- **Mới:** `GET .../production-receipts/{rid}` (chi tiết), `GET .../{rid}/events` (lịch sử), `PATCH .../{rid}` (sửa nháp), `POST .../{rid}/withdraw`
+  (`PENDING_APPROVAL → DRAFT`), `POST .../{rid}/cancel` (`DRAFT`/`PENDING_APPROVAL → CANCELLED`). Sửa/gửi/rút/huỷ **chỉ người tạo** (người khác ⇒ `403`).
+- **Hạn mức trên mọi response:** `actualFinalGoodQuantity` (G), `receiptableGoodCap` (C = min(kế hoạch, G)), `approvedReceiptQuantity` (A),
+  `claimedQuantity` (D: nháp + chờ duyệt), `awaitingReceiptQuantity` (W = C − A), `unclaimedReceiptQuantity` (U = C − A − D = max của ô nhập).
+  Nút: `allowedActions`.
+- **Bộ lọc list:** `workOrderId`, `destinationWarehouseId`, `receivedFrom`/`receivedTo` (ngày nhà máy, gồm hai đầu), `search` (mã phiếu, mã lệnh,
+  SKU/tên, số lô). Ứng viên: `workOrderId`, `search`.
+- **Quyền đọc:** `PERM_PRODUCTION_RECEIPT_READ` (mới) / `_MANAGE` / `_APPROVE` đọc mọi phiếu; `PERM_PRODUCTION_QC_READ` (mới) /
+  `PERM_QUALITY_DISPOSITION` chỉ đọc phiếu `APPROVED`.
+- Mã lô trùng một lô đã có (**không phân biệt hoa thường**) ⇒ `409 LOT_CODE_ALREADY_EXISTS` field `lotNumber`. Số lẻ thứ 7 ⇒ `400`.
 
 🔴 **Sau `approve`, hàng đã vào kho nhưng CHƯA dùng được**: lot ở trạng thái `HOLD`, `onHand` tăng
 nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đúng điều này.
@@ -785,7 +805,9 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 |---|---|
 | `400 LOT_REQUIRED` | Item lot-tracked mà không gửi `lotNumber` |
 | `400 SERIAL_REQUIRED` | Item serial-tracked mà không gửi `serialNumber` |
-| `409 PLANNED_QUANTITY_EXCEEDED` | Nhập vượt `availableToReceipt` (đã trừ receipt đang mở) |
+| `409 PLANNED_QUANTITY_EXCEEDED` | Nhập vượt `availableToReceipt` / `unclaimedReceiptQuantity` (đã trừ receipt đang mở); duyệt mà `A + q > C` |
+| `409 LOT_NOT_ELIGIBLE` field `expiresOn` | G9a: hạn lô đã qua kể từ lúc lưu nháp (gửi/duyệt) |
+| `422 RESOURCE_SCOPE_MISMATCH` | G9a: kho nhập không phải kho đầu ra của lệnh |
 | `409 STATE_CONFLICT` | Sai trạng thái receipt (vd approve một receipt đang `DRAFT`) |
 
 ---
@@ -926,11 +948,12 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Hoàn vật tư: tạo / ứng viên (G8d) | `POST /work-orders/{id}/material-returns` · `GET /work-orders/{id}/material-return-candidates` | `PERM_MATERIAL_RETURN_MANAGE` |
 | Hoàn vật tư: đọc (G8d) | `GET /material-returns` · `GET /material-returns/{id}` | `PERM_MATERIAL_RETURN_READ` **hoặc** `_MANAGE` |
 | Lịch sử báo sản lượng | `GET /production-executions?workOrderId=` | `PERM_PRODUCTION_EXECUTION_READ` |
-| Candidate nhập kho | `GET /production-receipts/candidates?plantId=` | `PERM_PRODUCTION_RECEIPT_MANAGE` |
-| Tạo/submit receipt | `POST /work-orders/{id}/production-receipts[/{rid}/submit]` | `PERM_PRODUCTION_RECEIPT_MANAGE` |
+| Candidate nhập kho | `GET /production-receipts/candidates?plantId=` | `PERM_PRODUCTION_RECEIPT_READ` / `_MANAGE` / `_APPROVE` |
+| Tạo/sửa/submit/rút/huỷ receipt (G9a) | `POST /work-orders/{id}/production-receipts` · `PATCH …/{rid}` · `POST …/{rid}/submit` · `/withdraw` · `/cancel` | `PERM_PRODUCTION_RECEIPT_MANAGE` (sửa/gửi/rút/huỷ: chỉ người tạo) |
+| Chi tiết / lịch sử receipt (G9a) | `GET …/{rid}` · `GET …/{rid}/events` | như danh sách |
 | Duyệt/từ chối receipt | `POST …/{rid}/approve` · `/reject` | `PERM_PRODUCTION_RECEIPT_APPROVE` |
 | QC | `POST …/{rid}/qc-disposition` | `PERM_QUALITY_DISPOSITION` |
-| Danh sách receipt (plant) | `GET /production-receipts?plantId=&status=` | `PERM_PRODUCTION_RECEIPT_MANAGE` |
+| Danh sách receipt (plant) | `GET /production-receipts?plantId=&status=&workOrderId=&destinationWarehouseId=&receivedFrom=&receivedTo=&search=` | `PERM_PRODUCTION_RECEIPT_READ` / `_MANAGE` / `_APPROVE`; `PERM_PRODUCTION_QC_READ` / `PERM_QUALITY_DISPOSITION` chỉ thấy `APPROVED` |
 
 > Nhận `403 PERMISSION_DENIED` nghĩa là **role của user đang đăng nhập** thiếu quyền đó, không phải
 > API sai. Vai trò: `ADMIN` (cấu hình hệ thống) · `MANAGER` (duyệt, lập kế hoạch) · `OPERATOR` (thực

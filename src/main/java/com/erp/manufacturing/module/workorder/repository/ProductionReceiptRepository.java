@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -28,13 +29,18 @@ public interface ProductionReceiptRepository extends JpaRepository<ProductionRec
     Page<ProductionReceipt> findByWorkOrderWorkOrderId(UUID workOrderId, Pageable pageable);
 
     /**
-     * Flat plant-scoped list (spec §6.2). {@code status} is an optional filter.
+     * Flat plant-scoped list (spec §6.2), with the G9a filters (FE §3.3): work order, destination warehouse,
+     * received-on range (plant-local dates, inclusive) and a free-text search on the receipt code, work order code,
+     * output item SKU/name and lot number. Every filter is optional and they combine with AND.
      *
      * <p>{@code join fetch w} is required, not an optimisation: unlike the nested endpoint above,
      * every row here can belong to a different work order, so rendering {@code workOrderCode} would
      * otherwise be one query per row. The {@code lines} collection is deliberately <em>not</em>
      * fetched (rule C13 forbids fetching a collection alongside pagination) — the service loads it
      * in one batch through {@code findByReceiptReceiptIdIn}.
+     *
+     * <p>🔴 Every nullable parameter that reaches {@code concat}/{@code like} or stands alone in {@code is null} is
+     * cast — the {@code lower(bytea)} trap of CLAUDE.md §0.24 / §0.36.
      */
     @Query(value = """
             select r
@@ -42,15 +48,53 @@ public interface ProductionReceiptRepository extends JpaRepository<ProductionRec
             join fetch r.workOrder w
             where w.plant.plantId = :plantId
               and (:status is null or r.status = :status)
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:receivedFrom as date) is null or r.receivedOn >= :receivedFrom)
+              and (cast(:receivedTo as date) is null or r.receivedOn <= :receivedTo)
+              and (:warehouseId is null or exists (
+                    select 1 from ProductionReceiptLine wl
+                    where wl.receipt = r and wl.warehouse.warehouseId = :warehouseId))
+              and (cast(:search as string) is null
+                   or lower(r.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.name) like lower(concat('%', cast(:search as string), '%'))
+                   or exists (
+                        select 1 from ProductionReceiptLine sl left join sl.lot sll
+                        where sl.receipt = r
+                          and (lower(sl.requestedLotCode) like lower(concat('%', cast(:search as string), '%'))
+                               or lower(sll.lotCode) like lower(concat('%', cast(:search as string), '%')))))
             """,
             countQuery = """
             select count(r)
             from ProductionReceipt r
-            where r.workOrder.plant.plantId = :plantId
+            join r.workOrder w
+            where w.plant.plantId = :plantId
               and (:status is null or r.status = :status)
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:receivedFrom as date) is null or r.receivedOn >= :receivedFrom)
+              and (cast(:receivedTo as date) is null or r.receivedOn <= :receivedTo)
+              and (:warehouseId is null or exists (
+                    select 1 from ProductionReceiptLine wl
+                    where wl.receipt = r and wl.warehouse.warehouseId = :warehouseId))
+              and (cast(:search as string) is null
+                   or lower(r.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.name) like lower(concat('%', cast(:search as string), '%'))
+                   or exists (
+                        select 1 from ProductionReceiptLine sl left join sl.lot sll
+                        where sl.receipt = r
+                          and (lower(sl.requestedLotCode) like lower(concat('%', cast(:search as string), '%'))
+                               or lower(sll.lotCode) like lower(concat('%', cast(:search as string), '%')))))
             """)
     Page<ProductionReceipt> findByPlant(@Param("plantId") UUID plantId,
                                         @Param("status") ProductionReceiptStatus status,
+                                        @Param("workOrderId") UUID workOrderId,
+                                        @Param("warehouseId") UUID warehouseId,
+                                        @Param("receivedFrom") LocalDate receivedFrom,
+                                        @Param("receivedTo") LocalDate receivedTo,
+                                        @Param("search") String search,
                                         Pageable pageable);
 
     /**

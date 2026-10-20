@@ -235,6 +235,7 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_MATERIAL_ISSUE_OVERRIDE` | Cấp vật tư **vượt định mức BOM** kèm lý do bắt buộc (Gate 1b) |
 | `PERM_MATERIAL_ISSUE_APPROVE` | **Duyệt / từ chối** đề nghị xuất vượt định mức đang chờ (`DEC-09`, `V66`). Đề nghị chỉ **ghi tồn kho lúc được duyệt**; từ chối bắt buộc kèm lý do |
 | `PERM_PRODUCTION_RECEIPT_APPROVE` | Duyệt / Từ chối Production Receipt đang chờ (Gate 1c) |
+| `PERM_PRODUCTION_RECEIPT_READ` | **[G9a, `V83`]** Xem phiếu nhập thành phẩm: danh sách theo nhà máy (lọc WO/kho/ngày nhận/tìm kiếm), danh sách theo WO, chi tiết, lịch sử, ứng viên. `_MANAGE`/`_APPROVE` vẫn đọc được như trước (không ai mất quyền đọc). ADMIN + MANAGER — OPERATOR không được cấp ngầm |
 | `PERM_PRODUCTION_EXECUTION_MANAGE` | Báo cáo sản lượng xưởng (`F5`, `V33`) – MANAGER cũng có để sửa/bổ sung thay ca |
 | `PERM_PRODUCTION_EXECUTION_READ` | Xem lịch sử báo cáo sản lượng (`F5`, `V33`) |
 | `PERM_WIP_READ` | **[G8d, `V82`]** Xem dở dang: `GET /v1/plants/{P}/wip`, `GET /v1/work-orders/{W}/wip` — vật tư (cấp / đã dùng / đã hoàn / chưa dùng), công đoạn, làm lại chờ, thành phẩm chờ nhập kho. Chỉ đọc, không mở thao tác nào. ADMIN + MANAGER |
@@ -244,6 +245,7 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 ### Quality Control
 | Quyền | Mô tả |
 |-------|-------|
+| `PERM_PRODUCTION_QC_READ` | **[G9a, `V83`]** Đọc phiếu nhập thành phẩm **đã duyệt** để kiểm tra chất lượng (danh sách, chi tiết, lịch sử). Phiếu nháp/chờ duyệt bị từ chối (403); danh sách trả trang rỗng cho trạng thái khác `APPROVED`. `PERM_QUALITY_DISPOSITION` đọc được theo cùng giới hạn. ADMIN + MANAGER |
 | `PERM_QUALITY_DISPOSITION` | QC disposition: giải phóng lot thành phẩm khỏi `HOLD` sang `AVAILABLE` hoặc `REJECTED` (`F2`, `V27`). Nhánh `AVAILABLE` còn tăng `fulfilledQuantity` của Sales Order line được allocate. Áp dụng cho cả output không lot-tracked: phán quyết nằm trên receipt; `AVAILABLE` giải phóng `quality_hold_quantity`, `REJECTED` giữ hàng on-hand nhưng tiếp tục hold. Không thêm permission mới |
 
 ### Reports

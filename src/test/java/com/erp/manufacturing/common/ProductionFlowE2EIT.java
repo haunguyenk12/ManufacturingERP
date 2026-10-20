@@ -339,25 +339,37 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         // ── 8. Draft receipt must not touch inventory ───────────────────────────────────────────
         String receiptKey = "E2E-RECEIPT-" + fixture.suffix;
+        long versionBeforeReceipt = workOrderVersion(workOrderId);
+        String receiptBody = json(Map.of(
+                "destinationWarehouseId", fixture.warehouseId,
+                "lotNumber", "LOT-" + fixture.suffix,
+                "quantity", GOOD_REPORTED,
+                "expectedWorkOrderVersion", versionBeforeReceipt,
+                "receivedOn", plantToday().toString()));
         JsonNode receipt = result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", receiptKey)
-                .content(json(Map.of(
-                        "destinationWarehouseId", fixture.warehouseId,
-                        "lotNumber", "LOT-" + fixture.suffix,
-                        "quantity", GOOD_REPORTED))), 201);
+                .content(receiptBody), 201);
         UUID receiptId = uuid(receipt, "receiptId");
+        // G9a (FE Q12): a receipt claims output of the work order, so its version moves on — exactly once.
+        assertThat(receipt.get("workOrderVersion").asLong()).isEqualTo(versionBeforeReceipt + 1);
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeReceipt + 1);
         assertThat(receipt.get("status").asText()).isEqualTo("DRAFT");
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         assertThat(result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
-                workOrderId, receiptId), 200).get("status").asText()).isEqualTo("PENDING_APPROVAL");
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200)
+                .get("status").asText()).isEqualTo("PENDING_APPROVAL");
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         // ── 9. Approve: stock arrives, but the lot is HOLD so nothing is usable yet ─────────────
+        long versionBeforeApproval = workOrderVersion(workOrderId);
         JsonNode approved = result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
-                workOrderId, receiptId), 200);
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        // The +2 trap of G8b: approval raises completedQuantity and moves stock, yet the version moves once.
+        assertThat(approved.get("workOrderVersion").asLong()).isEqualTo(versionBeforeApproval + 1);
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeApproval + 1);
         assertThat(approved.get("status").asText()).isEqualTo("APPROVED");
         assertThat(approved.get("approvedByUsername").asText()).isEqualTo("admin");
 
@@ -408,10 +420,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .content(executionBody), 201);
         result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
                 .header("Idempotency-Key", receiptKey)
-                .content(json(Map.of(
-                        "destinationWarehouseId", fixture.warehouseId,
-                        "lotNumber", "LOT-" + fixture.suffix,
-                        "quantity", GOOD_REPORTED))), 201);
+                .content(receiptBody), 201);
 
         assertThat(stockMovementRepository.count()).isEqualTo(movementsAfterFlow);
         assertThat(onHandQuantity(fixture.componentId, fixture.warehouseId)).isEqualByComparingTo(componentAfterReturn);
@@ -576,11 +585,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .header("Idempotency-Key", "E2E-NOLOT-RECEIPT-" + fixture.suffix)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
-                        "quantity", ORDERED_QUANTITY))), 201), "receiptId");
+                        "quantity", ORDERED_QUANTITY,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "receivedOn", plantToday().toString()))), 201), "receiptId");
         result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
-                workOrderId, receiptId), 200);
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
         result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
-                workOrderId, receiptId), 200);
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
 
         // NON_TRACKED output has no lot row, so StockBalance.qualityHoldQuantity carries the same
         // gate: approval increases on-hand but nothing is reservable before QC.
@@ -648,11 +659,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .header("Idempotency-Key", "E2E-REJ-RECEIPT-" + fixture.suffix)
                 .content(json(Map.of(
                         "destinationWarehouseId", fixture.warehouseId,
-                        "quantity", GOOD_REPORTED))), 201), "receiptId");
+                        "quantity", GOOD_REPORTED,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "receivedOn", plantToday().toString()))), 201), "receiptId");
         result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
-                workOrderId, receiptId), 200);
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
         result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
-                workOrderId, receiptId), 200);
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
         assertThat(availableQuantity(product.itemId)).isEqualByComparingTo(BigDecimal.ZERO);
 
         result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition",
@@ -838,6 +851,18 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
      * G8 (D5): every work order command carries the version last read. Read fresh each time — a refused
      * release persists BLOCKED in its own transaction and moves the version on behind the caller's back.
      */
+    /** G9a: the receipt's and the work order's versions, read back from the receipt detail. */
+    private String receiptVersions(UUID workOrderId, UUID receiptId) throws Exception {
+        JsonNode receipt = result(get("/v1/work-orders/{id}/production-receipts/{rid}", workOrderId, receiptId), 200);
+        return json(Map.of("expectedVersion", receipt.get("version").asLong(),
+                "expectedWorkOrderVersion", receipt.get("workOrderVersion").asLong()));
+    }
+
+    /** The receipt's business date: the fixture plant keeps the default time zone. */
+    private static java.time.LocalDate plantToday() {
+        return java.time.LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"));
+    }
+
     private long workOrderVersion(UUID workOrderId) throws Exception {
         return result(get("/v1/work-orders/{id}", workOrderId), 200).get("version").asLong();
     }

@@ -245,7 +245,7 @@ public class ManufacturingExecutionMapper {
     }
 
     /**
-     * Candidate row for the receipt screen (spec §6.4).
+     * Candidate row for the receipt screen (spec §6.4), with the G9a quota (FE §3.1, {@link ReceiptQuota}).
      *
      * <p>{@code openReceiptQuantity} — how much this work order's still-open receipts have already
      * claimed — has to be passed in: {@link WorkOrder#availableToReceipt()} does not deduct it (B16
@@ -255,6 +255,7 @@ public class ManufacturingExecutionMapper {
     public ProductionReceiptCandidateResponse toReceiptCandidateResponse(WorkOrder workOrder,
                                                                          BigDecimal openReceiptQuantity) {
         Item product = workOrder.getProductItem();
+        ReceiptQuota quota = ReceiptQuota.of(workOrder, openReceiptQuantity);
         return new ProductionReceiptCandidateResponse(
                 workOrder.getWorkOrderId(),
                 workOrder.getWorkOrderNo(),
@@ -265,9 +266,19 @@ public class ManufacturingExecutionMapper {
                 product.getUnit(),
                 workOrder.getActualGoodQuantity(),
                 workOrder.getCompletedQuantity(),
-                workOrder.availableToReceipt().subtract(openReceiptQuantity),
+                quota.unclaimed(),
                 TrackingMethod.of(product.isLotTracked(), product.isSerialTracked()).name(),
-                workOrder.getPlannedEndAt());
+                workOrder.getPlannedEndAt(),
+                workOrder.getVersion(),
+                workOrder.getPlannedQuantity(),
+                quota.cap(),
+                quota.approved(),
+                quota.claimed(),
+                quota.awaiting(),
+                quota.unclaimed(),
+                workOrder.getOutputWarehouse().getWarehouseId(),
+                workOrder.getOutputWarehouse().getCode(),
+                workOrder.getOutputWarehouse().getName());
     }
 
     public WipTransactionResponse toResponse(WipTransaction transaction) {
@@ -285,13 +296,17 @@ public class ManufacturingExecutionMapper {
     }
 
     /**
-     * Flat single-line shape (spec §6.3). {@code usernames} is resolved by the caller in one batch
+     * Flat single-line shape (spec §6.3), plus the G9a quota of the work order and the caller's allowed actions,
+     * both resolved by the caller. {@code usernames} is resolved by the caller in one batch
      * query so mapping a page of receipts does not become N+1 (rule C14); ids missing from the map
      * simply render as null.
      */
     public ProductionReceiptResponse toResponse(ProductionReceipt receipt,
                                                 List<ProductionReceiptLine> lines,
-                                                Map<UUID, String> usernames) {
+                                                Map<UUID, String> usernames,
+                                                ReceiptQuota quota,
+                                                List<String> allowedActions) {
+        WorkOrder workOrder = receipt.getWorkOrder();
         ProductionReceiptLine line = lines.isEmpty() ? null : lines.get(0);
         InventoryLot lot = line == null ? null : line.getLot();
         SerialNumber serial = line == null ? null : line.getSerial();
@@ -332,18 +347,31 @@ public class ManufacturingExecutionMapper {
                 usernameOf(usernames, receipt.getApprovedBy()),
                 usernameOf(usernames, receipt.getQcBy()),
                 receipt.getTraceId(),
-                splitTraceIds(receipt.getSourceWipTraceIds()));
+                splitTraceIds(receipt.getSourceWipTraceIds()),
+                receipt.getVersion(),
+                workOrder.getVersion(),
+                workOrder.getPlant().getPlantId(),
+                workOrder.getPlant().getTimezone(),
+                receipt.getReceivedOn(),
+                receipt.getExpiresOn(),
+                line == null ? null : line.getWarehouse().getName(),
+                usernameOf(usernames, receipt.getSubmittedBy()),
+                usernameOf(usernames, receipt.getRejectedBy()),
+                receipt.getWithdrawnAt(),
+                receipt.getWithdrawReason(),
+                usernameOf(usernames, receipt.getWithdrawnBy()),
+                receipt.getCancelledAt(),
+                receipt.getCancelReason(),
+                usernameOf(usernames, receipt.getCancelledBy()),
+                quota.finalGood(),
+                quota.cap(),
+                quota.approved(),
+                quota.claimed(),
+                quota.awaiting(),
+                quota.unclaimed(),
+                allowedActions);
     }
 
-    public ProductionReceiptResponse toResponse(ProductionReceipt receipt, Map<UUID, String> usernames) {
-        return toResponse(receipt, receipt.getLines(), usernames);
-    }
-
-    public ProductionReceiptResponse toResponse(ProductionReceipt receipt,
-                                                Map<UUID, List<ProductionReceiptLine>> linesByReceipt,
-                                                Map<UUID, String> usernames) {
-        return toResponse(receipt, linesByReceipt.getOrDefault(receipt.getReceiptId(), List.of()), usernames);
-    }
 
     private List<String> splitTraceIds(String csv) {
         return csv == null || csv.isBlank() ? List.of() : List.of(csv.split(","));

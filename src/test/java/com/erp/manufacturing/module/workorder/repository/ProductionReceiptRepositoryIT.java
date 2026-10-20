@@ -68,7 +68,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         ProductionReceipt approved = persistReceipt(workOrder, fixture,
                 ProductionReceiptStatus.APPROVED, new BigDecimal("3.000000"));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactlyInAnyOrder(draft.getReceiptId(), approved.getReceiptId());
     }
@@ -83,7 +83,8 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("3.000000"));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), ProductionReceiptStatus.DRAFT, PageRequest.of(0, 20)))
+                fixture.plant.getPlantId(), ProductionReceiptStatus.DRAFT, null, null, null, null, null,
+                PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactly(draft.getReceiptId());
     }
@@ -100,7 +101,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         persistReceipt(persistWorkOrder(other, WorkOrderStatus.IN_PROGRESS), other,
                 ProductionReceiptStatus.DRAFT, new BigDecimal("5.000000"));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactly(mine.getReceiptId());
     }
@@ -165,6 +166,60 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
 
     // @DataJpaTest does not load JpaAuditingConfig/SecurityAuditorAware, so createdAt/updatedAt
     // (NOT NULL on BaseEntity subclasses) are set explicitly before persisting.
+
+    // ---------------------------------------------------------------------------------------
+    // G9a filters (FE §3.3) — JPQL only, so only a real database can test them (R7)
+    // ---------------------------------------------------------------------------------------
+
+    private List<UUID> plantList(Fixture fixture, String search, java.time.LocalDate from, java.time.LocalDate to,
+                                 UUID warehouseId) {
+        return repository.findByPlant(fixture.plant.getPlantId(), null, null, warehouseId, from, to, search,
+                        PageRequest.of(0, 20))
+                .map(ProductionReceipt::getReceiptId).getContent();
+    }
+
+    /** 🔴 With every filter null the query still runs — the lower(bytea) trap of §0.24 on the new search. */
+    @Test
+    void findByPlant_searchesTheLotNumberAndTheReceiptCodeIgnoringCase() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionReceipt withLot = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("1"));
+        withLot.getLines().get(0).setRequestedLotCode("GD9-FG-01");
+        entityManager.persistAndFlush(withLot.getLines().get(0));
+        ProductionReceipt other = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("1"));
+
+        assertThat(plantList(fixture, "gd9-fg", null, null, null)).containsExactly(withLot.getReceiptId());
+        assertThat(plantList(fixture, other.getCode().toLowerCase(), null, null, null))
+                .containsExactly(other.getReceiptId());
+        assertThat(plantList(fixture, null, null, null, null))
+                .containsExactlyInAnyOrder(withLot.getReceiptId(), other.getReceiptId());
+    }
+
+    @Test
+    void findByPlant_receivedOnRangeIsInclusiveOnBothEnds() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionReceipt first = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("1"));
+        ProductionReceipt later = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("1"));
+        later.setReceivedOn(java.time.LocalDate.of(2026, 10, 5));
+        entityManager.persistAndFlush(later);
+
+        assertThat(plantList(fixture, null, java.time.LocalDate.of(2026, 10, 1), java.time.LocalDate.of(2026, 10, 1), null))
+                .containsExactly(first.getReceiptId());
+        assertThat(plantList(fixture, null, java.time.LocalDate.of(2026, 10, 2), java.time.LocalDate.of(2026, 10, 5), null))
+                .containsExactly(later.getReceiptId());
+    }
+
+    @Test
+    void findByPlant_filtersByDestinationWarehouse() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionReceipt receipt = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("1"));
+
+        assertThat(plantList(fixture, null, null, null, fixture.warehouse.getWarehouseId()))
+                .containsExactly(receipt.getReceiptId());
+        assertThat(plantList(fixture, null, null, null, UUID.randomUUID())).isEmpty();
+    }
 
     private record Fixture(Plant plant, Warehouse warehouse, Item product, BomHeader bom) {}
 
@@ -239,6 +294,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
                 .status(status)
                 .code("PR-" + UUID.randomUUID().toString().substring(0, 8))
                 .idempotencyKey(UUID.randomUUID().toString())
+                .receivedOn(java.time.LocalDate.of(2026, 10, 1))
                 .build();
         receipt.setCreatedAt(now);
         receipt.setUpdatedAt(now);

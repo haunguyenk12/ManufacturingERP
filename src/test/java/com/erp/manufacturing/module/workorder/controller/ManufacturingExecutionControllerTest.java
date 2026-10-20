@@ -16,6 +16,8 @@ import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionC
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionPostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptCandidateResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptEventResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptResponse;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionExecutionService;
@@ -47,6 +49,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -265,7 +268,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("receipt candidates: PageResult envelope is part of the contract (spec §6.2)")
     void listReceiptCandidates_returns200WithFullPageEnvelope() throws Exception {
-        when(productionReceiptService.listCandidates(eq(PLANT_ID), any()))
+        when(productionReceiptService.listCandidates(eq(PLANT_ID), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(sampleReceiptCandidate()), 0, 20, 1L, 1, true, true));
 
         mockMvc.perform(get("/v1/production-receipts/candidates").param("plantId", PLANT_ID.toString()))
@@ -300,7 +303,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("flat receipts: plant-scoped list forwards the optional status filter (spec §6.2)")
     void listProductionReceiptsByPlant_forwardsTheStatusFilter() throws Exception {
-        when(productionReceiptService.listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), any()))
+        when(productionReceiptService.listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/production-receipts")
@@ -310,20 +313,20 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.totalElements").value(0));
 
-        verify(productionReceiptService).listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), any());
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), any());
     }
 
     /** Omitting {@code status} must mean "every status", not "the first one" (§6.2). */
     @Test
     @DisplayName("flat receipts: omitting status passes null rather than defaulting to a status")
     void listProductionReceiptsByPlant_withoutStatus_passesNull() throws Exception {
-        when(productionReceiptService.listByPlant(eq(PLANT_ID), isNull(), any()))
+        when(productionReceiptService.listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/production-receipts").param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk());
 
-        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), any());
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any());
     }
 
     @Test
@@ -447,13 +450,175 @@ class ManufacturingExecutionControllerTest {
         verify(productionExecutionService).list(eq(WORK_ORDER_ID), any());
     }
 
+    // ---------------------------------------------------------------------------------------
+    // G9a — receipt lifecycle endpoints
+    // ---------------------------------------------------------------------------------------
+
+    private static final UUID RECEIPT_ID = UUID.randomUUID();
+
+    private ProductionReceiptResponse sampleReceipt(String status, List<String> actions) {
+        return new ProductionReceiptResponse(
+                RECEIPT_ID, "PR-0001", WORK_ORDER_ID, "WO-001", status, "KEY", "LOT_TRACKED",
+                UUID.randomUUID(), "FG-100", "Widget", "EA", UUID.randomUUID(), "WH-FG",
+                null, "GD9-FG-01", null, null, null, new BigDecimal("5.000000"), null,
+                Instant.parse("2026-10-20T01:00:00Z"), null, null, null, null, null, null, null, null,
+                "thukho", null, null, "abc", List.of(),
+                1L, 21L, PLANT_ID, "Asia/Ho_Chi_Minh", java.time.LocalDate.parse("2026-10-20"), null, "Finished goods",
+                null, null, null, null, null, null, null, null,
+                new BigDecimal("9.000000"), new BigDecimal("9.000000"), BigDecimal.ZERO, new BigDecimal("5.000000"),
+                new BigDecimal("9.000000"), new BigDecimal("4.000000"), actions);
+    }
+
+    @Test
+    @DisplayName("receipt detail: versions, quota and allowed actions are on the wire")
+    void getProductionReceipt_returnsVersionsQuotaAndActions() throws Exception {
+        when(productionReceiptService.get(WORK_ORDER_ID, RECEIPT_ID))
+                .thenReturn(sampleReceipt("DRAFT", List.of("EDIT", "SUBMIT", "CANCEL")));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.version").value(1))
+                .andExpect(jsonPath("$.result.workOrderVersion").value(21))
+                .andExpect(jsonPath("$.result.receivedOn").value("2026-10-20"))
+                .andExpect(jsonPath("$.result.unclaimedReceiptQuantity").value(4))
+                .andExpect(jsonPath("$.result.allowedActions[0]").value("EDIT"));
+    }
+
+    @Test
+    @DisplayName("receipt submit: a missing expectedVersion is a 400 on that field, before the service")
+    void submitProductionReceipt_withoutExpectedVersion_returns400OnTheField() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/submit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedWorkOrderVersion\": 3}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("expectedVersion"));
+
+        verifyNoInteractions(productionReceiptService);
+    }
+
+    @Test
+    @DisplayName("receipt approve: body versions and the Idempotency-Key are forwarded")
+    void approveProductionReceipt_forwardsVersionsAndKey() throws Exception {
+        when(productionReceiptService.approve(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any(), eq("APPROVE-1")))
+                .thenReturn(sampleReceipt("APPROVED", List.of()));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/approve")
+                        .header("Idempotency-Key", "APPROVE-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"expectedWorkOrderVersion\": 22}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("APPROVED"));
+
+        verify(productionReceiptService).approve(eq(WORK_ORDER_ID), eq(RECEIPT_ID),
+                argThat(body -> body.expectedVersion() == 2L && body.expectedWorkOrderVersion() == 22L), eq("APPROVE-1"));
+    }
+
+    @Test
+    @DisplayName("receipt withdraw: a state conflict from the service is a 409 STATE_CONFLICT")
+    void withdrawProductionReceipt_stateConflict_returns409() throws Exception {
+        when(productionReceiptService.withdraw(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any(), isNull()))
+                .thenThrow(new AppException(BusinessErrorCode.STATE_CONFLICT, "Only a receipt pending approval can be withdrawn"));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/withdraw")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"expectedWorkOrderVersion\": 3, \"reason\": \"Wrong lot\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
+    }
+
+    @Test
+    @DisplayName("receipt cancel: 200 with the cancelled receipt")
+    void cancelProductionReceipt_returns200() throws Exception {
+        when(productionReceiptService.cancel(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any(), eq("CANCEL-1")))
+                .thenReturn(sampleReceipt("CANCELLED", List.of()));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/cancel")
+                        .header("Idempotency-Key", "CANCEL-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"expectedWorkOrderVersion\": 3, \"reason\": \"Entered twice\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("receipt edit: PATCH forwards the body and the key")
+    void updateProductionReceipt_forwardsBodyAndKey() throws Exception {
+        when(productionReceiptService.update(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any(), eq("EDIT-1")))
+                .thenReturn(sampleReceipt("DRAFT", List.of("EDIT")));
+
+        mockMvc.perform(patch("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID)
+                        .header("Idempotency-Key", "EDIT-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"expectedWorkOrderVersion\": 3, \"quantity\": \"4.500000\","
+                                + " \"receivedOn\": \"2026-10-19\", \"note\": \"edited\"}"))
+                .andExpect(status().isOk());
+
+        verify(productionReceiptService).update(eq(WORK_ORDER_ID), eq(RECEIPT_ID),
+                argThat(body -> body.quantity().compareTo(new BigDecimal("4.5")) == 0
+                        && body.receivedOn().equals(java.time.LocalDate.parse("2026-10-19"))), eq("EDIT-1"));
+    }
+
+    /** FE R17: a seventh decimal is refused on its field, never rounded. */
+    @Test
+    @DisplayName("receipt create: a seventh decimal is a 400 on quantity")
+    void postProductionReceipt_sevenDecimals_returns400OnQuantity() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts")
+                        .header("Idempotency-Key", "K")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"destinationWarehouseId\": \"" + UUID.randomUUID() + "\", \"quantity\": 1.0000001,"
+                                + " \"expectedWorkOrderVersion\": 3, \"receivedOn\": \"2026-10-20\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("quantity"));
+
+        verifyNoInteractions(productionReceiptService);
+    }
+
+    @Test
+    @DisplayName("flat receipts: the G9a filters reach the service")
+    void listProductionReceiptsByPlant_forwardsTheG9aFilters() throws Exception {
+        UUID warehouseId = UUID.randomUUID();
+        when(productionReceiptService.listByPlant(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
+
+        mockMvc.perform(get("/v1/production-receipts")
+                        .param("plantId", PLANT_ID.toString())
+                        .param("workOrderId", WORK_ORDER_ID.toString())
+                        .param("destinationWarehouseId", warehouseId.toString())
+                        .param("receivedFrom", "2026-10-01")
+                        .param("receivedTo", "2026-10-20")
+                        .param("search", "gd9"))
+                .andExpect(status().isOk());
+
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), eq(WORK_ORDER_ID), eq(warehouseId),
+                eq(java.time.LocalDate.parse("2026-10-01")), eq(java.time.LocalDate.parse("2026-10-20")), eq("gd9"), any());
+    }
+
+    @Test
+    @DisplayName("receipt events: PageResult envelope")
+    void listProductionReceiptEvents_returns200() throws Exception {
+        when(productionReceiptService.events(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any()))
+                .thenReturn(new PageResult<>(List.of(new ProductionReceiptEventResponse(
+                        "CREATED", UUID.randomUUID(), "thukho", null, Instant.parse("2026-10-20T01:00:00Z"))),
+                        0, 20, 1L, 1, true, true));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.content[0].action").value("CREATED"))
+                .andExpect(jsonPath("$.result.totalElements").value(1));
+    }
+
     /** 10 produced good, none warehoused, 6 already claimed by an open receipt ⇒ 4 receiptable. */
     private ProductionReceiptCandidateResponse sampleReceiptCandidate() {
         return new ProductionReceiptCandidateResponse(
                 WORK_ORDER_ID, "WO-001", "COMPLETED",
                 UUID.randomUUID(), "FG-100", "Widget", "EA",
                 new BigDecimal("10.000000"), BigDecimal.ZERO, new BigDecimal("4.000000"),
-                "NON_TRACKED", Instant.now());
+                "NON_TRACKED", Instant.now(),
+                3L, new BigDecimal("10.000000"), new BigDecimal("10.000000"), BigDecimal.ZERO,
+                new BigDecimal("6.000000"), new BigDecimal("10.000000"), new BigDecimal("4.000000"),
+                UUID.randomUUID(), "WH-FG", "Finished goods");
     }
 
     @Test

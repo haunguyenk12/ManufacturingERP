@@ -788,11 +788,10 @@ report_output() {
 receipt_and_qc() {
     local wo="$1" qty="$2" lot="$3" key="$4" mode="${5:-yes}" rid_
     rid_=$(call POST "/v1/work-orders/$wo/production-receipts" \
-        "{\"destinationWarehouseId\":\"${ID[warehouses.$WH_FG]}\",\"lotNumber\":\"$lot\",\"quantity\":$qty,\"reason\":\"Finished goods receipt\",\"note\":\"Production receipt of the demo dataset\"}" \
+        "{\"destinationWarehouseId\":\"${ID[warehouses.$WH_FG]}\",\"lotNumber\":\"$lot\",\"quantity\":$qty,\"reason\":\"Finished goods receipt\",\"note\":\"Production receipt of the demo dataset\",\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"receivedOn\":\"$(plant_today)\"}" \
         -H "Idempotency-Key: $key" | rid receiptId)
-    call POST "/v1/work-orders/$wo/production-receipts/$rid_/submit" >/dev/null
-    call POST "/v1/work-orders/$wo/production-receipts/$rid_/approve" \
-        '{"reason":"Quantity verified against the output report"}' >/dev/null
+    call POST "/v1/work-orders/$wo/production-receipts/$rid_/submit" "$(rcpt_versions "$wo" "$rid_")" >/dev/null
+    call POST "/v1/work-orders/$wo/production-receipts/$rid_/approve" "$(rcpt_versions "$wo" "$rid_")" >/dev/null
     if [ "$mode" = "yes" ]; then
         call POST "/v1/work-orders/$wo/production-receipts/$rid_/qc-disposition" \
             '{"result":"AVAILABLE","reason":"Visual and functional inspection passed"}' >/dev/null

@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("82");
+        assertThat(current.getVersion().getVersion()).isEqualTo("83");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -455,6 +455,102 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
             assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
             assertThat(defaults.get("supplemental")).isEqualTo("false");
+        }
+    }
+
+    /**
+     * G9a / {@code V83}: {@code received_on} is backfilled from when the stock was received — approval, else the
+     * draft's posted_at — in the plant's time zone, then NOT NULL; the two read permissions go to ADMIN and MANAGER
+     * only. Seeded at V82 so the backfill runs on real rows, and on an instant whose UTC and plant dates differ.
+     */
+    @Test
+    void migrate_v83_backfillsReceivedOnInThePlantZone_andGrantsReadPermissions() throws Exception {
+        String schema = "flyway_v83_receipts";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("82")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111118301";
+        String plant = "22222222-2222-4222-8222-222222228301";
+        String warehouse = "33333333-3333-4333-8333-333333338301";
+        String item = "55555555-5555-4555-8555-555555558301";
+        String bom = "66666666-6666-4666-8666-666666668301";
+        String workOrder = "77777777-7777-4777-8777-777777778301";
+        String approved = "88888888-8888-4888-8888-888888888301";
+        String draft = "88888888-8888-4888-8888-888888888302";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V83', 'V83')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'FG', 'FG', 'FINISHED_GOOD', 'EA')".formatted(item, company));
+            statement.execute("insert into bom_headers (bom_id, company_id, parent_item_id, revision, bom_code, version_number)"
+                    + " values ('%s', '%s', '%s', 'A', 'FG-A', 1)".formatted(bom, company, item));
+            statement.execute(("insert into work_orders (work_order_id, company_id, plant_id, work_order_no, product_item_id,"
+                    + " bom_id, bom_revision, output_warehouse_id, planned_quantity, status) values ('%s', '%s', '%s',"
+                    + " 'WO-V83', '%s', '%s', 'A', '%s', 10, 'IN_PROGRESS')")
+                    .formatted(workOrder, company, plant, item, bom, warehouse));
+            // 18:30 UTC is already the next day in Asia/Ho_Chi_Minh (UTC+7).
+            statement.execute(("insert into production_receipts (receipt_id, work_order_id, status, idempotency_key,"
+                    + " posted_at, approved_at) values ('%s', '%s', 'APPROVED', 'V83-A', '2026-10-18T03:00:00Z',"
+                    + " '2026-10-19T18:30:00Z')").formatted(approved, workOrder));
+            statement.execute(("insert into production_receipts (receipt_id, work_order_id, status, idempotency_key,"
+                    + " posted_at) values ('%s', '%s', 'DRAFT', 'V83-D', '2026-10-18T03:00:00Z')")
+                    .formatted(draft, workOrder));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            java.util.Map<String, String> receivedOn = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery("select receipt_id, received_on from production_receipts")) {
+                while (rows.next()) {
+                    receivedOn.put(rows.getString("receipt_id"), rows.getString("received_on"));
+                }
+            }
+            assertThat(receivedOn).containsEntry(approved, "2026-10-20").containsEntry(draft, "2026-10-18");
+            try (ResultSet rows = statement.executeQuery("""
+                    select is_nullable from information_schema.columns
+                    where table_schema = '%s' and table_name = 'production_receipts' and column_name = 'received_on'
+                    """.formatted(schema))) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getString("is_nullable")).isEqualTo("NO");
+            }
+            for (String role : new String[] {"ADMIN", "MANAGER", "OPERATOR"}) {
+                Set<String> granted = new TreeSet<>();
+                try (ResultSet rows = statement.executeQuery("""
+                        select p.code from role_permissions rp
+                        join roles r on r.role_id = rp.role_id
+                        join permissions p on p.permission_id = rp.permission_id
+                        where r.code = '%s' and p.code in ('PERM_PRODUCTION_RECEIPT_READ', 'PERM_PRODUCTION_QC_READ')
+                        """.formatted(role))) {
+                    while (rows.next()) {
+                        granted.add(rows.getString("code"));
+                    }
+                }
+                if (role.equals("OPERATOR")) {
+                    assertThat(granted).isEmpty();
+                } else {
+                    assertThat(granted).containsExactly("PERM_PRODUCTION_QC_READ", "PERM_PRODUCTION_RECEIPT_READ");
+                }
+            }
         }
     }
 

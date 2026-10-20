@@ -94,6 +94,12 @@ public enum AuditAction {
      *  ProductionReceiptStatus POSTED → APPROVED rename (F2). */
     PRODUCTION_RECEIPT_POSTED,
     PRODUCTION_RECEIPT_REJECTED,
+    /** G9a: a DRAFT receipt edited by its requester. */
+    PRODUCTION_RECEIPT_UPDATED,
+    /** G9a: PENDING_APPROVAL back to DRAFT by its requester; the claimed output stays claimed. */
+    PRODUCTION_RECEIPT_WITHDRAWN,
+    /** G9a: DRAFT/PENDING_APPROVAL to CANCELLED by its requester; the claimed output is free again. */
+    PRODUCTION_RECEIPT_CANCELLED,
     QC_DISPOSITION_RECORDED,
     /** Shop-floor good/scrap/rework report (F5) — the event that now advances a work order. */
     PRODUCTION_EXECUTION_REPORTED,

@@ -5,6 +5,8 @@ import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.exception.AppException;
+import com.erp.manufacturing.common.exception.MultiErrorException;
+import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
@@ -22,7 +24,13 @@ import com.erp.manufacturing.module.organization.service.OrganizationLookupServi
 import com.erp.manufacturing.module.workorder.domain.*;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptPostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptQcDispositionRequest;
-import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptRejectRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptReasonRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptVersionRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptUpdateRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptEventResponse;
+import com.erp.manufacturing.module.organization.security.PermissionGuard;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
+import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
@@ -44,6 +52,8 @@ import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -52,6 +62,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -72,6 +83,12 @@ class ProductionReceiptServiceTest {
     @Mock ItemLookupService itemLookupService;
     @Mock SecurityAuditorAware auditorAware;
     @Mock WorkOrderDemandAllocationService allocationService;
+    @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
+    @Mock PermissionGuard permissionGuard;
+
+    /** The requester: G9a lets only the person who created a receipt edit, submit, withdraw or cancel it. */
+    static final UUID USER = UUID.randomUUID();
+    static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
 
     ProductionReceiptService service;
 
@@ -93,8 +110,21 @@ class ProductionReceiptServiceTest {
                 allocationService,
                 support,
                 new ManufacturingExecutionMapper(),
-                new IdempotencySupport(new ObjectMapper()),
-                new TraceIdProvider());
+                new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
+                new TraceIdProvider(),
+                new WorkOrderIdempotency(idempotencyRecordRepository, new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
+                permissionGuard);
+        lenient().when(auditorAware.getCurrentAuditor()).thenReturn(Optional.of(USER));
+    }
+
+    private static ProductionReceiptVersionRequest versions() {
+        return new ProductionReceiptVersionRequest(0L, 0L);
+    }
+
+    private void stubOutputWarehouse(WorkOrder workOrder) {
+        when(organizationLookupService.getActiveWarehouseInPlant(
+                workOrder.getOutputWarehouse().getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(workOrder.getOutputWarehouse());
     }
 
     /**
@@ -110,11 +140,11 @@ class ProductionReceiptServiceTest {
     void listCandidates_asksForCompletedWorkOrdersToo_unlikeTheExecutionCandidates() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.COMPLETED, new BigDecimal("10"));
         UUID plantId = workOrder.getPlant().getPlantId();
-        when(workOrderRepository.findReceiptCandidates(eq(plantId), any(), any()))
+        when(workOrderRepository.findReceiptCandidates(eq(plantId), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(workOrder)));
         when(receiptRepository.sumOpenQuantityByWorkOrderIds(any())).thenReturn(List.of());
 
-        var page = service.listCandidates(plantId, PageRequest.of(0, 20));
+        var page = service.listCandidates(plantId, null, null, PageRequest.of(0, 20));
 
         assertThat(page.content()).hasSize(1);
         assertThat(page.content().get(0).workOrderId()).isEqualTo(workOrder.getWorkOrderId());
@@ -122,7 +152,7 @@ class ProductionReceiptServiceTest {
         assertThat(page.content().get(0).outputTrackingMethod()).isEqualTo("NON_TRACKED");
 
         ArgumentCaptor<Collection<WorkOrderStatus>> statuses = ArgumentCaptor.forClass(Collection.class);
-        verify(workOrderRepository).findReceiptCandidates(eq(plantId), statuses.capture(), any());
+        verify(workOrderRepository).findReceiptCandidates(eq(plantId), statuses.capture(), any(), any(), any());
         assertThat(statuses.getValue()).containsExactlyInAnyOrder(
                 WorkOrderStatus.RELEASED, WorkOrderStatus.IN_PROGRESS, WorkOrderStatus.COMPLETED);
     }
@@ -138,12 +168,12 @@ class ProductionReceiptServiceTest {
     void listCandidates_reportsTheCeilingNetOfOpenReceipts_inOneBatchQuery() {
         WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
         UUID plantId = workOrder.getPlant().getPlantId();
-        when(workOrderRepository.findReceiptCandidates(eq(plantId), any(), any()))
+        when(workOrderRepository.findReceiptCandidates(eq(plantId), any(), any(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(workOrder)));
         when(receiptRepository.sumOpenQuantityByWorkOrderIds(any()))
                 .thenReturn(List.of(openQuantity(workOrder.getWorkOrderId(), new BigDecimal("6"))));
 
-        var row = service.listCandidates(plantId, PageRequest.of(0, 20)).content().get(0);
+        var row = service.listCandidates(plantId, null, null, PageRequest.of(0, 20)).content().get(0);
 
         assertThat(row.actualGoodQuantity()).isEqualByComparingTo("10");
         assertThat(row.receiptedQuantity()).isEqualByComparingTo("0");
@@ -168,12 +198,12 @@ class ProductionReceiptServiceTest {
                 .thenReturn(warehouse);
         when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(BigDecimal.ZERO);
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), receiptRequest(warehouse, new BigDecimal("10")), "KEY-RECEIPT");
 
         ArgumentCaptor<ProductionReceipt> captor = ArgumentCaptor.forClass(ProductionReceipt.class);
-        verify(receiptRepository).save(captor.capture());
+        verify(receiptRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(ProductionReceiptStatus.DRAFT);
         assertThat(captor.getValue().getSubmittedAt()).isNull();
         assertThat(captor.getValue().getLines().get(0).getStockMovement()).isNull();
@@ -203,7 +233,7 @@ class ProductionReceiptServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.LOT_REQUIRED));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
@@ -229,7 +259,7 @@ class ProductionReceiptServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.SERIAL_REQUIRED));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
@@ -253,7 +283,7 @@ class ProductionReceiptServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
@@ -268,12 +298,12 @@ class ProductionReceiptServiceTest {
                 .thenReturn(warehouse);
         when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(BigDecimal.ZERO);
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), serialReceiptRequest(warehouse, BigDecimal.ONE, "SN-1"), "KEY-SN-OK");
 
         ArgumentCaptor<ProductionReceipt> captor = ArgumentCaptor.forClass(ProductionReceipt.class);
-        verify(receiptRepository).save(captor.capture());
+        verify(receiptRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getLines().get(0).getRequestedSerialCode()).isEqualTo("SN-1");
         verifyNoInteractions(movementService);
     }
@@ -308,9 +338,11 @@ class ProductionReceiptServiceTest {
                 eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        stubOutputWarehouse(workOrder);
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         ArgumentCaptor<InventoryReceiveCommand> commandCaptor = ArgumentCaptor.forClass(InventoryReceiveCommand.class);
         verify(movementService).receive(commandCaptor.capture(), anyString(), eq(LotStatus.HOLD), eq(false));
@@ -335,7 +367,7 @@ class ProductionReceiptServiceTest {
                 BigDecimal.ONE, serial);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.AVAILABLE, "Passed"));
@@ -362,7 +394,7 @@ class ProductionReceiptServiceTest {
         ProductionReceipt receipt = receiptWithApprovedSerial(workOrder, warehouse, BigDecimal.ONE, serial);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Damaged"));
@@ -382,9 +414,9 @@ class ProductionReceiptServiceTest {
         ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(),
                 new BigDecimal("10"), ProductionReceiptStatus.DRAFT, null);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.PENDING_APPROVAL);
         assertThat(receipt.getSubmittedAt()).isNotNull();
@@ -401,12 +433,12 @@ class ProductionReceiptServiceTest {
         UUID workOrderId = workOrder.getWorkOrderId();
         UUID receiptId = receipt.getReceiptId();
 
-        assertThatThrownBy(() -> service.submit(workOrderId, receiptId))
+        assertThatThrownBy(() -> service.submit(workOrderId, receiptId, versions(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
@@ -428,7 +460,7 @@ class ProductionReceiptServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService, wipTransactionService);
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
     }
 
     /**
@@ -449,12 +481,12 @@ class ProductionReceiptServiceTest {
                 .thenReturn(warehouse);
         when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(BigDecimal.ZERO);
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.post(workOrder.getWorkOrderId(), receiptRequest(warehouse, new BigDecimal("10")), "KEY-COMPLETED");
 
         ArgumentCaptor<ProductionReceipt> captor = ArgumentCaptor.forClass(ProductionReceipt.class);
-        verify(receiptRepository).save(captor.capture());
+        verify(receiptRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(ProductionReceiptStatus.DRAFT);
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.COMPLETED);
     }
@@ -487,7 +519,7 @@ class ProductionReceiptServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, wipTransactionService);
     }
 
@@ -509,7 +541,7 @@ class ProductionReceiptServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService, wipTransactionService);
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
     }
 
     /** P6: a CLOSED work order is reconciled and locked completely — no further receipt, ever. */
@@ -530,7 +562,7 @@ class ProductionReceiptServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(movementService, wipTransactionService);
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
     }
 
     /**
@@ -544,9 +576,9 @@ class ProductionReceiptServiceTest {
         ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(),
                 new BigDecimal("10"), ProductionReceiptStatus.DRAFT, null);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.PENDING_APPROVAL);
         verifyNoInteractions(movementService, wipTransactionService);
@@ -563,9 +595,11 @@ class ProductionReceiptServiceTest {
         when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        stubOutputWarehouse(workOrder);
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         verify(movementService).receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false));
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.APPROVED);
@@ -589,7 +623,7 @@ class ProductionReceiptServiceTest {
 
         service.post(workOrder.getWorkOrderId(), receiptRequest(workOrder.getOutputWarehouse(), new BigDecimal("10")), "KEY-IDEM");
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
         verifyNoInteractions(movementService, workOrderRepository);
     }
 
@@ -614,7 +648,7 @@ class ProductionReceiptServiceTest {
                         .isEqualTo(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED));
 
         verifyNoInteractions(movementService);
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -651,9 +685,11 @@ class ProductionReceiptServiceTest {
                 eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        stubOutputWarehouse(workOrder);
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         verify(movementService).receive(any(InventoryReceiveCommand.class),
                 eq(receipt.getIdempotencyKey() + ":approve:L1"), eq(LotStatus.HOLD), eq(false));
@@ -681,9 +717,11 @@ class ProductionReceiptServiceTest {
         when(movementService.receive(any(InventoryReceiveCommand.class), anyString(), eq(LotStatus.HOLD), eq(false)))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        stubOutputWarehouse(workOrder);
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
 
         assertThat(workOrder.getCompletedQuantity()).isEqualByComparingTo("4");
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.IN_PROGRESS);
@@ -699,7 +737,7 @@ class ProductionReceiptServiceTest {
         UUID workOrderId = workOrder.getWorkOrderId();
         UUID receiptId = receipt.getReceiptId();
 
-        assertThatThrownBy(() -> service.approve(workOrderId, receiptId))
+        assertThatThrownBy(() -> service.approve(workOrderId, receiptId, versions(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -718,7 +756,7 @@ class ProductionReceiptServiceTest {
         UUID workOrderId = workOrder.getWorkOrderId();
         UUID receiptId = receipt.getReceiptId();
 
-        assertThatThrownBy(() -> service.approve(workOrderId, receiptId))
+        assertThatThrownBy(() -> service.approve(workOrderId, receiptId, versions(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -735,7 +773,7 @@ class ProductionReceiptServiceTest {
         UUID otherWorkOrderId = UUID.randomUUID();
         UUID receiptId = receipt.getReceiptId();
 
-        assertThatThrownBy(() -> service.approve(otherWorkOrderId, receiptId))
+        assertThatThrownBy(() -> service.approve(otherWorkOrderId, receiptId, versions(), null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
@@ -748,10 +786,10 @@ class ProductionReceiptServiceTest {
         WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
         ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("10"));
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.reject(workOrder.getWorkOrderId(), receipt.getReceiptId(),
-                new ProductionReceiptRejectRequest(" Quality failed "));
+                new ProductionReceiptReasonRequest(0L, 0L, " Quality failed "), null);
 
         assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.REJECTED);
         assertThat(receipt.getRejectReason()).isEqualTo("Quality failed");
@@ -768,14 +806,14 @@ class ProductionReceiptServiceTest {
 
         UUID workOrderId = workOrder.getWorkOrderId();
         UUID receiptId = receipt.getReceiptId();
-        ProductionReceiptRejectRequest request = new ProductionReceiptRejectRequest("   ");
+        ProductionReceiptReasonRequest request = new ProductionReceiptReasonRequest(0L, 0L, "   ");
 
-        assertThatThrownBy(() -> service.reject(workOrderId, receiptId, request))
+        assertThatThrownBy(() -> service.reject(workOrderId, receiptId, request, null))
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.APPROVAL_REASON_REQUIRED));
 
-        verify(receiptRepository, never()).save(any());
+        verify(receiptRepository, never()).saveAndFlush(any());
     }
 
     // ── QC disposition (spec §6.1) ─────────────────────────────────────────
@@ -788,7 +826,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("10"), ProductionReceiptStatus.APPROVED, lot);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.AVAILABLE, " Passed visual "));
@@ -823,7 +861,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("10"), ProductionReceiptStatus.APPROVED, lot);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Failed hardness"));
@@ -849,7 +887,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("7"), ProductionReceiptStatus.APPROVED, lot);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.AVAILABLE, "Passed"));
@@ -872,7 +910,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("7"), ProductionReceiptStatus.APPROVED, lot);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Failed hardness"));
@@ -960,7 +998,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("6"), ProductionReceiptStatus.APPROVED, null);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.AVAILABLE, " Passed visual "));
@@ -998,7 +1036,7 @@ class ProductionReceiptServiceTest {
                 new BigDecimal("6"), ProductionReceiptStatus.APPROVED, null);
         when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
         when(auditorAware.getCurrentAuditor()).thenReturn(Optional.empty());
-        when(receiptRepository.save(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.qcDisposition(workOrder.getWorkOrderId(), receipt.getReceiptId(),
                 new ProductionReceiptQcDispositionRequest(QualityDispositionResult.REJECTED, "Failed hardness"));
@@ -1099,14 +1137,590 @@ class ProductionReceiptServiceTest {
         verifyNoInteractions(movementService, dispositionRepository);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // G9a — lifecycle, versions, quota min(P, G), dates, reads (NEXT_PHASE_PLAN.md §16)
+    // ---------------------------------------------------------------------------------------
+
+    private void stubCreate(WorkOrder workOrder, String key, BigDecimal openClaims) {
+        when(receiptRepository.findWithLinesByIdempotencyKey(key)).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        lenient().when(organizationLookupService.getActiveWarehouseInPlant(
+                workOrder.getOutputWarehouse().getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(workOrder.getOutputWarehouse());
+        lenient().when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(openClaims);
+    }
+
+    private ProductionReceiptPostRequest request(Warehouse warehouse, String quantity, Long version,
+                                                 LocalDate receivedOn, LocalDate expiresOn, String lotNumber) {
+        return new ProductionReceiptPostRequest(warehouse.getWarehouseId(), null, lotNumber, null,
+                new BigDecimal(quantity), null, null, version, receivedOn, expiresOn);
+    }
+
+    private static void assertCode(Throwable thrown, Object code) {
+        assertThat(thrown).isInstanceOf(AppException.class);
+        assertThat(((AppException) thrown).getErrorCode()).isEqualTo(code);
+    }
+
+    /** The ceiling is C − A − D: 10 produced, 7 already claimed ⇒ 4 is refused on its field, before any write. */
+    @Test
+    void post_aboveWhatIsUnclaimed_isRefusedOnTheQuantityField() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", new BigDecimal("7"));
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "4", 0L, TODAY, null, null), "K"));
+
+        assertCode(thrown, BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("quantity");
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void post_withoutTheWorkOrderVersion_isAFieldErrorBeforeAnyWrite() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", null, TODAY, null, null), "K"));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("expectedWorkOrderVersion");
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void post_staleWorkOrderVersion_isConcurrentModification() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 7L, TODAY, null, null), "K"));
+
+        assertCode(thrown, BusinessErrorCode.CONCURRENT_MODIFICATION);
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void post_withoutReceivedOn_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 0L, null, null, null), "K"));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("receivedOn");
+    }
+
+    @Test
+    void post_receivedOnAfterThePlantsToday_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 0L, TODAY.plusDays(1), null, null), "K"));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("receivedOn");
+    }
+
+    @Test
+    void post_expiryOnOutputThatIsNotLotTracked_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 0L, TODAY, TODAY.plusDays(30), null), "K"));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("expiresOn");
+    }
+
+    @Test
+    void post_expiryNotAfterReceivedOn_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"), true);
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 0L, TODAY, TODAY, "LOT-9"), "K"));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsEntry("expiresOn", "must be after receivedOn");
+    }
+
+    /** FE R02: the destination is the work order's output warehouse, never another one of the plant. */
+    @Test
+    void post_toAnotherWarehouseOfThePlant_isAScopeMismatch() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        Warehouse other = warehouse(UUID.randomUUID(), workOrder.getPlant());
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(organizationLookupService.getActiveWarehouseInPlant(other.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(other);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(other, "1", 0L, TODAY, null, null), "K"));
+
+        assertCode(thrown, BusinessErrorCode.RESOURCE_SCOPE_MISMATCH);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("destinationWarehouseId");
+    }
+
+    /** FE Q8: a lot number any lot of the item already uses — whatever its case — is refused, on the field. */
+    @Test
+    void post_lotNumberAlreadyUsedInAnotherCase_isLotCodeAlreadyExists() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"), true);
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(itemLookupService.lotCodeExistsIgnoreCase(workOrder.getProductItem().getItemId(), "lot-9")).thenReturn(true);
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "1", 0L, TODAY, null, " lot-9 "), "K"));
+
+        assertCode(thrown, BusinessErrorCode.LOT_CODE_ALREADY_EXISTS);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("lotNumber");
+    }
+
+    /** FE Q12: a new receipt claims output of the work order, so the work order's version moves on — written once. */
+    @Test
+    void post_writesTheReceiptAndTheTouchedWorkOrder() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"), true);
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "4", 0L, TODAY.minusDays(1), TODAY.plusDays(90), "LOT-9"), "K");
+
+        assertThat(workOrder.getUpdatedAt()).isNotNull();
+        verify(workOrderRepository).saveAndFlush(workOrder);
+        assertThat(response.receivedOn()).isEqualTo(TODAY.minusDays(1));
+        assertThat(response.expiresOn()).isEqualTo(TODAY.plusDays(90));
+        assertThat(response.status()).isEqualTo("DRAFT");
+    }
+
+    @Test
+    void update_byAnotherUser_isRefused() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        receipt.setCreatedBy(UUID.randomUUID());
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("5"), null, TODAY, null, null), null));
+
+        assertCode(thrown, AuthErrorCode.ACCESS_DENIED);
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    /** FE R04: editing gives the draft's own claim back first — 4 claimed of 10 ⇒ it may grow to 10, not to 11. */
+    @Test
+    void update_quotaExcludesTheDraftsOwnClaim() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(new BigDecimal("4"));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Throwable tooMuch = catchThrowable(() -> service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("11"), null, TODAY, null, null), null));
+        assertCode(tooMuch, BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED);
+
+        service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("10"), null, TODAY.minusDays(2), null, " edited "),
+                null);
+        assertThat(receipt.getLines().get(0).getQuantity()).isEqualByComparingTo("10");
+        assertThat(receipt.getReceivedOn()).isEqualTo(TODAY.minusDays(2));
+        assertThat(receipt.getNote()).isEqualTo("edited");
+    }
+
+    /**
+     * B112: an edit that changes only the quantity touches the line alone; the receipt must still be dirtied so its
+     * version moves — the G9a smoke caught a second edit leaving it where it was.
+     */
+    @Test
+    void update_quantityOnly_stillDirtiesTheReceipt() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(new BigDecimal("4"));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        assertThat(receipt.getUpdatedAt()).isNull();
+
+        service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("5"), null, TODAY, null, null), null);
+
+        assertThat(receipt.getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    void update_pendingReceipt_isAStateConflict() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("5"), null, TODAY, null, null), null));
+
+        assertCode(thrown, BusinessErrorCode.STATE_CONFLICT);
+    }
+
+    @Test
+    void submit_staleReceiptVersion_isConcurrentModificationBeforeAnyWrite() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        receipt.setVersion(3L);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                versions(), null));
+
+        assertCode(thrown, BusinessErrorCode.CONCURRENT_MODIFICATION);
+        assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.DRAFT);
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void submit_byAnotherUser_isRefused() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        receipt.setCreatedBy(UUID.randomUUID());
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.submit(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                versions(), null));
+
+        assertCode(thrown, AuthErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    void withdraw_pendingReceipt_goesBackToDraftKeepingItsClaim() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.withdraw(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "  wrong lot number  "), null);
+
+        assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.DRAFT);
+        assertThat(receipt.isOpen()).isTrue();
+        assertThat(receipt.getWithdrawReason()).isEqualTo("wrong lot number");
+        assertThat(receipt.getWithdrawnBy()).isEqualTo(USER);
+        verify(workOrderRepository).saveAndFlush(workOrder);
+        verifyNoInteractions(movementService);
+    }
+
+    @Test
+    void withdraw_withoutAReason_isApprovalReasonRequired() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.withdraw(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "  "), null));
+
+        assertCode(thrown, ValidationErrorCode.APPROVAL_REASON_REQUIRED);
+    }
+
+    @Test
+    void withdraw_reasonShorterThanFive_isAFieldError() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.withdraw(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "abcd"), null));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("reason");
+    }
+
+    /** A cancelled receipt leaves the claim sum (B16): it is no longer open, so its output is free exactly once. */
+    @Test
+    void cancel_draft_isTerminalAndNoLongerOpen() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.cancel(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "Entered twice"), null);
+
+        assertThat(receipt.getStatus()).isEqualTo(ProductionReceiptStatus.CANCELLED);
+        assertThat(receipt.isOpen()).isFalse();
+        assertThat(receipt.getCancelReason()).isEqualTo("Entered twice");
+        assertThat(receipt.getCancelledAt()).isNotNull();
+        verifyNoInteractions(movementService);
+    }
+
+    @Test
+    void cancel_approvedReceipt_isAStateConflict() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.APPROVED, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.cancel(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "Entered twice"), null));
+
+        assertCode(thrown, BusinessErrorCode.STATE_CONFLICT);
+    }
+
+    @Test
+    void cancel_byAnotherUser_isRefused() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        receipt.setCreatedBy(UUID.randomUUID());
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.cancel(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "Entered twice"), null));
+
+        assertCode(thrown, AuthErrorCode.ACCESS_DENIED);
+    }
+
+    /** FE R08: approval re-checks A + q ≤ min(P, G) against the current work order, before any stock moves. */
+    @Test
+    void approve_overTheCurrentCap_isRefusedBeforeAnyMovement() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.setActualGoodQuantity(new BigDecimal("8"));
+        workOrder.setCompletedQuantity(new BigDecimal("5"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        stubOutputWarehouse(workOrder);
+
+        Throwable thrown = catchThrowable(() -> service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                versions(), null));
+
+        assertCode(thrown, BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED);
+        assertThat(workOrder.getCompletedQuantity()).isEqualByComparingTo("5");
+        verifyNoInteractions(movementService, wipTransactionService);
+    }
+
+    /** FE Q23: the lot expires at the start of expiresOn in the plant's time zone. */
+    @Test
+    void approve_passesTheExpiryAsTheStartOfThePlantDay() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"), true);
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        receipt.getLines().get(0).setRequestedLotCode("LOT-9");
+        receipt.setExpiresOn(TODAY.plusDays(30));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        stubOutputWarehouse(workOrder);
+        when(movementService.receive(any(), any(), any(), anyBoolean()))
+                .thenReturn(new InventoryMovementResult(movement(workOrder.getProductItem(), workOrder.getOutputWarehouse()), true));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
+
+        ArgumentCaptor<InventoryReceiveCommand> command = ArgumentCaptor.forClass(InventoryReceiveCommand.class);
+        verify(movementService).receive(command.capture(), any(), eq(LotStatus.HOLD), eq(false));
+        assertThat(command.getValue().expiresAt())
+                .isEqualTo(TODAY.plusDays(30).atStartOfDay(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant());
+    }
+
+    /** A date that was fine when saved but has passed since is a 409 at approval, not a 400. */
+    @Test
+    void approve_expiredSinceTheDraftWasSaved_isLotNotEligible() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"), true);
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        receipt.getLines().get(0).setRequestedLotCode("LOT-9");
+        receipt.setReceivedOn(TODAY.minusDays(10));
+        receipt.setExpiresOn(TODAY);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        Throwable thrown = catchThrowable(() -> service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                versions(), null));
+
+        assertCode(thrown, BusinessErrorCode.LOT_NOT_ELIGIBLE);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("expiresOn");
+        verifyNoInteractions(movementService);
+    }
+
+    /**
+     * The +2 version trap of G8b: every change to the work order happens before the movements can flush it, so
+     * completedQuantity is already raised when the RECEIVE runs.
+     */
+    @Test
+    void approve_raisesCompletedQuantityBeforeTheMovementCanFlushTheWorkOrder() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        stubOutputWarehouse(workOrder);
+        List<BigDecimal> completedAtReceive = new ArrayList<>();
+        when(movementService.receive(any(), any(), any(), anyBoolean())).thenAnswer(invocation -> {
+            completedAtReceive.add(workOrder.getCompletedQuantity());
+            return new InventoryMovementResult(movement(workOrder.getProductItem(), workOrder.getOutputWarehouse()), true);
+        });
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
+
+        assertThat(completedAtReceive).singleElement().satisfies(value -> assertThat(value).isEqualByComparingTo("4"));
+    }
+
+    /** CLAUDE.md §0.51 #3: what a command answers must be what a later read returns — microseconds, like Postgres. */
+    @Test
+    void lifecycleInstants_areCutToMicroseconds() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        stubOutputWarehouse(workOrder);
+        when(movementService.receive(any(), any(), any(), anyBoolean()))
+                .thenReturn(new InventoryMovementResult(movement(workOrder.getProductItem(), workOrder.getOutputWarehouse()), true));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), null);
+
+        assertThat(receipt.getApprovedAt().getNano() % 1000).isZero();
+        assertThat(ProductionReceipt.builder().build().getPostedAt().getNano() % 1000).isZero();
+    }
+
+    /** R9: a replayed approval answers the receipt as it is now, with no second movement. */
+    @Test
+    void approve_replayedKey_runsNothingAgain() throws Exception {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.APPROVED, null);
+        IdempotencySupport idempotencySupport = new IdempotencySupport(new ObjectMapper().findAndRegisterModules());
+        String hash = idempotencySupport.payloadHash(new WorkOrderIdempotency.Fingerprint(receipt.getReceiptId(), versions()));
+        when(idempotencyRecordRepository.findByIdempotencyKeyAndCommand("APPROVE-1", WorkOrderCommand.RECEIPT_APPROVE))
+                .thenReturn(Optional.of(WorkOrderIdempotencyRecord.builder()
+                        .idempotencyKey("APPROVE-1").command(WorkOrderCommand.RECEIPT_APPROVE)
+                        .resourceId(receipt.getReceiptId()).payloadHash(hash).build()));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        var response = service.approve(workOrder.getWorkOrderId(), receipt.getReceiptId(), versions(), "APPROVE-1");
+
+        assertThat(response.status()).isEqualTo("APPROVED");
+        verifyNoInteractions(movementService, wipTransactionService);
+        verify(receiptRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void reject_recordsWhoRejected() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = pendingReceipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"));
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.reject(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptReasonRequest(0L, 0L, "Count does not match"), null);
+
+        assertThat(receipt.getRejectedBy()).isEqualTo(USER);
+        assertThat(receipt.isOpen()).isFalse();
+    }
+
+    /** FE §1.3: QC alone reads approved receipts only; a draft is refused, not hidden as a 404. */
+    @Test
+    void get_withQualityPermissionsOnly_refusesADraft() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_QC_READ"), eq("PLANT"), any())).thenReturn(true);
+
+        Throwable thrown = catchThrowable(() -> service.get(workOrder.getWorkOrderId(), receipt.getReceiptId()));
+
+        assertCode(thrown, AuthErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    void listByPlant_withQualityPermissionsOnly_readsApprovedReceiptsAndNothingElse() {
+        UUID plantId = UUID.randomUUID();
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_QUALITY_DISPOSITION"), eq("PLANT"), eq(plantId))).thenReturn(true);
+        when(receiptRepository.findByPlant(eq(plantId), eq(ProductionReceiptStatus.APPROVED), any(), any(), any(), any(),
+                any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        service.listByPlant(plantId, null, null, null, null, null, null, PageRequest.of(0, 20));
+        var drafts = service.listByPlant(plantId, ProductionReceiptStatus.DRAFT, null, null, null, null, null,
+                PageRequest.of(0, 20));
+
+        assertThat(drafts.totalElements()).isZero();
+        verify(receiptRepository, times(1)).findByPlant(eq(plantId), eq(ProductionReceiptStatus.APPROVED), any(), any(),
+                any(), any(), any(), any());
+    }
+
+    @Test
+    void listByPlant_receivedFromAfterReceivedTo_isAFieldError() {
+        Throwable thrown = catchThrowable(() -> service.listByPlant(UUID.randomUUID(), null, null, null,
+                TODAY, TODAY.minusDays(1), null, PageRequest.of(0, 20)));
+
+        assertCode(thrown, ValidationErrorCode.INVALID_INPUT);
+        verifyNoInteractions(receiptRepository);
+    }
+
+    /** The detail carries the quota of the work order (FE §3.1) and the requester's buttons. */
+    @Test
+    void get_reportsTheQuotaAndTheRequestersActions() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.setActualGoodQuantity(new BigDecimal("9"));
+        workOrder.setCompletedQuantity(new BigDecimal("2"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(new BigDecimal("4"));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_RECEIPT_MANAGE"), eq("PLANT"), any())).thenReturn(true);
+
+        var response = service.get(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        assertThat(response.actualFinalGoodQuantity()).isEqualByComparingTo("9");
+        assertThat(response.receiptableGoodCap()).isEqualByComparingTo("9");
+        assertThat(response.approvedReceiptQuantity()).isEqualByComparingTo("2");
+        assertThat(response.claimedQuantity()).isEqualByComparingTo("4");
+        assertThat(response.awaitingReceiptQuantity()).isEqualByComparingTo("7");
+        assertThat(response.unclaimedReceiptQuantity()).isEqualByComparingTo("3");
+        assertThat(response.allowedActions()).containsExactly("EDIT", "SUBMIT", "CANCEL");
+        assertThat(response.version()).isZero();
+        assertThat(response.workOrderVersion()).isZero();
+    }
+
+    @Test
+    void get_anotherUsersDraft_offersNoAction() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        receipt.setCreatedBy(UUID.randomUUID());
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_RECEIPT_MANAGE"), eq("PLANT"), any())).thenReturn(true);
+
+        assertThat(service.get(workOrder.getWorkOrderId(), receipt.getReceiptId()).allowedActions()).isEmpty();
+    }
+
+    @Test
+    void events_listsTheStepsThatHappenedOldestFirst() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.CANCELLED, null);
+        Instant created = Instant.parse("2026-10-20T01:00:00Z");
+        receipt.setCreatedAt(created);
+        receipt.setSubmittedAt(created.plusSeconds(60));
+        receipt.setSubmittedBy(USER);
+        receipt.setCancelledAt(created.plusSeconds(120));
+        receipt.setCancelledBy(USER);
+        receipt.setCancelReason("Entered twice");
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_RECEIPT_READ"), eq("PLANT"), any())).thenReturn(true);
+        when(userLookupService.findUsernames(List.of(USER))).thenReturn(java.util.Map.of(USER, "thukho"));
+
+        var page = service.events(workOrder.getWorkOrderId(), receipt.getReceiptId(), PageRequest.of(0, 20));
+
+        assertThat(page.content()).extracting(ProductionReceiptEventResponse::action)
+                .containsExactly("CREATED", "SUBMITTED", "CANCELLED");
+        assertThat(page.content().get(2).reason()).isEqualTo("Entered twice");
+        assertThat(page.content().get(1).actorName()).isEqualTo("thukho");
+    }
+
     private ProductionReceiptPostRequest receiptRequest(Warehouse warehouse, BigDecimal quantity) {
         return new ProductionReceiptPostRequest(
-                warehouse.getWarehouseId(), null, null, null, quantity, "Complete", "Receipt");
+                warehouse.getWarehouseId(), null, null, null, quantity, "Complete", "Receipt", 0L, TODAY, null);
     }
 
     private ProductionReceiptPostRequest serialReceiptRequest(Warehouse warehouse, BigDecimal quantity, String serialNumber) {
         return new ProductionReceiptPostRequest(
-                warehouse.getWarehouseId(), null, null, serialNumber, quantity, "Complete", "Receipt");
+                warehouse.getWarehouseId(), null, null, serialNumber, quantity, "Complete", "Receipt", 0L, TODAY, null);
     }
 
     private ProductionReceipt pendingReceipt(WorkOrder workOrder, Warehouse warehouse, BigDecimal quantity) {
@@ -1125,8 +1739,11 @@ class ProductionReceiptServiceTest {
                 .workOrder(workOrder)
                 .status(status)
                 .idempotencyKey("KEY-PENDING-RECEIPT")
+                .receivedOn(TODAY)
                 .lines(new ArrayList<>())
                 .build();
+        receipt.setVersion(0L);
+        receipt.setCreatedBy(USER);
         receipt.getLines().add(ProductionReceiptLine.builder()
                 .receiptLineId(UUID.randomUUID())
                 .receipt(receipt)
@@ -1148,8 +1765,11 @@ class ProductionReceiptServiceTest {
                 .workOrder(workOrder)
                 .status(ProductionReceiptStatus.APPROVED)
                 .idempotencyKey("KEY-PENDING-RECEIPT")
+                .receivedOn(TODAY)
                 .lines(new ArrayList<>())
                 .build();
+        receipt.setVersion(0L);
+        receipt.setCreatedBy(USER);
         receipt.getLines().add(ProductionReceiptLine.builder()
                 .receiptLineId(UUID.randomUUID())
                 .receipt(receipt)
@@ -1171,8 +1791,11 @@ class ProductionReceiptServiceTest {
                 .workOrder(workOrder)
                 .status(status)
                 .idempotencyKey("KEY-PENDING-RECEIPT")
+                .receivedOn(TODAY)
                 .lines(new ArrayList<>())
                 .build();
+        receipt.setVersion(0L);
+        receipt.setCreatedBy(USER);
         receipt.getLines().add(ProductionReceiptLine.builder()
                 .receiptLineId(UUID.randomUUID())
                 .receipt(receipt)
@@ -1225,7 +1848,7 @@ class ProductionReceiptServiceTest {
                 .status(BomStatus.ACTIVE)
                 .lines(new ArrayList<>())
                 .build();
-        return WorkOrder.builder()
+        WorkOrder workOrder = WorkOrder.builder()
                 .workOrderId(UUID.randomUUID())
                 .company(plant.getCompany())
                 .plant(plant)
@@ -1244,6 +1867,8 @@ class ProductionReceiptServiceTest {
                 .status(status)
                 .componentLines(new ArrayList<>())
                 .build();
+        workOrder.setVersion(0L);
+        return workOrder;
     }
 
     private Item item(UUID itemId, UUID companyId, String code, ItemType type) {

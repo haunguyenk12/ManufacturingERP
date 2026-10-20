@@ -35,5 +35,19 @@ public record ProductionReceiptCandidateResponse(
         BigDecimal availableToReceipt,
         /** NON_TRACKED / LOT_TRACKED — decides whether the create form must ask for a lot number. */
         String outputTrackingMethod,
-        Instant plannedEndAt
+        Instant plannedEndAt,
+        // ---- G9a (FE §3.1) ----
+        Long workOrderVersion,
+        BigDecimal plannedQuantity,
+        /** C = min(planned, actual final good) (D12). {@code actualGoodQuantity} above is G itself. */
+        BigDecimal receiptableGoodCap,
+        BigDecimal approvedReceiptQuantity,
+        BigDecimal claimedQuantity,
+        BigDecimal awaitingReceiptQuantity,
+        /** Same number as {@code availableToReceipt}, under the FE's name. */
+        BigDecimal unclaimedReceiptQuantity,
+        /** The work order's output warehouse — the only destination a receipt of it may use (FE R02). */
+        UUID outputWarehouseId,
+        String outputWarehouseCode,
+        String outputWarehouseName
 ) {}

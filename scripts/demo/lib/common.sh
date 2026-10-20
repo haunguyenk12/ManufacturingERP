@@ -80,6 +80,16 @@ call() {
 wo_version() { call GET "/v1/work-orders/$1" | extract "d['result']['version']"; }
 wo_cmd() { call POST "/v1/work-orders/$1/$2" "{\"expectedWorkOrderVersion\":$(wo_version "$1")}"; }
 
+# rcpt_versions WO_ID RECEIPT_ID — G9a: the body every production receipt command after creation carries,
+# both versions read back from the receipt detail. plant_today — the receipt's business date in the demo
+# plants' time zone (Asia/Ho_Chi_Minh, UTC+7, no DST).
+rcpt_versions() {
+    local r_
+    r_=$(call GET "/v1/work-orders/$1/production-receipts/$2")
+    echo "{\"expectedVersion\":$(echo "$r_" | extract "d['result']['version']"),\"expectedWorkOrderVersion\":$(echo "$r_" | extract "d['result']['workOrderVersion']")}"
+}
+plant_today() { date -u -d '+7 hours' +%F; }
+
 # call_expect EXPECTED_CODE METHOD PATH [BODY] [EXTRA_CURL_ARGS...]
 #
 # For the steps that MUST fail. Three of them exist and none is optional:

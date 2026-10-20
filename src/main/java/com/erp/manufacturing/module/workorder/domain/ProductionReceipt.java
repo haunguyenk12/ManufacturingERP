@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -61,15 +62,27 @@ public class ProductionReceipt extends BaseEntity {
     @Column(name = "payload_hash", length = 64)
     private String payloadHash;
 
+    /** Cut to microseconds, what Postgres keeps: the instant a command answers must be the one read back (G9a). */
     @Column(name = "posted_at", nullable = false)
     @Builder.Default
-    private Instant postedAt = Instant.now();
+    private Instant postedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    /** G9a (V83): business date of the receipt, plant-local; never after the plant's today. */
+    @Column(name = "received_on", nullable = false)
+    private LocalDate receivedOn;
+
+    /** G9a (V83): shelf-life end of the output lot (lot-tracked only); the lot expires at its start, plant-local. */
+    @Column(name = "expires_on")
+    private LocalDate expiresOn;
+
     @Column(name = "submitted_at")
     private Instant submittedAt;
+
+    @Column(name = "submitted_by")
+    private UUID submittedBy;
 
     @Column(name = "approved_at")
     private Instant approvedAt;
@@ -82,6 +95,28 @@ public class ProductionReceipt extends BaseEntity {
 
     @Column(name = "reject_reason", columnDefinition = "TEXT")
     private String rejectReason;
+
+    @Column(name = "rejected_by")
+    private UUID rejectedBy;
+
+    /** The last withdrawal back to DRAFT (G9a); a receipt can be withdrawn and submitted again. */
+    @Column(name = "withdrawn_at")
+    private Instant withdrawnAt;
+
+    @Column(name = "withdrawn_by")
+    private UUID withdrawnBy;
+
+    @Column(name = "withdraw_reason", columnDefinition = "TEXT")
+    private String withdrawReason;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "cancelled_by")
+    private UUID cancelledBy;
+
+    @Column(name = "cancel_reason", columnDefinition = "TEXT")
+    private String cancelReason;
 
     /**
      * QC decision summary, denormalised from {@link QualityDisposition} so the list endpoint can
@@ -121,9 +156,31 @@ public class ProductionReceipt extends BaseEntity {
         return qcResult != null;
     }
 
-    public void submit(Instant now) {
+    /** DRAFT and PENDING_APPROVAL still claim output of the work order (B16); every other status does not. */
+    public boolean isOpen() {
+        return status == ProductionReceiptStatus.DRAFT || status == ProductionReceiptStatus.PENDING_APPROVAL;
+    }
+
+    public void submit(Instant now, UUID actor) {
         status = ProductionReceiptStatus.PENDING_APPROVAL;
         submittedAt = now;
+        submittedBy = actor;
+    }
+
+    /** Back to DRAFT so the requester can edit it; the output it claims stays claimed (FE R04). */
+    public void withdraw(Instant now, UUID actor, String reason) {
+        status = ProductionReceiptStatus.DRAFT;
+        withdrawnAt = now;
+        withdrawnBy = actor;
+        withdrawReason = reason;
+    }
+
+    /** Terminal: the output it claimed is free again, nothing was ever posted. */
+    public void cancel(Instant now, UUID actor, String reason) {
+        status = ProductionReceiptStatus.CANCELLED;
+        cancelledAt = now;
+        cancelledBy = actor;
+        cancelReason = reason;
     }
 
     /** Approval is the point where the receipt hits inventory. */
@@ -133,9 +190,10 @@ public class ProductionReceipt extends BaseEntity {
         approvedBy = approver;
     }
 
-    public void reject(Instant now, String reason) {
+    public void reject(Instant now, UUID actor, String reason) {
         status = ProductionReceiptStatus.REJECTED;
         rejectedAt = now;
+        rejectedBy = actor;
         rejectReason = reason;
     }
 

@@ -374,9 +374,25 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
                 .extracting(WorkOrder::getWorkOrderId).containsExactly(onTo.getWorkOrderId());
     }
 
+    @Test
+    void findReceiptCandidates_filtersByWorkOrderAndSearch() {
+        Fixture fixture = persistFixture();
+        WorkOrder wanted = persistWorkOrder(fixture, "WO-WANTED", WorkOrderStatus.IN_PROGRESS,
+                new BigDecimal("10.000000"), new BigDecimal("4.000000"));
+        persistWorkOrder(fixture, "WO-OTHER", WorkOrderStatus.IN_PROGRESS,
+                new BigDecimal("10.000000"), new BigDecimal("4.000000"));
+
+        assertThat(repository.findReceiptCandidates(fixture.plant.getPlantId(), RECEIPT_CANDIDATE_STATUSES,
+                        wanted.getWorkOrderId(), null, PageRequest.of(0, 20)).getContent())
+                .extracting(WorkOrder::getWorkOrderId).containsExactly(wanted.getWorkOrderId());
+        assertThat(repository.findReceiptCandidates(fixture.plant.getPlantId(), RECEIPT_CANDIDATE_STATUSES,
+                        null, "wo-wanted", PageRequest.of(0, 20)).getContent())
+                .extracting(WorkOrder::getWorkOrderId).containsExactly(wanted.getWorkOrderId());
+    }
+
     private List<WorkOrder> receiptCandidates(Fixture fixture) {
         return repository.findReceiptCandidates(
-                        fixture.plant.getPlantId(), RECEIPT_CANDIDATE_STATUSES, PageRequest.of(0, 20))
+                        fixture.plant.getPlantId(), RECEIPT_CANDIDATE_STATUSES, null, null, PageRequest.of(0, 20))
                 .getContent();
     }
 
@@ -391,6 +407,7 @@ class WorkOrderRepositoryIT extends AbstractPostgresIntegrationTest {
                 .status(status)
                 .code("PR-" + UUID.randomUUID().toString().substring(0, 8))
                 .idempotencyKey(UUID.randomUUID().toString())
+                .receivedOn(java.time.LocalDate.of(2026, 10, 1))
                 .build();
         receipt.setCreatedAt(now);
         receipt.setUpdatedAt(now);

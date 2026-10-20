@@ -141,7 +141,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
      *       the plan, so the <em>last</em> receipt of every such work order would vanish from the
      *       screen. This is the opposite of B75, where {@code COMPLETED} is correctly excluded
      *       because no further production may be reported.</li>
-     *   <li><b>Quantity</b> is {@code actualGood - completed - (open receipts)}, not just
+     *   <li><b>Quantity</b> is {@code min(planned, actualGood) - completed - (open receipts)} (G9a D12: good beyond
+     *       the plan is never receipted), not just
      *       {@code actualGood - completed}. Receipts in {@code DRAFT} or {@code PENDING_APPROVAL}
      *       have already claimed part of the output (B16), so leaving them out would offer the
      *       operator a row that {@code postNew} is certain to refuse with
@@ -160,9 +161,16 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             select w
             from WorkOrder w
             join fetch w.productItem
+            join fetch w.outputWarehouse
             where w.plant.plantId = :plantId
               and w.status in :statuses
-              and w.actualGoodQuantity - w.completedQuantity - (
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:search as string) is null
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.name) like lower(concat('%', cast(:search as string), '%')))
+              and (case when w.actualGoodQuantity < w.plannedQuantity
+                        then w.actualGoodQuantity else w.plannedQuantity end) - w.completedQuantity - (
                     select coalesce(sum(l.quantity), 0)
                     from ProductionReceiptLine l
                     where l.receipt.workOrder.workOrderId = w.workOrderId
@@ -176,7 +184,13 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             from WorkOrder w
             where w.plant.plantId = :plantId
               and w.status in :statuses
-              and w.actualGoodQuantity - w.completedQuantity - (
+              and (:workOrderId is null or w.workOrderId = :workOrderId)
+              and (cast(:search as string) is null
+                   or lower(w.workOrderNo) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.code) like lower(concat('%', cast(:search as string), '%'))
+                   or lower(w.productItem.name) like lower(concat('%', cast(:search as string), '%')))
+              and (case when w.actualGoodQuantity < w.plannedQuantity
+                        then w.actualGoodQuantity else w.plannedQuantity end) - w.completedQuantity - (
                     select coalesce(sum(l.quantity), 0)
                     from ProductionReceiptLine l
                     where l.receipt.workOrder.workOrderId = w.workOrderId
@@ -187,6 +201,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             """)
     Page<WorkOrder> findReceiptCandidates(@Param("plantId") UUID plantId,
                                           @Param("statuses") Collection<WorkOrderStatus> statuses,
+                                          @Param("workOrderId") UUID workOrderId,
+                                          @Param("search") String search,
                                           Pageable pageable);
 
     @EntityGraph(attributePaths = {
