@@ -121,6 +121,12 @@ public class InventoryLotService {
             throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot was rejected by purchase QC; its status cannot be changed");
         }
+        // G9c (R12): the same holds for a child lot production QC rejected.
+        if (lot.getStatus() == LotStatus.REJECTED
+                && LotQcOriginLookupService.LOT_SOURCE_TYPE.equals(lot.getSourceReferenceType())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot was rejected by production QC; its status cannot be changed");
+        }
         if (!replay && balanceRepository.existsByLotLotIdAndReservedQuantityGreaterThan(lotId, BigDecimal.ZERO)) {
             throw ExceptionFactory.custom(BusinessErrorCode.RESERVED_STOCK,
                     "Lot has reserved stock (work order or sales order); release the reservation first");

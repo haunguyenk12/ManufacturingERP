@@ -803,6 +803,22 @@ Từ chối: `POST .../{rid}/reject` body `{"expectedVersion", "expectedWorkOrde
   (`WORK_ORDER_LEVEL` | `UNKNOWN`) + `materials[]` (vật tư của cả lệnh: cấp / dùng / hoàn / còn lại theo dòng cấp, cùng hình dạng phần vật tư
   của `GET /v1/work-orders/{W}/wip`). Quyền như chi tiết phiếu.
 
+#### G9c (2026-10-23) — QC theo lượng, nhiều lượt
+
+- **Mới:** `POST /v1/work-orders/{W}/production-receipts/{R}/qc-decisions` (`Idempotency-Key` tuỳ chọn) body
+  `{"expectedVersion", "expectedWorkOrderVersion", "acceptedQuantity", "rejectedQuantity", "reason"}` — cả hai lượng bắt buộc (0 được),
+  tổng > 0 và ≤ phần chờ (`409 PLANNED_QUANTITY_EXCEEDED` field `acceptedQuantity`); có loại ⇒ lý do 5–2000 (thiếu ⇒
+  `400 APPROVAL_REASON_REQUIRED`). Response `{"receipt": <phiếu như chi tiết>, "qcDecision": {…, "outputLots": [...]}}`.
+- **Hàng theo lô:** phần đạt sang lô con `<lô>-A<n>` (`AVAILABLE`), phần loại sang `<lô>-R<n>` (`REJECTED`), phần chờ ở lại lô gốc `HOLD`.
+  Lô hết hạn chỉ được **loại** (đạt ⇒ `409 LOT_NOT_ELIGIBLE` field `acceptedQuantity`). **Hàng không theo lô:** phần đạt rời vùng chờ, phần loại
+  ở lại vùng chờ (màn hình tồn cộng chung "chờ kiểm" + "đã loại").
+- **Mới:** `GET …/{R}/qc-decisions` — lịch sử quyết định, mới nhất trước, bất biến.
+- **Mọi response phiếu nhập** thêm `qualityState` (`NOT_STARTED`/`PARTIAL`/`ACCEPTED`/`REJECTED`/`MIXED`, `null` khi chưa duyệt),
+  `acceptedQuantity`/`rejectedQuantity`/`pendingQcQuantity`, `valuationStatus = "PENDING_COSTING"` (chưa có giá trị — đừng hiển thị 0).
+  `qcResult` chỉ còn là tóm tắt: có giá trị khi hết chờ và toàn đạt/toàn loại, `null` khi `PARTIAL`/`MIXED`.
+- **`qc-disposition` cũ vẫn chạy:** quyết toàn bộ **phần còn chờ** một phía, ghi vào cùng sổ. Hết chờ ⇒ `409 STATE_CONFLICT`.
+- **Bộ lọc list:** `qualityState`, `pendingQc` (đã duyệt + còn chờ — hàng đợi QC), `hasQcDecision` (đã có quyết định — lịch sử, gồm cả phiếu kiểm dở).
+
 🔴 **Sau `approve`, hàng đã vào kho nhưng CHƯA dùng được**: lot ở trạng thái `HOLD`, `onHand` tăng
 nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đúng điều này.
 
@@ -963,6 +979,8 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Tạo/sửa/submit/rút/huỷ receipt (G9a) | `POST /work-orders/{id}/production-receipts` · `PATCH …/{rid}` · `POST …/{rid}/submit` · `/withdraw` · `/cancel` | `PERM_PRODUCTION_RECEIPT_MANAGE` (sửa/gửi/rút/huỷ: chỉ người tạo) |
 | Chi tiết / lịch sử receipt (G9a) | `GET …/{rid}` · `GET …/{rid}/events` | như danh sách |
 | Nguồn của receipt (G9b) | `GET …/{rid}/source` | như danh sách |
+| QC theo lượng (G9c) | `POST …/{rid}/qc-decisions` | `PERM_QUALITY_DISPOSITION` |
+| Lịch sử QC (G9c) | `GET …/{rid}/qc-decisions` | như danh sách |
 | Duyệt/từ chối receipt | `POST …/{rid}/approve` · `/reject` | `PERM_PRODUCTION_RECEIPT_APPROVE` |
 | QC | `POST …/{rid}/qc-disposition` | `PERM_QUALITY_DISPOSITION` |
 | Danh sách receipt (plant) | `GET /production-receipts?plantId=&status=&workOrderId=&destinationWarehouseId=&receivedFrom=&receivedTo=&search=` | `PERM_PRODUCTION_RECEIPT_READ` / `_MANAGE` / `_APPROVE`; `PERM_PRODUCTION_QC_READ` / `PERM_QUALITY_DISPOSITION` chỉ thấy `APPROVED` |

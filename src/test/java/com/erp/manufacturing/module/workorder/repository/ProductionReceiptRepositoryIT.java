@@ -3,7 +3,9 @@ package com.erp.manufacturing.module.workorder.repository;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
+import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
+import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.organization.domain.Company;
@@ -63,6 +65,9 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
     @Autowired
     ProductionReceiptContributionRepository contributionRepository;
 
+    @Autowired
+    ProductionReceiptLineRepository lineRepository;
+
     @Test
     void findByPlant_withoutAStatusFilter_returnsEveryReceiptOfThePlant() {
         Fixture fixture = persistFixture();
@@ -73,7 +78,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         ProductionReceipt approved = persistReceipt(workOrder, fixture,
                 ProductionReceiptStatus.APPROVED, new BigDecimal("3.000000"));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactlyInAnyOrder(draft.getReceiptId(), approved.getReceiptId());
     }
@@ -88,7 +93,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("3.000000"));
 
         assertThat(repository.findByPlant(
-                fixture.plant.getPlantId(), ProductionReceiptStatus.DRAFT, null, null, null, null, null,
+                fixture.plant.getPlantId(), ProductionReceiptStatus.DRAFT, null, null, null, null, null, null, null, null,
                 PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactly(draft.getReceiptId());
@@ -106,7 +111,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         persistReceipt(persistWorkOrder(other, WorkOrderStatus.IN_PROGRESS), other,
                 ProductionReceiptStatus.DRAFT, new BigDecimal("5.000000"));
 
-        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, PageRequest.of(0, 20)))
+        assertThat(repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .extracting(ProductionReceipt::getReceiptId)
                 .containsExactly(mine.getReceiptId());
     }
@@ -178,7 +183,7 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
 
     private List<UUID> plantList(Fixture fixture, String search, java.time.LocalDate from, java.time.LocalDate to,
                                  UUID warehouseId) {
-        return repository.findByPlant(fixture.plant.getPlantId(), null, null, warehouseId, from, to, search,
+        return repository.findByPlant(fixture.plant.getPlantId(), null, null, warehouseId, from, to, search, null, null, null,
                         PageRequest.of(0, 20))
                 .map(ProductionReceipt::getReceiptId).getContent();
     }
@@ -326,6 +331,97 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         contribution.setCreatedAt(now);
         contribution.setUpdatedAt(now);
         entityManager.persistAndFlush(contribution);
+    }
+
+
+    // ---------------------------------------------------------------------------------------
+    // G9c — quality filters and the HOLD gate (V85)
+    // ---------------------------------------------------------------------------------------
+
+    private ProductionReceipt judged(WorkOrder workOrder, Fixture fixture, ProductionReceiptStatus status,
+                                     String quantity, String accepted, String rejected) {
+        ProductionReceipt receipt = persistReceipt(workOrder, fixture, status, new BigDecimal(quantity));
+        receipt.getLines().get(0).recordQualityDecision(new BigDecimal(accepted), new BigDecimal(rejected));
+        entityManager.flush();
+        return receipt;
+    }
+
+    private List<UUID> byQuality(Fixture fixture, String state, Boolean pendingQc, Boolean hasQcDecision) {
+        return repository.findByPlant(fixture.plant.getPlantId(), null, null, null, null, null, null,
+                        state, pendingQc, hasQcDecision, PageRequest.of(0, 20))
+                .map(ProductionReceipt::getReceiptId).getContent();
+    }
+
+    /** FE Q20/Q21: each quality state, pendingQc and hasQcDecision follow the same rule as ProductionReceipt. */
+    @Test
+    void findByPlant_qualityFiltersFollowTheLineTotals() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        UUID notStarted = judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "0", "0").getReceiptId();
+        UUID partial = judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "2", "1").getReceiptId();
+        UUID accepted = judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "5", "0").getReceiptId();
+        UUID rejected = judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "0", "5").getReceiptId();
+        UUID mixed = judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "3", "2").getReceiptId();
+        UUID draft = judged(workOrder, fixture, ProductionReceiptStatus.DRAFT, "5", "0", "0").getReceiptId();
+
+        assertThat(byQuality(fixture, "NOT_STARTED", null, null)).containsExactly(notStarted);
+        assertThat(byQuality(fixture, "PARTIAL", null, null)).containsExactly(partial);
+        assertThat(byQuality(fixture, "ACCEPTED", null, null)).containsExactly(accepted);
+        assertThat(byQuality(fixture, "REJECTED", null, null)).containsExactly(rejected);
+        assertThat(byQuality(fixture, "MIXED", null, null)).containsExactly(mixed);
+        assertThat(byQuality(fixture, null, true, null)).containsExactlyInAnyOrder(notStarted, partial);
+        assertThat(byQuality(fixture, null, false, null)).containsExactlyInAnyOrder(accepted, rejected, mixed, draft);
+        // Q21: the history keeps receipts judged only in part — pendingQc=false would lose them.
+        assertThat(byQuality(fixture, null, null, true)).containsExactlyInAnyOrder(partial, accepted, rejected, mixed);
+        assertThat(byQuality(fixture, null, null, false)).containsExactlyInAnyOrder(notStarted, draft);
+        assertThat(byQuality(fixture, null, null, null)).hasSize(6);
+    }
+
+    /** C2-2 / G9c: the lot of an approved line with QC pending is gated; once judged it is free. */
+    @Test
+    void existsPendingQualityForLot_onlyWhileAnApprovedLineHasSomethingPending() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        InventoryLot pendingLot = persistLot(fixture, "G9C-PEND");
+        InventoryLot judgedLot = persistLot(fixture, "G9C-DONE");
+        InventoryLot rejectedReceiptLot = persistLot(fixture, "G9C-REJ");
+        attachLot(judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "2", "1"), pendingLot);
+        attachLot(judged(workOrder, fixture, ProductionReceiptStatus.APPROVED, "5", "3", "2"), judgedLot);
+        attachLot(judged(workOrder, fixture, ProductionReceiptStatus.REJECTED, "5", "0", "0"), rejectedReceiptLot);
+
+        assertThat(lineRepository.existsPendingQualityForLot(pendingLot.getLotId(), ProductionReceiptStatus.APPROVED)).isTrue();
+        assertThat(lineRepository.existsPendingQualityForLot(judgedLot.getLotId(), ProductionReceiptStatus.APPROVED)).isFalse();
+        assertThat(lineRepository.existsPendingQualityForLot(rejectedReceiptLot.getLotId(), ProductionReceiptStatus.APPROVED))
+                .isFalse();
+    }
+
+    /** V85: a line can never be judged past its quantity. */
+    @Test
+    void lineTotals_cannotExceedTheReceivedQuantity() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionReceipt receipt = persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("5"));
+        receipt.getLines().get(0).recordQualityDecision(new BigDecimal("4"), new BigDecimal("2"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> entityManager.flush())
+                .hasMessageContaining("chk_production_receipt_lines_qc_within_quantity");
+    }
+
+    private InventoryLot persistLot(Fixture fixture, String code) {
+        InventoryLot lot = InventoryLot.builder()
+                .item(fixture.product)
+                .lotCode(code + "-" + UUID.randomUUID().toString().substring(0, 6))
+                .status(LotStatus.HOLD)
+                .receivedAt(Instant.now())
+                .build();
+        lot.setCreatedAt(Instant.now());
+        lot.setUpdatedAt(Instant.now());
+        return entityManager.persistFlushFind(lot);
+    }
+
+    private void attachLot(ProductionReceipt receipt, InventoryLot lot) {
+        receipt.getLines().get(0).setLot(lot);
+        entityManager.flush();
     }
 
     private record Fixture(Plant plant, Warehouse warehouse, Item product, BomHeader bom) {}

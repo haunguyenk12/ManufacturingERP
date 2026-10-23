@@ -67,4 +67,23 @@ public class ProductionReceiptLine extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "stock_movement_id")
     private StockMovement stockMovement;
+
+    /** G9c (V85): running sum of the QC decisions on this line. */
+    @Column(name = "qc_accepted_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal qcAcceptedQuantity = BigDecimal.ZERO;
+
+    @Column(name = "qc_rejected_quantity", nullable = false, precision = 19, scale = 6)
+    @Builder.Default
+    private BigDecimal qcRejectedQuantity = BigDecimal.ZERO;
+
+    /** What QC has still to judge: {@code quantity − accepted − rejected}, never below 0 (CHECK V85). */
+    public BigDecimal pendingQcQuantity() {
+        return quantity.subtract(qcAcceptedQuantity).subtract(qcRejectedQuantity);
+    }
+
+    public void recordQualityDecision(BigDecimal accepted, BigDecimal rejected) {
+        qcAcceptedQuantity = qcAcceptedQuantity.add(accepted);
+        qcRejectedQuantity = qcRejectedQuantity.add(rejected);
+    }
 }

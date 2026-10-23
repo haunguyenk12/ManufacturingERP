@@ -11,6 +11,7 @@ import com.erp.manufacturing.common.web.PlantContextResolver;
 import org.springframework.context.annotation.Import;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
+import com.erp.manufacturing.module.workorder.domain.ProductionQualityState;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionCandidateResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionPostRequest;
@@ -18,6 +19,9 @@ import com.erp.manufacturing.module.workorder.dto.execution.ProductionExecutionR
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptCandidateResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptEventResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionResult;
+import org.springframework.data.domain.PageImpl;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionExecutionService;
@@ -303,7 +307,7 @@ class ManufacturingExecutionControllerTest {
     @Test
     @DisplayName("flat receipts: plant-scoped list forwards the optional status filter (spec §6.2)")
     void listProductionReceiptsByPlant_forwardsTheStatusFilter() throws Exception {
-        when(productionReceiptService.listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
+        when(productionReceiptService.listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/production-receipts")
@@ -313,20 +317,20 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.result.totalElements").value(0));
 
-        verify(productionReceiptService).listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), any());
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), eq(ProductionReceiptStatus.DRAFT), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any());
     }
 
     /** Omitting {@code status} must mean "every status", not "the first one" (§6.2). */
     @Test
     @DisplayName("flat receipts: omitting status passes null rather than defaulting to a status")
     void listProductionReceiptsByPlant_withoutStatus_passesNull() throws Exception {
-        when(productionReceiptService.listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
+        when(productionReceiptService.listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/production-receipts").param("plantId", PLANT_ID.toString()))
                 .andExpect(status().isOk());
 
-        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any());
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any());
     }
 
     @Test
@@ -467,7 +471,9 @@ class ManufacturingExecutionControllerTest {
                 null, null, null, null, null, null, null, null,
                 new BigDecimal("9.000000"), new BigDecimal("9.000000"), BigDecimal.ZERO, new BigDecimal("5.000000"),
                 new BigDecimal("9.000000"), new BigDecimal("4.000000"), actions,
-                false, "The receipt predates the contribution ledger; the reports it drew from were not recorded", null);
+                false, "The receipt predates the contribution ledger; the reports it drew from were not recorded", null,
+                status.equals("APPROVED") ? "NOT_STARTED" : null, BigDecimal.ZERO, BigDecimal.ZERO,
+                status.equals("APPROVED") ? new BigDecimal("5.000000") : BigDecimal.ZERO, "PENDING_COSTING");
     }
 
     @Test
@@ -484,6 +490,62 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.result.receivedOn").value("2026-10-20"))
                 .andExpect(jsonPath("$.result.unclaimedReceiptQuantity").value(4))
                 .andExpect(jsonPath("$.result.allowedActions[0]").value("EDIT"));
+    }
+
+    @Test
+    @DisplayName("QC decision: body and Idempotency-Key are forwarded; receipt and decision come back")
+    void decideProductionReceiptQuality_forwardsBodyAndKey() throws Exception {
+        UUID decisionId = UUID.randomUUID();
+        when(productionReceiptService.decideQuality(eq(WORK_ORDER_ID), eq(RECEIPT_ID), any(), eq("QC-1"))).thenReturn(
+                new ProductionQcDecisionResult(sampleReceipt("APPROVED", List.of()),
+                        new ProductionQcDecisionResponse(decisionId, RECEIPT_ID, "PR-0001", UUID.randomUUID(),
+                                new BigDecimal("3.000000"), new BigDecimal("1.000000"), "One out of tolerance",
+                                null, null, Instant.parse("2026-10-23T02:00:00Z"), null, List.of(), List.of())));
+
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/qc-decisions")
+                        .header("Idempotency-Key", "QC-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"expectedWorkOrderVersion\": 26, \"acceptedQuantity\": 3, "
+                                + "\"rejectedQuantity\": 1, \"reason\": \"One out of tolerance\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.qcDecision.qcDecisionId").value(decisionId.toString()))
+                .andExpect(jsonPath("$.result.receipt.valuationStatus").value("PENDING_COSTING"));
+
+        verify(productionReceiptService).decideQuality(eq(WORK_ORDER_ID), eq(RECEIPT_ID),
+                argThat(body -> body.expectedVersion() == 3L && body.acceptedQuantity().compareTo(new BigDecimal("3")) == 0
+                        && body.rejectedQuantity().compareTo(BigDecimal.ONE) == 0), eq("QC-1"));
+    }
+
+    @Test
+    @DisplayName("QC decision: a missing rejectedQuantity or a seventh decimal is a 400 on the field, before the service")
+    void decideProductionReceiptQuality_invalidQuantities_return400OnTheField() throws Exception {
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/qc-decisions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"expectedWorkOrderVersion\": 26, \"acceptedQuantity\": 1}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("rejectedQuantity"));
+        mockMvc.perform(post("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/qc-decisions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"expectedWorkOrderVersion\": 26, \"acceptedQuantity\": 1.0000001, "
+                                + "\"rejectedQuantity\": 0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("acceptedQuantity"));
+
+        verifyNoInteractions(productionReceiptService);
+    }
+
+    @Test
+    @DisplayName("receipt list: the G9c quality filters are forwarded")
+    void listProductionReceiptsByPlant_forwardsTheQualityFilters() throws Exception {
+        when(productionReceiptService.listByPlant(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(PageResult.from(new PageImpl<>(List.of())));
+
+        mockMvc.perform(get("/v1/production-receipts").param("plantId", PLANT_ID.toString())
+                        .param("qualityState", "PARTIAL").param("pendingQc", "true").param("hasQcDecision", "true"))
+                .andExpect(status().isOk());
+
+        verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(ProductionQualityState.PARTIAL), eq(true), eq(true), any());
     }
 
     @Test
@@ -612,7 +674,7 @@ class ManufacturingExecutionControllerTest {
     @DisplayName("flat receipts: the G9a filters reach the service")
     void listProductionReceiptsByPlant_forwardsTheG9aFilters() throws Exception {
         UUID warehouseId = UUID.randomUUID();
-        when(productionReceiptService.listByPlant(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(productionReceiptService.listByPlant(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0, true, true));
 
         mockMvc.perform(get("/v1/production-receipts")
@@ -625,7 +687,7 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(status().isOk());
 
         verify(productionReceiptService).listByPlant(eq(PLANT_ID), isNull(), eq(WORK_ORDER_ID), eq(warehouseId),
-                eq(java.time.LocalDate.parse("2026-10-01")), eq(java.time.LocalDate.parse("2026-10-20")), eq("gd9"), any());
+                eq(java.time.LocalDate.parse("2026-10-01")), eq(java.time.LocalDate.parse("2026-10-20")), eq("gd9"), isNull(), isNull(), isNull(), any());
     }
 
     @Test

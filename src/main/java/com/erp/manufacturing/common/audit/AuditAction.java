@@ -101,6 +101,7 @@ public enum AuditAction {
     /** G9a: DRAFT/PENDING_APPROVAL to CANCELLED by its requester; the claimed output is free again. */
     PRODUCTION_RECEIPT_CANCELLED,
     QC_DISPOSITION_RECORDED,
+    PRODUCTION_QC_DECIDED,
     /** Shop-floor good/scrap/rework report (F5) — the event that now advances a work order. */
     PRODUCTION_EXECUTION_REPORTED,
     /** G8c: confirmed input of an operation (from the plan, or transferred from its predecessor). */

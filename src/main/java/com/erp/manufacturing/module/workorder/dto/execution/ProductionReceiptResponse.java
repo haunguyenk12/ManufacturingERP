@@ -92,5 +92,16 @@ public record ProductionReceiptResponse(
         boolean outputEvidenceKnown,
         String outputUnknownReason,
         /** The final-good executions this receipt claims, oldest first; {@code null} when not known. */
-        List<ProductionReceiptContributionResponse> contributions
+        List<ProductionReceiptContributionResponse> contributions,
+        // ---- G9c (FE R09–R11, Q20) ----
+        /** NOT_STARTED / PARTIAL / ACCEPTED / REJECTED / MIXED; {@code null} before approval. */
+        String qualityState,
+        /** Sum of what QC decisions accepted. */
+        BigDecimal acceptedQuantity,
+        /** Sum of what QC decisions rejected. */
+        BigDecimal rejectedQuantity,
+        /** quantity − accepted − rejected while APPROVED; 0 otherwise. */
+        BigDecimal pendingQcQuantity,
+        /** Always PENDING_COSTING: no value is carried for finished goods yet (D10) — never read it as 0. */
+        String valuationStatus
 ) {}

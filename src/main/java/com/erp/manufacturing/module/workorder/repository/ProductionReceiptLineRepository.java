@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.workorder.repository;
 
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptLine;
+import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -17,12 +18,18 @@ public interface ProductionReceiptLineRepository extends JpaRepository<Productio
     List<ProductionReceiptLine> findByReceiptReceiptIdIn(Collection<UUID> receiptIds);
 
     /**
-     * Whether a lot was produced by (at least) one production receipt line — used by
-     * {@code LotQcOriginLookupService} (C2-2) to decide if a lot stuck at {@code HOLD} must go
-     * through QC disposition before {@code module/inventory}'s generic status-change endpoint may
-     * release it.
+     * G9c: whether a lot is the output lot of an APPROVED production receipt line QC has not finished judging —
+     * used by {@code LotQcOriginLookupService} (C2-2) so the generic status-change endpoint cannot release it past
+     * QC. A line fully judged (whole-lot or partial) frees the lot, so one quarantined again by hand stays releasable.
      */
-    boolean existsByLotLotId(UUID lotId);
+    @Query("""
+            select count(l) > 0 from ProductionReceiptLine l
+            where l.lot.lotId = :lotId
+              and l.receipt.status = :approved
+              and l.quantity > l.qcAcceptedQuantity + l.qcRejectedQuantity
+            """)
+    boolean existsPendingQualityForLot(@Param("lotId") UUID lotId,
+                                       @Param("approved") ProductionReceiptStatus approved);
 
     @Query("""
             select coalesce(sum(l.quantity), 0)

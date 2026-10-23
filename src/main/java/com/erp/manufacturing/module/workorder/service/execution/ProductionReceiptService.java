@@ -19,11 +19,18 @@ import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.inventory.service.LotStatusChangeCommand;
+import com.erp.manufacturing.module.inventory.service.LotSplitCommand;
+import com.erp.manufacturing.module.inventory.service.LotSplitResult;
+import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.*;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptCandidateResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionRequest;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionResult;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionQcLotResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptEventResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptPostRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptQcDispositionRequest;
@@ -37,6 +44,7 @@ import com.erp.manufacturing.module.workorder.repository.OpenReceiptQuantityProj
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptContributionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptLineRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionQualityDecisionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptRepository;
 import com.erp.manufacturing.module.workorder.repository.QualityDispositionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
@@ -44,6 +52,7 @@ import com.erp.manufacturing.module.workorder.service.ReasonRules;
 import com.erp.manufacturing.module.workorder.service.WorkOrderDemandAllocationService;
 import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
 import com.erp.manufacturing.module.workorder.service.WorkOrderVersions;
+import com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -131,6 +140,7 @@ public class ProductionReceiptService {
     private final ProductionReceiptContributionRepository contributionRepository;
     private final ReceiptContributionLedger contributionLedger;
     private final MaterialSourceLedger materialSourceLedger;
+    private final ProductionQualityDecisionRepository qualityDecisionRepository;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_RECEIPT_MANAGE', #workOrderId)")
@@ -435,8 +445,12 @@ public class ProductionReceiptService {
     /**
      * Records the QC decision on an approved receipt. What that does to stock depends on whether the
      * output is carried by a lot — {@link #dispositionLots} vs {@link #dispositionWithoutLots} — but
-     * the gates in front of it are the same either way: {@code APPROVED} only, once only, reason
-     * required (B38).
+     * the gates in front of it are the same either way: {@code APPROVED} only, reason required (B38).
+     *
+     * <p>G9c (D2): one decision for <em>everything still pending</em>, written to the same decision ledger as
+     * {@link #decideQuality}. A receipt nobody has judged yet keeps the old whole-lot behaviour (the lot itself
+     * leaves HOLD); one already partly judged has its remainder split off like any partial decision. Nothing
+     * pending ⇒ {@code STATE_CONFLICT}.
      */
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_QUALITY_DISPOSITION', #workOrderId)")
@@ -451,7 +465,7 @@ public class ProductionReceiptService {
         }
         if (receipt.isQcDecided()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
-                    "QC disposition has already been recorded for this receipt");
+                    "QC has already judged everything this receipt put on hold");
         }
         if (receipt.getWorkOrder().getProductItem().isLotTracked()
                 && receipt.getLines().stream().anyMatch(line -> line.getLot() == null)) {
@@ -467,6 +481,11 @@ public class ProductionReceiptService {
         Instant now = now();
         UUID actor = currentActor();
         receipt.getWorkOrder().touch();
+        boolean untouched = ProductionReceipt.qcAcceptedQuantity(receipt.getLines()).signum() == 0
+                && ProductionReceipt.qcRejectedQuantity(receipt.getLines()).signum() == 0;
+        if (!untouched) {
+            return decideRemainder(receipt, request.result(), reason, now, actor);
+        }
         // The condition is per line, not a flag on the item: what decides the path is whether
         // approval actually opened a lot (or a serial) to carry the verdict.
         List<ProductionReceiptLine> lotLines = receipt.getLines().stream()
@@ -490,8 +509,274 @@ public class ProductionReceiptService {
             allocationService.fulfill(receipt.getWorkOrder(), dispositionedQuantity);
         }
 
+        recordWholeReceiptDecisions(receipt, request.result(), reason, now, actor);
         receipt.recordQcDecision(request.result(), reason, now, actor);
         return flush(receipt);
+    }
+
+    /**
+     * G9c: the whole-lot path of the old endpoint, written into the decision ledger — every line's whole quantity
+     * one way, naming the line's own lot (it changed status itself, nothing was split).
+     */
+    private void recordWholeReceiptDecisions(ProductionReceipt receipt, QualityDispositionResult result, String reason,
+                                             Instant now, UUID actor) {
+        boolean accepted = result == QualityDispositionResult.AVAILABLE;
+        for (ProductionReceiptLine line : receipt.getLines()) {
+            BigDecimal quantity = line.getQuantity();
+            line.recordQualityDecision(accepted ? quantity : BigDecimal.ZERO, accepted ? BigDecimal.ZERO : quantity);
+            qualityDecisionRepository.save(ProductionQualityDecision.builder()
+                    .decisionId(UUID.randomUUID())
+                    .receipt(receipt)
+                    .receiptLine(line)
+                    .acceptedQuantity(accepted ? quantity : BigDecimal.ZERO)
+                    .rejectedQuantity(accepted ? BigDecimal.ZERO : quantity)
+                    .reason(reason)
+                    .acceptedLot(accepted ? line.getLot() : null)
+                    .rejectedLot(accepted ? null : line.getLot())
+                    .decidedAt(now)
+                    .decidedBy(actor)
+                    .build());
+        }
+    }
+
+    /** G9c (D2): the old endpoint on a receipt already partly judged — the remainder goes one way, split off. */
+    private ProductionReceiptResponse decideRemainder(ProductionReceipt receipt, QualityDispositionResult result,
+                                                      String reason, Instant now, UUID actor) {
+        boolean accept = result == QualityDispositionResult.AVAILABLE;
+        BigDecimal acceptedTotal = BigDecimal.ZERO;
+        for (ProductionReceiptLine line : receipt.getLines()) {
+            BigDecimal pending = line.pendingQcQuantity();
+            if (pending.signum() == 0) {
+                continue;
+            }
+            BigDecimal accepted = accept ? pending : BigDecimal.ZERO;
+            BigDecimal rejected = accept ? BigDecimal.ZERO : pending;
+            ensureDecidable(receipt, line, accepted, now);
+            applyDecision(receipt, line, UUID.randomUUID(), accepted, rejected, reason, now, actor);
+            acceptedTotal = acceptedTotal.add(accepted);
+        }
+        if (acceptedTotal.signum() > 0) {
+            allocationService.fulfill(receipt.getWorkOrder(), acceptedTotal);
+        }
+        receipt.summarizeQualityDecision(reason, now, actor);
+        receipt.setUpdatedAt(now);
+        return flush(receipt);
+    }
+
+    /**
+     * G9c (FE R09–R11, Q15–Q19, Q24): one QC decision on part of what an APPROVED receipt still has pending. Both
+     * versions required; accepted ≥ 0, rejected ≥ 0, together &gt; 0 and ≤ pending; a rejection needs a reason.
+     * Tracked output: the accepted part moves into a new {@code AVAILABLE} child lot, the rejected part into a new
+     * {@code REJECTED} child lot, the rest stays on the parent {@code HOLD} lot. Non-tracked output: the accepted part
+     * leaves the quality hold, the rejected part stays held (D4). On-hand never changes; only the accepted part fulfils
+     * sales orders (D14); the work order's version moves by exactly one.
+     */
+    @Transactional
+    @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_QUALITY_DISPOSITION', #workOrderId)")
+    @Auditable(action = AuditAction.PRODUCTION_QC_DECIDED, entityType = "ProductionReceipt", entityIdExpression = "receiptId.toString()")
+    public ProductionQcDecisionResult decideQuality(UUID workOrderId,
+                                                    UUID receiptId,
+                                                    ProductionQcDecisionRequest request,
+                                                    String idempotencyKey) {
+        String key = idempotencyRecords.key(idempotencyKey);
+        WorkOrderIdempotency.Fingerprint fingerprint = new WorkOrderIdempotency.Fingerprint(receiptId, request);
+        Optional<UUID> replayed = idempotencyRecords.replay(key, WorkOrderCommand.RECEIPT_QC, fingerprint);
+        if (replayed.isPresent()) {
+            ProductionQualityDecision decision = findDecision(replayed.get());
+            return new ProductionQcDecisionResult(toResponse(findReceipt(receiptId)), toDecisionResponse(decision,
+                    usernamesOfDecisions(List.of(decision))));
+        }
+        BigDecimal accepted = request.acceptedQuantity();
+        BigDecimal rejected = request.rejectedQuantity();
+        if (accepted.signum() == 0 && rejected.signum() == 0) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("acceptedQuantity", "accepted and rejected quantities cannot both be 0"));
+        }
+        String reason = ReasonRules.lengthChecked(request.reason(), "reason");
+        if (rejected.signum() > 0 && reason == null) {
+            throw ExceptionFactory.custom(ValidationErrorCode.APPROVAL_REASON_REQUIRED,
+                    "A reason is required when a quantity is rejected");
+        }
+
+        ProductionReceipt receipt = findReceiptOfWorkOrder(workOrderId, receiptId);
+        ensureVersions(receipt, request.expectedVersion(), request.expectedWorkOrderVersion());
+        if (!receipt.isApproved()) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "Only an APPROVED receipt goes through QC");
+        }
+        ProductionReceiptLine line = singleLine(receipt);
+        if (line.getSerial() != null) {
+            throw ExceptionFactory.custom(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    "Serial-tracked output is judged whole through qc-disposition (D15)");
+        }
+        if (receipt.getWorkOrder().getProductItem().isLotTracked() && line.getLot() == null) {
+            throw ExceptionFactory.custom(BusinessErrorCode.OUTPUT_LOT_NOT_POSTED,
+                    "QC can only judge the output lot created or reused at receipt approval");
+        }
+        BigDecimal pending = line.pendingQcQuantity();
+        if (accepted.add(rejected).compareTo(pending) > 0) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED, Map.of("acceptedQuantity",
+                    "accepted + rejected exceeds what is still pending QC: " + pending.stripTrailingZeros().toPlainString()));
+        }
+        Instant now = now();
+        ensureDecidable(receipt, line, accepted, now);
+
+        UUID decisionId = UUID.randomUUID();
+        UUID actor = currentActor();
+        idempotencyRecords.record(key, WorkOrderCommand.RECEIPT_QC, decisionId, fingerprint);
+        receipt.getWorkOrder().touch();
+        ProductionQualityDecision decision = applyDecision(receipt, line, decisionId, accepted, rejected, reason, now, actor);
+        if (accepted.signum() > 0) {
+            allocationService.fulfill(receipt.getWorkOrder(), accepted);
+        }
+        receipt.summarizeQualityDecision(reason, now, actor);
+        // Lines are an inverse collection: without dirtying the header its version would not move (B112).
+        receipt.setUpdatedAt(now);
+        ProductionReceiptResponse written = flush(receipt);
+        return new ProductionQcDecisionResult(written, toDecisionResponse(decision, usernamesOfDecisions(List.of(decision))));
+    }
+
+    /** G9c: the QC decisions of one receipt, newest first. Same readers as the receipt (QC-only ⇒ APPROVED only). */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@workOrderPermissionGuard.hasAnyWorkOrderAccess(authentication, "
+            + "{'PERM_PRODUCTION_RECEIPT_READ', 'PERM_PRODUCTION_RECEIPT_MANAGE', 'PERM_PRODUCTION_RECEIPT_APPROVE', "
+            + "'PERM_PRODUCTION_QC_READ', 'PERM_QUALITY_DISPOSITION'}, #workOrderId)")
+    public PageResult<ProductionQcDecisionResponse> qualityDecisions(UUID workOrderId, UUID receiptId, Pageable pageable) {
+        ProductionReceipt receipt = findReceiptOfWorkOrder(workOrderId, receiptId);
+        ensureQcOnlyReadsApproved(receipt);
+        Page<ProductionQualityDecision> page = qualityDecisionRepository.findByReceipt(receiptId, pageable);
+        Map<UUID, String> usernames = usernamesOfDecisions(page.getContent());
+        return PageResult.from(page.map(decision -> toDecisionResponse(decision, usernames)));
+    }
+
+    /** The lot (if any) must still be on hold, and expired output can only be rejected (FE Q24). */
+    private static void ensureDecidable(ProductionReceipt receipt, ProductionReceiptLine line, BigDecimal accepted,
+                                        Instant now) {
+        InventoryLot lot = line.getLot();
+        if (lot == null) {
+            return;
+        }
+        if (lot.getStatus() != LotStatus.HOLD) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot is not on hold and cannot be judged: " + lot.getLotCode());
+        }
+        if (accepted.signum() > 0 && lot.getExpiresAt() != null && !lot.getExpiresAt().isAfter(now)) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.LOT_NOT_ELIGIBLE, Map.of("acceptedQuantity",
+                    "lot " + lot.getLotCode() + " expired at " + lot.getExpiresAt() + "; it can only be rejected"));
+        }
+    }
+
+    /** Moves the stock of one decision, adds it to the line and writes the immutable decision row. */
+    private ProductionQualityDecision applyDecision(ProductionReceipt receipt, ProductionReceiptLine line, UUID decisionId,
+                                                    BigDecimal accepted, BigDecimal rejected, String reason,
+                                                    Instant now, UUID actor) {
+        InventoryLot parent = line.getLot();
+        UUID itemId = line.getItem().getItemId();
+        UUID warehouseId = line.getWarehouse().getWarehouseId();
+        LotSplitResult acceptedSplit = null;
+        LotSplitResult rejectedSplit = null;
+        if (parent != null) {
+            if (accepted.signum() > 0) {
+                acceptedSplit = split(itemId, warehouseId, parent, "A", LotStatus.AVAILABLE, accepted, decisionId, reason);
+            }
+            if (rejected.signum() > 0) {
+                rejectedSplit = split(itemId, warehouseId, parent, "R", LotStatus.REJECTED, rejected, decisionId, reason);
+            }
+        } else if (accepted.signum() > 0) {
+            // The rejected part simply stays in qualityHoldQuantity: unusable, and still on hand (D4).
+            movementService.releaseQualityHold(itemId, warehouseId, accepted);
+        }
+        line.recordQualityDecision(accepted, rejected);
+        return qualityDecisionRepository.save(ProductionQualityDecision.builder()
+                .decisionId(decisionId)
+                .receipt(receipt)
+                .receiptLine(line)
+                .acceptedQuantity(accepted)
+                .rejectedQuantity(rejected)
+                .reason(reason)
+                .acceptedLot(acceptedSplit == null ? null : acceptedSplit.childLot())
+                .rejectedLot(rejectedSplit == null ? null : rejectedSplit.childLot())
+                .acceptedMovement(acceptedSplit == null ? null : acceptedSplit.inMovement())
+                .rejectedMovement(rejectedSplit == null ? null : rejectedSplit.inMovement())
+                .decidedAt(now)
+                .decidedBy(actor)
+                .build());
+    }
+
+    private LotSplitResult split(UUID itemId, UUID warehouseId, InventoryLot parent, String side, LotStatus status,
+                                 BigDecimal quantity, UUID decisionId, String reason) {
+        return movementService.splitLot(new LotSplitCommand(itemId, warehouseId, parent.getLotId(),
+                        childLotCode(itemId, parent.getLotCode(), side), status, quantity,
+                        LotQcOriginLookupService.LOT_SOURCE_TYPE, decisionId, reason),
+                "RQC-" + decisionId + ":" + side);
+    }
+
+    /**
+     * {@code <parent>-A1}, {@code <parent>-R1}, then {@code -A2}… for the next decision — the first suffix no lot of
+     * the item uses yet, ignoring case (B205). Fits the 120-character column. Same rule as purchase QC.
+     */
+    private String childLotCode(UUID itemId, String parentCode, String side) {
+        for (int index = 1; ; index++) {
+            String suffix = "-" + side + index;
+            String base = parentCode.length() + suffix.length() > 120
+                    ? parentCode.substring(0, 120 - suffix.length())
+                    : parentCode;
+            String candidate = base + suffix;
+            if (!itemLookupService.lotCodeExistsIgnoreCase(itemId, candidate)) {
+                return candidate;
+            }
+        }
+    }
+
+    private ProductionQualityDecision findDecision(UUID decisionId) {
+        return qualityDecisionRepository.findWithDetailsByDecisionId(decisionId)
+                .orElseThrow(() -> ExceptionFactory.notFound(
+                        ValidationErrorCode.RESOURCE_NOT_FOUND, "Production QC decision", decisionId));
+    }
+
+    private Map<UUID, String> usernamesOfDecisions(List<ProductionQualityDecision> decisions) {
+        List<UUID> actors = decisions.stream().map(ProductionQualityDecision::getDecidedBy)
+                .filter(Objects::nonNull).distinct().toList();
+        return actors.isEmpty() ? Map.of() : userLookupService.findUsernames(actors);
+    }
+
+    private ProductionQcDecisionResponse toDecisionResponse(ProductionQualityDecision decision, Map<UUID, String> usernames) {
+        List<ProductionQcLotResponse> lots = new ArrayList<>();
+        List<UUID> movementIds = new ArrayList<>();
+        addLot(lots, movementIds, decision.getAcceptedLot(), LotStatus.AVAILABLE, decision.getAcceptedQuantity(),
+                decision.getAcceptedMovement());
+        addLot(lots, movementIds, decision.getRejectedLot(), LotStatus.REJECTED, decision.getRejectedQuantity(),
+                decision.getRejectedMovement());
+        ProductionReceiptLine line = decision.getReceiptLine();
+        return new ProductionQcDecisionResponse(
+                decision.getDecisionId(),
+                decision.getReceipt().getReceiptId(),
+                decision.getReceipt().getCode(),
+                line.getReceiptLineId(),
+                decision.getAcceptedQuantity(),
+                decision.getRejectedQuantity(),
+                decision.getReason(),
+                decision.getDecidedBy(),
+                decision.getDecidedBy() == null ? null : usernames.get(decision.getDecidedBy()),
+                decision.getDecidedAt(),
+                line.getLot() == null ? line.getReceiptLineId() : null,
+                lots,
+                movementIds);
+    }
+
+    private static void addLot(List<ProductionQcLotResponse> lots, List<UUID> movementIds, InventoryLot lot,
+                               LotStatus status, BigDecimal quantity, StockMovement movement) {
+        if (lot == null) {
+            return;
+        }
+        UUID movementId = movement == null ? null : movement.getMovementId();
+        // parentLotId is a read-only column mirror: empty on a child lot created in this same transaction (§0.59 #1).
+        UUID parentLotId = lot.getParentLot() != null ? lot.getParentLot().getLotId() : lot.getParentLotId();
+        lots.add(new ProductionQcLotResponse(lot.getLotId(), lot.getLotCode(), parentLotId, status.name(), quantity,
+                lot.getExpiresAt(), movementId));
+        if (movementId != null) {
+            movementIds.add(movementId);
+        }
     }
 
     /**
@@ -693,7 +978,7 @@ public class ProductionReceiptService {
         UUID plantId = workOrder.getPlant().getPlantId();
         if (!canReadEveryReceipt(plantId)) {
             return toPage(receiptRepository.findByPlant(plantId, ProductionReceiptStatus.APPROVED, workOrderId,
-                    null, null, null, null, pageable));
+                    null, null, null, null, null, null, null, pageable));
         }
         return toPage(receiptRepository.findByWorkOrderWorkOrderId(workOrderId, pageable));
     }
@@ -719,6 +1004,9 @@ public class ProductionReceiptService {
                                                              LocalDate receivedFrom,
                                                              LocalDate receivedTo,
                                                              String search,
+                                                             ProductionQualityState qualityState,
+                                                             Boolean pendingQc,
+                                                             Boolean hasQcDecision,
                                                              Pageable pageable) {
         if (receivedFrom != null && receivedTo != null && receivedFrom.isAfter(receivedTo)) {
             throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
@@ -732,7 +1020,8 @@ public class ProductionReceiptService {
             effectiveStatus = ProductionReceiptStatus.APPROVED;
         }
         return toPage(receiptRepository.findByPlant(plantId, effectiveStatus, workOrderId, destinationWarehouseId,
-                receivedFrom, receivedTo, support.trimToNull(search), pageable));
+                receivedFrom, receivedTo, support.trimToNull(search),
+                qualityState == null ? null : qualityState.name(), pendingQc, hasQcDecision, pageable));
     }
 
     /**
@@ -1090,7 +1379,8 @@ public class ProductionReceiptService {
             }
             case APPROVED -> {
                 boolean serial = lines.stream().anyMatch(line -> line.getSerial() != null);
-                if (permissions.contains(PERM_QC) && !receipt.isQcDecided() && !serial) {
+                if (permissions.contains(PERM_QC) && !serial
+                        && ProductionReceipt.pendingQcQuantity(receipt.getStatus(), lines).signum() > 0) {
                     actions.add("QC");
                 }
             }

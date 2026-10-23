@@ -4,6 +4,7 @@ import com.erp.manufacturing.common.audit.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -152,8 +153,51 @@ public class ProductionReceipt extends BaseEntity {
         return status == ProductionReceiptStatus.APPROVED;
     }
 
+    /** G9c (D2): QC is over once nothing is pending — no longer "one verdict was recorded". */
     public boolean isQcDecided() {
-        return qcResult != null;
+        return pendingQcQuantity(status, lines).signum() == 0;
+    }
+
+    public ProductionQualityState qualityState() {
+        return qualityState(status, lines);
+    }
+
+    /** Sum of what QC accepted on the given lines (the receipt's own, or a batch-loaded copy of them — C14). */
+    public static BigDecimal qcAcceptedQuantity(List<ProductionReceiptLine> lines) {
+        return lines.stream().map(ProductionReceiptLine::getQcAcceptedQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public static BigDecimal qcRejectedQuantity(List<ProductionReceiptLine> lines) {
+        return lines.stream().map(ProductionReceiptLine::getQcRejectedQuantity).reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** What QC still has to judge; 0 for a receipt that is not APPROVED (FE §3.1). */
+    public static BigDecimal pendingQcQuantity(ProductionReceiptStatus status, List<ProductionReceiptLine> lines) {
+        return status == ProductionReceiptStatus.APPROVED
+                ? lines.stream().map(ProductionReceiptLine::pendingQcQuantity).reduce(BigDecimal.ZERO, BigDecimal::add)
+                : BigDecimal.ZERO;
+    }
+
+    /**
+     * G9c (FE Q20): the quality state, independent of the document status; {@code null} before approval.
+     * Something still pending is PARTIAL even when part was rejected — the totals keep the rejection visible.
+     */
+    public static ProductionQualityState qualityState(ProductionReceiptStatus status, List<ProductionReceiptLine> lines) {
+        if (status != ProductionReceiptStatus.APPROVED) {
+            return null;
+        }
+        BigDecimal accepted = qcAcceptedQuantity(lines);
+        BigDecimal rejected = qcRejectedQuantity(lines);
+        if (accepted.signum() == 0 && rejected.signum() == 0) {
+            return ProductionQualityState.NOT_STARTED;
+        }
+        if (pendingQcQuantity(status, lines).signum() > 0) {
+            return ProductionQualityState.PARTIAL;
+        }
+        if (rejected.signum() == 0) {
+            return ProductionQualityState.ACCEPTED;
+        }
+        return accepted.signum() == 0 ? ProductionQualityState.REJECTED : ProductionQualityState.MIXED;
     }
 
     /** DRAFT and PENDING_APPROVAL still claim output of the work order (B16); every other status does not. */
@@ -203,6 +247,21 @@ public class ProductionReceipt extends BaseEntity {
      */
     public void recordQcDecision(QualityDispositionResult result, String reason, Instant now, UUID actor) {
         qcResult = result;
+        qcReason = reason;
+        qcAt = now;
+        qcBy = actor;
+    }
+
+    /**
+     * G9c (D2): after a decision has been added to the lines, refresh the summary the old fields carried — the
+     * latest decision's reason, time and actor, and a whole-receipt result only once QC ended all one way
+     * ({@code AVAILABLE} for ACCEPTED, {@code REJECTED} for REJECTED, {@code null} while PARTIAL or when MIXED).
+     */
+    public void summarizeQualityDecision(String reason, Instant now, UUID actor) {
+        ProductionQualityState state = qualityState();
+        qcResult = state == ProductionQualityState.ACCEPTED ? QualityDispositionResult.AVAILABLE
+                : state == ProductionQualityState.REJECTED ? QualityDispositionResult.REJECTED
+                : null;
         qcReason = reason;
         qcAt = now;
         qcBy = actor;

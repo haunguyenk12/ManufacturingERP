@@ -270,6 +270,24 @@ class InventoryLotServiceTest {
     }
 
     @Test
+    @DisplayName("G9c changeStatus: a child lot rejected by production QC cannot be released")
+    void changeStatus_productionQcRejectedChild_cannotBeReleased() {
+        InventoryLot lot = lot(LotStatus.REJECTED);
+        lot.setSourceReferenceType(com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService.LOT_SOURCE_TYPE);
+        lot.setSourceReferenceId(UUID.randomUUID());
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+
+        InventoryLotStatusChangeRequest request = new InventoryLotStatusChangeRequest(
+                warehouseId, LotStatus.AVAILABLE, "Override QC", null, null);
+
+        assertThatThrownBy(() -> service.changeStatus(lotId, request, "KEY-1"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+        verifyNoInteractions(movementService, balanceRepository);
+    }
+
+    @Test
     @DisplayName("changeStatus: escaping HOLD is allowed once the lookup says QC is not required")
     void changeStatus_holdEscapeAllowedWhenQcNotRequired() {
         InventoryLot lot = lot(LotStatus.HOLD);

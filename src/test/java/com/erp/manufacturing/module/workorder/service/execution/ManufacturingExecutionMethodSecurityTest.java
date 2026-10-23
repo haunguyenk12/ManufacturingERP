@@ -302,6 +302,50 @@ class ManufacturingExecutionMethodSecurityTest {
         verify(workOrderPermissionGuard).hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId));
     }
 
+    /** G9c: a QC decision needs PERM_QUALITY_DISPOSITION — reading receipts is not enough. */
+    @Test
+    void decideProductionQuality_deniedWhenQualityPermissionMissing() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_QUALITY_DISPOSITION"), eq(workOrderId)))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> receiptService.decideQuality(workOrderId, UUID.randomUUID(),
+                new com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionRequest(
+                        0L, 0L, BigDecimal.ONE, BigDecimal.ZERO, null), null))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(productionReceiptRepository);
+        verify(workOrderPermissionGuard).hasWorkOrderAccess(any(), eq("PERM_QUALITY_DISPOSITION"), eq(workOrderId));
+    }
+
+    @Test
+    void decideProductionQuality_allowedWhenQualityPermissionPresent() {
+        UUID workOrderId = UUID.randomUUID();
+        UUID receiptId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasWorkOrderAccess(any(), eq("PERM_QUALITY_DISPOSITION"), eq(workOrderId)))
+                .thenReturn(true);
+        when(productionReceiptRepository.findWithLinesByReceiptId(receiptId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> receiptService.decideQuality(workOrderId, receiptId,
+                new com.erp.manufacturing.module.workorder.dto.execution.ProductionQcDecisionRequest(
+                        0L, 0L, BigDecimal.ONE, BigDecimal.ZERO, null), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    @Test
+    void productionQualityDecisions_deniedWhenNoReceiptOrQualityPermissionIsHeld() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> receiptService.qualityDecisions(workOrderId, UUID.randomUUID(), PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(productionReceiptRepository);
+        verify(workOrderPermissionGuard).hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId));
+    }
+
     /** G9b: the source of a receipt is read with the same permissions as the receipt itself. */
     @Test
     void productionReceiptSource_deniedWhenNoReceiptOrQualityPermissionIsHeld() {
@@ -332,10 +376,10 @@ class ManufacturingExecutionMethodSecurityTest {
         UUID plantId = UUID.randomUUID();
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_PRODUCTION_RECEIPT_READ"), eq("PLANT"), eq(plantId))).thenReturn(true);
-        when(productionReceiptRepository.findByPlant(eq(plantId), any(), any(), any(), any(), any(), any(),
+        when(productionReceiptRepository.findByPlant(eq(plantId), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(Pageable.class))).thenReturn(Page.empty());
 
-        assertThatCode(() -> receiptService.listByPlant(plantId, null, null, null, null, null, null,
+        assertThatCode(() -> receiptService.listByPlant(plantId, null, null, null, null, null, null, null, null, null,
                 PageRequest.of(0, 20))).doesNotThrowAnyException();
         verify(permissionGuard, atLeastOnce()).hasResourceAccess(
                 any(), eq("PERM_PRODUCTION_RECEIPT_READ"), eq("PLANT"), eq(plantId));
@@ -408,7 +452,7 @@ class ManufacturingExecutionMethodSecurityTest {
         when(permissionGuard.hasResourceAccess(
                 any(), eq("PERM_PRODUCTION_RECEIPT_MANAGE"), eq("PLANT"), eq(plantId))).thenReturn(false);
 
-        assertThatThrownBy(() -> receiptService.listByPlant(plantId, null, null, null, null, null, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> receiptService.listByPlant(plantId, null, null, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(productionReceiptRepository);
@@ -622,7 +666,8 @@ class ManufacturingExecutionMethodSecurityTest {
                     permissionGuard,
                     mock(ProductionReceiptContributionRepository.class),
                     mock(ReceiptContributionLedger.class),
-                    mock(MaterialSourceLedger.class));
+                    mock(MaterialSourceLedger.class),
+                    mock(ProductionQualityDecisionRepository.class));
         }
 
         @Bean QualityDispositionRepository qualityDispositionRepository() { return mock(QualityDispositionRepository.class); }

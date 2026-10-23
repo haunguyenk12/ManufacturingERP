@@ -3,6 +3,7 @@ package com.erp.manufacturing.module.workorder.controller;
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.workorder.domain.MaterialIssueStatus;
+import com.erp.manufacturing.module.workorder.domain.ProductionQualityState;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.dto.core.*;
 import com.erp.manufacturing.module.workorder.dto.execution.*;
@@ -412,7 +413,7 @@ public class ManufacturingExecutionController {
             description = "Spec §6.2. Flat form of GET /work-orders/{workOrderId}/production-receipts. G9a filters: "
                     + "workOrderId, destinationWarehouseId, receivedFrom/receivedTo (plant-local dates, inclusive) and "
                     + "search (receipt code, work order code, item SKU/name, lot number). QC-only permissions read "
-                    + "APPROVED receipts only.")
+                    + "APPROVED receipts only. G9c: qualityState, pendingQc, hasQcDecision.")
     public ResponseEntity<ApiResponse<PageResult<ProductionReceiptResponse>>> listProductionReceiptsByPlant(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @RequestParam UUID plantId,
@@ -422,6 +423,9 @@ public class ManufacturingExecutionController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedTo,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) ProductionQualityState qualityState,
+            @RequestParam(required = false) Boolean pendingQc,
+            @RequestParam(required = false) Boolean hasQcDecision,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "postedAt") String sortBy,
@@ -429,7 +433,7 @@ public class ManufacturingExecutionController {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.listByPlant(
                 plantId, status, workOrderId, destinationWarehouseId, receivedFrom, receivedTo, search,
-                PageableFactory.of(page, size, sortBy, sortDir))));
+                qualityState, pendingQc, hasQcDecision, PageableFactory.of(page, size, sortBy, sortDir))));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts")
@@ -565,6 +569,31 @@ public class ManufacturingExecutionController {
             @Valid @RequestBody ProductionReceiptReasonRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(
                 productionReceiptService.reject(workOrderId, receiptId, request, idempotencyKey)));
+    }
+
+    @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/qc-decisions")
+    @Operation(summary = "Record one QC decision on part of an approved production receipt",
+            description = "G9c. accepted + rejected ≤ what is pending; a rejection needs a reason (5–2000). Tracked "
+                    + "output splits child lots <lot>-A<n> (AVAILABLE) / <lot>-R<n> (REJECTED), the rest stays on the "
+                    + "HOLD lot; non-tracked output releases the accepted part from quality hold. On-hand is unchanged.")
+    public ResponseEntity<ApiResponse<ProductionQcDecisionResult>> decideProductionReceiptQuality(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody ProductionQcDecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                productionReceiptService.decideQuality(workOrderId, receiptId, request, idempotencyKey)));
+    }
+
+    @GetMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/qc-decisions")
+    @Operation(summary = "QC decisions of one production receipt", description = "G9c. Newest first, immutable.")
+    public ResponseEntity<ApiResponse<PageResult<ProductionQcDecisionResponse>>> listProductionReceiptQualityDecisions(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.qualityDecisions(
+                workOrderId, receiptId, PageableFactory.unsorted(page, size))));
     }
 
     @PostMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/qc-disposition")

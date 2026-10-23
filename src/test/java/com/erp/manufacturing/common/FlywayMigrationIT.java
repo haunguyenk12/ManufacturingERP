@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("84");
+        assertThat(current.getVersion().getVersion()).isEqualTo("85");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -455,6 +455,98 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
             assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
             assertThat(defaults.get("supplemental")).isEqualTo("false");
+        }
+    }
+
+    /**
+     * G9c / {@code V85}: receipts judged through the old whole-receipt endpoint get their line totals and one
+     * decision row from the recorded verdict; an approved receipt not judged yet gets neither. Seeded at V84 so the
+     * backfill runs on real rows.
+     */
+    @Test
+    void migrate_v85_backfillsTheRecordedVerdictsIntoTheDecisionLedger() throws Exception {
+        String schema = "flyway_v85_quality";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("84")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111118501";
+        String plant = "22222222-2222-4222-8222-222222228501";
+        String warehouse = "33333333-3333-4333-8333-333333338501";
+        String item = "55555555-5555-4555-8555-555555558501";
+        String bom = "66666666-6666-4666-8666-666666668501";
+        String workOrder = "77777777-7777-4777-8777-777777778501";
+        String passed = "88888888-8888-4888-8888-888888888501";
+        String failed = "88888888-8888-4888-8888-888888888502";
+        String waiting = "88888888-8888-4888-8888-888888888503";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V85', 'V85')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'FG', 'FG', 'FINISHED_GOOD', 'EA')".formatted(item, company));
+            statement.execute("insert into bom_headers (bom_id, company_id, parent_item_id, revision, bom_code, version_number)"
+                    + " values ('%s', '%s', '%s', 'A', 'FG-A', 1)".formatted(bom, company, item));
+            statement.execute(("insert into work_orders (work_order_id, company_id, plant_id, work_order_no, product_item_id,"
+                    + " bom_id, bom_revision, output_warehouse_id, planned_quantity, status) values ('%s', '%s', '%s',"
+                    + " 'WO-V85', '%s', '%s', 'A', '%s', 10, 'IN_PROGRESS')")
+                    .formatted(workOrder, company, plant, item, bom, warehouse));
+            String[][] receipts = {{passed, "AVAILABLE", "'Passed'"}, {failed, "REJECTED", "'Scratched'"}, {waiting, null, "null"}};
+            int index = 0;
+            for (String[] receipt : receipts) {
+                index++;
+                statement.execute(("insert into production_receipts (receipt_id, work_order_id, status, idempotency_key,"
+                        + " posted_at, approved_at, received_on, qc_result, qc_reason, qc_at, created_at, updated_at)"
+                        + " values ('%s', '%s', 'APPROVED', 'V85-%d', now(), now(), '2026-10-20', %s, %s, %s, now(), now())")
+                        .formatted(receipt[0], workOrder, index, receipt[1] == null ? "null" : "'" + receipt[1] + "'",
+                                receipt[2], receipt[1] == null ? "null" : "'2026-10-21T03:00:00Z'"));
+                statement.execute(("insert into production_receipt_lines (receipt_line_id, receipt_id, item_id, warehouse_id,"
+                        + " quantity, created_at, updated_at) values (gen_random_uuid(), '%s', '%s', '%s', 4, now(), now())")
+                        .formatted(receipt[0], item, warehouse));
+            }
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            java.util.Map<String, String> totals = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery(
+                    "select receipt_id, qc_accepted_quantity, qc_rejected_quantity from production_receipt_lines")) {
+                while (rows.next()) {
+                    totals.put(rows.getString("receipt_id"),
+                            rows.getBigDecimal("qc_accepted_quantity").stripTrailingZeros().toPlainString() + "/"
+                                    + rows.getBigDecimal("qc_rejected_quantity").stripTrailingZeros().toPlainString());
+                }
+            }
+            assertThat(totals).containsEntry(passed, "4/0").containsEntry(failed, "0/4").containsEntry(waiting, "0/0");
+            java.util.Map<String, String> decisions = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery(
+                    "select receipt_id, accepted_quantity, rejected_quantity, reason, decided_at from production_quality_decisions")) {
+                while (rows.next()) {
+                    decisions.put(rows.getString("receipt_id"),
+                            rows.getBigDecimal("accepted_quantity").stripTrailingZeros().toPlainString() + "/"
+                                    + rows.getBigDecimal("rejected_quantity").stripTrailingZeros().toPlainString() + "/"
+                                    + rows.getString("reason"));
+                }
+            }
+            assertThat(decisions).hasSize(2).containsEntry(passed, "4/0/Passed").containsEntry(failed, "0/4/Scratched");
         }
     }
 

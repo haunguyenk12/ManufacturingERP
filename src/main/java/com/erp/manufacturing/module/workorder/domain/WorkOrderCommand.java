@@ -21,5 +21,6 @@ public enum WorkOrderCommand {
     RECEIPT_WITHDRAW,
     RECEIPT_CANCEL,
     RECEIPT_APPROVE,
-    RECEIPT_REJECT
+    RECEIPT_REJECT,
+    RECEIPT_QC
 }

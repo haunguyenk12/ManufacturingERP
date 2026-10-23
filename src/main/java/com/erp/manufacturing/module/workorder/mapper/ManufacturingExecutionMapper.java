@@ -308,6 +308,7 @@ public class ManufacturingExecutionMapper {
                                                 List<String> allowedActions,
                                                 List<ProductionReceiptContribution> contributions) {
         WorkOrder workOrder = receipt.getWorkOrder();
+        ProductionQualityState qualityState = ProductionReceipt.qualityState(receipt.getStatus(), lines);
         ProductionReceiptLine line = lines.isEmpty() ? null : lines.get(0);
         InventoryLot lot = line == null ? null : line.getLot();
         SerialNumber serial = line == null ? null : line.getSerial();
@@ -373,8 +374,16 @@ public class ManufacturingExecutionMapper {
                 allowedActions,
                 !contributions.isEmpty(),
                 contributions.isEmpty() ? UNKNOWN_OUTPUT_REASON : null,
-                contributions.isEmpty() ? null : toContributionResponses(contributions));
+                contributions.isEmpty() ? null : toContributionResponses(contributions),
+                qualityState == null ? null : qualityState.name(),
+                ProductionReceipt.qcAcceptedQuantity(lines),
+                ProductionReceipt.qcRejectedQuantity(lines),
+                ProductionReceipt.pendingQcQuantity(receipt.getStatus(), lines),
+                VALUATION_PENDING_COSTING);
     }
+
+    /** G9c (D10): finished goods carry no value yet. */
+    public static final String VALUATION_PENDING_COSTING = "PENDING_COSTING";
 
     /** G9b (R22): a receipt written before V84 never recorded its source executions; none is invented. */
     public static final String UNKNOWN_OUTPUT_REASON =

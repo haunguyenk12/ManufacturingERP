@@ -402,6 +402,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .content(json(Map.of("result", "AVAILABLE", "reason", "Passed E2E inspection"))), 200);
         assertThat(qc.get("qcResult").asText()).isEqualTo("AVAILABLE");
         assertThat(qc.get("status").asText()).isEqualTo("APPROVED");
+        // G9c (D2): the old whole-receipt endpoint writes the same decision ledger the partial QC uses.
+        assertThat(qc.get("qualityState").asText()).isEqualTo("ACCEPTED");
+        assertThat(new BigDecimal(qc.get("pendingQcQuantity").asText())).isEqualByComparingTo(BigDecimal.ZERO);
+        JsonNode decisions = result(get("/v1/work-orders/{id}/production-receipts/{rid}/qc-decisions", workOrderId, receiptId), 200);
+        assertThat(decisions.get("content")).hasSize(1);
+        assertThat(new BigDecimal(decisions.get("content").get(0).get("acceptedQuantity").asText()))
+                .isEqualByComparingTo(GOOD_REPORTED);
 
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(GOOD_REPORTED);
