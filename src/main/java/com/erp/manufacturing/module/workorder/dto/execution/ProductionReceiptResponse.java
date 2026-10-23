@@ -86,5 +86,11 @@ public record ProductionReceiptResponse(
         /** U = max(0, C − A − D): what a new receipt may still claim. */
         BigDecimal unclaimedReceiptQuantity,
         /** What the caller may do on this receipt right now (EDIT, SUBMIT, WITHDRAW, CANCEL, APPROVE, REJECT, QC). */
-        List<String> allowedActions
+        List<String> allowedActions,
+        // ---- G9b (FE R05, R22) ----
+        /** False for a receipt written before V84: which reports it drew from was never recorded. */
+        boolean outputEvidenceKnown,
+        String outputUnknownReason,
+        /** The final-good executions this receipt claims, oldest first; {@code null} when not known. */
+        List<ProductionReceiptContributionResponse> contributions
 ) {}

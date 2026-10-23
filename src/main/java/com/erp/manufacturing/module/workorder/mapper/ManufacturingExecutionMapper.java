@@ -305,7 +305,8 @@ public class ManufacturingExecutionMapper {
                                                 List<ProductionReceiptLine> lines,
                                                 Map<UUID, String> usernames,
                                                 ReceiptQuota quota,
-                                                List<String> allowedActions) {
+                                                List<String> allowedActions,
+                                                List<ProductionReceiptContribution> contributions) {
         WorkOrder workOrder = receipt.getWorkOrder();
         ProductionReceiptLine line = lines.isEmpty() ? null : lines.get(0);
         InventoryLot lot = line == null ? null : line.getLot();
@@ -369,7 +370,29 @@ public class ManufacturingExecutionMapper {
                 quota.claimed(),
                 quota.awaiting(),
                 quota.unclaimed(),
-                allowedActions);
+                allowedActions,
+                !contributions.isEmpty(),
+                contributions.isEmpty() ? UNKNOWN_OUTPUT_REASON : null,
+                contributions.isEmpty() ? null : toContributionResponses(contributions));
+    }
+
+    /** G9b (R22): a receipt written before V84 never recorded its source executions; none is invented. */
+    public static final String UNKNOWN_OUTPUT_REASON =
+            "The receipt predates the contribution ledger; the reports it drew from were not recorded";
+
+    public List<ProductionReceiptContributionResponse> toContributionResponses(List<ProductionReceiptContribution> contributions) {
+        return contributions.stream()
+                .map(contribution -> {
+                    ProductionExecution execution = contribution.getExecution();
+                    WorkOrderOperation operation = execution.getOperation();
+                    return new ProductionReceiptContributionResponse(
+                            execution.getProductionExecutionId(),
+                            execution.getCode(),
+                            operation == null ? null : operation.getWorkOrderOperationId(),
+                            operation == null ? null : operation.getSequence(),
+                            contribution.getQuantity());
+                })
+                .toList();
     }
 
 

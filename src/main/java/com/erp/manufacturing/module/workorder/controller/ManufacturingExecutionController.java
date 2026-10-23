@@ -479,6 +479,18 @@ public class ManufacturingExecutionController {
                 workOrderId, receiptId, PageableFactory.of(page, size, "createdAt", "asc"))));
     }
 
+    @GetMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}/source")
+    @Operation(summary = "Where the output of one production receipt came from",
+            description = "G9b. The final-good executions the receipt draws from (allocated by the server, oldest report "
+                    + "first) and the work order's posted material with what was consumed and returned "
+                    + "(materialAttribution WORK_ORDER_LEVEL). Receipts written before the contribution ledger report "
+                    + "outputEvidenceKnown = false.")
+    public ResponseEntity<ApiResponse<ProductionReceiptSourceResponse>> getProductionReceiptSource(
+            @PathVariable UUID workOrderId,
+            @PathVariable UUID receiptId) {
+        return ResponseEntity.ok(ApiResponse.ok(productionReceiptService.source(workOrderId, receiptId)));
+    }
+
     @PatchMapping("/v1/work-orders/{workOrderId}/production-receipts/{receiptId}")
     @Operation(summary = "Edit a draft production receipt",
             description = "G9a. Requester only. Quantity, lot number, dates and note; the source cannot change.")

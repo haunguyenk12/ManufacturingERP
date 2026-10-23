@@ -356,6 +356,13 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(receipt.get("status").asText()).isEqualTo("DRAFT");
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
+        // G9b (D3): the server names the report the receipt draws from — the one final-good execution above.
+        assertThat(receipt.get("outputEvidenceKnown").asBoolean()).isTrue();
+        assertThat(receipt.get("contributions")).hasSize(1);
+        assertThat(receipt.get("contributions").get(0).get("executionId").asText())
+                .isEqualTo(execution.get("productionExecutionId").asText());
+        assertThat(new BigDecimal(receipt.get("contributions").get(0).get("quantity").asText()))
+                .isEqualByComparingTo(GOOD_REPORTED);
 
         assertThat(result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
                 workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200)
@@ -372,6 +379,12 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeApproval + 1);
         assertThat(approved.get("status").asText()).isEqualTo("APPROVED");
         assertThat(approved.get("approvedByUsername").asText()).isEqualTo("admin");
+        // G9b (FE R13): the source of the receipt — its report, and the work order's material with the return.
+        JsonNode source = result(get("/v1/work-orders/{id}/production-receipts/{rid}/source", workOrderId, receiptId), 200);
+        assertThat(source.get("outputEvidenceKnown").asBoolean()).isTrue();
+        assertThat(source.get("materialAttribution").asText()).isEqualTo("WORK_ORDER_LEVEL");
+        assertThat(new BigDecimal(source.get("materials").get(0).get("returnedQuantity").asText()))
+                .isEqualByComparingTo(returned);
 
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(GOOD_REPORTED);

@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("83");
+        assertThat(current.getVersion().getVersion()).isEqualTo("84");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -455,6 +455,36 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             }
             assertThat(nullable).containsEntry("supplemental", "NO").containsEntry("cancellation_reason", "YES");
             assertThat(defaults.get("supplemental")).isEqualTo("false");
+        }
+    }
+
+    /**
+     * G9b / {@code V84}: a contribution claims a positive quantity, and a receipt claims each execution at most once.
+     */
+    @Test
+    void migrate_v84_contributionsArePositiveAndUniquePerReceiptAndExecution() throws Exception {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+                     WHERE connamespace = 'public'::regnamespace
+                       AND conname IN ('chk_production_receipt_contributions_quantity',
+                                       'uk_production_receipt_contributions_receipt_execution')
+                     """)) {
+            java.util.Map<String, String> definitions = new java.util.HashMap<>();
+            while (rows.next()) {
+                definitions.put(rows.getString("conname"), rows.getString("def"));
+            }
+            assertThat(definitions.get("chk_production_receipt_contributions_quantity")).contains("> (0)");
+            assertThat(definitions.get("uk_production_receipt_contributions_receipt_execution"))
+                    .contains("UNIQUE (receipt_id, production_execution_id)");
         }
     }
 

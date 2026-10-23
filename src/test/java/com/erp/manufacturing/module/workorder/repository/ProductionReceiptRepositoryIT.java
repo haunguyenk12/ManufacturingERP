@@ -11,7 +11,9 @@ import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.domain.WarehouseType;
+import com.erp.manufacturing.module.workorder.domain.ProductionExecution;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceipt;
+import com.erp.manufacturing.module.workorder.domain.ProductionReceiptContribution;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptLine;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
@@ -57,6 +59,9 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
 
     @Autowired
     TestEntityManager entityManager;
+
+    @Autowired
+    ProductionReceiptContributionRepository contributionRepository;
 
     @Test
     void findByPlant_withoutAStatusFilter_returnsEveryReceiptOfThePlant() {
@@ -219,6 +224,108 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(plantList(fixture, null, null, null, fixture.warehouse.getWarehouseId()))
                 .containsExactly(receipt.getReceiptId());
         assertThat(plantList(fixture, null, null, null, UUID.randomUUID())).isEmpty();
+    }
+
+
+    // ---------------------------------------------------------------------------------------
+    // G9b — contribution ledger queries (V84)
+    // ---------------------------------------------------------------------------------------
+
+    /** Only receipts that still claim output count, and an edited draft can leave itself out. */
+    @Test
+    void sumLiveByExecution_countsLiveReceiptsAndCanExcludeOne() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionExecution execution = persistExecution(workOrder, "8");
+        ProductionReceipt draft = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("2"));
+        ProductionReceipt approved = persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("3"));
+        ProductionReceipt rejected = persistReceipt(workOrder, fixture, ProductionReceiptStatus.REJECTED, new BigDecimal("4"));
+        persistContribution(draft, execution, "2");
+        persistContribution(approved, execution, "3");
+        persistContribution(rejected, execution, "4");
+
+        assertThat(claimedBy(contributionRepository.sumLiveByExecution(workOrder.getWorkOrderId(), null)))
+                .containsOnlyKeys(execution.getProductionExecutionId())
+                .hasEntrySatisfying(execution.getProductionExecutionId(), sum -> assertThat(sum).isEqualByComparingTo("5"));
+        assertThat(claimedBy(contributionRepository.sumLiveByExecution(workOrder.getWorkOrderId(), draft.getReceiptId())))
+                .hasEntrySatisfying(execution.getProductionExecutionId(), sum -> assertThat(sum).isEqualByComparingTo("3"));
+    }
+
+    @Test
+    void sumLiveByExecution_ignoresAnotherWorkOrder() {
+        Fixture fixture = persistFixture();
+        WorkOrder mine = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        WorkOrder other = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionExecution mineExecution = persistExecution(mine, "5");
+        ProductionExecution otherExecution = persistExecution(other, "5");
+        persistContribution(persistReceipt(mine, fixture, ProductionReceiptStatus.DRAFT, BigDecimal.ONE), mineExecution, "1");
+        persistContribution(persistReceipt(other, fixture, ProductionReceiptStatus.DRAFT, BigDecimal.ONE), otherExecution, "1");
+
+        assertThat(claimedBy(contributionRepository.sumLiveByExecution(mine.getWorkOrderId(), null)))
+                .containsOnlyKeys(mineExecution.getProductionExecutionId());
+    }
+
+    /** B231: a live receipt with no contribution row is a pre-V84 receipt; one with rows or a dead one is not. */
+    @Test
+    void sumLiveWithoutContributions_sumsLiveReceiptsThatHaveNoRow() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionExecution execution = persistExecution(workOrder, "9");
+        ProductionReceipt legacyApproved = persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("3"));
+        persistReceipt(workOrder, fixture, ProductionReceiptStatus.REJECTED, new BigDecimal("5"));
+        ProductionReceipt recorded = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("2"));
+        persistContribution(recorded, execution, "2");
+
+        assertThat(repository.sumLiveWithoutContributions(workOrder.getWorkOrderId(), null)).isEqualByComparingTo("3");
+        assertThat(repository.sumLiveWithoutContributions(workOrder.getWorkOrderId(), legacyApproved.getReceiptId()))
+                .isEqualByComparingTo("0");
+    }
+
+    @Test
+    void deleteByReceiptId_removesOnlyThatReceiptsRows() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        ProductionExecution execution = persistExecution(workOrder, "9");
+        ProductionReceipt edited = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("2"));
+        ProductionReceipt kept = persistReceipt(workOrder, fixture, ProductionReceiptStatus.DRAFT, new BigDecimal("3"));
+        persistContribution(edited, execution, "2");
+        persistContribution(kept, execution, "3");
+
+        assertThat(contributionRepository.deleteByReceiptId(edited.getReceiptId())).isEqualTo(1);
+
+        assertThat(contributionRepository.findByReceiptReceiptIdIn(List.of(edited.getReceiptId(), kept.getReceiptId())))
+                .extracting(contribution -> contribution.getReceipt().getReceiptId())
+                .containsExactly(kept.getReceiptId());
+    }
+
+    private static Map<UUID, BigDecimal> claimedBy(List<KeyedQuantityProjection> rows) {
+        return rows.stream().collect(Collectors.toMap(KeyedQuantityProjection::getRefId, KeyedQuantityProjection::getQuantity));
+    }
+
+    private ProductionExecution persistExecution(WorkOrder workOrder, String good) {
+        Instant now = Instant.now();
+        ProductionExecution execution = ProductionExecution.builder()
+                .workOrder(workOrder)
+                .goodQuantity(new BigDecimal(good))
+                .actualStartedAt(now.minusSeconds(3600))
+                .actualEndedAt(now)
+                .idempotencyKey(UUID.randomUUID().toString())
+                .build();
+        execution.setCreatedAt(now);
+        execution.setUpdatedAt(now);
+        return entityManager.persistFlushFind(execution);
+    }
+
+    private void persistContribution(ProductionReceipt receipt, ProductionExecution execution, String quantity) {
+        Instant now = Instant.now();
+        ProductionReceiptContribution contribution = ProductionReceiptContribution.builder()
+                .receipt(receipt)
+                .execution(execution)
+                .quantity(new BigDecimal(quantity))
+                .build();
+        contribution.setCreatedAt(now);
+        contribution.setUpdatedAt(now);
+        entityManager.persistAndFlush(contribution);
     }
 
     private record Fixture(Plant plant, Warehouse warehouse, Item product, BomHeader bom) {}

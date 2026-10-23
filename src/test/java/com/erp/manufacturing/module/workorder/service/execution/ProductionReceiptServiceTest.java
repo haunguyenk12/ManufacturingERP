@@ -37,6 +37,12 @@ import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepo
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptLineRepository;
 import com.erp.manufacturing.module.workorder.repository.OpenReceiptQuantityProjection;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionReceiptContributionRepository;
+import com.erp.manufacturing.module.workorder.repository.KeyedQuantityProjection;
+import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
+import com.erp.manufacturing.module.workorder.repository.MaterialReturnLineRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionExecutionConsumptionRepository;
 import com.erp.manufacturing.module.workorder.repository.QualityDispositionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import com.erp.manufacturing.module.workorder.service.WorkOrderDemandAllocationService;
@@ -85,6 +91,11 @@ class ProductionReceiptServiceTest {
     @Mock WorkOrderDemandAllocationService allocationService;
     @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
     @Mock PermissionGuard permissionGuard;
+    @Mock ProductionReceiptContributionRepository contributionRepository;
+    @Mock WorkOrderOperationRepository operationRepository;
+    @Mock MaterialIssueLineRepository issueLineRepository;
+    @Mock ProductionExecutionConsumptionRepository consumptionRepository;
+    @Mock MaterialReturnLineRepository returnLineRepository;
 
     /** The requester: G9a lets only the person who created a receipt edit, submit, withdraw or cancel it. */
     static final UUID USER = UUID.randomUUID();
@@ -113,8 +124,40 @@ class ProductionReceiptServiceTest {
                 new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
                 new TraceIdProvider(),
                 new WorkOrderIdempotency(idempotencyRecordRepository, new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
-                permissionGuard);
+                permissionGuard,
+                contributionRepository,
+                new ReceiptContributionLedger(executionRepository, operationRepository, contributionRepository, receiptRepository),
+                new MaterialSourceLedger(issueLineRepository, consumptionRepository, returnLineRepository));
         lenient().when(auditorAware.getCurrentAuditor()).thenReturn(Optional.of(USER));
+        // G9b: unless a test says otherwise, a work order's final good was reported in one execution large enough
+        // that the contribution ledger never refuses before the quota does, and no legacy receipt is unrecorded.
+        lenient().when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(any()))
+                .thenAnswer(invocation -> List.of(report(null, "1000000", Instant.parse("2026-10-01T00:00:00Z"))));
+        lenient().when(receiptRepository.sumLiveWithoutContributions(any(), any())).thenReturn(BigDecimal.ZERO);
+    }
+
+    private static ProductionExecution report(WorkOrderOperation operation, String good, Instant endedAt) {
+        return ProductionExecution.builder()
+                .productionExecutionId(UUID.randomUUID())
+                .code("PE-" + good)
+                .operation(operation)
+                .goodQuantity(new BigDecimal(good))
+                .actualEndedAt(endedAt)
+                .build();
+    }
+
+    private static KeyedQuantityProjection claimed(UUID executionId, String quantity) {
+        return new KeyedQuantityProjection() {
+            @Override public UUID getRefId() { return executionId; }
+            @Override public BigDecimal getQuantity() { return new BigDecimal(quantity); }
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<ProductionReceiptContribution> savedContributions() {
+        ArgumentCaptor<List<ProductionReceiptContribution>> captor = ArgumentCaptor.forClass(List.class);
+        verify(contributionRepository).saveAll(captor.capture());
+        return captor.getValue();
     }
 
     private static ProductionReceiptVersionRequest versions() {
@@ -1711,6 +1754,221 @@ class ProductionReceiptServiceTest {
                 .containsExactly("CREATED", "SUBMITTED", "CANCELLED");
         assertThat(page.content().get(2).reason()).isEqualTo("Entered twice");
         assertThat(page.content().get(1).actorName()).isEqualTo("thukho");
+    }
+
+
+    // ---------------------------------------------------------------------------------------
+    // G9b — contributions by final-good report (NEXT_PHASE_PLAN.md §16, B231–B233)
+    // ---------------------------------------------------------------------------------------
+
+    /** D3: the server takes the receipt from the oldest report first — 3 from the 08:00 report, 2 from the 09:00 one. */
+    @Test
+    void post_allocatesTheReceiptToTheOldestReportsFirst() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ProductionExecution later = report(null, "5", Instant.parse("2026-10-20T02:00:00Z"));
+        ProductionExecution earlier = report(null, "3", Instant.parse("2026-10-20T01:00:00Z"));
+        when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(later, earlier));
+
+        service.post(workOrder.getWorkOrderId(), request(workOrder.getOutputWarehouse(), "5", 0L, TODAY, null, null), "K");
+
+        List<ProductionReceiptContribution> saved = savedContributions();
+        assertThat(saved).extracting(ProductionReceiptContribution::getExecution).containsExactly(earlier, later);
+        assertThat(saved).extracting(ProductionReceiptContribution::getQuantity)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("3"), new BigDecimal("2"));
+    }
+
+    /** B232: what another live receipt already claims of a report is not free for this one. */
+    @Test
+    void post_skipsWhatOtherReceiptsAlreadyClaimOfAReport() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", new BigDecimal("2"));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ProductionExecution first = report(null, "3", Instant.parse("2026-10-20T01:00:00Z"));
+        ProductionExecution second = report(null, "5", Instant.parse("2026-10-20T02:00:00Z"));
+        when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(first, second));
+        when(contributionRepository.sumLiveByExecution(workOrder.getWorkOrderId(), null))
+                .thenReturn(List.of(claimed(first.getProductionExecutionId(), "2")));
+
+        service.post(workOrder.getWorkOrderId(), request(workOrder.getOutputWarehouse(), "4", 0L, TODAY, null, null), "K");
+
+        assertThat(savedContributions()).extracting(contribution -> contribution.getQuantity().stripTrailingZeros().toPlainString())
+                .containsExactly("1", "3");
+    }
+
+    /** B231: a receipt written before V84 has no rows; its quantity is charged to the oldest reports first. */
+    @Test
+    void post_chargesUnrecordedLegacyReceiptsToTheOldestReports() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", new BigDecimal("3"));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ProductionExecution first = report(null, "3", Instant.parse("2026-10-20T01:00:00Z"));
+        ProductionExecution second = report(null, "5", Instant.parse("2026-10-20T02:00:00Z"));
+        when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(first, second));
+        when(receiptRepository.sumLiveWithoutContributions(workOrder.getWorkOrderId(), null)).thenReturn(new BigDecimal("3"));
+
+        service.post(workOrder.getWorkOrderId(), request(workOrder.getOutputWarehouse(), "4", 0L, TODAY, null, null), "K");
+
+        List<ProductionReceiptContribution> saved = savedContributions();
+        assertThat(saved).extracting(ProductionReceiptContribution::getExecution).containsExactly(second);
+        assertThat(saved.get(0).getQuantity()).isEqualByComparingTo("4");
+    }
+
+    /** B219: only the last operation's reports are final good — the earlier operation's output is not a source. */
+    @Test
+    void post_drawsOnlyOnTheLastOperationsReports() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        WorkOrderOperation cut = WorkOrderOperation.builder().workOrderOperationId(UUID.randomUUID()).sequence(10).build();
+        WorkOrderOperation weld = WorkOrderOperation.builder().workOrderOperationId(UUID.randomUUID()).sequence(20).build();
+        when(operationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(cut, weld));
+        ProductionExecution cutReport = report(cut, "10", Instant.parse("2026-10-20T01:00:00Z"));
+        ProductionExecution weldReport = report(weld, "4", Instant.parse("2026-10-20T02:00:00Z"));
+        when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(cutReport, weldReport));
+
+        service.post(workOrder.getWorkOrderId(), request(workOrder.getOutputWarehouse(), "4", 0L, TODAY, null, null), "K");
+
+        assertThat(savedContributions()).extracting(ProductionReceiptContribution::getExecution).containsExactly(weldReport);
+    }
+
+    /** A ledger that drifted from the quota is refused on the quantity field, before the receipt is written. */
+    @Test
+    void post_reportsThatNoLongerCoverTheReceipt_isRefusedBeforeAnyWrite() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        stubCreate(workOrder, "K", BigDecimal.ZERO);
+        when(executionRepository.findByWorkOrderWorkOrderIdOrderByCreatedAtAsc(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(report(null, "2", Instant.parse("2026-10-20T01:00:00Z"))));
+
+        Throwable thrown = catchThrowable(() -> service.post(workOrder.getWorkOrderId(),
+                request(workOrder.getOutputWarehouse(), "3", 0L, TODAY, null, null), "K"));
+
+        assertCode(thrown, BusinessErrorCode.PLANNED_QUANTITY_EXCEEDED);
+        assertThat(((MultiErrorException) thrown).getFieldErrors()).containsKey("quantity");
+        verify(receiptRepository, never()).saveAndFlush(any());
+        verify(contributionRepository, never()).saveAll(any());
+    }
+
+    /** A draft edit gives its own claims back, drops its old rows and allocates the new quantity from scratch. */
+    @Test
+    void update_reallocatesTheDraftFromScratch() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        when(receiptRepository.sumOpenQuantityByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(new BigDecimal("4"));
+        when(receiptRepository.saveAndFlush(any(ProductionReceipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.update(workOrder.getWorkOrderId(), receipt.getReceiptId(),
+                new ProductionReceiptUpdateRequest(0L, 0L, new BigDecimal("6"), null, TODAY, null, null), null);
+
+        verify(contributionRepository).sumLiveByExecution(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        verify(receiptRepository).sumLiveWithoutContributions(workOrder.getWorkOrderId(), receipt.getReceiptId());
+        var order = inOrder(contributionRepository);
+        order.verify(contributionRepository).deleteByReceiptId(receipt.getReceiptId());
+        order.verify(contributionRepository).saveAll(any());
+        assertThat(savedContributions().get(0).getQuantity()).isEqualByComparingTo("6");
+        assertThat(savedContributions().get(0).getReceipt()).isSameAs(receipt);
+    }
+
+    /** R22: the detail names the reports a receipt draws from. */
+    @Test
+    void get_carriesTheContributionsOfTheReceipt() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        WorkOrderOperation weld = WorkOrderOperation.builder().workOrderOperationId(UUID.randomUUID()).sequence(20).build();
+        ProductionExecution execution = report(weld, "4", Instant.parse("2026-10-20T02:00:00Z"));
+        when(contributionRepository.findByReceiptReceiptIdIn(List.of(receipt.getReceiptId()))).thenReturn(List.of(
+                ProductionReceiptContribution.builder().receipt(receipt).execution(execution)
+                        .quantity(new BigDecimal("4")).build()));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_RECEIPT_MANAGE"), eq("PLANT"), any())).thenReturn(true);
+
+        var response = service.get(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        assertThat(response.outputEvidenceKnown()).isTrue();
+        assertThat(response.outputUnknownReason()).isNull();
+        assertThat(response.contributions()).singleElement().satisfies(contribution -> {
+            assertThat(contribution.executionId()).isEqualTo(execution.getProductionExecutionId());
+            assertThat(contribution.operationId()).isEqualTo(weld.getWorkOrderOperationId());
+            assertThat(contribution.operationSequence()).isEqualTo(20);
+            assertThat(contribution.quantity()).isEqualByComparingTo("4");
+        });
+    }
+
+    /** R22: the detail of a receipt written before V84 says its output source is unknown, not that it has none. */
+    @Test
+    void get_ofALegacyReceipt_reportsTheOutputSourceAsUnknown() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_RECEIPT_MANAGE"), eq("PLANT"), any())).thenReturn(true);
+
+        var response = service.get(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        assertThat(response.outputEvidenceKnown()).isFalse();
+        assertThat(response.outputUnknownReason()).isEqualTo(ManufacturingExecutionMapper.UNKNOWN_OUTPUT_REASON);
+        assertThat(response.contributions()).isNull();
+    }
+
+    /** B231: a receipt without rows is reported as unknown — never as zero, never as every report. */
+    @Test
+    void source_ofALegacyReceipt_isUnknownNotEmpty() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        workOrder.setOperationTracking(false);
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.APPROVED, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+
+        var source = service.source(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        assertThat(source.outputEvidenceKnown()).isFalse();
+        assertThat(source.outputUnknownReason()).isEqualTo(ManufacturingExecutionMapper.UNKNOWN_OUTPUT_REASON);
+        assertThat(source.contributions()).isNull();
+        assertThat(source.materialAttribution()).isEqualTo("UNKNOWN");
+        assertThat(source.materials()).isEmpty();
+    }
+
+    @Test
+    void source_ofATrackedReceipt_namesItsReportsAndWorkOrderLevelMaterial() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.APPROVED, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        ProductionExecution execution = report(null, "4", Instant.parse("2026-10-20T02:00:00Z"));
+        when(contributionRepository.findByReceiptReceiptIdIn(List.of(receipt.getReceiptId()))).thenReturn(List.of(
+                ProductionReceiptContribution.builder().receipt(receipt).execution(execution)
+                        .quantity(new BigDecimal("4")).build()));
+
+        var source = service.source(workOrder.getWorkOrderId(), receipt.getReceiptId());
+
+        assertThat(source.outputEvidenceKnown()).isTrue();
+        assertThat(source.contributions()).extracting(contribution -> contribution.executionId())
+                .containsExactly(execution.getProductionExecutionId());
+        assertThat(source.materialAttribution()).isEqualTo("WORK_ORDER_LEVEL");
+        verify(issueLineRepository).findPostedByWorkOrder(workOrder.getWorkOrderId());
+    }
+
+    @Test
+    void source_withQualityPermissionsOnly_refusesADraft() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        ProductionReceipt receipt = receipt(workOrder, workOrder.getOutputWarehouse(), new BigDecimal("4"),
+                ProductionReceiptStatus.DRAFT, null);
+        when(receiptRepository.findWithLinesByReceiptId(receipt.getReceiptId())).thenReturn(Optional.of(receipt));
+        lenient().when(permissionGuard.hasResourceAccess(any(), eq("PERM_PRODUCTION_QC_READ"), eq("PLANT"), any())).thenReturn(true);
+
+        Throwable thrown = catchThrowable(() -> service.source(workOrder.getWorkOrderId(), receipt.getReceiptId()));
+
+        assertCode(thrown, AuthErrorCode.ACCESS_DENIED);
     }
 
     private ProductionReceiptPostRequest receiptRequest(Warehouse warehouse, BigDecimal quantity) {

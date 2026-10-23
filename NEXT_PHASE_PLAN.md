@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G9` — FE handoff Giai đoạn 9: nhập thành phẩm và kiểm tra chất lượng** (`FE_HANDOFF_GD_09_2026-10-15.md`, P1) — 🔄 **D0 = tách 3 làm liền (user chốt 2026-10-20)**: **`G9a` ✅ 2026-10-21** (`BE_RESPONSE_GD_09_2026-10-21.md` v1) · `G9b` ⏳ · `G9c` ⏳ — xem **§16**. 🔴 Khác `G7`/`G8`: vòng đời phiếu nhập **và** QC đã có từ `F2`/`D5`, và cỗ máy QC từng phần vừa dựng **hôm qua** cho mua hàng (`G7c` `splitLot`) ⇒ phần lớn là **nâng cấp**. Ba thứ chưa có: QC theo **lượng**, phân bổ theo từng lượt báo, nửa còn lại của vòng đời (rút/huỷ/chi tiết/`PATCH`) |
+| **Đang chạy** | **`G9` — FE handoff Giai đoạn 9: nhập thành phẩm và kiểm tra chất lượng** (`FE_HANDOFF_GD_09_2026-10-15.md`, P1) — 🔄 **D0 = tách 3 làm liền (user chốt 2026-10-20)**: **`G9a` ✅ 2026-10-21** (`BE_RESPONSE_GD_09_2026-10-21.md` v1) · **`G9b` ✅ 2026-10-23** (`BE_RESPONSE_GD_09_2026-10-23_v2.md`) · `G9c` ⏳ — xem **§16**. 🔴 Khác `G7`/`G8`: vòng đời phiếu nhập **và** QC đã có từ `F2`/`D5`, và cỗ máy QC từng phần vừa dựng **hôm qua** cho mua hàng (`G7c` `splitLot`) ⇒ phần lớn là **nâng cấp**. Ba thứ chưa có: QC theo **lượng**, phân bổ theo từng lượt báo, nửa còn lại của vòng đời (rút/huỷ/chi tiết/`PATCH`) |
 | **Chờ FE** | `G8` (§15) — ✅ BE xong cả 4 phần 2026-10-19/20, bản ghi `CLAUDE.md §0.60`–`§0.63`. `G7` (§14) — ✅ 2026-10-18/19. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -126,7 +126,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 13 | **`G6` — FE handoff Giai đoạn 6 (đơn bán hàng + hoạch định vật tư)** | ✅ **BE xong 2026-10-17/18 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_06_2026-10-14.md`, P1. Mở lại hai thứ đã **cố ý hoãn**: nối `SalesOrder` ↔ `Customer` (`G2 §9.5`) và giữ tồn cho đơn bán (reservation hiện **chỉ** thuộc WO). Chi tiết **§13** |
 | 14 | **`G7` — FE handoff Giai đoạn 7 (đơn mua hàng, nhận hàng, QC)** | ✅ **BE xong cả 3 phần 2026-10-18/19 — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_07_2026-10-14.md`, P1. Module mua hàng **đã có** — việc chính là đổi vòng đời (PO `CLOSED`/sửa nháp, phiếu nhận `DRAFT`, nhận vào `HOLD`) cộng **hai thứ chưa từng có**: QC mua hàng và giá trị tồn kho. Chi tiết **§14** |
 | 15 | **`G8` — FE handoff Giai đoạn 8 (lệnh sản xuất, cấp vật tư, công đoạn, dở dang)** | ✅ **BE hoàn thành — `G8a`/`G8b` 2026-10-19, `G8c`/`G8d` 2026-10-20; chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_08_2026-10-14.md`, P1. Chi tiết **§15** |
-| 16 | **`G9` — FE handoff Giai đoạn 9 (nhập thành phẩm, kiểm tra chất lượng)** | 🔄 **`G9a` ✅ 2026-10-21 · `G9b`/`G9c` đang làm** | Nguồn `FE_HANDOFF_GD_09_2026-10-15.md`, P1. Vòng đời phiếu nhập + QC **đã có** (`F2`/`D5`), trần từ good công đoạn cuối **vừa đúng** nhờ `G8c`, lô con + `splitLot` **vừa dựng** ở `G7c`. Việc chính: QC theo **lượng** nhiều lượt, phân bổ theo từng lượt báo (truy xuất nguồn), rút/huỷ/chi tiết/`PATCH`, 2 quyền đọc. Chi tiết **§16** |
+| 16 | **`G9` — FE handoff Giai đoạn 9 (nhập thành phẩm, kiểm tra chất lượng)** | 🔄 **`G9a` ✅ 2026-10-21 · `G9b` ✅ 2026-10-23 · `G9c` đang làm** | Nguồn `FE_HANDOFF_GD_09_2026-10-15.md`, P1. Vòng đời phiếu nhập + QC **đã có** (`F2`/`D5`), trần từ good công đoạn cuối **vừa đúng** nhờ `G8c`, lô con + `splitLot` **vừa dựng** ở `G7c`. Việc chính: QC theo **lượng** nhiều lượt, phân bổ theo từng lượt báo (truy xuất nguồn), rút/huỷ/chi tiết/`PATCH`, 2 quyền đọc. Chi tiết **§16** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -1234,6 +1234,10 @@ Phạm vi đã rà: 8 mapping phiếu nhập/QC của `ManufacturingExecutionCon
 **`G9b` — phân bổ theo lượt báo + truy xuất nguồn**
 Bảng `production_receipt_contributions` + sinh phía server theo thời gian+ID (`D3`); trần mỗi nguồn ≤ good của nguồn (đọc sổ `G8c`); `outputEvidenceKnown`/`outputUnknownReason` cho phiếu cũ; `GET .../source` hai tầng (execution + WO-level `materialAttribution`, đọc `production_execution_consumptions` + `material_issue_lines` của `G8c`/`G8d`). Kiểm lại nguồn lúc gửi/duyệt ⇒ `PRODUCTION_RECEIPT_SOURCE_CHANGED`.
 
+### 16.3b Kết quả `G9b` *(2026-10-23)*
+
+✅ BE HOÀN THÀNH. Migration `V84` (bảng phân bổ, không backfill); `GET …/source`; `outputEvidenceKnown`/`outputUnknownReason`/`contributions[]` trên mọi response phiếu nhập. Server phân bổ lúc tạo + sửa nháp, công đoạn cuối, lượt cũ nhất trước; phiếu cũ tính trừ vào lượt cũ nhất. 🔴 **Lệch kế hoạch:** không kiểm lại lúc gửi/duyệt và **không** mã `PRODUCTION_RECEIPT_SOURCE_CHANGED` — lượt báo bất biến, phân bổ tuần tự hoá qua version WO, phần phiếu cũ chỉ giảm (B232). `mvn -o clean verify` 1982 + 279, mutation 14/14, smoke 16/16 (lượt `084754`). Bản ghi: `CLAUDE.md §0.65`, bất biến `B231`–`B233`.
+
 **`G9c` — QC từng phần *(migration riêng)***
 Bảng `production_quality_decisions` (nhân bản `G7c`, bất biến) + tái dùng `InventoryMovementService.splitLot`; `qualityState` + tổng đạt/loại/chờ; cài lại `qc-disposition` cũ bên trên sổ mới (`D2`) và đổi cổng `isQcDecided()` → "hết phần chờ"; đường không theo lô theo `D4`; `GET .../qc-decisions` + bộ lọc `pendingQc`/`hasQcDecision`; projection WO/dở dang/tồn kho/lô mang `receiptId`/`qcDecisionId`; `valuationStatus = PENDING_COSTING` (`D10`).
 
@@ -1413,7 +1417,7 @@ Giao hàng/hoá đơn/thanh toán (GĐ10); chi phí/định giá/đóng kỳ đ�
   - [x] **Chốt `D0` — tách `G9a`/`G9b`/`G9c` làm liền** (2026-10-20)
   - [x] Chốt 15 quyết định còn lại §16.2 *(2026-10-20: D12 kẹp, D13/D14 giữ, còn lại theo khuyến nghị)* — **`D1`** (mô hình QC từng phần: nhân bản `G7c` hay sửa `quality_dispositions`), **`D2`** (endpoint QC nguyên phiếu cũ), **`D3`** (phân bổ theo lượt báo), **`D13`** (nguồn cung WO cho MRP — kỳ vọng A38 của FE lệch số thật) và **`D14`** (QC có còn làm đơn bán `FULFILLED`) là năm cái quyết định độ lớn
   - [x] `G9a` Vòng đời + đọc *(2026-10-21, `BE_RESPONSE_GD_09_2026-10-21.md`)*: `receivedOn`/`expiresOn`, rút/huỷ/chi tiết/`PATCH`, `version` + `qualityState` + bộ đếm trên response, `expectedVersion` mọi lệnh, bộ lọc list, 2 quyền đọc (`V83`)
-  - [ ] `G9b` Phân bổ theo lượt báo + truy xuất nguồn hai tầng + kiểm lại nguồn lúc gửi/duyệt
+  - [x] `G9b` Phân bổ theo lượt báo + truy xuất nguồn hai tầng *(2026-10-23, `BE_RESPONSE_GD_09_2026-10-23_v2.md`; kiểm lại lúc gửi/duyệt bỏ có chủ đích — B232)*
   - [ ] `G9c` QC từng phần: bảng quyết định bất biến (nhân bản `G7c`), tái dùng `splitLot`, cài lại endpoint QC cũ bên trên sổ mới, hàng đợi/lịch sử, projection kho/WO/dở dang
   - [ ] `G9-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_09_*.md` + docs (🔴 `C10` **có** kích hoạt: 2 quyền mới ⇒ `docs/roles-and-permissions.md`)
   - [ ] FE nghiệm thu A01–A40

@@ -302,6 +302,19 @@ class ManufacturingExecutionMethodSecurityTest {
         verify(workOrderPermissionGuard).hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId));
     }
 
+    /** G9b: the source of a receipt is read with the same permissions as the receipt itself. */
+    @Test
+    void productionReceiptSource_deniedWhenNoReceiptOrQualityPermissionIsHeld() {
+        UUID workOrderId = UUID.randomUUID();
+        when(workOrderPermissionGuard.hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId))).thenReturn(false);
+
+        assertThatThrownBy(() -> receiptService.source(workOrderId, UUID.randomUUID()))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(productionReceiptRepository);
+        verify(workOrderPermissionGuard).hasAnyWorkOrderAccess(any(), eq(RECEIPT_READERS), eq(workOrderId));
+    }
+
     @Test
     void productionReceiptEvents_deniedWhenNoReceiptOrQualityPermissionIsHeld() {
         UUID workOrderId = UUID.randomUUID();
@@ -606,7 +619,10 @@ class ManufacturingExecutionMethodSecurityTest {
                     mapper, new IdempotencySupport(new ObjectMapper()), new TraceIdProvider(),
                     new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
                             new IdempotencySupport(new ObjectMapper())),
-                    permissionGuard);
+                    permissionGuard,
+                    mock(ProductionReceiptContributionRepository.class),
+                    mock(ReceiptContributionLedger.class),
+                    mock(MaterialSourceLedger.class));
         }
 
         @Bean QualityDispositionRepository qualityDispositionRepository() { return mock(QualityDispositionRepository.class); }

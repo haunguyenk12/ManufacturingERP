@@ -466,7 +466,8 @@ class ManufacturingExecutionControllerTest {
                 1L, 21L, PLANT_ID, "Asia/Ho_Chi_Minh", java.time.LocalDate.parse("2026-10-20"), null, "Finished goods",
                 null, null, null, null, null, null, null, null,
                 new BigDecimal("9.000000"), new BigDecimal("9.000000"), BigDecimal.ZERO, new BigDecimal("5.000000"),
-                new BigDecimal("9.000000"), new BigDecimal("4.000000"), actions);
+                new BigDecimal("9.000000"), new BigDecimal("4.000000"), actions,
+                false, "The receipt predates the contribution ledger; the reports it drew from were not recorded", null);
     }
 
     @Test
@@ -483,6 +484,38 @@ class ManufacturingExecutionControllerTest {
                 .andExpect(jsonPath("$.result.receivedOn").value("2026-10-20"))
                 .andExpect(jsonPath("$.result.unclaimedReceiptQuantity").value(4))
                 .andExpect(jsonPath("$.result.allowedActions[0]").value("EDIT"));
+    }
+
+    @Test
+    @DisplayName("receipt source: reports, attribution and work-order material are on the wire")
+    void getProductionReceiptSource_returnsContributionsAndMaterial() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        when(productionReceiptService.source(WORK_ORDER_ID, RECEIPT_ID)).thenReturn(
+                new com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptSourceResponse(
+                        RECEIPT_ID, "PR-0001", WORK_ORDER_ID, "WO-001", true, null,
+                        List.of(new com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptContributionResponse(
+                                executionId, "PE-0001", null, null, new BigDecimal("5.000000"))),
+                        "WORK_ORDER_LEVEL", List.of()));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID + "/source"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.outputEvidenceKnown").value(true))
+                .andExpect(jsonPath("$.result.contributions[0].executionId").value(executionId.toString()))
+                .andExpect(jsonPath("$.result.contributions[0].quantity").value(5))
+                .andExpect(jsonPath("$.result.materialAttribution").value("WORK_ORDER_LEVEL"));
+    }
+
+    @Test
+    @DisplayName("receipt detail: a legacy receipt says its source is unknown, with the contributions null")
+    void getProductionReceipt_legacyReceipt_reportsUnknownOutput() throws Exception {
+        when(productionReceiptService.get(WORK_ORDER_ID, RECEIPT_ID)).thenReturn(sampleReceipt("APPROVED", List.of()));
+
+        mockMvc.perform(get("/v1/work-orders/" + WORK_ORDER_ID + "/production-receipts/" + RECEIPT_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.outputEvidenceKnown").value(false))
+                .andExpect(jsonPath("$.result.outputUnknownReason").isString())
+                .andExpect(jsonPath("$.result.contributions").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

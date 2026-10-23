@@ -131,4 +131,25 @@ public interface ProductionReceiptRepository extends JpaRepository<ProductionRec
                     com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.PENDING_APPROVAL)
             """)
     BigDecimal sumOpenQuantityByWorkOrderId(@Param("workOrderId") UUID workOrderId);
+
+    /**
+     * G9b: the quantity of receipts that still claim output (DRAFT, PENDING_APPROVAL, APPROVED) but recorded no
+     * contribution — written before V84. Their sources are unknown, so the allocation charges them to the oldest
+     * reports first, the order {@code sourceWipTraceIds} always assumed (D3). {@code excludeReceiptId}: a draft being
+     * edited.
+     */
+    @Query("""
+            select coalesce(sum(l.quantity), 0)
+            from ProductionReceiptLine l
+            where l.receipt.workOrder.workOrderId = :workOrderId
+              and l.receipt.status in (
+                    com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.DRAFT,
+                    com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.PENDING_APPROVAL,
+                    com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.APPROVED)
+              and (:excludeReceiptId is null or l.receipt.receiptId <> :excludeReceiptId)
+              and not exists (
+                    select 1 from ProductionReceiptContribution c where c.receipt = l.receipt)
+            """)
+    BigDecimal sumLiveWithoutContributions(@Param("workOrderId") UUID workOrderId,
+                                           @Param("excludeReceiptId") UUID excludeReceiptId);
 }

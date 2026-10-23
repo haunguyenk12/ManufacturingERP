@@ -792,6 +792,17 @@ Từ chối: `POST .../{rid}/reject` body `{"expectedVersion", "expectedWorkOrde
   `PERM_QUALITY_DISPOSITION` chỉ đọc phiếu `APPROVED`.
 - Mã lô trùng một lô đã có (**không phân biệt hoa thường**) ⇒ `409 LOT_CODE_ALREADY_EXISTS` field `lotNumber`. Số lẻ thứ 7 ⇒ `400`.
 
+#### G9b (2026-10-23) — phiếu lấy từ lượt báo nào, và nguồn của phiếu
+
+- **Server tự phân bổ** — không gửi gì thêm. Lúc tạo phiếu và mỗi lần sửa nháp, BE lấy lượng từ các lượt báo good của **công đoạn cuối**,
+  lượt cũ nhất trước, không lượt nào bị giữ quá good của chính nó.
+- **Mọi response phiếu nhập** có thêm `outputEvidenceKnown` (boolean), `outputUnknownReason` (chuỗi | `null`), `contributions[]`
+  (`executionId`, `executionCode`, `operationId`, `operationSequence`, `quantity`). Phiếu tạo trước bản này: `outputEvidenceKnown = false`,
+  `contributions = null` — hiển thị "không rõ nguồn", **đừng** hiểu là 0.
+- **Mới:** `GET /v1/work-orders/{W}/production-receipts/{R}/source` — `contributions[]` như trên + `materialAttribution`
+  (`WORK_ORDER_LEVEL` | `UNKNOWN`) + `materials[]` (vật tư của cả lệnh: cấp / dùng / hoàn / còn lại theo dòng cấp, cùng hình dạng phần vật tư
+  của `GET /v1/work-orders/{W}/wip`). Quyền như chi tiết phiếu.
+
 🔴 **Sau `approve`, hàng đã vào kho nhưng CHƯA dùng được**: lot ở trạng thái `HOLD`, `onHand` tăng
 nhưng `available` **vẫn = 0**. Màn hình tồn kho phải hiển thị đúng điều này.
 
@@ -951,6 +962,7 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 | Candidate nhập kho | `GET /production-receipts/candidates?plantId=` | `PERM_PRODUCTION_RECEIPT_READ` / `_MANAGE` / `_APPROVE` |
 | Tạo/sửa/submit/rút/huỷ receipt (G9a) | `POST /work-orders/{id}/production-receipts` · `PATCH …/{rid}` · `POST …/{rid}/submit` · `/withdraw` · `/cancel` | `PERM_PRODUCTION_RECEIPT_MANAGE` (sửa/gửi/rút/huỷ: chỉ người tạo) |
 | Chi tiết / lịch sử receipt (G9a) | `GET …/{rid}` · `GET …/{rid}/events` | như danh sách |
+| Nguồn của receipt (G9b) | `GET …/{rid}/source` | như danh sách |
 | Duyệt/từ chối receipt | `POST …/{rid}/approve` · `/reject` | `PERM_PRODUCTION_RECEIPT_APPROVE` |
 | QC | `POST …/{rid}/qc-disposition` | `PERM_QUALITY_DISPOSITION` |
 | Danh sách receipt (plant) | `GET /production-receipts?plantId=&status=&workOrderId=&destinationWarehouseId=&receivedFrom=&receivedTo=&search=` | `PERM_PRODUCTION_RECEIPT_READ` / `_MANAGE` / `_APPROVE`; `PERM_PRODUCTION_QC_READ` / `PERM_QUALITY_DISPOSITION` chỉ thấy `APPROVED` |

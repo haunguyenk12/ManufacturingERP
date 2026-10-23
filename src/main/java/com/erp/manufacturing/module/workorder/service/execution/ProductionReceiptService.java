@@ -29,11 +29,13 @@ import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptPos
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptQcDispositionRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptReasonRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptResponse;
+import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptSourceResponse;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptUpdateRequest;
 import com.erp.manufacturing.module.workorder.dto.execution.ProductionReceiptVersionRequest;
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
 import com.erp.manufacturing.module.workorder.repository.OpenReceiptQuantityProjection;
 import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionReceiptContributionRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptLineRepository;
 import com.erp.manufacturing.module.workorder.repository.ProductionReceiptRepository;
 import com.erp.manufacturing.module.workorder.repository.QualityDispositionRepository;
@@ -126,6 +128,9 @@ public class ProductionReceiptService {
     private final TraceIdProvider traceIdProvider;
     private final WorkOrderIdempotency idempotencyRecords;
     private final PermissionGuard permissionGuard;
+    private final ProductionReceiptContributionRepository contributionRepository;
+    private final ReceiptContributionLedger contributionLedger;
+    private final MaterialSourceLedger materialSourceLedger;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_PRODUCTION_RECEIPT_MANAGE', #workOrderId)")
@@ -199,7 +204,10 @@ public class ProductionReceiptService {
             line.setRequestedLotCode(lotNumber);
         }
         validateDates(workOrder, request.receivedOn(), request.expiresOn(), false);
+        // G9b: the edited quantity is allocated again from scratch, this draft's own claims given back first.
+        List<ReceiptContributionLedger.Share> shares = contributionLedger.allocate(workOrder, quantity, receiptId);
         idempotencyRecords.record(key, WorkOrderCommand.RECEIPT_UPDATE, receiptId, fingerprint);
+        contributionRepository.deleteByReceiptId(receiptId);
         workOrder.touch();
         line.setQuantity(quantity);
         // The quantity lives on the line, an inverse collection: changing it alone never dirties the receipt, so its
@@ -208,7 +216,7 @@ public class ProductionReceiptService {
         receipt.setReceivedOn(request.receivedOn());
         receipt.setExpiresOn(request.expiresOn());
         receipt.setNote(support.trimToNull(request.note()));
-        return flush(receipt);
+        return flush(receipt, shares);
     }
 
     /**
@@ -649,6 +657,33 @@ public class ProductionReceiptService {
 
     private record Event(String action, UUID actor, String reason, Instant at) {}
 
+    /**
+     * G9b (FE R13, Q27): where the output of one receipt came from — the final-good executions it draws from, and the
+     * material of its work order at work order level. Unknown is reported as unknown, never as zero or as everything.
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@workOrderPermissionGuard.hasAnyWorkOrderAccess(authentication, "
+            + "{'PERM_PRODUCTION_RECEIPT_READ', 'PERM_PRODUCTION_RECEIPT_MANAGE', 'PERM_PRODUCTION_RECEIPT_APPROVE', "
+            + "'PERM_PRODUCTION_QC_READ', 'PERM_QUALITY_DISPOSITION'}, #workOrderId)")
+    public ProductionReceiptSourceResponse source(UUID workOrderId, UUID receiptId) {
+        ProductionReceipt receipt = findReceiptOfWorkOrder(workOrderId, receiptId);
+        ensureQcOnlyReadsApproved(receipt);
+        WorkOrder workOrder = receipt.getWorkOrder();
+        List<ProductionReceiptContribution> contributions =
+                contributionsOf(List.of(receiptId)).getOrDefault(receiptId, List.of());
+        boolean known = !contributions.isEmpty();
+        return new ProductionReceiptSourceResponse(
+                receiptId,
+                receipt.getCode(),
+                workOrder.getWorkOrderId(),
+                workOrder.getWorkOrderNo(),
+                known,
+                known ? null : ManufacturingExecutionMapper.UNKNOWN_OUTPUT_REASON,
+                known ? mapper.toContributionResponses(contributions) : null,
+                workOrder.isOperationTracking() ? "WORK_ORDER_LEVEL" : "UNKNOWN",
+                materialSourceLedger.lines(workOrder));
+    }
+
     @Transactional(readOnly = true)
     @PreAuthorize("@workOrderPermissionGuard.hasAnyWorkOrderAccess(authentication, "
             + "{'PERM_PRODUCTION_RECEIPT_READ', 'PERM_PRODUCTION_RECEIPT_MANAGE', 'PERM_PRODUCTION_RECEIPT_APPROVE', "
@@ -733,6 +768,7 @@ public class ProductionReceiptService {
                 .collect(Collectors.groupingBy(line -> line.getReceipt().getReceiptId()));
         Map<UUID, String> usernames = usernamesOf(page.getContent());
         Map<UUID, BigDecimal> claims = openClaims(page.getContent().stream().map(ProductionReceipt::getWorkOrder).toList());
+        Map<UUID, List<ProductionReceiptContribution>> contributions = contributionsOf(receiptIds);
         Map<UUID, Set<String>> granted = new HashMap<>();
         UUID actor = currentActor();
         return PageResult.from(page.map(receipt -> {
@@ -741,8 +777,24 @@ public class ProductionReceiptService {
             Set<String> permissions = granted.computeIfAbsent(workOrder.getPlant().getPlantId(), this::grantedPermissions);
             return mapper.toResponse(receipt, lines, usernames,
                     ReceiptQuota.of(workOrder, claims.getOrDefault(workOrder.getWorkOrderId(), BigDecimal.ZERO)),
-                    allowedActions(receipt, lines, permissions, actor));
+                    allowedActions(receipt, lines, permissions, actor),
+                    contributions.getOrDefault(receipt.getReceiptId(), List.of()));
         }));
+    }
+
+    /** G9b: the contributions of several receipts in one query (C14), oldest report first within each. */
+    private Map<UUID, List<ProductionReceiptContribution>> contributionsOf(List<UUID> receiptIds) {
+        if (receiptIds.isEmpty()) {
+            return Map.of();
+        }
+        return contributionRepository.findByReceiptReceiptIdIn(receiptIds).stream()
+                .sorted(Comparator.comparing((ProductionReceiptContribution contribution) ->
+                                contribution.getExecution().getActualEndedAt() != null
+                                        ? contribution.getExecution().getActualEndedAt()
+                                        : contribution.getExecution().getCreatedAt())
+                        .thenComparing(contribution -> contribution.getExecution().getProductionExecutionId().toString()))
+                .collect(Collectors.groupingBy(contribution -> contribution.getReceipt().getReceiptId(),
+                        LinkedHashMap::new, Collectors.toList()));
     }
 
     /**
@@ -776,6 +828,8 @@ public class ProductionReceiptService {
         // produced, up to the plan, and has not been receipted yet. Receipts that are still open (DRAFT /
         // PENDING_APPROVAL) have already claimed part of it.
         ensureWithinQuota(quantity, quota(workOrder).unclaimed());
+        // G9b (D3): which final-good reports the receipt draws from — server-side, oldest first, never from the client.
+        List<ReceiptContributionLedger.Share> shares = contributionLedger.allocate(workOrder, quantity, null);
         // Fail here rather than at approval: without a lot the output can never leave HOLD,
         // so a lot-tracked receipt with no lot would be un-QC-able (spec §6.3).
         requireLotWhenTracked(workOrder, request.lotId(), request.lotNumber());
@@ -819,14 +873,31 @@ public class ProductionReceiptService {
                 .build());
         // The receipt claims output of the work order, so the work order's version moves on (FE Q12).
         workOrder.touch();
-        return flush(receipt);
+        return flush(receipt, shares);
     }
 
     /** Writes the receipt and the touched work order, then answers with both versions as written (§0.39). */
     private ProductionReceiptResponse flush(ProductionReceipt receipt) {
+        return flush(receipt, null);
+    }
+
+    /** As {@link #flush(ProductionReceipt)}, writing the receipt's newly allocated contributions too (G9b). */
+    private ProductionReceiptResponse flush(ProductionReceipt receipt, List<ReceiptContributionLedger.Share> shares) {
         ProductionReceipt saved = receiptRepository.saveAndFlush(receipt);
+        if (shares == null) {
+            support.flushTouched(saved.getWorkOrder());
+            return toResponse(saved);
+        }
+        List<ProductionReceiptContribution> contributions = shares.stream()
+                .map(share -> ProductionReceiptContribution.builder()
+                        .receipt(saved)
+                        .execution(share.execution())
+                        .quantity(share.quantity())
+                        .build())
+                .toList();
+        contributionRepository.saveAll(contributions);
         support.flushTouched(saved.getWorkOrder());
-        return toResponse(saved);
+        return toResponse(saved, contributions);
     }
 
     private ReceiptQuota quota(WorkOrder workOrder) {
@@ -1041,10 +1112,16 @@ public class ProductionReceiptService {
 
     /** One receipt with its quota, usernames and the caller's allowed actions. */
     private ProductionReceiptResponse toResponse(ProductionReceipt receipt) {
+        return toResponse(receipt,
+                contributionsOf(List.of(receipt.getReceiptId())).getOrDefault(receipt.getReceiptId(), List.of()));
+    }
+
+    private ProductionReceiptResponse toResponse(ProductionReceipt receipt, List<ProductionReceiptContribution> contributions) {
         WorkOrder workOrder = receipt.getWorkOrder();
         Set<String> permissions = grantedPermissions(workOrder.getPlant().getPlantId());
         return mapper.toResponse(receipt, receipt.getLines(), usernamesOf(List.of(receipt)), quota(workOrder),
-                allowedActions(receipt, receipt.getLines(), permissions, currentActor()));
+                allowedActions(receipt, receipt.getLines(), permissions, currentActor()),
+                contributions);
     }
 
     private Map<UUID, String> usernamesOf(List<ProductionReceipt> receipts) {
