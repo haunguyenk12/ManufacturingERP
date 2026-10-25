@@ -66,6 +66,9 @@ class SalesOrderControllerTest {
     @MockBean
     com.erp.manufacturing.module.sales.service.SalesOrderReservationService reservationService;
 
+    @MockBean
+    com.erp.manufacturing.module.sales.service.SalesOrderPricingService pricingService;
+
     // Unused directly by these tests – required only so the auto-detected security filters
     // can be constructed by the @WebMvcTest slice, even with addFilters = false.
     @MockBean
@@ -264,6 +267,40 @@ class SalesOrderControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[?(@.field == 'lines[0].orderedQuantity')]").exists());
         verifyNoInteractions(salesOrderService);
+    }
+
+    @Test
+    @DisplayName("commercial-prices: 200 with the command result only, Idempotency-Key forwarded (G10a)")
+    void setPrices_returnsTheCommandResultAndForwardsTheKey() throws Exception {
+        when(pricingService.setPrices(eq(SALES_ORDER_ID), any(), eq("key-1"))).thenReturn(
+                new com.erp.manufacturing.module.sales.dto.CommercialCommandResult(SALES_ORDER_ID, "SALES_PRICE", 5L, "PRICE-2"));
+
+        mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/commercial-prices")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":4,\"prices\":[{\"salesOrderLineId\":\"%s\",\"unitPrice\":0}]}"
+                                .formatted(UUID.randomUUID())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.documentId").value(SALES_ORDER_ID.toString()))
+                .andExpect(jsonPath("$.result.type").value("SALES_PRICE"))
+                .andExpect(jsonPath("$.result.version").value(5))
+                .andExpect(jsonPath("$.result.pricingVersion").value("PRICE-2"));
+    }
+
+    @Test
+    @DisplayName("commercial-prices: negative, over the ceiling or a seventh decimal is a 400 on the line field")
+    void setPrices_outOfRangePrice_returns400NamingTheField() throws Exception {
+        for (String price : List.of("-1", "1000000000", "1.1234567")) {
+            mockMvc.perform(post("/sales-orders/v1/" + SALES_ORDER_ID + "/commercial-prices")
+                            .header("Idempotency-Key", "key-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"expectedVersion\":4,\"prices\":[{\"salesOrderLineId\":\"%s\",\"unitPrice\":%s}]}"
+                                    .formatted(UUID.randomUUID(), price)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[?(@.field == 'prices[0].unitPrice')]").exists());
+        }
+        verifyNoInteractions(pricingService);
     }
 
     @Test

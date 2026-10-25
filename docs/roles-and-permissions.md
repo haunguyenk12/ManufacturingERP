@@ -242,6 +242,24 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 | `PERM_MATERIAL_RETURN_READ` | **[G8d, `V82`]** Xem phiếu hoàn vật tư (danh sách theo nhà máy, chi tiết). `_MANAGE` cũng đọc được. ADMIN + MANAGER |
 | `PERM_MATERIAL_RETURN_MANAGE` | **[G8d, `V82`]** Hoàn vật tư chưa dùng về đúng kho/lô nguồn của dòng cấp (`POST /v1/work-orders/{W}/material-returns`) + xem ứng viên hoàn. ADMIN + MANAGER — OPERATOR **không** được cấp ngầm (FE Q34) |
 
+### Giao hàng, hoá đơn, thanh toán *(G10, `V86`)*
+| Quyền | Mô tả |
+|-------|-------|
+| `PERM_DELIVERY_READ` | **[G10a]** Xem phiếu giao hàng, ứng viên dòng đơn và nguồn tồn kho. Đọc được bằng bất kỳ quyền nào trong ba quyền giao hàng; **không** thấy giá bán. ADMIN + MANAGER |
+| `PERM_DELIVERY_MANAGE` | **[G10a]** Tạo / sửa / huỷ phiếu giao **nháp của chính mình**. Nháp chỉ giữ hạn mức trên dòng đơn, không giữ tồn. ADMIN + MANAGER |
+| `PERM_DELIVERY_POST` | **[G10a]** Ghi sổ phiếu giao (xuất kho) — được ghi sổ cả phiếu mình tạo (FE Q28, không duyệt hai cấp). ADMIN + MANAGER |
+| `PERM_SALES_INVOICE_READ` | **[G10a]** Xem hoá đơn bán hàng và số dư; cũng mở **giá bán** trên đơn bán. ADMIN + MANAGER |
+| `PERM_SALES_INVOICE_MANAGE` | **[G10a]** Tạo / sửa / huỷ hoá đơn nháp của chính mình; mở giá bán. ADMIN + MANAGER |
+| `PERM_SALES_INVOICE_POST` | **[G10a]** Ghi sổ hoá đơn; mở giá bán. ADMIN + MANAGER |
+| `PERM_CUSTOMER_PAYMENT_READ` | **[G10a]** Xem thanh toán khách hàng và phân bổ; **không** thấy giá dòng đơn (FE Q30). ADMIN + MANAGER |
+| `PERM_CUSTOMER_PAYMENT_MANAGE` | **[G10a]** Tạo / sửa / huỷ thanh toán nháp của chính mình. ADMIN + MANAGER |
+| `PERM_CUSTOMER_PAYMENT_POST` | **[G10a]** Ghi sổ thanh toán (không chuyển tiền thật). ADMIN + MANAGER |
+| `PERM_SALES_PRICE_MANAGE` | **[G10a]** Xem giá bán trên đơn bán và bổ sung giá còn thiếu cho đơn đã xác nhận (`POST /sales-orders/v1/{id}/commercial-prices`); giá đã biết (kể cả 0) khoá. Giá trên đơn **nháp** đi theo `PATCH /{id}/draft` (quyền `PERM_SALES_ORDER_MANAGE`). ADMIN + MANAGER — OPERATOR không được cấp ngầm |
+
+> 🔴 **Ai thấy giá bán trên `GET /sales-orders/v1/{id}`:** chỉ người có `PERM_SALES_PRICE_MANAGE` hoặc một trong ba quyền hoá
+> đơn trên nhà máy của đơn. Người chỉ có `PERM_SALES_ORDER_READ` (thủ kho) đọc được đơn nhưng **không có** field `commercial`
+> nào trong JSON — vắng mặt, không phải `null` (D6).
+
 ### Quality Control
 | Quyền | Mô tả |
 |-------|-------|

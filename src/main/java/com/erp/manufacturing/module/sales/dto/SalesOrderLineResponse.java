@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.sales.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -18,6 +20,9 @@ import java.util.UUID;
  * {@code deliveredQuantity} — always {@code null} (no shipment document yet);
  * {@code uncoveredQuantity} = max(0, ordered − qcAccepted − heldStock − workOrderCovered).
  * The figures are filled on the detail response; on rows without metrics they are {@code null}.
+ *
+ * <p>G10a: {@code commercial} — the line's price — is <b>absent</b> from the JSON unless the caller may see sales
+ * prices (D6). Never {@code null} on the wire: {@code default-property-inclusion: always} would print a null.
  */
 public record SalesOrderLineResponse(
         UUID salesOrderLineId,
@@ -36,5 +41,18 @@ public record SalesOrderLineResponse(
         BigDecimal qcAcceptedQuantity,
         BigDecimal deliveredQuantity,
         BigDecimal uncoveredQuantity,
-        SalesOrderLineMetricsEvidence metricsEvidence
-) {}
+        SalesOrderLineMetricsEvidence metricsEvidence,
+        @JsonInclude(JsonInclude.Include.NON_NULL) SalesOrderLineCommercialResponse commercial
+) {
+    /** Shape before G10a, no money. */
+    public SalesOrderLineResponse(UUID salesOrderLineId, Integer lineNo, UUID itemId, String itemSku, String itemName,
+                                  String uom, BigDecimal orderedQuantity, BigDecimal fulfilledQuantity,
+                                  BigDecimal openQuantity, LocalDate dueDate, BigDecimal heldStockQuantity,
+                                  BigDecimal workOrderCoveredQuantity, BigDecimal producedQuantity,
+                                  BigDecimal qcAcceptedQuantity, BigDecimal deliveredQuantity,
+                                  BigDecimal uncoveredQuantity, SalesOrderLineMetricsEvidence metricsEvidence) {
+        this(salesOrderLineId, lineNo, itemId, itemSku, itemName, uom, orderedQuantity, fulfilledQuantity,
+                openQuantity, dueDate, heldStockQuantity, workOrderCoveredQuantity, producedQuantity,
+                qcAcceptedQuantity, deliveredQuantity, uncoveredQuantity, metricsEvidence, null);
+    }
+}

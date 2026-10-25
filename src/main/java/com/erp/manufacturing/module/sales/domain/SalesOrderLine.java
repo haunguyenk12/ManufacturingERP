@@ -52,6 +52,13 @@ public class SalesOrderLine extends BaseEntity {
     @Column(name = "due_date", nullable = false)
     private LocalDate dueDate;
 
+    /**
+     * G10a, VND. {@code null} = no price yet, which is not the same as {@code 0} (FE R02): an invoice refuses a
+     * missing price and bills a known zero. Once the order is confirmed a known price is locked, zero included.
+     */
+    @Column(name = "unit_price", precision = 19, scale = 6)
+    private BigDecimal unitPrice;
+
     public BigDecimal openQuantity() {
         return orderedQuantity.subtract(fulfilledQuantity);
     }

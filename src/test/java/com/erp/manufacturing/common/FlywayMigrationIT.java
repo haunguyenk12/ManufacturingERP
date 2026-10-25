@@ -52,7 +52,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("85");
+        assertThat(current.getVersion().getVersion()).isEqualTo("86");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -547,6 +547,94 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                 }
             }
             assertThat(decisions).hasSize(2).containsEntry(passed, "4/0/Passed").containsEntry(failed, "0/4/Scratched");
+        }
+    }
+
+    /**
+     * G10a / {@code V86} (D3): an order already past DRAFT when V86 runs has no delivery baseline — nothing recorded what
+     * left the warehouse for it — while a DRAFT has shipped nothing and keeps a known baseline. A price is 0..999 999 999,
+     * {@code NULL} allowed; the ten commercial permissions go to ADMIN and MANAGER only.
+     */
+    @Test
+    void migrate_v86_marksOrdersPastDraftAsBaselineUnknownAndBoundsThePrice() throws Exception {
+        String schema = "flyway_v86_sales";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("85")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111118601";
+        String plant = "22222222-2222-4222-8222-222222228601";
+        String item = "55555555-5555-4555-8555-555555558601";
+        String draft = "99999999-9999-4999-8999-999999998601";
+        String confirmed = "99999999-9999-4999-8999-999999998602";
+        String cancelled = "99999999-9999-4999-8999-999999998603";
+        String line = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa8601";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V86', 'V86')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'FG', 'FG', 'FINISHED_GOOD', 'EA')".formatted(item, company));
+            String[][] orders = {{draft, "DRAFT"}, {confirmed, "CONFIRMED"}, {cancelled, "CANCELLED"}};
+            for (String[] order : orders) {
+                statement.execute(("insert into sales_orders (sales_order_id, company_id, plant_id, order_no, customer_name,"
+                        + " order_date, status) values ('%s', '%s', '%s', 'SO-%s', 'A', '2026-10-01', '%s')")
+                        .formatted(order[0], company, plant, order[1], order[1]));
+            }
+            statement.execute(("insert into sales_order_lines (sales_order_line_id, sales_order_id, item_id, line_no,"
+                    + " ordered_quantity, due_date) values ('%s', '%s', '%s', 1, 10, '2026-10-09')")
+                    .formatted(line, confirmed, item));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            java.util.Map<String, Boolean> baseline = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery(
+                    "select sales_order_id, delivery_baseline_known, pricing_revision from sales_orders")) {
+                while (rows.next()) {
+                    baseline.put(rows.getString("sales_order_id"), rows.getBoolean("delivery_baseline_known"));
+                    assertThat(rows.getInt("pricing_revision")).isZero();
+                }
+            }
+            assertThat(baseline).containsEntry(draft, true).containsEntry(confirmed, false).containsEntry(cancelled, false);
+            try (ResultSet rows = statement.executeQuery("select unit_price from sales_order_lines")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getBigDecimal("unit_price")).isNull();
+            }
+            statement.execute("update sales_order_lines set unit_price = 0");
+            statement.execute("update sales_order_lines set unit_price = 999999999");
+            assertThatThrownBy(() -> statement.execute("update sales_order_lines set unit_price = -1"))
+                    .hasMessageContaining("chk_sales_order_lines_unit_price");
+            assertThatThrownBy(() -> statement.execute("update sales_order_lines set unit_price = 1000000000"))
+                    .hasMessageContaining("chk_sales_order_lines_unit_price");
+            java.util.Map<String, java.util.Set<String>> grants = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery("select p.code, r.code as role from permissions p"
+                    + " join role_permissions rp on rp.permission_id = p.permission_id"
+                    + " join roles r on r.role_id = rp.role_id"
+                    + " where p.code like 'PERM_DELIVERY_%' or p.code like 'PERM_SALES_INVOICE_%'"
+                    + " or p.code like 'PERM_CUSTOMER_PAYMENT_%' or p.code = 'PERM_SALES_PRICE_MANAGE'")) {
+                while (rows.next()) {
+                    grants.computeIfAbsent(rows.getString("code"), k -> new java.util.HashSet<>()).add(rows.getString("role"));
+                }
+            }
+            assertThat(grants).hasSize(10);
+            assertThat(grants.values()).allSatisfy(roles -> assertThat(roles).containsExactlyInAnyOrder("ADMIN", "MANAGER"));
         }
     }
 

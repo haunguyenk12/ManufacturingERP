@@ -81,7 +81,7 @@ class SalesOrderServiceTest {
                 planningDemandService,
                 stockReservationService,
                 coverageLookupService,
-                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper),
+                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)),
                 mapper);
     }
 
@@ -340,6 +340,7 @@ class SalesOrderServiceTest {
     @Test
     void confirm_generatesOnePlanningDemandPerLine() {
         SalesOrder order = draftOrderWithTwoLines();
+        linkActiveCustomer(order);
         UUID salesOrderId = order.getSalesOrderId();
         when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
         when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(returnFirstArgument());
@@ -358,6 +359,26 @@ class SalesOrderServiceTest {
                 argThat(quantity -> quantity.compareTo(new BigDecimal("40")) == 0),
                 eq(second.getDueDate()), eq(second.getSalesOrderLineId()));
         verifyNoMoreInteractions(planningDemandService);
+    }
+
+    @Test
+    void confirm_withoutAMasterCustomer_isRefusedOnTheCustomerIdFieldBeforeCreatingDemand() {
+        // G10a (D4): a free-text customer name cannot carry invoices and payments.
+        SalesOrder order = draftOrderWithTwoLines();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> service.confirm(salesOrderId, null))
+                .isInstanceOf(com.erp.manufacturing.common.exception.MultiErrorException.class)
+                .satisfies(ex -> {
+                    com.erp.manufacturing.common.exception.MultiErrorException error =
+                            (com.erp.manufacturing.common.exception.MultiErrorException) ex;
+                    assertThat(error.getErrorCode()).isEqualTo(BusinessErrorCode.OPERATION_NOT_ALLOWED);
+                    assertThat(error.getFieldErrors()).containsOnlyKeys("customerId");
+                });
+        assertThat(order.getStatus()).isEqualTo(SalesOrderStatus.DRAFT);
+        verifyNoInteractions(planningDemandService);
+        verify(salesOrderRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -480,6 +501,15 @@ class SalesOrderServiceTest {
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
+
+    private void linkActiveCustomer(SalesOrder order) {
+        com.erp.manufacturing.module.sales.domain.Customer customer =
+                com.erp.manufacturing.module.sales.domain.Customer.builder()
+                        .customerId(UUID.randomUUID()).company(order.getCompany()).code("CUS-1").name("ACME Corp")
+                        .status(com.erp.manufacturing.module.sales.domain.CustomerStatus.ACTIVE).build();
+        order.setCustomerId(customer.getCustomerId());
+        when(customerRepository.findWithCompanyByCustomerId(customer.getCustomerId())).thenReturn(Optional.of(customer));
+    }
 
     private SalesOrder draftOrderWithTwoLines() {
         Company company = company(UUID.randomUUID());

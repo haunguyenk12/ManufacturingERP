@@ -139,6 +139,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     @Autowired PlanningDemandRepository planningDemandRepository;
     @Autowired WorkOrderRepository workOrderRepository;
     @Autowired UserRepository userRepository;
+    @Autowired com.erp.manufacturing.module.sales.repository.CustomerRepository customerRepository;
     @Autowired InventoryAvailabilityService availabilityService;
 
     private RequestPostProcessor asAdmin;
@@ -162,6 +163,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "plantId", fixture.plantId,
                         "orderNo", "SO-" + fixture.suffix,
                         "customerName", "E2E Customer",
+                        "customerId", fixture.customerId,
                         "orderDate", ORDER_DATE.toString(),
                         "lines", List.of(Map.of(
                                 "itemId", fixture.finishedGoodId,
@@ -534,6 +536,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "plantId", fixture.plantId,
                         "orderNo", "SO-NOLOT-" + fixture.suffix,
                         "customerName", "E2E Customer",
+                        "customerId", fixture.customerId,
                         "orderDate", ORDER_DATE.toString(),
                         "lines", List.of(Map.of(
                                 "itemId", product.itemId,
@@ -793,8 +796,14 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .item(component).warehouse(warehouse).quantity(COMPONENT_ON_HAND)
                 .reservedQuantity(BigDecimal.ZERO).build());
 
+        // G10a (D4): confirming a sales order needs a master customer.
+        com.erp.manufacturing.module.sales.domain.Customer customer = customerRepository.save(
+                com.erp.manufacturing.module.sales.domain.Customer.builder()
+                        .company(company).code("CUS-" + suffix).name("E2E Customer")
+                        .status(com.erp.manufacturing.module.sales.domain.CustomerStatus.ACTIVE).build());
+
         return new Fixture(suffix, company.getCompanyId(), plant.getPlantId(),
-                warehouse.getWarehouseId(), finishedGood.getItemId(), component.getItemId());
+                warehouse.getWarehouseId(), finishedGood.getItemId(), component.getItemId(), customer.getCustomerId());
     }
 
     /**
@@ -941,5 +950,6 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                            UUID plantId,
                            UUID warehouseId,
                            UUID finishedGoodId,
-                           UUID componentId) {}
+                           UUID componentId,
+                           UUID customerId) {}
 }

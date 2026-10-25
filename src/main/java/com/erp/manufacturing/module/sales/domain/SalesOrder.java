@@ -76,9 +76,32 @@ public class SalesOrder extends BaseEntity {
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 
+    /** G10a: moved on by every change to a line price; exposed only as the opaque {@link #pricingVersion()}. */
+    @Column(name = "pricing_revision", nullable = false)
+    @Builder.Default
+    private int pricingRevision = 0;
+
+    /**
+     * G10a (D3): whether "nothing delivered yet" is a fact for this order. {@code false} on every order that was
+     * past DRAFT when V86 ran — nothing recorded what left the warehouse for it before deliveries existed — so it
+     * cannot be delivered or invoiced; never set back to {@code true} by guessing.
+     */
+    @Column(name = "delivery_baseline_known", nullable = false)
+    @Builder.Default
+    private boolean deliveryBaselineKnown = true;
+
     @OneToMany(mappedBy = "salesOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<SalesOrderLine> lines = new ArrayList<>();
+
+    public void bumpPricingRevision() {
+        pricingRevision++;
+    }
+
+    /** Opaque to clients (FE §3.2): they echo it back, never parse it. */
+    public String pricingVersion() {
+        return "PRICE-" + pricingRevision;
+    }
 
     public boolean isDraft() {
         return status == SalesOrderStatus.DRAFT;

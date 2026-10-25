@@ -79,7 +79,7 @@ class SalesOrderDraftServiceTest {
         service = new SalesOrderService(salesOrderRepository, salesOrderLineRepository, customerRepository,
                 organizationLookupService, itemLookupService, uomLookupService, planningDemandService,
                 stockReservationService, coverageLookupService,
-                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper), mapper);
+                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)), mapper);
         company = Company.builder().companyId(UUID.randomUUID()).code("C").status(OrganizationStatus.ACTIVE).build();
         plant = Plant.builder().plantId(UUID.randomUUID()).company(company).code("P").status(OrganizationStatus.ACTIVE).build();
         customer = Customer.builder().customerId(UUID.randomUUID()).company(company).code("CUS-1").name("Khách A")
@@ -111,6 +111,58 @@ class SalesOrderDraftServiceTest {
         assertThat(response.customerReference()).isEqualTo("PO-77");
         assertThat(response.lines()).extracting(l -> l.lineNo()).containsExactly(1, 2);
         assertThat(response.lines().get(0).uom()).isEqualTo("EA");
+    }
+
+    /** G10a (FE R02): a draft line price is optional; absent stays null, never 0. */
+    @Test
+    void createDraft_storesTheLinePricesAsSent_absentStaysNull() {
+        when(salesOrderRepository.nextOrderNumber()).thenReturn(1L);
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.createDraft(request(
+                new SalesOrderDraftLineRequest(finishedGood.getItemId(), BigDecimal.ONE, ORDER_DATE, new BigDecimal("0")),
+                line(finishedGood, "1", ORDER_DATE)));
+
+        org.mockito.ArgumentCaptor<SalesOrder> saved = org.mockito.ArgumentCaptor.forClass(SalesOrder.class);
+        verify(salesOrderRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getLines().get(0).getUnitPrice()).isEqualByComparingTo("0");
+        assertThat(saved.getValue().getLines().get(1).getUnitPrice()).isNull();
+        assertThat(saved.getValue().isDeliveryBaselineKnown()).isTrue();
+    }
+
+    /** G10a: replacing a draft with another price moves the pricing version; the same prices do not. */
+    @Test
+    void updateDraft_movesThePricingVersionOnlyWhenAPriceChanges() {
+        SalesOrder order = draftOrder();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(order.getSalesOrderId())).thenReturn(Optional.of(order));
+        when(salesOrderRepository.saveAndFlush(any(SalesOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.updateDraft(order.getSalesOrderId(), new SalesOrderDraftUpdateRequest(3L, customer.getCustomerId(), null,
+                ORDER_DATE, null, List.of(line(finishedGood, "1", ORDER_DATE))));
+        assertThat(order.getPricingRevision()).isZero();
+
+        service.updateDraft(order.getSalesOrderId(), new SalesOrderDraftUpdateRequest(3L, customer.getCustomerId(), null,
+                ORDER_DATE, null, List.of(new SalesOrderDraftLineRequest(
+                        finishedGood.getItemId(), BigDecimal.ONE, ORDER_DATE, new BigDecimal("12.5")))));
+        assertThat(order.getPricingRevision()).isEqualTo(1);
+        assertThat(order.getLines().get(0).getUnitPrice()).isEqualByComparingTo("12.5");
+    }
+
+    /** G10a (D4): the legacy create may now link a master customer; its name replaces the free text. */
+    @Test
+    void legacyCreate_withACustomerId_linksTheMasterCustomer() {
+        when(salesOrderRepository.existsByCompanyCompanyIdAndOrderNo(company.getCompanyId(), "SO-LEG")).thenReturn(false);
+        when(salesOrderRepository.save(any(SalesOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        SalesOrderResponse response = service.create(new com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest(
+                company.getCompanyId(), plant.getPlantId(), "SO-LEG", "typed name", ORDER_DATE, null,
+                List.of(new com.erp.manufacturing.module.sales.dto.SalesOrderLineRequest(
+                        finishedGood.getItemId(), BigDecimal.ONE, ORDER_DATE)),
+                customer.getCustomerId()));
+
+        assertThat(response.customerId()).isEqualTo(customer.getCustomerId());
+        assertThat(response.customerName()).isEqualTo("Khách A");
+        assertThat(response.customerCode()).isEqualTo("CUS-1");
     }
 
     @Test

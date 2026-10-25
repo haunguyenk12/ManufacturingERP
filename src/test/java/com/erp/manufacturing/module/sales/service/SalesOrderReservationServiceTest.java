@@ -56,7 +56,7 @@ class SalesOrderReservationServiceTest {
     void setUp() {
         SalesOrderMapper mapper = new SalesOrderMapper();
         service = new SalesOrderReservationService(salesOrderRepository, organizationLookupService,
-                stockReservationService, new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper));
+                stockReservationService, new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)));
         Company company = Company.builder().companyId(UUID.randomUUID()).code("C").build();
         Plant plant = Plant.builder().plantId(UUID.randomUUID()).company(company).code("P").build();
         warehouse = Warehouse.builder().warehouseId(UUID.randomUUID()).plant(plant).code("FG").build();

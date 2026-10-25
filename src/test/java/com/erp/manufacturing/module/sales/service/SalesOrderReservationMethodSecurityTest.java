@@ -111,7 +111,7 @@ class SalesOrderReservationMethodSecurityTest {
             SalesOrderCoverageLookupService coverage = mock(SalesOrderCoverageLookupService.class);
             return new SalesOrderReservationService(salesOrderRepository, mock(OrganizationLookupService.class),
                     stockReservationService,
-                    new SalesOrderDetailAssembler(stockReservationService, coverage, new SalesOrderMapper()));
+                    new SalesOrderDetailAssembler(stockReservationService, coverage, new SalesOrderMapper(), org.mockito.Mockito.mock(SalesPriceVisibility.class)));
         }
 
         @Bean(name = "salesPermissionGuard")

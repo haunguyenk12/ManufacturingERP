@@ -96,6 +96,11 @@ public enum BusinessErrorCode implements ErrorCode {
      * posted or cancelled first.
      */
     PENDING_GOODS_RECEIPT     ("PENDING_GOODS_RECEIPT",     "A draft goods receipt is still pending for this purchase order", HttpStatus.CONFLICT),
+    /**
+     * G10a (FE Q6): a known price on a confirmed sales order line is locked, zero included. Not STATE_CONFLICT:
+     * reloading does not help — only a missing price can still be filled.
+     */
+    PRICE_LOCKED              ("PRICE_LOCKED",              "A known sales price cannot be changed once the order is confirmed", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
     /**
      * G8c (FE Q14): the first operation of a work order takes input only after material was issued to it. Not

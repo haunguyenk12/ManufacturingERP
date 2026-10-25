@@ -263,6 +263,11 @@ tập dòng; kèm `errors[{field}]`. Tách khỏi `STATE_CONFLICT` vì tải l�
 sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nhận ⇒ `VALIDATION_ERROR` field `lines[i].unitPrice`; vật tư sai loại ⇒
 `OPERATION_NOT_ALLOWED` field `lines[i].itemId`; huỷ PO đã nhận / đóng PO hết lượng mở / đảo phiếu nhận của PO `CLOSED` ⇒ `STATE_CONFLICT`.
 
+**Constant thêm ở `G10a` (2026-10-25):** `PRICE_LOCKED` (409) — bổ sung giá cho một dòng đơn đã xác nhận mà giá đã biết (kể cả
+0); kèm `errors[{field:"prices[i].unitPrice"}]`. Tách khỏi `STATE_CONFLICT` vì tải lại không giúp gì — giá đã chốt không sửa được. Còn
+lại dùng mã sẵn có: xác nhận đơn không có khách master ⇒ `OPERATION_NOT_ALLOWED` (422) field `customerId`; giá âm/quá trần/quá 6 số lẻ
+⇒ `VALIDATION_ERROR` field; thiếu `Idempotency-Key` ⇒ `MISSING_REQUIRED_FIELD`.
+
 **Constant thêm ở `G7b` (2026-10-18):** `PENDING_GOODS_RECEIPT` (409) — huỷ hoặc đóng một PO còn phiếu nhận `DRAFT`. Tách khỏi
 `STATE_CONFLICT` vì cách xử lý là post hoặc huỷ phiếu nhận nháp trước, không phải tải lại PO. Còn lại dùng mã sẵn có: nhận vượt lượng mở (kể cả
 kẻ thua của hai lần post đồng thời) ⇒ `PLANNED_QUANTITY_EXCEEDED` field `lines[i].receivedQuantity`; mã lô đã có (không phân biệt hoa thường) ⇒

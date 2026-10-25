@@ -198,7 +198,7 @@ class SalesOrderMethodSecurityTest {
                     mock(CustomerRepository.class), organizationLookupService, itemLookupService,
                     mock(UomLookupService.class), planningDemandService, stockReservationService,
                     coverageLookupService,
-                    new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper),
+                    new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)),
                     mapper);
         }
 

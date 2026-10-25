@@ -3,6 +3,8 @@ package com.erp.manufacturing.module.sales.mapper;
 import com.erp.manufacturing.module.sales.domain.SalesOrder;
 import com.erp.manufacturing.module.sales.domain.SalesOrderLine;
 import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderCommercialResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderLineCommercialResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLineMetricsEvidence;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLineResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderLinkedDocumentResponse;
@@ -31,7 +33,7 @@ public class SalesOrderMapper {
         List<SalesOrderLineResponse> lines = includeLines
                 ? sortedLines(order).stream().map(this::toResponse).toList()
                 : List.of();
-        return build(order, lines, includeLines ? summaryOf(order) : null, List.of());
+        return build(order, lines, includeLines ? summaryOf(order) : null, List.of(), false);
     }
 
     /** List row: no lines, the summary from {@code SalesOrderLineRepository.summarizeByOrderIds}. */
@@ -40,7 +42,7 @@ public class SalesOrderMapper {
                 ? new LineSummary(null, null, 0)
                 : new LineSummary(summary.getEarliestDueDate(), summary.getLatestDueDate(),
                         summary.getLineCount().intValue());
-        return build(order, List.of(), lineSummary, List.of());
+        return build(order, List.of(), lineSummary, List.of(), false);
     }
 
     /**
@@ -48,15 +50,18 @@ public class SalesOrderMapper {
      *
      * @param heldByLine     ACTIVE stock held per line (absent = none)
      * @param coverageByLine open work-order coverage per line (absent = none)
+     * @param showPrices     G10a (D6): whether the caller may see the order's money
      */
     public SalesOrderResponse toDetailResponse(SalesOrder order,
                                                Map<UUID, BigDecimal> heldByLine,
                                                Map<UUID, BigDecimal> coverageByLine,
-                                               List<LinkedWorkOrder> linkedWorkOrders) {
+                                               List<LinkedWorkOrder> linkedWorkOrders,
+                                               boolean showPrices) {
         List<SalesOrderLineResponse> lines = sortedLines(order).stream()
                 .map(line -> toResponse(line,
                         heldByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
-                        coverageByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO)))
+                        coverageByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
+                        showPrices))
                 .toList();
         List<SalesOrderLinkedDocumentResponse> documents = linkedWorkOrders.stream()
                 .map(linked -> new SalesOrderLinkedDocumentResponse(
@@ -70,7 +75,7 @@ public class SalesOrderMapper {
                         linked.allocatedQuantity(),
                         linked.fulfilledQuantity()))
                 .toList();
-        return build(order, lines, summaryOf(order), documents);
+        return build(order, lines, summaryOf(order), documents, showPrices);
     }
 
     public SalesOrderLineResponse toResponse(SalesOrderLine line) {
@@ -88,7 +93,8 @@ public class SalesOrderMapper {
                 null, null, null, null, null, null, null);
     }
 
-    private SalesOrderLineResponse toResponse(SalesOrderLine line, BigDecimal held, BigDecimal coverage) {
+    private SalesOrderLineResponse toResponse(SalesOrderLine line, BigDecimal held, BigDecimal coverage,
+                                              boolean showPrices) {
         BigDecimal qcAccepted = line.getFulfilledQuantity();
         return new SalesOrderLineResponse(
                 line.getSalesOrderLineId(),
@@ -107,7 +113,13 @@ public class SalesOrderMapper {
                 qcAccepted,
                 null,
                 uncovered(line.getOrderedQuantity(), qcAccepted, held, coverage),
-                SalesOrderLineMetricsEvidence.current());
+                SalesOrderLineMetricsEvidence.current(),
+                showPrices ? commercialOf(line) : null);
+    }
+
+    private static SalesOrderLineCommercialResponse commercialOf(SalesOrderLine line) {
+        return new SalesOrderLineCommercialResponse(
+                line.getUnitPrice(), SalesOrderCommercialResponse.VND, line.getUnitPrice() != null);
     }
 
     /**
@@ -147,7 +159,8 @@ public class SalesOrderMapper {
     private SalesOrderResponse build(SalesOrder order,
                                      List<SalesOrderLineResponse> lines,
                                      LineSummary summary,
-                                     List<SalesOrderLinkedDocumentResponse> documents) {
+                                     List<SalesOrderLinkedDocumentResponse> documents,
+                                     boolean showPrices) {
         return new SalesOrderResponse(
                 order.getSalesOrderId(),
                 order.getCompany().getCompanyId(),
@@ -170,7 +183,14 @@ public class SalesOrderMapper {
                 summary != null ? summary.earliest() : null,
                 summary != null ? summary.latest() : null,
                 summary != null ? summary.count() : null,
-                documents);
+                documents,
+                order.isDeliveryBaselineKnown(),
+                order.isDeliveryBaselineKnown() ? null : SalesOrderResponse.LEGACY_ORDER,
+                showPrices ? new SalesOrderCommercialResponse(
+                        SalesOrderCommercialResponse.VND,
+                        order.pricingVersion(),
+                        (int) order.getLines().stream().filter(line -> line.getUnitPrice() == null).count())
+                        : null);
     }
 
     private List<SalesOrderLine> sortedLines(SalesOrder order) {

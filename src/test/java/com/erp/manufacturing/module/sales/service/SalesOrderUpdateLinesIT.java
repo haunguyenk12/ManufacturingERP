@@ -93,6 +93,8 @@ class SalesOrderUpdateLinesIT extends AbstractPostgresIntegrationTest {
     @Autowired
     TestEntityManager entityManager;
 
+    @MockBean com.erp.manufacturing.module.sales.service.SalesPriceVisibility salesPriceVisibility;
+
     @MockBean
     OrganizationLookupService organizationLookupService;
 

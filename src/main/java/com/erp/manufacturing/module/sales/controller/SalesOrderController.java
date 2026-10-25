@@ -5,7 +5,9 @@ import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.common.web.PageableFactory;
 import com.erp.manufacturing.common.web.PlantContextResolver;
 import com.erp.manufacturing.module.sales.domain.SalesOrderStatus;
+import com.erp.manufacturing.module.sales.dto.CommercialCommandResult;
 import com.erp.manufacturing.module.sales.dto.PlanningDemandLineResponse;
+import com.erp.manufacturing.module.sales.dto.SalesOrderCommercialPricesRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderAllocationCandidatesResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCancelRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderCreateRequest;
@@ -18,6 +20,7 @@ import com.erp.manufacturing.module.sales.dto.SalesOrderReservationResult;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
 import com.erp.manufacturing.module.sales.dto.SalesOrderUpdateRequest;
 import com.erp.manufacturing.module.sales.dto.SalesOrderVersionRequest;
+import com.erp.manufacturing.module.sales.service.SalesOrderPricingService;
 import com.erp.manufacturing.module.sales.service.SalesOrderReservationService;
 import com.erp.manufacturing.module.sales.service.SalesOrderService;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus;
@@ -42,6 +45,7 @@ public class SalesOrderController {
 
     private final SalesOrderService salesOrderService;
     private final SalesOrderReservationService reservationService;
+    private final SalesOrderPricingService pricingService;
     private final PlantContextResolver plantContextResolver;
 
     @PostMapping("/v1")
@@ -138,6 +142,15 @@ public class SalesOrderController {
             @PathVariable UUID salesOrderId,
             @Valid @RequestBody(required = false) SalesOrderCancelRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(salesOrderService.cancel(salesOrderId, request)));
+    }
+
+    @PostMapping("/v1/{salesOrderId}/commercial-prices")
+    @Operation(summary = "Fill missing prices of a confirmed sales order; known prices are locked (G10a)")
+    public ResponseEntity<ApiResponse<CommercialCommandResult>> setPrices(
+            @PathVariable UUID salesOrderId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody SalesOrderCommercialPricesRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(pricingService.setPrices(salesOrderId, request, idempotencyKey)));
     }
 
     @GetMapping("/v1/{salesOrderId}/reservations")

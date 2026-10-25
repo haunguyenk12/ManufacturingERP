@@ -27,13 +27,15 @@ public class SalesOrderDetailAssembler {
     private final SalesOrderStockReservationService stockReservationService;
     private final SalesOrderCoverageLookupService coverageLookupService;
     private final SalesOrderMapper mapper;
+    private final SalesPriceVisibility priceVisibility;
 
     public SalesOrderResponse toDetail(SalesOrder order) {
         List<UUID> lineIds = lineIds(order);
         return mapper.toDetailResponse(order,
                 stockReservationService.sumActiveHeldBySalesOrderLineIds(lineIds),
                 coverageLookupService.sumOpenCoverageBySalesOrderLineIds(lineIds),
-                coverageLookupService.findLinkedWorkOrders(lineIds));
+                coverageLookupService.findLinkedWorkOrders(lineIds),
+                priceVisibility.canSeePrices(order.getPlant().getPlantId()));
     }
 
     /** {@code max(0, ordered − qcAccepted − held − workOrderCovered)} of one line, read now. */

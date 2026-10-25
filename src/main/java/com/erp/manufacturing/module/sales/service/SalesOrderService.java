@@ -109,6 +109,9 @@ public class SalesOrderService {
                 .orderDate(request.orderDate())
                 .note(trimToNull(request.note()))
                 .build();
+        if (request.customerId() != null) {
+            applyCustomer(order, resolveActiveCustomer(request.customerId(), company), null);
+        }
 
         int lineNo = 1;
         for (SalesOrderLineRequest lineRequest : request.lines()) {
@@ -169,6 +172,9 @@ public class SalesOrderService {
         applyCustomer(order, customer, request.customerReference());
         order.setOrderDate(request.orderDate());
         order.setNote(trimToNull(request.note()));
+        if (pricesChange(order.getLines(), request.lines())) {
+            order.bumpPricingRevision();
+        }
         order.getLines().clear();
         order.setUpdatedAt(Instant.now());
         salesOrderRepository.flush();
@@ -231,9 +237,12 @@ public class SalesOrderService {
      * demand per line — this is the point where a commercial commitment becomes something MRP can
      * plan against (spec §1).
      *
-     * <p>G6a: {@code expectedVersion} is optional ({@code null} = legacy call, no check). An order
-     * linked to a customer re-checks that the customer and every item are still ACTIVE (FE R02);
-     * legacy free-text orders keep their old behaviour.
+     * <p>G6a: {@code expectedVersion} is optional ({@code null} = legacy call, no check). The customer
+     * and every item are re-checked ACTIVE (FE R02).
+     *
+     * <p>G10a (D4): an order without a master customer cannot be confirmed — invoices and payments are
+     * bound to the customer master (FE Q4), and a free-text name cannot be locked. {@code 422} on the
+     * {@code customerId} field; the client links one through {@code PATCH /{id}/draft} first.
      */
     @Transactional
     @PreAuthorize("@salesPermissionGuard.hasOrderAccess(authentication, 'PERM_SALES_ORDER_MANAGE', #salesOrderId)")
@@ -249,11 +258,13 @@ public class SalesOrderService {
         if (expectedVersion != null) {
             ensureVersion(order, expectedVersion);
         }
-        if (order.getCustomerId() != null) {
-            resolveActiveCustomer(order.getCustomerId(), order.getCompany());
-            for (SalesOrderLine line : order.getLines()) {
-                itemLookupService.getActiveItem(line.getItem().getItemId());
-            }
+        if (order.getCustomerId() == null) {
+            throw ExceptionFactory.withErrors(BusinessErrorCode.OPERATION_NOT_ALLOWED,
+                    Map.of("customerId", "a customer from the customer master is required to confirm"));
+        }
+        resolveActiveCustomer(order.getCustomerId(), order.getCompany());
+        for (SalesOrderLine line : order.getLines()) {
+            itemLookupService.getActiveItem(line.getItem().getItemId());
         }
         order.confirm();
         for (SalesOrderLine line : order.getLines()) {
@@ -475,8 +486,32 @@ public class SalesOrderService {
                     .orderedQuantity(line.orderedQuantity())
                     .fulfilledQuantity(BigDecimal.ZERO)
                     .dueDate(line.dueDate())
+                    .unitPrice(line.unitPrice())
                     .build());
         }
+    }
+
+    /**
+     * G10a: whether a draft replacement changes any line price, compared line by line in {@code lineNo} order (line
+     * ids are reissued on every save, so position is the only identity a draft has). Moves {@code pricingVersion}.
+     */
+    static boolean pricesChange(List<SalesOrderLine> existing, List<SalesOrderDraftLineRequest> replacement) {
+        List<BigDecimal> before = existing.stream()
+                .sorted(java.util.Comparator.comparing(SalesOrderLine::getLineNo))
+                .map(SalesOrderLine::getUnitPrice)
+                .toList();
+        List<BigDecimal> after = replacement.stream().map(SalesOrderDraftLineRequest::unitPrice).toList();
+        if (before.size() != after.size()) {
+            return before.stream().anyMatch(Objects::nonNull) || after.stream().anyMatch(Objects::nonNull);
+        }
+        for (int i = 0; i < before.size(); i++) {
+            BigDecimal b = before.get(i);
+            BigDecimal a = after.get(i);
+            if (b == null ? a != null : (a == null || b.compareTo(a) != 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Customer resolveActiveCustomer(UUID customerId, Company company) {

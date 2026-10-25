@@ -106,6 +106,8 @@ class SalesOrderReservationIT extends AbstractPostgresIntegrationTest {
     @Autowired StockBalanceRepository balanceRepository;
     @Autowired JdbcTemplate jdbc;
 
+    @MockBean com.erp.manufacturing.module.sales.service.SalesPriceVisibility salesPriceVisibility;
+
     @MockBean OrganizationLookupService organizationLookupService;
     @MockBean ItemLookupService itemLookupService;
     @MockBean PlanningDemandService planningDemandService;
