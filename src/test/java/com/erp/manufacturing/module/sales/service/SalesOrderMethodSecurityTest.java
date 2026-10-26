@@ -198,8 +198,8 @@ class SalesOrderMethodSecurityTest {
                     mock(CustomerRepository.class), organizationLookupService, itemLookupService,
                     mock(UomLookupService.class), planningDemandService, stockReservationService,
                     coverageLookupService,
-                    new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)),
-                    mapper);
+                    new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class), org.mockito.Mockito.mock(com.erp.manufacturing.module.delivery.service.DeliveryLookupService.class)),
+                    mapper, org.mockito.Mockito.mock(com.erp.manufacturing.module.delivery.service.DeliveryLookupService.class));
         }
 
         @Bean SalesOrderMapper salesOrderMapper() { return new SalesOrderMapper(); }

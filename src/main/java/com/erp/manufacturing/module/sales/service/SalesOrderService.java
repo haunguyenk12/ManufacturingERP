@@ -6,6 +6,7 @@ import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.module.delivery.service.DeliveryLookupService;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
@@ -85,6 +86,7 @@ public class SalesOrderService {
     private final SalesOrderCoverageLookupService coverageLookupService;
     private final SalesOrderDetailAssembler detailAssembler;
     private final SalesOrderMapper mapper;
+    private final DeliveryLookupService deliveryLookupService;
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_SALES_ORDER_MANAGE', 'PLANT', #request.plantId())")
@@ -286,6 +288,9 @@ public class SalesOrderService {
      * order, and unwinding those is not a sales-side decision. Cancelling a confirmed order also
      * cancels the demand it generated, so MRP stops planning for it.
      *
+     * <p>G10b (FE R26/Q37): refused while a DRAFT or POSTED delivery stands behind the order — a posted
+     * delivery is irreversible, and a draft must be cancelled by its author first.
+     *
      * <p>G6a: also releases every stock hold of <em>this</em> order in the same transaction (FE R06).
      * The work-order guard is the status rule above: allocating a work order moves the order to
      * {@code IN_PRODUCTION}, so an order with a work order behind it can never get here (FE Q24 —
@@ -304,6 +309,10 @@ public class SalesOrderService {
         }
         if (request != null && request.expectedVersion() != null) {
             ensureVersion(order, request.expectedVersion());
+        }
+        if (deliveryLookupService.hasOpenDeliveries(order.getSalesOrderId())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
+                    "A draft or posted delivery stands behind this sales order; cancel the draft first");
         }
         if (order.isConfirmed()) {
             planningDemandService.cancelOpenDemandsForSalesOrderLines(
@@ -373,18 +382,32 @@ public class SalesOrderService {
         Map<UUID, UUID> demandIdByLineId = planningDemandService.findOpenDemandIdsBySalesOrderLineIds(lineIds);
         Map<UUID, BigDecimal> held = stockReservationService.sumActiveHeldBySalesOrderLineIds(lineIds);
         Map<UUID, BigDecimal> coverage = coverageLookupService.sumOpenCoverageBySalesOrderLineIds(lineIds);
+        Map<UUID, BigDecimal> delivered = deliveryLookupService.sumDeliveredBySalesOrderLineIds(lineIds);
+        Map<UUID, BigDecimal> fulfilled = salesOrderLineRepository.findAllById(lineIds).stream()
+                .collect(Collectors.toMap(SalesOrderLine::getSalesOrderLineId, SalesOrderLine::getFulfilledQuantity));
         return eligible.stream()
                 .map(projection -> mapper.toResponse(
                         projection,
                         demandIdByLineId.get(projection.getSalesOrderLineId()),
                         held.getOrDefault(projection.getSalesOrderLineId(), BigDecimal.ZERO),
-                        coverage.getOrDefault(projection.getSalesOrderLineId(), BigDecimal.ZERO)))
+                        coverage.getOrDefault(projection.getSalesOrderLineId(), BigDecimal.ZERO),
+                        deliveredBeyondQc(delivered.get(projection.getSalesOrderLineId()),
+                                fulfilled.get(projection.getSalesOrderLineId()))))
                 .filter(line -> !uncoveredOnly || line.uncoveredQuantity().signum() > 0)
                 .toList();
     }
 
     private SalesOrderResponse toDetail(SalesOrder order) {
         return detailAssembler.toDetail(order);
+    }
+
+    /** G10b (D8): the part of the delivered quantity QC acceptance does not already account for. */
+    private static BigDecimal deliveredBeyondQc(BigDecimal delivered, BigDecimal fulfilled) {
+        if (delivered == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal beyond = delivered.subtract(fulfilled == null ? BigDecimal.ZERO : fulfilled);
+        return beyond.signum() > 0 ? beyond : BigDecimal.ZERO;
     }
 
     private void ensureVersion(SalesOrder order, Long expectedVersion) {

@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.sales.service;
 
+import com.erp.manufacturing.module.delivery.service.DeliveryLookupService;
 import com.erp.manufacturing.module.sales.domain.SalesOrder;
 import com.erp.manufacturing.module.sales.domain.SalesOrderLine;
 import com.erp.manufacturing.module.sales.dto.SalesOrderResponse;
@@ -28,6 +29,7 @@ public class SalesOrderDetailAssembler {
     private final SalesOrderCoverageLookupService coverageLookupService;
     private final SalesOrderMapper mapper;
     private final SalesPriceVisibility priceVisibility;
+    private final DeliveryLookupService deliveryLookupService;
 
     public SalesOrderResponse toDetail(SalesOrder order) {
         List<UUID> lineIds = lineIds(order);
@@ -35,17 +37,20 @@ public class SalesOrderDetailAssembler {
                 stockReservationService.sumActiveHeldBySalesOrderLineIds(lineIds),
                 coverageLookupService.sumOpenCoverageBySalesOrderLineIds(lineIds),
                 coverageLookupService.findLinkedWorkOrders(lineIds),
-                priceVisibility.canSeePrices(order.getPlant().getPlantId()));
+                priceVisibility.canSeePrices(order.getPlant().getPlantId()),
+                deliveryLookupService.sumDeliveredBySalesOrderLineIds(lineIds));
     }
 
-    /** {@code max(0, ordered − qcAccepted − held − workOrderCovered)} of one line, read now. */
+    /** {@code max(0, ordered − max(qcAccepted, delivered) − held − workOrderCovered)} of one line, read now (D8). */
     public BigDecimal uncoveredQuantity(SalesOrderLine line) {
         List<UUID> ids = List.of(line.getSalesOrderLineId());
         Map<UUID, BigDecimal> held = stockReservationService.sumActiveHeldBySalesOrderLineIds(ids);
         Map<UUID, BigDecimal> coverage = coverageLookupService.sumOpenCoverageBySalesOrderLineIds(ids);
+        Map<UUID, BigDecimal> delivered = deliveryLookupService.sumDeliveredBySalesOrderLineIds(ids);
         return SalesOrderMapper.uncovered(
                 line.getOrderedQuantity(),
                 line.getFulfilledQuantity(),
+                delivered.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
                 held.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
                 coverage.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO));
     }

@@ -353,6 +353,47 @@ public class InventoryMovementService {
     }
 
     /**
+     * G10b: a delivery's share taken from its own sales order hold — {@link #issueReserved}, but a lot past its
+     * {@code expiresAt} is refused like {@link #issueManual} (a delivery refuses expired stock on both of its legs).
+     */
+    @Transactional
+    public InventoryMovementResult issueReservedManual(InventoryIssueCommand command, String idempotencyKey) {
+        return issueInternal(command, idempotencyKey, true, true);
+    }
+
+    /** G10b: one stock position as it is now, for a read-only figure (free quantity of a delivery source). */
+    @Transactional(readOnly = true)
+    public Optional<StockBalance> findPosition(StockPositionRef position) {
+        return position.lotId() == null
+                ? balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(
+                        position.itemId(), position.warehouseId())
+                : balanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
+                        position.itemId(), position.warehouseId(), position.lotId());
+    }
+
+    /**
+     * G10b: takes a write lock on each stock position, in one stable order (item, warehouse, lot), before any of them
+     * is read — so two deliveries over the same positions queue instead of both reading the same free quantity, and
+     * cannot deadlock (same idea as B151). A position that does not exist is skipped: the issue that follows reports
+     * the shortage. Call it before anything has loaded these balances into the persistence context (B194).
+     */
+    @Transactional
+    public void lockPositions(java.util.Collection<StockPositionRef> positions) {
+        positions.stream()
+                .distinct()
+                .sorted(java.util.Comparator.comparing((StockPositionRef p) -> p.itemId().toString())
+                        .thenComparing(p -> p.warehouseId().toString())
+                        .thenComparing(p -> p.lotId() == null ? "" : p.lotId().toString()))
+                .forEach(p -> {
+                    if (p.lotId() == null) {
+                        balanceRepository.lockPositionWithoutLot(p.itemId(), p.warehouseId());
+                    } else {
+                        balanceRepository.lockPositionWithLot(p.itemId(), p.warehouseId(), p.lotId());
+                    }
+                });
+    }
+
+    /**
      * Both {@link #issue} and {@link #issueReserved} write {@link MovementType#ISSUE}, so they share a
      * single replay scope on purpose: both are "goods leaving the warehouse", and inventing a second
      * movement type just to separate two entry points would put an implementation detail in the ledger.

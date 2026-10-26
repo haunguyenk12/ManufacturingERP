@@ -103,6 +103,16 @@ public class OrganizationLookupService {
                 .collect(Collectors.toMap(Plant::getCode, Function.identity()));
     }
 
+    /** G10b: warehouses by id for labels on a page of documents, one query (C14); absent ids are skipped. */
+    @Transactional(readOnly = true)
+    public Map<UUID, Warehouse> findWarehousesById(Collection<UUID> warehouseIds) {
+        if (warehouseIds == null || warehouseIds.isEmpty()) {
+            return Map.of();
+        }
+        return warehouseRepository.findAllById(warehouseIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Warehouse::getWarehouseId, w -> w));
+    }
+
     @Transactional(readOnly = true)
     public Map<String, Warehouse> findWarehousesByCode(UUID plantId, Collection<String> codes) {
         if (codes.isEmpty()) {

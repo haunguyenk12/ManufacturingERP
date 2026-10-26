@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G10` — FE handoff Giai đoạn 10: giao hàng, hoá đơn và thanh toán** (`FE_HANDOFF_GD_10_2026-10-15.md`, P1) — 🔄 **đang chạy** (quyết định chốt 2026-10-25, §17.2): **`G10a` ✅ 2026-10-25** · `G10b` · `G10c` · `G10d` — xem **§17**. 🔴 Khác mọi handoff trước: **gần như toàn bộ là dựng mới** và là lần đầu repo chạm **tiền**. Không có entity/bảng/quyền/endpoint nào cho giao hàng, hoá đơn, thanh toán; đơn bán **chưa có giá**; `customerId` của đơn còn nullable; kho **không có** sổ "lô này thuộc dòng đơn nào" như FE giả định. `G9` đã xong ở BE, chờ FE nghiệm thu |
+| **Đang chạy** | **`G10` — FE handoff Giai đoạn 10: giao hàng, hoá đơn và thanh toán** (`FE_HANDOFF_GD_10_2026-10-15.md`, P1) — 🔄 **đang chạy** (quyết định chốt 2026-10-25, §17.2): **`G10a` ✅ · `G10b` ✅ 2026-10-25** · `G10c` · `G10d` — xem **§17**. 🔴 Khác mọi handoff trước: **gần như toàn bộ là dựng mới** và là lần đầu repo chạm **tiền**. Không có entity/bảng/quyền/endpoint nào cho giao hàng, hoá đơn, thanh toán; đơn bán **chưa có giá**; `customerId` của đơn còn nullable; kho **không có** sổ "lô này thuộc dòng đơn nào" như FE giả định. `G9` đã xong ở BE, chờ FE nghiệm thu |
 | **Chờ FE** | `G9` (§16) — ✅ BE xong cả 3 phần 2026-10-21/23, bản ghi `CLAUDE.md §0.64`–`§0.66`. `G8` (§15) — ✅ BE xong cả 4 phần 2026-10-19/20, bản ghi `CLAUDE.md §0.60`–`§0.63`. `G7` (§14) — ✅ 2026-10-18/19. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -1275,7 +1275,7 @@ Giao hàng/hoá đơn/thanh toán (GĐ10); chi phí/định giá/đóng kỳ đ�
 
 ---
 
-## 17. `G10` — FE handoff Giai đoạn 10: Giao hàng, hoá đơn và thanh toán 🔄 ĐANG CHẠY — `G10a` ✅ 2026-10-25
+## 17. `G10` — FE handoff Giai đoạn 10: Giao hàng, hoá đơn và thanh toán 🔄 ĐANG CHẠY — `G10a` ✅ `G10b` ✅ 2026-10-25
 
 Nguồn: `FE_HANDOFF_GD_10_2026-10-15.md` (v1, P1, 786 dòng). FE/mock đã xong: danh sách + nháp + ghi sổ **phiếu giao hàng** (một đơn bán, nhiều dòng/kho/lô), **hoá đơn bán hàng** (một đơn bán, gộp nhiều phiếu giao), **thanh toán khách hàng** (một khách, phân bổ nhiều hoá đơn), **giá bán trên đơn bán**, và các màn hình đọc liên quan (đơn bán, giữ hàng, tồn/lô/biến động, hoạch định, liên kết ngược từ phiếu nhập/lô/WO). BE phải (1) trả lời Q1–Q40 §5, (2) đối chiếu R01–R30 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_10_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào (§2.1 ghi rõ cả năm mảnh bằng chứng đều trống).
 
@@ -1376,6 +1376,14 @@ Bảng `customer_payments` + `customer_payment_allocations`; `invoice-candidates
 Lệch kế hoạch: D6 làm bằng **một** object `commercial` tuỳ chọn (vắng mặt khi không quyền) thay cho hai record; đường tạo đơn cũ nhận
 `customerId` tuỳ chọn để vẫn xác nhận được. `mvn -o clean verify` 2032 unit + 284 IT xanh; mutation 8/8. **Chưa:** smoke HTTP (chạy chung
 với `G10b`), sửa `scripts/demo-capstone2/seed.sh` gửi `customerId` (`G10-9`). Bản ghi: `CLAUDE.md §0.67`.
+
+### 17.3b Kết quả `G10b` *(2026-10-25)*
+
+✅ Migration `V87`, module mới `module/delivery` (10 endpoint), mã `SOURCE_UNKNOWN`, bất biến `B241`–`B245`. D8 làm: `uncovered` trừ
+`max(qcAccepted, delivered)` ở detail + `planning-demands`; huỷ đơn còn phiếu giao ⇒ 409. Lệch kế hoạch: **không** có bảng sự kiện riêng —
+lịch sử dẫn xuất từ cột ai/khi/lý do của phiếu; **không** `sourceSnapshotVersion` (kiểm lại dưới khoá lúc ghi sổ). Smoke HTTP (gộp `G10a`)
+tìm ra version +2 ở bổ sung giá và sửa nháp đổi ghi chú — đã sửa, lượt `171137` 39/39. `mvn -o clean verify` 2053 unit + 294 IT xanh;
+mutation 12/12. Trả lời FE: `BE_RESPONSE_GD_10_2026-10-25.md` (phần 1–2). Bản ghi: `CLAUDE.md §0.68`.
 
 ### 17.4 Breaking changes dự kiến *(ghi đầy đủ vào `BE_RESPONSE_GD_10_*` khi làm)*
 
@@ -1554,7 +1562,7 @@ Vận chuyển / vận đơn / POD / xác nhận khách đã nhận (`POSTED` ch
   - [x] **Chốt `D0` — tách `G10a`/`G10b`/`G10c`/`G10d` hay làm một lượt** *(2026-10-25: tách 4 làm liền)*
   - [ ] Chốt 9 quyết định còn lại §17.2 — **`D2`** (có dựng sổ "quyền hưởng theo nguồn" không: khuyến nghị không), **`D3`** (đơn cũ baseline chưa biết ⇒ không giao được), **`D5`** (tiền là số JSON, trần `2^53`), **`D6`** (hai hình dạng response theo quyền) và **`D8`** (MRP trừ phần đã giao — đổi số) là năm cái quyết định độ lớn
   - [x] `G10a` Nền đơn bán: giá (`unit_price` nullable + sự kiện), cờ baseline, `customerId` bắt buộc khi xác nhận, `commercial-prices`, 10 quyền, mẫu response theo quyền, bảng idempotency (`V86`)
-  - [ ] `G10b` Giao hàng: hạn mức dẫn xuất từ sổ, nguồn (`free`/`ownReserved`), ghi sổ nguyên tử hai nhánh `ISSUE`, `related`, (nếu `D8`) hạ nhu cầu MRP (`V87`)
+  - [x] `G10b` Giao hàng: hạn mức dẫn xuất từ sổ, nguồn (`free`/`ownReserved`), ghi sổ nguyên tử hai nhánh `ISSUE`, `related`, (nếu `D8`) hạ nhu cầu MRP (`V87`)
   - [ ] `G10c` Hoá đơn: preview, hạn mức theo dòng giao, làm tròn HALF_UP cộng dồn, `PRICE_STALE` (`V88`)
   - [ ] `G10d` Thanh toán + màn hình đọc: phân bổ nhiều hoá đơn, `paid`/`outstanding`, tiến độ đơn, liên kết ngược (`V89`)
   - [ ] `G10-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_10_*.md` + docs (🔴 `C10` **có** kích hoạt: 10 quyền mới ⇒ `docs/roles-and-permissions.md`)

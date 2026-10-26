@@ -50,7 +50,7 @@ class SalesOrderCommercialShapeTest {
     void detail_forACallerWhoMaySeePrices_carriesThePriceTheMissingOneAsNullAndTheOrderTotals() {
         SalesOrder order = confirmedOrder(new BigDecimal("100000"), null);
 
-        JsonNode body = json.valueToTree(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), true));
+        JsonNode body = json.valueToTree(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), true, Map.of()));
 
         assertThat(body.get("lines").get(0).get("commercial").get("unitPrice").decimalValue()).isEqualByComparingTo("100000");
         assertThat(body.get("lines").get(0).get("commercial").get("priceKnown").asBoolean()).isTrue();
@@ -66,7 +66,7 @@ class SalesOrderCommercialShapeTest {
     void detail_forACallerWhoMayNotSeePrices_hasNoMoneyFieldAtAll() {
         SalesOrder order = confirmedOrder(new BigDecimal("100000"), new BigDecimal("5"));
 
-        JsonNode body = json.valueToTree(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false));
+        JsonNode body = json.valueToTree(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false, Map.of()));
 
         assertThat(body.has("commercial")).isFalse();
         assertThat(body.get("lines")).allSatisfy(line -> assertThat(line.has("commercial")).isFalse());
@@ -79,12 +79,12 @@ class SalesOrderCommercialShapeTest {
         SalesOrder order = confirmedOrder(null, null);
         order.setDeliveryBaselineKnown(false);
 
-        SalesOrderResponse response = mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false);
+        SalesOrderResponse response = mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false, Map.of());
 
         assertThat(response.deliveryBaselineKnown()).isFalse();
         assertThat(response.deliveryBaselineUnknownReason()).isEqualTo(SalesOrderResponse.LEGACY_ORDER);
         order.setDeliveryBaselineKnown(true);
-        assertThat(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false).deliveryBaselineUnknownReason())
+        assertThat(mapper.toDetailResponse(order, Map.of(), Map.of(), List.of(), false, Map.of()).deliveryBaselineUnknownReason())
                 .isNull();
     }
 

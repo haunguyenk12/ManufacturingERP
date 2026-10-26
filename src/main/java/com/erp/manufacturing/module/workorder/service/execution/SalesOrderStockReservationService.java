@@ -154,6 +154,30 @@ public class SalesOrderStockReservationService {
         return active.size();
     }
 
+    /**
+     * G10b: the order's {@code ACTIVE} holds, oldest first — what a delivery takes before free stock (FE Q14). One
+     * query for the whole order; the caller narrows by line and position.
+     */
+    @Transactional(readOnly = true)
+    public List<MaterialReservation> findActiveForSalesOrder(UUID salesOrderId) {
+        return reservationRepository.findBySalesOrderIdAndStatus(salesOrderId, MaterialReservationStatus.ACTIVE)
+                .stream()
+                .sorted(java.util.Comparator.comparing(MaterialReservation::getCreatedAt,
+                                java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder()))
+                        .thenComparing(r -> r.getReservationId().toString()))
+                .toList();
+    }
+
+    /**
+     * G10b: a delivery issued {@code amount} out of this hold. The balance side — quantity and reserved quantity both
+     * down — is the {@code ISSUE} itself ({@code issueReservedManual}); this only moves the hold to its new remainder.
+     */
+    @Transactional
+    public void consumeForDelivery(MaterialReservation reservation, BigDecimal amount) {
+        reservation.consume(amount);
+        reservationRepository.save(reservation);
+    }
+
     /** Remaining {@code ACTIVE} held quantity per sales order line, one query (rule C14). */
     @Transactional(readOnly = true)
     public Map<UUID, BigDecimal> sumActiveHeldBySalesOrderLineIds(Collection<UUID> salesOrderLineIds) {

@@ -62,8 +62,20 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, UUID> {
     @Query(value = "select nextval('sales_order_number_seq')", nativeQuery = true)
     long nextOrderNumber();
 
+    /**
+     * G10b: row lock only, by id — the caller re-reads the order afterwards
+     * ({@code SalesOrderCommercialLookupService.lockOrder}, B194).
+     */
+    @Query(value = "select sales_order_id from sales_orders where sales_order_id = :salesOrderId for update",
+            nativeQuery = true)
+    Optional<UUID> lockRowBySalesOrderId(@Param("salesOrderId") UUID salesOrderId);
+
     @EntityGraph(attributePaths = {"company", "plant", "lines", "lines.item"})
     Optional<SalesOrder> findWithDetailsBySalesOrderId(UUID salesOrderId);
+
+    /** G10b: the orders behind a page of documents with their lines and items, one query (C14). */
+    @EntityGraph(attributePaths = {"lines", "lines.item"})
+    List<SalesOrder> findWithLinesBySalesOrderIdIn(java.util.Collection<UUID> salesOrderIds);
 
     /**
      * Loads whole orders with <b>all</b> of their lines (F6). The fulfilment roll-up decides

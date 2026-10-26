@@ -101,6 +101,12 @@ public enum BusinessErrorCode implements ErrorCode {
      * reloading does not help — only a missing price can still be filled.
      */
     PRICE_LOCKED              ("PRICE_LOCKED",              "A known sales price cannot be changed once the order is confirmed", HttpStatus.CONFLICT),
+    /**
+     * G10b (FE Q5): the order has no known delivery baseline — confirmed before deliveries existed (D3), or without a
+     * master customer (D4) — so nothing can be delivered or invoiced from it. Not STATE_CONFLICT: reloading does not
+     * help; only a reconciliation outside this system can fill the gap.
+     */
+    SOURCE_UNKNOWN            ("SOURCE_UNKNOWN",            "This order has no known delivery baseline", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
     /**
      * G8c (FE Q14): the first operation of a work order takes input only after material was issued to it. Not

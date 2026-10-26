@@ -124,6 +124,10 @@ public enum AuditAction {
     /** G6a: a sales order hold released back to free stock. */
     SALES_ORDER_STOCK_RELEASED,
     SALES_ORDER_PRICES_SET,
+    DELIVERY_CREATED,
+    DELIVERY_UPDATED,
+    DELIVERY_POSTED,
+    DELIVERY_CANCELLED,
     MRP_RUN,
     PLANNING_DEMAND_CREATED,
     PLANNING_DEMAND_CANCELLED,

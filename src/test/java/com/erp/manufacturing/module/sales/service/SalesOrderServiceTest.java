@@ -65,6 +65,7 @@ class SalesOrderServiceTest {
     @Mock UomLookupService uomLookupService;
     @Mock SalesOrderStockReservationService stockReservationService;
     @Mock SalesOrderCoverageLookupService coverageLookupService;
+    @Mock com.erp.manufacturing.module.delivery.service.DeliveryLookupService deliveryLookupService;
 
     SalesOrderService service;
 
@@ -81,8 +82,8 @@ class SalesOrderServiceTest {
                 planningDemandService,
                 stockReservationService,
                 coverageLookupService,
-                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)),
-                mapper);
+                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class), deliveryLookupService),
+                mapper, deliveryLookupService);
     }
 
     // ── create ─────────────────────────────────────────────────────────────
@@ -501,6 +502,45 @@ class SalesOrderServiceTest {
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
+
+    /**
+     * G10b (D8), the cases measured before choosing the formula: shipping must neither leave the shipped quantity
+     * planned again nor count goods QC released and then shipped twice.
+     */
+    @Test
+    void uncovered_subtractsMaxOfQcAcceptedAndDelivered_notTheirSum() {
+        BigDecimal ten = BigDecimal.TEN;
+        BigDecimal zero = BigDecimal.ZERO;
+        // shipped 10 from free stock, nothing produced for the order: nothing left to plan
+        assertThat(SalesOrderMapper.uncovered(ten, zero, ten, zero, zero)).isEqualByComparingTo("0");
+        // held 10 then shipped them (the hold is consumed): still nothing left to plan
+        assertThat(SalesOrderMapper.uncovered(ten, zero, ten, zero, zero)).isEqualByComparingTo("0");
+        // QC accepted 6, work order closed short, those 6 shipped: 4 still to make, not 0
+        assertThat(SalesOrderMapper.uncovered(ten, new BigDecimal("6"), new BigDecimal("6"), zero, zero))
+                .isEqualByComparingTo("4");
+        // QC 6, shipped 8 (2 from other stock): 2 left
+        assertThat(SalesOrderMapper.uncovered(ten, new BigDecimal("6"), new BigDecimal("8"), zero, zero))
+                .isEqualByComparingTo("2");
+        // unknown delivery baseline counts nothing delivered
+        assertThat(SalesOrderMapper.uncovered(ten, new BigDecimal("6"), null, new BigDecimal("1"), zero))
+                .isEqualByComparingTo("3");
+    }
+
+    /** G10b (FE R26/Q37): a draft or posted delivery stands behind the order. */
+    @Test
+    void cancel_withADeliveryBehindTheOrder_isStateConflictAndReleasesNothing() {
+        SalesOrder order = draftOrderWithTwoLines();
+        order.confirm();
+        UUID salesOrderId = order.getSalesOrderId();
+        when(salesOrderRepository.findWithDetailsBySalesOrderId(salesOrderId)).thenReturn(Optional.of(order));
+        when(deliveryLookupService.hasOpenDeliveries(salesOrderId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.cancel(salesOrderId, null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        assertThat(order.getStatus()).isEqualTo(SalesOrderStatus.CONFIRMED);
+        verifyNoInteractions(planningDemandService, stockReservationService);
+    }
 
     private void linkActiveCustomer(SalesOrder order) {
         com.erp.manufacturing.module.sales.domain.Customer customer =

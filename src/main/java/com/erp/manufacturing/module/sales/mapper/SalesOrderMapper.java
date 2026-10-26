@@ -51,17 +51,22 @@ public class SalesOrderMapper {
      * @param heldByLine     ACTIVE stock held per line (absent = none)
      * @param coverageByLine open work-order coverage per line (absent = none)
      * @param showPrices     G10a (D6): whether the caller may see the order's money
+     * @param deliveredByLine G10b: POSTED delivery quantity per line (absent = none)
      */
     public SalesOrderResponse toDetailResponse(SalesOrder order,
                                                Map<UUID, BigDecimal> heldByLine,
                                                Map<UUID, BigDecimal> coverageByLine,
                                                List<LinkedWorkOrder> linkedWorkOrders,
-                                               boolean showPrices) {
+                                               boolean showPrices,
+                                               Map<UUID, BigDecimal> deliveredByLine) {
         List<SalesOrderLineResponse> lines = sortedLines(order).stream()
                 .map(line -> toResponse(line,
                         heldByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
                         coverageByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO),
-                        showPrices))
+                        showPrices,
+                        order.isDeliveryBaselineKnown()
+                                ? deliveredByLine.getOrDefault(line.getSalesOrderLineId(), BigDecimal.ZERO)
+                                : null))
                 .toList();
         List<SalesOrderLinkedDocumentResponse> documents = linkedWorkOrders.stream()
                 .map(linked -> new SalesOrderLinkedDocumentResponse(
@@ -93,8 +98,9 @@ public class SalesOrderMapper {
                 null, null, null, null, null, null, null);
     }
 
+    /** @param delivered {@code null} when the order's delivery baseline is unknown (D3) — never a guessed 0 */
     private SalesOrderLineResponse toResponse(SalesOrderLine line, BigDecimal held, BigDecimal coverage,
-                                              boolean showPrices) {
+                                              boolean showPrices, BigDecimal delivered) {
         BigDecimal qcAccepted = line.getFulfilledQuantity();
         return new SalesOrderLineResponse(
                 line.getSalesOrderLineId(),
@@ -111,9 +117,9 @@ public class SalesOrderMapper {
                 coverage,
                 null,
                 qcAccepted,
-                null,
-                uncovered(line.getOrderedQuantity(), qcAccepted, held, coverage),
-                SalesOrderLineMetricsEvidence.current(),
+                delivered,
+                uncovered(line.getOrderedQuantity(), qcAccepted, delivered, held, coverage),
+                SalesOrderLineMetricsEvidence.of(delivered != null),
                 showPrices ? commercialOf(line) : null);
     }
 
@@ -123,22 +129,31 @@ public class SalesOrderMapper {
     }
 
     /**
-     * {@code max(0, ordered − qcAccepted − held − workOrderCovered)}. The three subtracted figures never
-     * overlap: work-order coverage counts only the part QC has not released yet, and holds are capped
-     * by this very number when they are made.
+     * {@code max(0, ordered − max(qcAccepted, delivered) − held − workOrderCovered)} (G10b, D8). The subtracted
+     * figures never overlap: work-order coverage counts only the part QC has not released yet, and holds are capped
+     * by this very number when they are made. {@code delivered} enters as {@code max} with {@code qcAccepted}, not as
+     * a fourth subtraction: goods QC released and then shipped are counted once (a straight subtraction makes
+     * "ordered 10, QC 6, shipped those 6" read as nothing left to make), while a shipment from a hold or from free
+     * stock no longer leaves its quantity planned again. {@code delivered} {@code null} (unknown baseline) counts 0.
      */
-    public static BigDecimal uncovered(BigDecimal ordered, BigDecimal qcAccepted,
+    public static BigDecimal uncovered(BigDecimal ordered, BigDecimal qcAccepted, BigDecimal delivered,
                                        BigDecimal held, BigDecimal workOrderCovered) {
-        BigDecimal rest = ordered.subtract(qcAccepted).subtract(held).subtract(workOrderCovered);
+        BigDecimal satisfied = delivered == null ? qcAccepted : qcAccepted.max(delivered);
+        BigDecimal rest = ordered.subtract(satisfied).subtract(held).subtract(workOrderCovered);
         return rest.signum() > 0 ? rest : BigDecimal.ZERO;
     }
 
-    /** {@code planningDemandId} and the coverage figures come from separate batch lookups. */
+    /**
+     * {@code planningDemandId}, the coverage figures and (G10b) the delivered quantity come from separate batch
+     * lookups. {@code open} is {@code ordered − fulfilled}, so {@code ordered − max(fulfilled, delivered)} is
+     * {@code open − max(0, delivered − fulfilled)} — the same D8 formula as {@link #uncovered}.
+     */
     public PlanningDemandLineResponse toResponse(SalesOrderPlanningDemandProjection projection,
                                                  UUID planningDemandId,
                                                  BigDecimal held,
-                                                 BigDecimal coverage) {
-        BigDecimal rest = projection.getOpenQuantity().subtract(held).subtract(coverage);
+                                                 BigDecimal coverage,
+                                                 BigDecimal deliveredBeyondQc) {
+        BigDecimal rest = projection.getOpenQuantity().subtract(deliveredBeyondQc).subtract(held).subtract(coverage);
         return new PlanningDemandLineResponse(
                 projection.getSalesOrderId(),
                 projection.getSalesOrderCode(),

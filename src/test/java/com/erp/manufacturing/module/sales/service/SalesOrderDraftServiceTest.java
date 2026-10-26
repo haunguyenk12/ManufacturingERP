@@ -66,6 +66,7 @@ class SalesOrderDraftServiceTest {
     @Mock PlanningDemandService planningDemandService;
     @Mock SalesOrderStockReservationService stockReservationService;
     @Mock SalesOrderCoverageLookupService coverageLookupService;
+    @Mock com.erp.manufacturing.module.delivery.service.DeliveryLookupService deliveryLookupService;
 
     SalesOrderService service;
     Company company;
@@ -79,7 +80,7 @@ class SalesOrderDraftServiceTest {
         service = new SalesOrderService(salesOrderRepository, salesOrderLineRepository, customerRepository,
                 organizationLookupService, itemLookupService, uomLookupService, planningDemandService,
                 stockReservationService, coverageLookupService,
-                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class)), mapper);
+                new SalesOrderDetailAssembler(stockReservationService, coverageLookupService, mapper, org.mockito.Mockito.mock(SalesPriceVisibility.class), deliveryLookupService), mapper, deliveryLookupService);
         company = Company.builder().companyId(UUID.randomUUID()).code("C").status(OrganizationStatus.ACTIVE).build();
         plant = Plant.builder().plantId(UUID.randomUUID()).company(company).code("P").status(OrganizationStatus.ACTIVE).build();
         customer = Customer.builder().customerId(UUID.randomUUID()).company(company).code("CUS-1").name("Khách A")

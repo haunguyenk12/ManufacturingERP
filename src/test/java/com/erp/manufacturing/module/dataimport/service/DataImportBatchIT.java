@@ -131,6 +131,7 @@ class DataImportBatchIT extends AbstractPostgresIntegrationTest {
     @SpyBean CustomerService customerService;
     @SpyBean com.erp.manufacturing.module.bom.service.BomService bomService;
     @MockBean com.erp.manufacturing.module.sales.service.SalesPriceVisibility salesPriceVisibility;
+    @MockBean com.erp.manufacturing.module.delivery.service.DeliveryLookupService deliveryLookupService;
 
     @MockBean DataImportBatchPermissionGuard batchGuard;
     @SpyBean com.erp.manufacturing.module.sales.service.SalesOrderService salesOrderService;

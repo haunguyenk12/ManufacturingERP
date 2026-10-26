@@ -69,6 +69,9 @@ public class SalesOrderPricingService {
         List<SalesOrderLine> targets = validate(request.prices(), lines);
 
         order.bumpPricingRevision();
+        // Lines are an inverse collection: dirty the header so its version moves (B112) — and do it before the first
+        // flush below, or the header is updated twice and the version moves by two (B212; found by the G10 smoke).
+        order.setUpdatedAt(Instant.now());
         List<SalesOrderPriceEvent> events = new ArrayList<>();
         for (int i = 0; i < targets.size(); i++) {
             SalesOrderLine line = targets.get(i);
@@ -83,8 +86,6 @@ public class SalesOrderPricingService {
         }
         priceEventRepository.saveAll(events);
         idempotency.record(key, CommercialCommand.SALES_PRICE_SET, order.getSalesOrderId(), fingerprint);
-        // Lines are an inverse collection: dirty the header so exactly one version bump is issued (B112).
-        order.setUpdatedAt(Instant.now());
         return result(salesOrderRepository.saveAndFlush(order));
     }
 
