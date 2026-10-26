@@ -107,6 +107,17 @@ public enum BusinessErrorCode implements ErrorCode {
      * help; only a reconciliation outside this system can fill the gap.
      */
     SOURCE_UNKNOWN            ("SOURCE_UNKNOWN",            "This order has no known delivery baseline", HttpStatus.CONFLICT),
+    /**
+     * G10c (FE R13, A19): a sales order line has no price, so its delivery cannot be invoiced. Never billed as 0 — a
+     * missing price is filled through {@code commercial-prices} by someone with the price authority.
+     */
+    PRICE_UNKNOWN             ("PRICE_UNKNOWN",             "A sales order line has no price yet", HttpStatus.CONFLICT),
+    /**
+     * G10c (FE R14, Q22, A22): the cumulative billing base (or the order's prices) changed since the invoice was
+     * previewed or saved. Not CONCURRENT_MODIFICATION: the amounts themselves would change, so the user previews,
+     * saves and confirms again — the server never changes an amount inside the old confirmation.
+     */
+    PRICE_STALE               ("PRICE_STALE",               "The invoice was priced on a billing base that has changed", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
     /**
      * G8c (FE Q14): the first operation of a work order takes input only after material was issued to it. Not

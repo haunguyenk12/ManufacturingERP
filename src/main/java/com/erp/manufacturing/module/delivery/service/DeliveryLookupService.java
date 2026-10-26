@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.delivery.service;
 
+import com.erp.manufacturing.module.delivery.domain.DeliveryLine;
 import com.erp.manufacturing.module.delivery.domain.DeliveryStatus;
 import com.erp.manufacturing.module.delivery.repository.DeliveryLineRepository;
 import com.erp.manufacturing.module.delivery.repository.DeliveryRepository;
@@ -15,7 +16,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * G10b: entry point for {@code module/sales} into deliveries (rule C7). Repository-only, no {@code @PreAuthorize} —
+ * G10b: entry point for {@code module/sales} and {@code module/billing} into deliveries (rule C7). Repository-only, no {@code @PreAuthorize} —
  * callers are guarded on the order's plant. Delivered quantity is always summed from POSTED lines, never stored.
  */
 @Service
@@ -37,6 +38,21 @@ public class DeliveryLookupService {
             delivered.put(row.getSalesOrderLineId(), row.getQuantity());
         }
         return delivered;
+    }
+
+    /** G10c: delivery lines by id with their delivery (status, order, date, code), one query. */
+    @Transactional(readOnly = true)
+    public List<DeliveryLine> findLines(Collection<UUID> deliveryLineIds) {
+        if (deliveryLineIds == null || deliveryLineIds.isEmpty()) {
+            return List.of();
+        }
+        return deliveryLineRepository.findWithDeliveryByDeliveryLineIdIn(deliveryLineIds);
+    }
+
+    /** G10c: the lines of the order's POSTED deliveries, oldest document first. */
+    @Transactional(readOnly = true)
+    public List<DeliveryLine> findPostedLines(UUID salesOrderId) {
+        return deliveryLineRepository.findPostedBySalesOrderId(salesOrderId);
     }
 
     /** FE R26/Q37: a DRAFT or POSTED delivery stands behind the order, so the order cannot be cancelled. */

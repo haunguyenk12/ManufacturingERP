@@ -50,6 +50,19 @@ public interface DeliveryLineRepository extends JpaRepository<DeliveryLine, UUID
     List<LineQuantityProjection> sumDraftBySalesOrderLineIds(@Param("lineIds") Collection<UUID> lineIds,
                                                             @Param("excludeDeliveryId") UUID excludeDeliveryId);
 
+    /** Lines by id with their delivery — what an invoice line points at (G10c). */
+    @Query("select l from DeliveryLine l join fetch l.delivery d where l.deliveryLineId in :ids")
+    List<DeliveryLine> findWithDeliveryByDeliveryLineIdIn(@Param("ids") Collection<UUID> ids);
+
+    /** Every line of the order's POSTED deliveries, oldest document first — the invoice candidates (G10c). */
+    @Query("""
+            select l from DeliveryLine l join fetch l.delivery d
+            where d.salesOrderId = :salesOrderId
+              and d.status = com.erp.manufacturing.module.delivery.domain.DeliveryStatus.POSTED
+            order by d.documentDate, d.code, l.lineNo
+            """)
+    List<DeliveryLine> findPostedBySalesOrderId(@Param("salesOrderId") UUID salesOrderId);
+
     interface LineQuantityProjection {
         UUID getSalesOrderLineId();
 

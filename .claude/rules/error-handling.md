@@ -263,6 +263,8 @@ tập dòng; kèm `errors[{field}]`. Tách khỏi `STATE_CONFLICT` vì tải l�
 sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nhận ⇒ `VALIDATION_ERROR` field `lines[i].unitPrice`; vật tư sai loại ⇒
 `OPERATION_NOT_ALLOWED` field `lines[i].itemId`; huỷ PO đã nhận / đóng PO hết lượng mở / đảo phiếu nhận của PO `CLOSED` ⇒ `STATE_CONFLICT`.
 
+**Constant thêm ở `G10c` (2026-10-26):** `PRICE_UNKNOWN` (409) — dòng đơn chưa có giá nên phiếu giao của nó không lập hoá đơn được (không bao giờ tính 0); field `lines[i].deliveryLineId`. `PRICE_STALE` (409) — nền tính tiền (hoá đơn `POSTED` của các dòng đơn chạm tới, hoặc phiên bản giá) đã đổi: lưu với `billingSnapshotVersion` cũ (field đó), hoặc ghi sổ khi nền đổi từ lúc lưu / số tiền đã lưu không khớp. Tách khỏi `CONCURRENT_MODIFICATION`: chính số tiền sẽ đổi, nên người dùng phải xem trước và xác nhận lại. Còn lại dùng mã sẵn có: vượt phần còn lập ⇒ `PLANNED_QUANTITY_EXCEEDED` field `lines[i].quantity` (FE đề xuất `INVOICE_EXCEEDED`); nguồn chưa `POSTED` ⇒ `STATE_CONFLICT`; nguồn lạ/đơn khác, ngày sai ⇒ `VALIDATION_ERROR` field.
+
 **Constant thêm ở `G10b` (2026-10-25):** `SOURCE_UNKNOWN` (409) — đơn bán không có baseline giao hàng (xác nhận trước `V86`,
 D3) hoặc không có khách master (D4): không giao / lập hoá đơn được. Tách khỏi `STATE_CONFLICT` vì tải lại không giúp gì — chỉ đối soát ngoài
 hệ thống mới lấp được. Còn lại dùng mã sẵn có: vượt hạn mức giao (`ordered − D − Cd`) ⇒ `PLANNED_QUANTITY_EXCEEDED` field
