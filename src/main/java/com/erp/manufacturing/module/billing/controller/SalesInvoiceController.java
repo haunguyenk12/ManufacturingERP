@@ -4,7 +4,10 @@ import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.common.web.PageableFactory;
 import com.erp.manufacturing.common.web.PlantContextResolver;
+import com.erp.manufacturing.module.billing.domain.PaymentState;
 import com.erp.manufacturing.module.billing.domain.SalesInvoiceStatus;
+import com.erp.manufacturing.module.billing.dto.FulfillmentSummaryResponse;
+import com.erp.manufacturing.module.billing.dto.InvoicePaymentResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceCancelRequest;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceCandidatesResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceCreateRequest;
@@ -14,6 +17,8 @@ import com.erp.manufacturing.module.billing.dto.SalesInvoicePreviewRequest;
 import com.erp.manufacturing.module.billing.dto.SalesInvoicePreviewResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceUpdateRequest;
+import com.erp.manufacturing.module.billing.service.CustomerPaymentQueryService;
+import com.erp.manufacturing.module.billing.service.FulfillmentSummaryService;
 import com.erp.manufacturing.module.billing.service.SalesInvoiceQueryService;
 import com.erp.manufacturing.module.billing.service.SalesInvoiceService;
 import com.erp.manufacturing.module.sales.dto.CommercialCommandResult;
@@ -43,6 +48,8 @@ public class SalesInvoiceController {
 
     private final SalesInvoiceService invoiceService;
     private final SalesInvoiceQueryService queryService;
+    private final CustomerPaymentQueryService paymentQueryService;
+    private final FulfillmentSummaryService fulfillmentSummaryService;
     private final PlantContextResolver plantContextResolver;
 
     @GetMapping("/v1/sales-invoices")
@@ -56,11 +63,12 @@ public class SalesInvoiceController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) PaymentState paymentState,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         return ResponseEntity.ok(ApiResponse.ok(queryService.list(plantId, status, salesOrderId, customerId,
-                fromDate, toDate, search, PageableFactory.of(page, size, "documentDate", "desc", "invoiceId"))));
+                fromDate, toDate, search, paymentState, PageableFactory.of(page, size, "documentDate", "desc", "invoiceId"))));
     }
 
     @GetMapping("/v1/sales-invoices/{invoiceId}")
@@ -76,6 +84,16 @@ public class SalesInvoiceController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(ApiResponse.ok(queryService.history(invoiceId, PageableFactory.unsorted(page, size))));
+    }
+
+    @GetMapping("/v1/sales-invoices/{invoiceId}/payments")
+    @Operation(summary = "Payments allocated to a sales invoice, with the part each allocated to it")
+    public ResponseEntity<ApiResponse<PageResult<InvoicePaymentResponse>>> payments(
+            @PathVariable UUID invoiceId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(paymentQueryService.invoicePayments(invoiceId,
+                PageableFactory.unsorted(page, size))));
     }
 
     @PostMapping("/v1/sales-invoices/preview")
@@ -119,6 +137,12 @@ public class SalesInvoiceController {
             @RequestHeader(value = KEY, required = false) String idempotencyKey,
             @Valid @RequestBody SalesInvoiceCancelRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(invoiceService.cancel(invoiceId, request, idempotencyKey)));
+    }
+
+    @GetMapping("/sales-orders/v1/{salesOrderId}/fulfillment-summary")
+    @Operation(summary = "QC, delivery, invoice and payment progress of a sales order")
+    public ResponseEntity<ApiResponse<FulfillmentSummaryResponse>> fulfillmentSummary(@PathVariable UUID salesOrderId) {
+        return ResponseEntity.ok(ApiResponse.ok(fulfillmentSummaryService.summarize(salesOrderId)));
     }
 
     @GetMapping("/sales-orders/v1/{salesOrderId}/invoice-candidates")

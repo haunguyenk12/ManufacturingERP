@@ -14,6 +14,16 @@ import java.util.UUID;
 
 public interface ProductionReceiptLineRepository extends JpaRepository<ProductionReceiptLine, UUID> {
 
+    /** G10d: the output lots of APPROVED receipts — of one receipt, or of every receipt of one work order. */
+    @Query("""
+            select distinct l.lot.lotId from ProductionReceiptLine l
+            where l.lot is not null
+              and l.receipt.status = com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.APPROVED
+              and (:receiptId is null or l.receipt.receiptId = :receiptId)
+              and (:workOrderId is null or l.receipt.workOrder.workOrderId = :workOrderId)
+            """)
+    List<UUID> findApprovedOutputLotIds(@Param("receiptId") UUID receiptId, @Param("workOrderId") UUID workOrderId);
+
     @EntityGraph(attributePaths = {"receipt", "item", "warehouse", "lot", "stockMovement"})
     List<ProductionReceiptLine> findByReceiptReceiptIdIn(Collection<UUID> receiptIds);
 

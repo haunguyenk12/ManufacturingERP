@@ -8,7 +8,8 @@ import java.util.UUID;
 
 /**
  * G10c: an invoice with its lines. Only invoice authority reads it, so the money is always there. A DRAFT's amount is
- * a preview, not a receivable (FE §3.6). {@code allowedActions} is a UX hint; every command checks again.
+ * a preview, not a receivable (FE §3.6): {@code paidAmount}, {@code outstandingAmount} and {@code paymentState} are
+ * {@code null} until it is POSTED (G10d). {@code allowedActions} is a UX hint; every command checks again.
  */
 public record SalesInvoiceResponse(
         UUID invoiceId,
@@ -27,6 +28,9 @@ public record SalesInvoiceResponse(
         String note,
         String currency,
         BigDecimal amount,
+        BigDecimal paidAmount,
+        BigDecimal outstandingAmount,
+        String paymentState,
         String billingSnapshotVersion,
         List<SalesInvoiceLineResponse> lines,
         UUID createdBy,

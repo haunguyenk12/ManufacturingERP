@@ -65,15 +65,17 @@ public class DeliveryController {
     }
 
     @GetMapping("/v1/deliveries/related")
-    @Operation(summary = "POSTED deliveries of a plant that took stock from a lot")
+    @Operation(summary = "POSTED deliveries of a plant that took stock from a lot, a production receipt or a work order")
     public ResponseEntity<ApiResponse<PageResult<DeliveryResponse>>> related(
             @RequestHeader(value = PlantContextResolver.HEADER, required = false) String plantHeader,
             @RequestParam UUID plantId,
-            @RequestParam UUID lotId,
+            @RequestParam(required = false) UUID lotId,
+            @RequestParam(required = false) UUID productionReceiptId,
+            @RequestParam(required = false) UUID workOrderId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
-        return ResponseEntity.ok(ApiResponse.ok(queryService.related(plantId, lotId,
+        return ResponseEntity.ok(ApiResponse.ok(queryService.related(plantId, lotId, productionReceiptId, workOrderId,
                 PageableFactory.of(page, size, "postedAt", "desc", "deliveryId"))));
     }
 

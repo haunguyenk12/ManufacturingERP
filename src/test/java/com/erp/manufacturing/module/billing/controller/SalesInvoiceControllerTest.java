@@ -9,6 +9,8 @@ import com.erp.manufacturing.common.web.PlantContextResolver;
 import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.module.billing.dto.SalesInvoicePreviewLineResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoicePreviewResponse;
+import com.erp.manufacturing.module.billing.service.CustomerPaymentQueryService;
+import com.erp.manufacturing.module.billing.service.FulfillmentSummaryService;
 import com.erp.manufacturing.module.billing.service.SalesInvoiceQueryService;
 import com.erp.manufacturing.module.billing.service.SalesInvoiceService;
 import com.erp.manufacturing.module.sales.dto.CommercialCommandResult;
@@ -49,6 +51,8 @@ class SalesInvoiceControllerTest {
 
     @MockBean SalesInvoiceService invoiceService;
     @MockBean SalesInvoiceQueryService queryService;
+    @MockBean CustomerPaymentQueryService paymentQueryService;
+    @MockBean FulfillmentSummaryService fulfillmentSummaryService;
 
     @MockBean IpExtractor ipExtractor;
     @MockBean JwtTokenProvider jwtTokenProvider;

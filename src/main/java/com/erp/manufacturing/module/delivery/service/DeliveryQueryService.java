@@ -28,6 +28,7 @@ import com.erp.manufacturing.module.sales.service.SalesOrderCommercialLookupServ
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservation;
 import com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService;
+import com.erp.manufacturing.module.workorder.service.query.ProductionOutputLotLookupService;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -44,6 +45,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,6 +75,7 @@ public class DeliveryQueryService {
     private final UserLookupService userLookupService;
     private final PermissionGuard permissionGuard;
     private final SecurityAuditorAware auditorAware;
+    private final ProductionOutputLotLookupService outputLotLookupService;
 
     @Transactional(readOnly = true)
     @PreAuthorize("@deliveryPermissionGuard.canReadDelivery(authentication, #deliveryId)")
@@ -92,11 +95,25 @@ public class DeliveryQueryService {
         return PageResult.from(new PageImpl<>(toResponses(page.getContent()), pageable, page.getTotalElements()));
     }
 
-    /** POSTED deliveries of the plant that took stock from {@code lotId} (FE "related", one source filter — Q38). */
+    /**
+     * POSTED deliveries of the plant that took stock from one source (FE "related", exactly one filter — Q38): a lot, a
+     * production receipt or a work order. A receipt or work order stands for the lots it put into stock — its APPROVED
+     * output lot and the child lots its QC accepted (G10d).
+     */
     @Transactional(readOnly = true)
     @PreAuthorize("@deliveryPermissionGuard.canReadPlant(authentication, #plantId)")
-    public PageResult<DeliveryResponse> related(UUID plantId, UUID lotId, Pageable pageable) {
-        Page<Delivery> page = deliveryRepository.findPostedFromLots(plantId, List.of(lotId), pageable);
+    public PageResult<DeliveryResponse> related(UUID plantId, UUID lotId, UUID productionReceiptId, UUID workOrderId,
+                                                Pageable pageable) {
+        if (Stream.of(lotId, productionReceiptId, workOrderId).filter(Objects::nonNull).count() != 1) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("lotId", "give exactly one of lotId, productionReceiptId, workOrderId"));
+        }
+        Collection<UUID> lots = lotId != null ? List.of(lotId)
+                : outputLotLookupService.findOutputLotIds(productionReceiptId, workOrderId);
+        if (lots.isEmpty()) {
+            return PageResult.from(new PageImpl<>(List.of(), pageable, 0));
+        }
+        Page<Delivery> page = deliveryRepository.findPostedFromLots(plantId, lots, pageable);
         return PageResult.from(new PageImpl<>(toResponses(page.getContent()), pageable, page.getTotalElements()));
     }
 

@@ -6,6 +6,7 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.billing.domain.SalesInvoice;
 import com.erp.manufacturing.module.billing.domain.SalesInvoiceLine;
+import com.erp.manufacturing.module.billing.domain.PaymentState;
 import com.erp.manufacturing.module.billing.domain.SalesInvoiceStatus;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceCandidateLineResponse;
 import com.erp.manufacturing.module.billing.dto.SalesInvoiceCandidatesResponse;
@@ -57,6 +58,7 @@ public class SalesInvoiceQueryService {
     private final SalesInvoiceRepository invoiceRepository;
     private final SalesInvoiceLineRepository invoiceLineRepository;
     private final SalesInvoiceSupport support;
+    private final CustomerPaymentSupport paymentSupport;
     private final DeliveryLookupService deliveryLookupService;
     private final SalesOrderCommercialLookupService salesOrderLookupService;
     private final UserLookupService userLookupService;
@@ -73,9 +75,10 @@ public class SalesInvoiceQueryService {
     @PreAuthorize("@salesInvoicePermissionGuard.canReadPlant(authentication, #plantId)")
     public PageResult<SalesInvoiceResponse> list(UUID plantId, SalesInvoiceStatus status, UUID salesOrderId,
                                                  UUID customerId, LocalDate fromDate, LocalDate toDate, String search,
-                                                 Pageable pageable) {
+                                                 PaymentState paymentState, Pageable pageable) {
         Page<SalesInvoice> page = invoiceRepository.search(plantId, status, salesOrderId, customerId, fromDate, toDate,
-                StringUtils.hasText(search) ? search.trim() : null, pageable);
+                StringUtils.hasText(search) ? search.trim() : null, paymentState == null ? null : paymentState.name(),
+                pageable);
         return PageResult.from(new PageImpl<>(toResponses(page.getContent()), pageable, page.getTotalElements()));
     }
 
@@ -162,6 +165,8 @@ public class SalesInvoiceQueryService {
         Map<UUID, String> usernames = userLookupService.findUsernames(invoices.stream()
                 .flatMap(i -> Stream.of(i.getCreatedBy(), i.getPostedBy(), i.getCancelledBy()))
                 .filter(Objects::nonNull).distinct().toList());
+        Map<UUID, BigDecimal> paid = paymentSupport.paid(invoices.stream()
+                .filter(SalesInvoice::isPosted).map(SalesInvoice::getInvoiceId).toList());
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         UUID actor = auditorAware.getCurrentAuditor().orElse(null);
         Map<String, Boolean> permissions = new HashMap<>();
@@ -186,11 +191,16 @@ public class SalesInvoiceQueryService {
                                 line.getBilledQuantityBefore(), line.getBilledAmountBefore());
                     }).toList();
             SalesOrder order = orders.get(invoice.getSalesOrderId());
+            boolean posted = invoice.isPosted();
+            BigDecimal paidAmount = posted ? paid.getOrDefault(invoice.getInvoiceId(), BigDecimal.ZERO) : null;
             responses.add(new SalesInvoiceResponse(invoice.getInvoiceId(), invoice.getCode(), SalesInvoiceResponse.TYPE,
                     invoice.getStatus().name(), invoice.getVersion(), invoice.getCompanyId(), invoice.getPlantId(),
                     invoice.getSalesOrderId(), order == null ? null : order.getOrderNo(), invoice.getCustomerId(),
                     invoice.getCustomerName(), invoice.getDocumentDate(), invoice.getDueDate(), invoice.getNote(),
-                    SalesInvoiceResponse.VND, invoice.getAmount(), invoice.getBillingSnapshot(), lineResponses,
+                    SalesInvoiceResponse.VND, invoice.getAmount(), paidAmount,
+                    posted ? invoice.getAmount().subtract(paidAmount) : null,
+                    posted ? PaymentState.of(invoice.getAmount(), paidAmount).name() : null,
+                    invoice.getBillingSnapshot(), lineResponses,
                     invoice.getCreatedBy(), usernames.get(invoice.getCreatedBy()), invoice.getCreatedAt(),
                     invoice.getPostedBy(), invoice.getPostedBy() == null ? null : usernames.get(invoice.getPostedBy()),
                     invoice.getPostedAt(),

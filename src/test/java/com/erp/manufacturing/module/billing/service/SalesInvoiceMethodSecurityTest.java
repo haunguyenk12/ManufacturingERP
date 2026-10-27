@@ -111,7 +111,7 @@ class SalesInvoiceMethodSecurityTest {
         when(guard.canReadOrder(any(), eq(orderId))).thenReturn(false);
         assertThatThrownBy(() -> queryService.get(invoiceId)).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> queryService.history(invoiceId, PageRequest.of(0, 20))).isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> queryService.list(plantId, null, null, null, null, null, null, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> queryService.list(plantId, null, null, null, null, null, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> queryService.candidates(orderId, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
@@ -151,7 +151,7 @@ class SalesInvoiceMethodSecurityTest {
         @Bean
         SalesInvoiceQueryService salesInvoiceQueryService() {
             return new SalesInvoiceQueryService(mock(SalesInvoiceRepository.class), mock(SalesInvoiceLineRepository.class),
-                    mock(SalesInvoiceSupport.class), mock(DeliveryLookupService.class),
+                    mock(SalesInvoiceSupport.class), mock(CustomerPaymentSupport.class), mock(DeliveryLookupService.class),
                     mock(SalesOrderCommercialLookupService.class), mock(UserLookupService.class),
                     mock(PermissionGuard.class), mock(SecurityAuditorAware.class));
         }

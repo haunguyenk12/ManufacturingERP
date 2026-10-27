@@ -14,6 +14,7 @@ import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.domain.WarehouseType;
 import com.erp.manufacturing.module.workorder.domain.ProductionExecution;
+import com.erp.manufacturing.module.workorder.domain.ProductionQualityDecision;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceipt;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptContribution;
 import com.erp.manufacturing.module.workorder.domain.ProductionReceiptLine;
@@ -67,6 +68,9 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
 
     @Autowired
     ProductionReceiptLineRepository lineRepository;
+
+    @Autowired
+    ProductionQualityDecisionRepository decisionRepository;
 
     @Test
     void findByPlant_withoutAStatusFilter_returnsEveryReceiptOfThePlant() {
@@ -393,6 +397,37 @@ class ProductionReceiptRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(lineRepository.existsPendingQualityForLot(judgedLot.getLotId(), ProductionReceiptStatus.APPROVED)).isFalse();
         assertThat(lineRepository.existsPendingQualityForLot(rejectedReceiptLot.getLotId(), ProductionReceiptStatus.APPROVED))
                 .isFalse();
+    }
+
+    /**
+     * G10d ("related deliveries" by receipt or work order): the lots a receipt put into stock are its APPROVED output lot
+     * and the child lots QC accepted out of it — a REJECTED receipt and another work order's receipt stay out.
+     */
+    @Test
+    void outputLots_areTheApprovedOutputLotAndTheQcAcceptedChildLots_perReceiptOrWorkOrder() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        WorkOrder other = persistWorkOrder(fixture, WorkOrderStatus.IN_PROGRESS);
+        InventoryLot output = persistLot(fixture, "G10D-OUT");
+        InventoryLot child = persistLot(fixture, "G10D-A1");
+        ProductionReceipt approved = persistReceipt(workOrder, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("5"));
+        attachLot(approved, output);
+        attachLot(persistReceipt(workOrder, fixture, ProductionReceiptStatus.REJECTED, new BigDecimal("5")),
+                persistLot(fixture, "G10D-REJ"));
+        attachLot(persistReceipt(other, fixture, ProductionReceiptStatus.APPROVED, new BigDecimal("5")),
+                persistLot(fixture, "G10D-OTH"));
+        Instant now = Instant.now();
+        ProductionQualityDecision decision = ProductionQualityDecision.builder().decisionId(UUID.randomUUID()).receipt(approved)
+                .receiptLine(approved.getLines().get(0)).acceptedQuantity(new BigDecimal("3"))
+                .rejectedQuantity(BigDecimal.ZERO).acceptedLot(child).decidedAt(now).build();
+        decision.setCreatedAt(now);
+        decision.setUpdatedAt(now);
+        entityManager.persistAndFlush(decision);
+
+        assertThat(lineRepository.findApprovedOutputLotIds(approved.getReceiptId(), null)).containsExactly(output.getLotId());
+        assertThat(lineRepository.findApprovedOutputLotIds(null, workOrder.getWorkOrderId())).containsExactly(output.getLotId());
+        assertThat(decisionRepository.findAcceptedLotIds(approved.getReceiptId(), null)).containsExactly(child.getLotId());
+        assertThat(decisionRepository.findAcceptedLotIds(null, other.getWorkOrderId())).isEmpty();
     }
 
     /** V85: a line can never be judged past its quantity. */

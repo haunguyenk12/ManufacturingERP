@@ -8,10 +8,21 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface ProductionQualityDecisionRepository extends JpaRepository<ProductionQualityDecision, UUID> {
+
+    /** G10d: the child lots QC accepted out of a receipt's output — of one receipt, or of every receipt of one work order. */
+    @Query("""
+            select distinct d.acceptedLot.lotId from ProductionQualityDecision d
+            where d.acceptedLot is not null
+              and (:receiptId is null or d.receipt.receiptId = :receiptId)
+              and (:workOrderId is null or d.receipt.workOrder.workOrderId = :workOrderId)
+            """)
+    List<UUID> findAcceptedLotIds(@Param("receiptId") UUID receiptId,
+                                  @Param("workOrderId") UUID workOrderId);
 
     /** G9c: newest first, then id, so equal timestamps never shuffle between pages — same order as purchase QC. */
     @EntityGraph(attributePaths = {"acceptedLot", "rejectedLot", "acceptedMovement", "rejectedMovement"})

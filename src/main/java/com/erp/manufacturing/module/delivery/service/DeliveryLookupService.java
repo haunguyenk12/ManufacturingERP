@@ -55,6 +55,20 @@ public class DeliveryLookupService {
         return deliveryLineRepository.findPostedBySalesOrderId(salesOrderId);
     }
 
+    /** G10d: Cd per sales order line — what DRAFT deliveries claim (absent = nothing), one query. */
+    @Transactional(readOnly = true)
+    public Map<UUID, BigDecimal> sumDraftBySalesOrderLineIds(Collection<UUID> salesOrderLineIds) {
+        if (salesOrderLineIds == null || salesOrderLineIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, BigDecimal> drafts = new HashMap<>();
+        for (DeliveryLineRepository.LineQuantityProjection row
+                : deliveryLineRepository.sumDraftBySalesOrderLineIds(salesOrderLineIds, null)) {
+            drafts.put(row.getSalesOrderLineId(), row.getQuantity());
+        }
+        return drafts;
+    }
+
     /** FE R26/Q37: a DRAFT or POSTED delivery stands behind the order, so the order cannot be cancelled. */
     @Transactional(readOnly = true)
     public boolean hasOpenDeliveries(UUID salesOrderId) {

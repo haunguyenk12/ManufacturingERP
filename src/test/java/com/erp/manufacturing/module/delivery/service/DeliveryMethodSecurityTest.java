@@ -15,6 +15,7 @@ import com.erp.manufacturing.module.sales.service.CommercialIdempotency;
 import com.erp.manufacturing.module.sales.service.SalesOrderCommercialLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import com.erp.manufacturing.module.workorder.service.execution.SalesOrderStockReservationService;
+import com.erp.manufacturing.module.workorder.service.query.ProductionOutputLotLookupService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -154,7 +155,8 @@ class DeliveryMethodSecurityTest {
                     mock(DeliverySupport.class), mock(SalesOrderCommercialLookupService.class),
                     mock(SalesOrderStockReservationService.class), mock(InventoryMovementService.class),
                     mock(InventoryLotLookupService.class), mock(OrganizationLookupService.class),
-                    mock(UserLookupService.class), mock(PermissionGuard.class), mock(SecurityAuditorAware.class));
+                    mock(UserLookupService.class), mock(PermissionGuard.class), mock(SecurityAuditorAware.class),
+                    mock(ProductionOutputLotLookupService.class));
         }
     }
 }

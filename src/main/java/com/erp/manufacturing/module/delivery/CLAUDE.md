@@ -28,7 +28,9 @@
 
 - `GET /v1/deliveries` bắt buộc `plantId` (cross-check `X-Plant-Id`); quyền bất kỳ `PERM_DELIVERY_READ/_MANAGE/_POST`.
   Nhãn đơn/kho/lô/người dùng nạp theo batch cho cả trang (C14); `allowedActions` tính quyền **một lần mỗi nhà máy**.
-- `GET /v1/deliveries/related?plantId&lotId` — phiếu `POSTED` đã lấy từ lô. Theo phiếu nhập/WO: `G10d`.
+- `GET /v1/deliveries/related?plantId` + **đúng một** trong `lotId` / `productionReceiptId` / `workOrderId` (không hoặc hai ⇒ `400` field `lotId`) —
+  phiếu `POSTED` đã lấy từ lô. Phiếu nhập/WO đại diện cho các lô nó đưa vào kho: lô đầu ra của phiếu `APPROVED` + lô con QC chấp nhận
+  (`ProductionOutputLotLookupService`, `G10d`); không có lô nào ⇒ trang rỗng, không query thêm. Hàng không theo lô không truy được theo nguồn.
 - `delivery-candidates` / `delivery-sources` treo dưới `/sales-orders/v1/{id}`; guard đọc đơn qua `findOrder` (Optional) — guard
   không được ném qua proxy `@Transactional` (rollback-only).
 - **Không** có giá trị tiền / giá vốn: `valuationStatus = "PENDING_COSTING"` (`D7`).

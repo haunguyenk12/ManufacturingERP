@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | **`G10` — FE handoff Giai đoạn 10: giao hàng, hoá đơn và thanh toán** (`FE_HANDOFF_GD_10_2026-10-15.md`, P1) — 🔄 **đang chạy** (quyết định chốt 2026-10-25, §17.2): **`G10a` ✅ · `G10b` ✅ 2026-10-25 · `G10c` ✅ 2026-10-26** · `G10d` — xem **§17**. 🔴 Khác mọi handoff trước: **gần như toàn bộ là dựng mới** và là lần đầu repo chạm **tiền**. Không có entity/bảng/quyền/endpoint nào cho giao hàng, hoá đơn, thanh toán; đơn bán **chưa có giá**; `customerId` của đơn còn nullable; kho **không có** sổ "lô này thuộc dòng đơn nào" như FE giả định. `G9` đã xong ở BE, chờ FE nghiệm thu |
+| **Đang chạy** | **`G10` — FE handoff Giai đoạn 10: giao hàng, hoá đơn và thanh toán** (`FE_HANDOFF_GD_10_2026-10-15.md`, P1) — 🔄 **đang chạy** (quyết định chốt 2026-10-25, §17.2): **`G10a` ✅ · `G10b` ✅ 2026-10-25 · `G10c` ✅ 2026-10-26 · `G10d` ✅ 2026-10-27** · còn `G10-9` (seed demo + guide FE) — xem **§17**. 🔴 Khác mọi handoff trước: **gần như toàn bộ là dựng mới** và là lần đầu repo chạm **tiền**. Không có entity/bảng/quyền/endpoint nào cho giao hàng, hoá đơn, thanh toán; đơn bán **chưa có giá**; `customerId` của đơn còn nullable; kho **không có** sổ "lô này thuộc dòng đơn nào" như FE giả định. `G9` đã xong ở BE, chờ FE nghiệm thu |
 | **Chờ FE** | `G9` (§16) — ✅ BE xong cả 3 phần 2026-10-21/23, bản ghi `CLAUDE.md §0.64`–`§0.66`. `G8` (§15) — ✅ BE xong cả 4 phần 2026-10-19/20, bản ghi `CLAUDE.md §0.60`–`§0.63`. `G7` (§14) — ✅ 2026-10-18/19. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -1275,7 +1275,7 @@ Giao hàng/hoá đơn/thanh toán (GĐ10); chi phí/định giá/đóng kỳ đ�
 
 ---
 
-## 17. `G10` — FE handoff Giai đoạn 10: Giao hàng, hoá đơn và thanh toán 🔄 ĐANG CHẠY — `G10a` ✅ `G10b` ✅ 2026-10-25 · `G10c` ✅ 2026-10-26
+## 17. `G10` — FE handoff Giai đoạn 10: Giao hàng, hoá đơn và thanh toán 🔄 ĐANG CHẠY — `G10a` ✅ `G10b` ✅ 2026-10-25 · `G10c` ✅ 2026-10-26 · `G10d` ✅ 2026-10-27 · `G10-9` còn
 
 Nguồn: `FE_HANDOFF_GD_10_2026-10-15.md` (v1, P1, 786 dòng). FE/mock đã xong: danh sách + nháp + ghi sổ **phiếu giao hàng** (một đơn bán, nhiều dòng/kho/lô), **hoá đơn bán hàng** (một đơn bán, gộp nhiều phiếu giao), **thanh toán khách hàng** (một khách, phân bổ nhiều hoá đơn), **giá bán trên đơn bán**, và các màn hình đọc liên quan (đơn bán, giữ hàng, tồn/lô/biến động, hoạch định, liên kết ngược từ phiếu nhập/lô/WO). BE phải (1) trả lời Q1–Q40 §5, (2) đối chiếu R01–R30 với API có sẵn, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_10_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào (§2.1 ghi rõ cả năm mảnh bằng chứng đều trống).
 
@@ -1392,6 +1392,15 @@ mutation 12/12. Trả lời FE: `BE_RESPONSE_GD_10_2026-10-25.md` (phần 1–2)
 (server so với snapshot đã lưu trên hoá đơn); lịch sử dẫn xuất từ cột ai/khi/lý do. Mutation lộ một lỗ hổng test (nền dời mà tiền không
 đổi) — đã thêm IT, 17/17. `mvn -o clean verify` 2068 unit + 303 IT xanh; smoke `213414` 31/31. Trả lời FE:
 `BE_RESPONSE_GD_10_2026-10-26_v2.md`. Bản ghi: `CLAUDE.md §0.69`.
+
+### 17.3d Kết quả `G10d` *(2026-10-27)*
+
+✅ Migration `V89`, thanh toán khách hàng trong `module/billing` (8 endpoint) + `GET /v1/sales-invoices/{id}/payments` + `paymentState` trên
+hoá đơn (field + bộ lọc) + `GET /sales-orders/v1/{id}/fulfillment-summary` + `GET /v1/deliveries/related` nhận `productionReceiptId`/`workOrderId`.
+Bất biến `B251`–`B255`. Không quyền mới, không mã lỗi mới. Lệch kế hoạch: tiến độ đơn sống ở `module/billing` (không thêm chiều
+`sales → billing`); "tham chiếu giao hàng trên biến động tồn" đã có từ `G10b` (`referenceType = DELIVERY`), không làm thêm; evidence
+`delivered` đã `KNOWN` từ `G10b`. Mutation 23/23 (một ca IT thêm trước khi chạy: sửa chỉ đổi phân bổ). `mvn -o clean verify` 2085 unit +
+312 IT xanh; smoke `100050` 44/44. Trả lời FE: `BE_RESPONSE_GD_10_2026-10-27_v3.md`. Bản ghi: `CLAUDE.md §0.70`.
 
 ### 17.4 Breaking changes dự kiến *(ghi đầy đủ vào `BE_RESPONSE_GD_10_*` khi làm)*
 

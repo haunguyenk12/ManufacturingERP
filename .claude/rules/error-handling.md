@@ -263,6 +263,11 @@ tập dòng; kèm `errors[{field}]`. Tách khỏi `STATE_CONFLICT` vì tải l�
 sửa field cho phép. Còn lại dùng mã sẵn có: thiếu giá khi xác nhận ⇒ `VALIDATION_ERROR` field `lines[i].unitPrice`; vật tư sai loại ⇒
 `OPERATION_NOT_ALLOWED` field `lines[i].itemId`; huỷ PO đã nhận / đóng PO hết lượng mở / đảo phiếu nhận của PO `CLOSED` ⇒ `STATE_CONFLICT`.
 
+**`G10d` (2026-10-27) — không thêm mã mới.** Thanh toán dùng mã sẵn có: header khác tổng phân bổ, hoá đơn lạ/khách khác/nhà máy khác/trùng,
+ngày sai ⇒ `VALIDATION_ERROR` field (`amount`, `allocations[i].invoiceId`, `documentDate`); vượt `amount − P − Cp` ⇒ `PLANNED_QUANTITY_EXCEEDED` field
+`allocations[i].amount` (FE đề xuất `PAYMENT_EXCEEDED`); hoá đơn chưa `POSTED` hoặc thanh toán không `DRAFT` ⇒ `STATE_CONFLICT`; version hoá đơn lệch ⇒
+`CONCURRENT_MODIFICATION` field `allocations[i].expectedInvoiceVersion`; khách ngừng ⇒ `RESOURCE_INACTIVE`; không phải người tạo sửa/huỷ ⇒ `403`.
+
 **Constant thêm ở `G10c` (2026-10-26):** `PRICE_UNKNOWN` (409) — dòng đơn chưa có giá nên phiếu giao của nó không lập hoá đơn được (không bao giờ tính 0); field `lines[i].deliveryLineId`. `PRICE_STALE` (409) — nền tính tiền (hoá đơn `POSTED` của các dòng đơn chạm tới, hoặc phiên bản giá) đã đổi: lưu với `billingSnapshotVersion` cũ (field đó), hoặc ghi sổ khi nền đổi từ lúc lưu / số tiền đã lưu không khớp. Tách khỏi `CONCURRENT_MODIFICATION`: chính số tiền sẽ đổi, nên người dùng phải xem trước và xác nhận lại. Còn lại dùng mã sẵn có: vượt phần còn lập ⇒ `PLANNED_QUANTITY_EXCEEDED` field `lines[i].quantity` (FE đề xuất `INVOICE_EXCEEDED`); nguồn chưa `POSTED` ⇒ `STATE_CONFLICT`; nguồn lạ/đơn khác, ngày sai ⇒ `VALIDATION_ERROR` field.
 
 **Constant thêm ở `G10b` (2026-10-25):** `SOURCE_UNKNOWN` (409) — đơn bán không có baseline giao hàng (xác nhận trước `V86`,
