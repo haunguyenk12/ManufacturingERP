@@ -1431,6 +1431,26 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Giá thành sản xuất và đóng lệnh — FE giai đoạn 11 *(`G11`, 2026-10-27)*
+
+Chi tiết đầy đủ (13 endpoint, công thức, Q1–Q36): `BE_RESPONSE_GD_11_2026-10-27.md`. Những điều phải nhớ khi wire:
+
+- 🔴 **Hai hệ giá thành, khác nghĩa:** `GET /v1/work-orders/{id}/variance` (`costVariance`) = giá chuẩn **theo vật tư**, tức thời —
+  **không đổi**. `GET /v1/work-orders/{id}/production-costs` = giá thành **theo trung tâm + thời gian**, cơ sở chụp lúc phát hành,
+  có tính thử và chốt. Đừng ghép số của hai bên.
+- **Giá vật tư = giá chuẩn của vật tư tại giây phát hành** (kho không có giá). Đặt giá chuẩn
+  (`PUT /v1/companies/{C}/items/{I}/standard-cost`) và đơn giá trung tâm (`PUT /v1/plants/{P}/production-cost-rates/{W}`) **trước**
+  khi phát hành — thêm sau không hồi tố; thiếu thì số liên quan là `null` kèm `unknownReasons`, không phải 0.
+- **Luồng đóng lệnh mới:** đọc `GET …/cost-checklist` (lấy `sourceVersion`, `workOrderVersion`) → `POST …/cost-runs`
+  `{expectedVersion, expectedSourceVersion}` → khi `readiness = READY`: `POST …/finalize-cost-and-close`
+  `{expectedVersion, expectedSourceVersion, runId, expectedRunVersion: 1, reason}`. Cả ba lệnh **bắt buộc** `Idempotency-Key` và chỉ
+  trả id + version — đọc lại sau đó.
+- 🔴 `POST /v1/work-orders/{id}/close` trả `409 CLOSE_BLOCKED` cho lệnh phát hành sau bản này; lệnh cũ (không có cơ sở chi phí) đóng
+  như trước.
+- Người không có quyền xem giá thành vẫn đọc được checklist (`PERM_WORK_ORDER_CLOSE` / `_READ` / `PERM_WIP_READ`): `sourceVersion` và
+  `cost` khi đó **vắng mặt**, không phải `null`.
+- Tiền là số JSON scale ≤ 6 (trần `NUMERIC(19,6)`); đọc bằng decimal nếu cần chính xác trên ~10^9.
+
 ### Giao hàng, hoá đơn, thu tiền — FE giai đoạn 10 *(`G10a`–`G10d`, 2026-10-25 → 27)*
 
 Lệnh ghi GĐ10 (phiếu giao, hoá đơn, phiếu thu, bổ sung giá) **bắt buộc** `Idempotency-Key` và trả `{documentId, type, version}` — đọc lại chi tiết
@@ -1747,6 +1767,10 @@ File nhập vượt 5 MiB (giới hạn của đường nhập mẫu cố địn
 | `PRICE_LOCKED` 🆕 `G10a` | Bổ sung giá cho dòng đơn đã có giá (kể cả 0) — giá đã chốt không sửa |
 | `SOURCE_UNKNOWN` 🆕 `G10b` | Đơn không có baseline giao hàng (xác nhận trước GĐ10) hoặc không có khách master — không giao / lập hoá đơn được |
 | `PRICE_UNKNOWN` 🆕 `G10c` | Dòng đơn chưa có giá nên không lập hoá đơn được (không bao giờ tính 0) |
+| `COST_SOURCE_STALE` 🆕 `G11` | Nguồn giá thành đã đổi từ lúc đọc / lúc tính run — tính thử lại (field `expectedSourceVersion` hoặc `runId`) |
+| `CLOSE_BLOCKED` 🆕 `G11` | Checklist vận hành chưa đạt (field = mã kiểm tra, message = lý do), hoặc `close` cũ trên lệnh có cơ sở chi phí |
+| `COST_DATA_INCOMPLETE` 🆕 `G11` | Thiếu cơ sở chi phí / giá / đơn giá / tiêu thụ / thời gian hợp lệ — không có số bù |
+| `VALUATION_UNRECONCILED` 🆕 `G11` | Kho đầu ra có hàng/biến động không phải của lệnh này, hoặc giao không khớp phần QC |
 | `PRICE_STALE` 🆕 `G10c` | Nền tính tiền hoá đơn đã đổi — xem trước lại, cho người dùng xác nhận số mới, lưu lại |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |
 | `RESOURCE_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `EMAIL_ALREADY_EXISTS` | Trùng khoá |

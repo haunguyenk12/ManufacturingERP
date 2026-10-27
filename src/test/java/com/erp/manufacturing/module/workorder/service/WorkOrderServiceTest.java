@@ -6,6 +6,7 @@ import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository
 import com.erp.manufacturing.module.planning.service.WorkOrderPlanningLinkService;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
+import com.erp.manufacturing.module.workorder.service.cost.ProductionCostBaselineService;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.MultiErrorException;
@@ -87,6 +88,7 @@ class WorkOrderServiceTest {
     @Mock WorkOrderPlanningLinkService planningLinkService;
     @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
     @Mock SecurityAuditorAware auditorAware;
+    @Mock ProductionCostBaselineService costBaselineService;
 
     WorkOrderService service;
 
@@ -111,6 +113,7 @@ class WorkOrderServiceTest {
                 new WorkOrderIdempotency(idempotencyRecordRepository,
                         new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
                 auditorAware,
+                costBaselineService,
                 new WorkOrderMapper());
     }
 
@@ -608,6 +611,39 @@ class WorkOrderServiceTest {
         assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.CLOSED);
         assertThat(workOrder.getClosedAt()).isNotNull();
         verify(materialReservationService).cancelActiveReservations(workOrder);
+    }
+
+    /** G11c (D5): a work order released with a cost baseline must close through finalize-and-close. */
+    @Test
+    void close_workOrderWithCostBaseline_isCloseBlocked_andChangesNothing() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.COMPLETED, new BigDecimal("10"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(costBaselineService.hasBaseline(workOrder.getWorkOrderId())).thenReturn(true);
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> service.close(workOrderId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.CLOSE_BLOCKED));
+
+        assertThat(workOrder.getStatus()).isEqualTo(WorkOrderStatus.COMPLETED);
+        verify(workOrderRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(materialReservationService);
+    }
+
+    /** G11a (FE R05): the cost baseline is captured in the release itself, once. */
+    @Test
+    void release_capturesTheCostBaselineOnce() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter(workOrder.getPlant(), null), "5", "2"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
+
+        verify(costBaselineService, times(1)).capture(eq(workOrder), any());
     }
 
     @Test

@@ -71,6 +71,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -707,6 +708,151 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEmpty();
     }
 
+    /**
+     * G11: a work order released with prices and rates gets a cost baseline in the release transaction; the old close is
+     * refused for it (D5); a preview changes nothing; finalize-and-close re-calculates, writes the final snapshot and the
+     * value-only entry and closes, all at once — and of two finalizes racing on the same versions only one commits (A35).
+     */
+    @Test
+    @DisplayName("G11: baseline at release, preview, atomic finalize-and-close")
+    void productionCost_finalizeAndClose_isAtomicAndTheOldCloseIsBlocked() throws Exception {
+        NonLotFixture product = seedNonLotTrackedFinishedGood();
+        result(put("/v1/companies/{c}/items/{i}/standard-cost", fixture.companyId, fixture.componentId)
+                .content(json(Map.of("materialCost", 1000, "laborCost", 0, "overheadCost", 0))), 200);
+        JsonNode rate = result(put("/v1/plants/{p}/production-cost-rates/{w}", fixture.plantId, product.workCenterId)
+                .header("Idempotency-Key", "E2E-G11-RATE-" + fixture.suffix)
+                .content(json(Map.of("expectedVersion", 0, "laborRate", 6000, "overheadRate", 3000,
+                        "reason", "E2E operating rate"))), 200);
+        assertThat(rate.get("rateVersion").asInt()).isEqualTo(1);
+
+        UUID workOrderId = uuid(result(post("/v1/plants/{plantId}/work-orders", fixture.plantId)
+                .content(json(Map.of(
+                        "workOrderNo", "WO-G11-" + fixture.suffix,
+                        "productItemId", product.itemId,
+                        "outputWarehouseId", fixture.warehouseId,
+                        "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId)
+                .content(versionBody(workOrderId)), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
+
+        // A rate saved after release never reaches the captured baseline (B256, FE A03).
+        result(put("/v1/plants/{p}/production-cost-rates/{w}", fixture.plantId, product.workCenterId)
+                .header("Idempotency-Key", "E2E-G11-RATE2-" + fixture.suffix)
+                .content(json(Map.of("expectedVersion", 1, "laborRate", 9000, "overheadRate", 9000,
+                        "reason", "Rate raised after release"))), 200);
+        JsonNode baseline = result(get("/v1/work-orders/{id}/cost-baseline", workOrderId), 200).get("baseline");
+        assertThat(new BigDecimal(baseline.get("materials").get(0).get("unitCost").asText())).isEqualByComparingTo("1000");
+        JsonNode plannedOperation = baseline.get("operations").get(0);
+        assertThat(new BigDecimal(plannedOperation.get("plannedMinutes").asText())).isEqualByComparingTo("15");
+        assertThat(new BigDecimal(plannedOperation.get("laborRate").asText())).isEqualByComparingTo("6000");
+        assertThat(new BigDecimal(baseline.get("planned").get("total").asText())).isEqualByComparingTo("22250");
+
+        JsonNode issue = result(post("/v1/material-issues")
+                .header("Idempotency-Key", "E2E-G11-ISSUE-" + fixture.suffix)
+                .content(json(Map.of(
+                        "workOrderId", workOrderId,
+                        "reservationId", uuid(reservations.get(0), "reservationId"),
+                        "quantity", new BigDecimal(reservations.get(0).get("quantity").asText())))), 201);
+        UUID issueLineId = uuid(issue.get("lines").get(0), "issueLineId");
+        UUID operationId = confirmFirstOperationInput(workOrderId, ORDERED_QUANTITY);
+        result(post("/v1/work-orders/{id}/production-executions", workOrderId)
+                .header("Idempotency-Key", "E2E-G11-EXEC-" + fixture.suffix)
+                .content(json(Map.of("goodQuantity", ORDERED_QUANTITY,
+                        "actualStartedAt", EXEC_STARTED_AT,
+                        "actualEndedAt", EXEC_ENDED_AT,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "workOrderOperationId", operationId,
+                        "consumption", List.of(Map.of("issueLineId", issueLineId,
+                                "quantity", ORDERED_QUANTITY.multiply(QUANTITY_PER)))))), 201);
+        result(post("/v1/work-orders/{id}/operations/{op}/finish", workOrderId, operationId)
+                .content(versionBody(workOrderId)), 200);
+        UUID receiptId = uuid(result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
+                .header("Idempotency-Key", "E2E-G11-RECEIPT-" + fixture.suffix)
+                .content(json(Map.of(
+                        "destinationWarehouseId", fixture.warehouseId,
+                        "quantity", ORDERED_QUANTITY,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "receivedOn", plantToday().toString()))), 201), "receiptId");
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition", workOrderId, receiptId)
+                .content(json(Map.of("result", "AVAILABLE", "reason", "Passed E2E inspection"))), 200);
+
+        // D5: the P6 close would skip the checklist, so a work order with a baseline cannot use it.
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/close", workOrderId)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CLOSE_BLOCKED"));
+
+        JsonNode checklist = result(get("/v1/work-orders/{id}/cost-checklist", workOrderId), 200);
+        assertThat(checklist.get("readiness").asText()).as("checklist %s", checklist).isEqualTo("BLOCKED");
+        assertThat(strings(checklist.get("checks").get(10).get("reasonCodes"))).containsExactly("NO_PREVIEW");
+        String sourceVersion = checklist.get("sourceVersion").asText();
+        long versionBeforePreview = workOrderVersion(workOrderId);
+        long movementsBeforePreview = stockMovementRepository.count();
+
+        JsonNode run = result(post("/v1/work-orders/{id}/cost-runs", workOrderId)
+                .header("Idempotency-Key", "E2E-G11-RUN-" + fixture.suffix)
+                .content(json(Map.of("expectedVersion", versionBeforePreview,
+                        "expectedSourceVersion", sourceVersion))), 200);
+        UUID runId = uuid(run, "runId");
+        // A preview changes nothing but itself (FE R16, A19).
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforePreview);
+        assertThat(stockMovementRepository.count()).isEqualTo(movementsBeforePreview);
+        JsonNode overview = result(get("/v1/work-orders/{id}/production-costs", workOrderId), 200);
+        assertThat(overview.get("readiness").asText()).as("overview %s", overview).isEqualTo("READY");
+        assertThat(new BigDecimal(overview.get("data").get("actual").get("total").asText()))
+                .isEqualByComparingTo("92000");
+        assertThat(new BigDecimal(overview.get("data").get("unitCost").asText())).isEqualByComparingTo("9200");
+
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/finalize-cost-and-close", workOrderId)
+                        .header("Idempotency-Key", "E2E-G11-STALE-" + fixture.suffix)
+                        .content(json(finalizeBody(versionBeforePreview, "cs1-not-the-current-one", runId)))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("COST_SOURCE_STALE"));
+
+        // Two finalizes on the same versions with different keys: the row lock serialises them, one commits.
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        List<java.util.concurrent.Future<MvcResult>> racing = new java.util.ArrayList<>();
+        for (String key : List.of("E2E-G11-FIN-A-", "E2E-G11-FIN-B-")) {
+            String body = json(finalizeBody(versionBeforePreview, sourceVersion, runId));
+            racing.add(pool.submit(() -> {
+                start.await();
+                return mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/finalize-cost-and-close", workOrderId)
+                        .header("Idempotency-Key", key + fixture.suffix).content(body))).andReturn();
+            }));
+        }
+        start.countDown();
+        List<Integer> statuses = new java.util.ArrayList<>();
+        for (java.util.concurrent.Future<MvcResult> future : racing) {
+            statuses.add(future.get(60, java.util.concurrent.TimeUnit.SECONDS).getResponse().getStatus());
+        }
+        pool.shutdown();
+        assertThat(statuses).containsExactlyInAnyOrder(200, 409);
+
+        JsonNode closedRun = result(get("/v1/work-orders/{id}/cost-runs/{r}", workOrderId, runId), 200);
+        assertThat(closedRun.get("status").asText()).isEqualTo("CLOSED");
+        assertThat(closedRun.get("readiness").asText()).isEqualTo("CLOSED");
+        assertThat(closedRun.get("closed").get("closeReason").asText()).isEqualTo("Cost reconciled by E2E");
+        assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforePreview + 1);
+        JsonNode entries = result(get("/v1/work-orders/{id}/cost-runs/{r}/adjustments", workOrderId, runId), 200)
+                .get("content");
+        assertThat(entries.size()).isEqualTo(1);
+        assertThat(new BigDecimal(entries.get(0).get("quantity").asText())).isEqualByComparingTo("0");
+        assertThat(new BigDecimal(entries.get(0).get("stockValueDelta").asText())).isEqualByComparingTo("92000");
+        assertThat(result(get("/v1/work-orders/{id}/cost-runs", workOrderId), 200).get("content").get(0)
+                .get("state").asText()).isEqualTo("FINALIZED");
+        // Closing never moved stock: on hand is still the 10 received (FE §3.6).
+        assertThat(onHandQuantity(product.itemId, fixture.warehouseId)).isEqualByComparingTo(ORDERED_QUANTITY);
+    }
+
+    private Map<String, Object> finalizeBody(long workOrderVersion, String sourceVersion, UUID runId) {
+        return Map.of("expectedVersion", workOrderVersion, "expectedSourceVersion", sourceVersion,
+                "runId", runId, "expectedRunVersion", 1, "reason", "Cost reconciled by E2E");
+    }
+
     /** Closed work orders still refuse reservation — the widened rule has a floor (B13). */
     @Test
     @DisplayName("A cancelled work order cannot be reserved against")
@@ -853,7 +999,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .reorderPoint(BigDecimal.ZERO).leadTimeDays(0)
                 .status(ItemWarehouseSettingStatus.ACTIVE).build());
 
-        return new NonLotFixture(finishedGood.getItemId());
+        return new NonLotFixture(finishedGood.getItemId(), workCenter.getWorkCenterId());
     }
 
     private BigDecimal onHandQuantity(UUID itemId, UUID warehouseId) {
@@ -943,7 +1089,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         return collected;
     }
 
-    private record NonLotFixture(UUID itemId) {}
+    private record NonLotFixture(UUID itemId, UUID workCenterId) {}
 
     private record Fixture(String suffix,
                            UUID companyId,

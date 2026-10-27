@@ -100,3 +100,13 @@ truy vấn đệ quy — chấp nhận được vì đây là read hiếm (maste
 `ItemStandardCostController` nằm trong `module/costing` — module mới, focused, cùng khuôn `uom`/
 `workcenter`/`shift`. `WorkOrderCostAccumulator` + `WorkOrderCostAccumulatorService` nằm trong
 `module/workorder/domain` + `module/workorder/service/execution` (xem mục 2).
+
+## G11 — hệ giá thành thứ hai (2026-10-27)
+
+`G11` (`module/workorder/service/cost`, bất biến `B256`–`B262`) là hệ giá thành **khác** hệ ở file này (D2): ở đây giá chuẩn
+**theo vật tư**, tức thời (`/variance.costVariance`, `work_order_cost_accumulators`); G11 là giá thành **theo trung tâm + thời
+gian**, chụp baseline lúc phát hành và chốt khi đóng (`/production-costs`, `/cost-runs`). Cùng một lệnh có thể có hai con số
+"chi phí thực tế" khác công thức — có chủ đích, `/variance` **không đổi**. G11 chỉ dùng thêm một method mới:
+`ItemStandardCostLookupService.findKnownStandardUnitCost` — rỗng khi vật tư chưa có dòng `ItemStandardCost` (khác
+`findStandardUnitCost`, đọc thiếu thành 0 theo B92), vì G11 phải phân biệt "chưa có giá" với "giá 0".
+

@@ -68,4 +68,14 @@ public interface DeliveryLineRepository extends JpaRepository<DeliveryLine, UUID
 
         BigDecimal getQuantity();
     }
+
+    /** G11b: lines of POSTED deliveries of one item from one warehouse, in posting order then line number. */
+    @Query("""
+            select l from DeliveryLine l
+            join fetch l.delivery d
+            where l.itemId = :itemId and l.warehouseId = :warehouseId
+              and d.status = com.erp.manufacturing.module.delivery.domain.DeliveryStatus.POSTED
+            order by d.postedAt, d.deliveryId, l.lineNo
+            """)
+    List<DeliveryLine> findPostedByItemAndWarehouse(@Param("itemId") UUID itemId, @Param("warehouseId") UUID warehouseId);
 }

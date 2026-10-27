@@ -40,4 +40,13 @@ public interface ProductionQualityDecisionRepository extends JpaRepository<Produ
     @EntityGraph(attributePaths = {"receipt", "receiptLine", "acceptedLot", "rejectedLot", "acceptedMovement",
             "rejectedMovement"})
     Optional<ProductionQualityDecision> findWithDetailsByDecisionId(UUID decisionId);
+
+    /** G11b: every QC decision on the receipts of a work order. */
+    @Query("""
+            select d from ProductionQualityDecision d
+            left join fetch d.acceptedLot
+            left join fetch d.rejectedLot
+            where d.receipt.workOrder.workOrderId = :workOrderId
+            """)
+    List<ProductionQualityDecision> findByWorkOrder(@Param("workOrderId") UUID workOrderId);
 }

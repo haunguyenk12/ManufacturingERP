@@ -260,6 +260,21 @@ MANAGER **xem** master data nhưng **không cấu hình** hệ thống.
 > đơn trên nhà máy của đơn. Người chỉ có `PERM_SALES_ORDER_READ` (thủ kho) đọc được đơn nhưng **không có** field `commercial`
 > nào trong JSON — vắng mặt, không phải `null` (D6).
 
+### Giá thành sản xuất và đóng lệnh *(G11, `V90`)*
+
+| Permission | Mô tả |
+|---|---|
+| `PERM_PRODUCTION_COST_CALCULATE` | **[G11b]** Tính thử giá thành của lệnh (`POST /v1/work-orders/{id}/cost-runs`) và **xem** giá thành. ADMIN + MANAGER |
+| `PERM_COST_RATE_MANAGE` | **[G11a]** Đặt đơn giá nhân công/chi phí chung theo giờ của trung tâm sản xuất (`PUT /v1/plants/{P}/production-cost-rates/{W}`); xem bảng đơn giá **tối thiểu** (mã, tên, trạng thái, công suất) mà không cần quyền đọc master trung tâm (FE R28). **Không** mở hồ sơ giá thành lệnh. ADMIN + MANAGER |
+| `PERM_WORK_ORDER_CLOSE` | **[G11c]** Chốt giá thành và đóng lệnh (`POST /v1/work-orders/{id}/finalize-cost-and-close`) — **chỉ khi kèm** quyền xem giá thành (không đóng mù, FE Q28). Người đã tính được tự chốt (không duyệt hai người, Q29). ADMIN + MANAGER |
+
+> 🔴 **"Xem giá thành" (cost view) = `PERM_WORK_ORDER_VARIANCE_READ` hoặc `PERM_PRODUCTION_COST_CALCULATE`** trên nhà máy của lệnh
+> (D6). Checklist đóng lệnh (`GET …/cost-checklist`) và danh sách `mode=close` còn đọc được bằng `PERM_WORK_ORDER_CLOSE`,
+> `PERM_WORK_ORDER_READ`, `PERM_WIP_READ` — khi đó **không có** `sourceVersion` và tiền (vắng mặt, không `null`). Giá vốn một
+> phiếu giao (`GET /v1/deliveries/{id}/production-cost`) đòi quyền đọc phiếu giao **và** cost view. `PERM_COSTING_*` (`P3`,
+> giá chuẩn theo vật tư) **không** mở gì ở đây — hai hệ giá thành khác nghĩa (D2). Đường `POST …/close` cũ vẫn gác bằng
+> `PERM_WORK_ORDER_MANAGE` nhưng trả `409 CLOSE_BLOCKED` cho mọi lệnh có cơ sở chi phí (phát hành sau G11, D5).
+
 ### Quality Control
 | Quyền | Mô tả |
 |-------|-------|

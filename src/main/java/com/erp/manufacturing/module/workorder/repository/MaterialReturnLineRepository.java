@@ -38,4 +38,14 @@ public interface MaterialReturnLineRepository extends JpaRepository<MaterialRetu
             order by l.lineNo
             """)
     List<MaterialReturnLine> findWithSourceByMaterialReturnIds(@Param("returnIds") Collection<UUID> returnIds);
+
+    /** G11b: every return line of these issue lines, in posting order — the order return values are decided in. */
+    @Query("""
+            select l from MaterialReturnLine l
+            join fetch l.materialReturn r
+            where l.sourceIssueLine.issueLineId in :issueLineIds
+              and r.status = com.erp.manufacturing.module.workorder.domain.MaterialReturnStatus.POSTED
+            order by r.postedAt, r.materialReturnId, l.lineNo
+            """)
+    List<MaterialReturnLine> findPostedBySourceIssueLineIds(@Param("issueLineIds") Collection<UUID> issueLineIds);
 }

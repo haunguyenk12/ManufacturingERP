@@ -182,4 +182,14 @@ public interface ProductionReceiptRepository extends JpaRepository<ProductionRec
             """)
     BigDecimal sumLiveWithoutContributions(@Param("workOrderId") UUID workOrderId,
                                            @Param("excludeReceiptId") UUID excludeReceiptId);
+
+    /** G11b: the APPROVED receipts of a work order with their line, in approval order (FE Q20). */
+    @Query("""
+            select distinct r from ProductionReceipt r
+            left join fetch r.lines l
+            left join fetch l.lot
+            where r.workOrder.workOrderId = :workOrderId
+              and r.status = com.erp.manufacturing.module.workorder.domain.ProductionReceiptStatus.APPROVED
+            """)
+    List<ProductionReceipt> findApprovedWithLinesByWorkOrder(@Param("workOrderId") UUID workOrderId);
 }

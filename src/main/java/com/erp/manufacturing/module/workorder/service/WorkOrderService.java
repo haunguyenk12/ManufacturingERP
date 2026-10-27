@@ -35,6 +35,7 @@ import com.erp.manufacturing.module.workorder.repository.ComponentQuantityProjec
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
 import com.erp.manufacturing.module.workorder.repository.MaterialReservationRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
+import com.erp.manufacturing.module.workorder.service.cost.ProductionCostBaselineService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialIssueService;
 import com.erp.manufacturing.module.workorder.service.execution.MaterialReservationService;
 import com.erp.manufacturing.module.workorder.service.execution.ProductionReceiptService;
@@ -82,6 +83,7 @@ public class WorkOrderService {
     private final WorkOrderPlanningLinkService planningLinkService;
     private final WorkOrderIdempotency idempotencyRecords;
     private final SecurityAuditorAware auditorAware;
+    private final ProductionCostBaselineService costBaselineService;
     private final WorkOrderMapper mapper;
 
     /**
@@ -339,6 +341,8 @@ public class WorkOrderService {
         scheduleOperations(workOrder, now);
         WorkOrder saved = workOrderRepository.saveAndFlush(workOrder);
         wipTransactionService.recordStart(saved);
+        // G11a (FE R05): the cost baseline is captured once, in this transaction; missing prices never block (D4).
+        costBaselineService.capture(saved, now.truncatedTo(ChronoUnit.MICROS));
         return toResponse(saved);
     }
 
@@ -431,6 +435,12 @@ public class WorkOrderService {
         if (!workOrder.canClose()) {
             throw ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT,
                     "Only completed work orders can be closed");
+        }
+        // G11c (D5, FE R32): a work order released with a cost baseline closes only through finalize-and-close, so
+        // this path can never skip its checklist. Work orders released before G11 keep the P6 behaviour.
+        if (costBaselineService.hasBaseline(workOrderId)) {
+            throw ExceptionFactory.custom(BusinessErrorCode.CLOSE_BLOCKED,
+                    "This work order has a cost baseline; close it with POST /v1/work-orders/{id}/finalize-cost-and-close");
         }
         materialReservationService.cancelActiveReservations(workOrder);
         workOrder.close(Instant.now());

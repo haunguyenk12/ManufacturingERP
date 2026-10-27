@@ -330,4 +330,12 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
             @Param("availableStatus") LotStatus availableStatus);
+
+    /** G11: everything on hand of one item in one warehouse, every lot and quality bucket included. */
+    @Query("""
+            select coalesce(sum(b.quantity), 0)
+            from StockBalance b
+            where b.item.itemId = :itemId and b.warehouse.warehouseId = :warehouseId
+            """)
+    java.math.BigDecimal sumOnHand(@Param("itemId") UUID itemId, @Param("warehouseId") UUID warehouseId);
 }

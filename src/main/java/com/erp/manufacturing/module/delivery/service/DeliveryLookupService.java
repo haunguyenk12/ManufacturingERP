@@ -75,4 +75,22 @@ public class DeliveryLookupService {
         return deliveryRepository.existsBySalesOrderIdAndStatusIn(
                 salesOrderId, List.of(DeliveryStatus.DRAFT, DeliveryStatus.POSTED));
     }
+
+    /** G11b: the posted delivery lines of one output pool (item × warehouse), oldest first — production costing. */
+    @Transactional(readOnly = true)
+    public List<DeliveryLine> findPostedPoolLines(UUID itemId, UUID warehouseId) {
+        return deliveryLineRepository.findPostedByItemAndWarehouse(itemId, warehouseId);
+    }
+
+    /** G11c: one delivery with its lines, or empty. */
+    @Transactional(readOnly = true)
+    public java.util.Optional<com.erp.manufacturing.module.delivery.domain.Delivery> findDelivery(UUID deliveryId) {
+        return deliveryRepository.findById(deliveryId);
+    }
+
+    /** G11c: the lines of one delivery in line order. */
+    @Transactional(readOnly = true)
+    public List<DeliveryLine> findLinesOfDelivery(UUID deliveryId) {
+        return deliveryLineRepository.findByDeliveryDeliveryIdOrderByLineNo(deliveryId);
+    }
 }

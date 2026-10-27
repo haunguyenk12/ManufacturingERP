@@ -100,7 +100,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 
 | | |
 |---|---|
-| **Đang chạy** | *(chưa chốt)* — `G10` (FE handoff Giai đoạn 10: giao hàng, hoá đơn và thanh toán, `FE_HANDOFF_GD_10_2026-10-15.md`) ✅ **BE xong cả 4 phần + `G10-9`** 2026-10-25 → 27, xem **§17**; chờ FE nghiệm thu. 🔴 Khác mọi handoff trước: **gần như toàn bộ là dựng mới** và là lần đầu repo chạm **tiền**. Không có entity/bảng/quyền/endpoint nào cho giao hàng, hoá đơn, thanh toán; đơn bán **chưa có giá**; `customerId` của đơn còn nullable; kho **không có** sổ "lô này thuộc dòng đơn nào" như FE giả định. `G9` đã xong ở BE, chờ FE nghiệm thu |
+| **Đang chạy** | *(chưa chốt)* — **`G11` ✅ BE xong 2026-10-27** (§18, bản ghi `CLAUDE.md §0.71`, trả lời FE `BE_RESPONSE_GD_11_2026-10-27.md`), chờ FE nghiệm thu. `G10` đã xong ở BE, chờ FE nghiệm thu |
 | **Chờ FE** | `G10` (§17) — ✅ BE xong 2026-10-25/27, bản ghi `CLAUDE.md §0.67`–`§0.70`. `G9` (§16) — ✅ BE xong cả 3 phần 2026-10-21/23, bản ghi `CLAUDE.md §0.64`–`§0.66`. `G8` (§15) — ✅ BE xong cả 4 phần 2026-10-19/20, bản ghi `CLAUDE.md §0.60`–`§0.63`. `G7` (§14) — ✅ 2026-10-18/19. `G6` (§13) — ✅ 2026-10-17/18. `G5` (§12) — ✅ 2026-10-16. `G4` (§11) — ✅ 2026-10-15. `G2` (§9), `G3` (§10) — ✅ 2026-10-14 |
 | **Ứng viên kế tiếp** | **`G5` — FE handoff Giai đoạn 5: định mức, quy trình, công suất** (`FE_HANDOFF_GD_05_2026-10-13.md`, P1) — 📝 **đã lập kế hoạch 2026-10-15, chờ user chốt 12 quyết định (§12.2) trước khi code** — xem **§12**. Định giá tồn kho (D1 của G4, gộp với `P7`) — **chưa lập kế hoạch**. `G1` — FE handoff Giai đoạn 1 (Auth/tài khoản/quyền) — **chưa lập kế hoạch** |
 | **Bị chặn** | *(không có)*. ⚠️ `MANUFACTURING_PHASE_PLAN_P7_P11.md` dự kiến migration `V69`→`V73`, nhưng `V69`–`V72` đã dùng (`G2`/`G3`/`G4`) ⇒ **phải đánh số lại từ `V73`** trước khi làm `P7` |
@@ -128,6 +128,7 @@ chối có chủ đích (`D`, `E`, `I` ở `FRONTEND_ALIGNMENT_ROADMAP.md §7.1`
 | 15 | **`G8` — FE handoff Giai đoạn 8 (lệnh sản xuất, cấp vật tư, công đoạn, dở dang)** | ✅ **BE hoàn thành — `G8a`/`G8b` 2026-10-19, `G8c`/`G8d` 2026-10-20; chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_08_2026-10-14.md`, P1. Chi tiết **§15** |
 | 16 | **`G9` — FE handoff Giai đoạn 9 (nhập thành phẩm, kiểm tra chất lượng)** | ✅ **BE xong (`G9a` 2026-10-21 · `G9b`/`G9c` 2026-10-23) — chờ FE nghiệm thu** | Nguồn `FE_HANDOFF_GD_09_2026-10-15.md`, P1. Vòng đời phiếu nhập + QC **đã có** (`F2`/`D5`), trần từ good công đoạn cuối **vừa đúng** nhờ `G8c`, lô con + `splitLot` **vừa dựng** ở `G7c`. Việc chính: QC theo **lượng** nhiều lượt, phân bổ theo từng lượt báo (truy xuất nguồn), rút/huỷ/chi tiết/`PATCH`, 2 quyền đọc. Chi tiết **§16** |
 | 17 | **`G10` — FE handoff Giai đoạn 10 (giao hàng, hoá đơn, thanh toán)** | 🔄 **Đang chạy** — `G10a` ✅ 2026-10-25 | Nguồn `FE_HANDOFF_GD_10_2026-10-15.md`, P1. 30 yêu cầu, 40 câu hỏi, 48 ca, 19 màn hình. **Dựng mới gần như toàn bộ**: ba aggregate chứng từ, 10 quyền mới, kiểu tiền VND, giá bán trên đơn. Ba rủi ro chính: lộ giá bán cho người không có quyền tiền (mẫu "hai hình dạng theo quyền" chưa tồn tại), trừ tồn kho theo hai nguồn (phần giữ của đơn + hàng tự do), và MRP có đếm đôi phần đã giao. Chi tiết **§17** |
+| 18 | **`G11` — FE handoff Giai đoạn 11 (giá thành, chênh lệch, đóng lệnh)** | 📝 **Đã lập kế hoạch — chờ chốt §18.2** | Nguồn `FE_HANDOFF_GD_11_2026-10-15.md`, P1. 32 yêu cầu, 36 câu hỏi, 48 ca, 22 màn hình. Mọi nguồn **số lượng** đã có từ `G8`/`G9`/`G10`; thiếu: đơn giá giờ theo trung tâm, cơ sở chi phí chụp lúc phát hành, giá trị vật tư, phân bổ lũy kế ba tầng, tính thử, checklist 11 mã, chốt giá + đóng nguyên tử, 3 quyền mới. Rủi ro chính: không có giá trị tồn kho (`D1`/`D3`), hai hệ giá thành (`D2`), đường `close` cũ là đường né (`D5`). Chi tiết **§18** |
 
 > `C2-8`..`8` là thứ tự **đề xuất**, không phải bắt buộc — xác nhận lại với user trước khi bắt đầu
 > từng phase, vì độ ưu tiên nghiệp vụ có thể đổi giữa chừng.
@@ -1439,6 +1440,143 @@ Vận chuyển / vận đơn / POD / xác nhận khách đã nhận (`POSTED` ch
 
 ---
 
+## 18. `G11` — FE handoff Giai đoạn 11: Giá thành, chênh lệch và đóng lệnh ✅ BE XONG (2026-10-27)
+
+Nguồn: `FE_HANDOFF_GD_11_2026-10-15.md` (v1, P1, 698 dòng). FE/mock đã xong: **đơn giá giờ theo trung tâm sản xuất** (có phiên bản + lịch sử), **cơ sở chi phí chụp lúc phát hành lệnh**, **giá thành theo lệnh** (vật tư thực dùng, công đoạn, chênh lệch, phân bổ theo phiếu nhập → phần QC → phiếu giao), **tính thử (preview) lưu thành lần chạy**, **checklist 11 điều kiện** và **một lệnh nguyên tử chốt giá + đóng lệnh**. BE phải (1) trả lời Q1–Q36 §5, (2) đối chiếu R01–R32 với code thật, (3) chỉ code phần thiếu, (4) trả `BE_RESPONSE_GD_11_<ngày>.md` theo `BETaskDeliveryRules.md`. FE chưa gọi live lần nào (§2.1 ghi rõ cả năm mảnh bằng chứng đều trống).
+
+> 🔴 **Đây là handoff chạm vào thứ repo đã né năm lần: GIÁ TRỊ TỒN KHO.** `P3` loại Material Price Variance vì `stock_movements` không có cột giá (`§0.31` #2); `G7 D8`, `G8 D10`, `G9 D10`, `G10 D7` đều **hoãn** lớp giá trị. `grep -rniE "unit_cost|average_cost|stock_value|inventory_value" db/migration` ra **0 dòng** — kho chỉ biết **lượng**. Nay FE đòi: "giá bình quân của kho tại lúc phát hành" (§3.3 `baseline.materials[].unitCost`), "giá trị còn kho" (`remainingValue`), "điều chỉnh giá trị tồn" (`stockValueDelta`), "pool đầu ra `value 0` đã biết". **Không thứ nào tồn tại.** Toàn bộ phase xoay quanh một câu hỏi: dựng lớp giá trị tồn thật, hay chốt một phạm vi hẹp hơn (`D1`, `D3`).
+>
+> 🔴 **Ba thứ làm phase này khác ba phase trước:**
+> 1. **Repo đã có một hệ giá thành khác, với công thức khác.** `P3` (`module/costing` + `work_order_cost_accumulators`): giá chuẩn **theo vật tư** (`ItemStandardCost`, nhập tay, cộng dồn BOM), nhân công/chi phí chung = `lượng good × rate của vật tư`, vật tư = `lượng xuất × giá chuẩn`. G11 đòi: nhân công/chi phí chung = `phút thực × rate của trung tâm sản xuất / 60`, vật tư = **lượng tiêu thụ** (đã trừ hoàn). Cùng một lệnh sẽ có **hai con số "chi phí thực tế"** ⇒ đúng loại "một hệ thống, hai con số" của `§0.44` — phải chốt ranh giới (`D2`) trước khi viết dòng nào.
+> 2. **Đóng lệnh hiện nay gần như không kiểm gì.** `WorkOrderService.close` (`P6`/`B100`): không body, không version, không checklist, quyền `PERM_WORK_ORDER_MANAGE`; chỉ đòi `COMPLETED`, huỷ giữ chỗ còn sót, ghi `CLOSED`. FE đòi một lệnh mới với 11 điều kiện + tính lại phía server + bất biến ghi sổ — và **không** được để lệnh cũ trở thành đường né.
+> 3. **Tiền ở đây không phải VND nguyên như `G10`** mà là `scale 6` HALF_UP, cộng dồn lũy kế qua ba tầng (phiếu nhập → phần QC → phiếu giao) để tổng luôn bằng đúng `actualTotal`. Lỗi làm tròn nhỏ nhất là tổng lệch 0.000001 — và **không test nào dùng mock bắt được** nếu công thức sai ở tầng lũy kế (`R7`).
+>
+> ✅ **Tin tốt — mọi nguồn dữ liệu số lượng đã có sẵn từ `G8`/`G9`/`G10`, và chúng được dựng đúng để phục vụ phase này:**
+> - **Vật tư**: `MaterialSourceLedger` (`B222`) đã dẫn xuất `cấp − đã dùng − đã hoàn` theo từng dòng cấp (cộng mục trùng); `production_execution_consumptions` là sổ tiêu thụ; `material_returns` là sổ hoàn. `consumed/returned/unused` của FE (§3.5 mục 4) **tính được ngay**.
+> - **Thời gian**: `production_executions.actual_started_at/actual_ended_at` bắt buộc từ `F7`; lượt xử lý lại có `source_execution_id` (`G8c`, `B218`) ⇒ "retry tính một lần" (Q11) đã đúng cấu trúc. Công đoạn cuối + `actualGoodQuantity` = good công đoạn cuối (`B219`) ⇒ `G` của FE (§3.5 mục 7) là cột có sẵn.
+> - **Phiếu nhập → phần QC**: `production_receipt_contributions` (`G9b`) + `production_quality_decisions` (`G9c`, bất biến, mang lượng đạt/loại và lô con) ⇒ thứ tự lũy kế "theo thứ tự ghi sổ" (Q20) có khoá thật (`createdAt` + id).
+> - **Phiếu giao**: `delivery_lines` nối hai biến động `ISSUE` (`G10b`, `B241`) ⇒ phần "COGS đã xuất" gắn được vào đúng dòng giao.
+> - **Mẫu kỹ thuật**: `WorkOrderIdempotency` + `touch()`/`flushTouched` (đúng +1 version), khuôn "hai hình dạng response theo quyền" của `G10a` (`B240`, field **vắng mặt**), `ReasonRules` 5–2000, `plantToday`/múi giờ nhà máy (`G9a`).
+> - **Đã đúng sẵn, chỉ cần trả lời**: R31 (CLOSED không phải cung tương lai — `aggregateOpenSupply` chỉ xét `RELEASED`/`IN_PROGRESS`), R33/Q25 (đóng lệnh không đọc hoá đơn/thanh toán), Q26 (phiếu giao không đọc trạng thái lệnh sản xuất).
+
+### 18.1 Đối chiếu yêu cầu FE ↔ code thật *(rà 2026-10-27 bằng đọc source, chưa gọi live)*
+
+Phạm vi đã rà: danh sách file `module/costing` (10 file); `WorkOrderCostAccumulator` (cột `material/labor/overhead_cost_accumulated`, `NUMERIC(19,6)`); các trường của `WorkCenter` (không có cột giá nào); `WorkOrderService.close` (đọc thân hàm) và `WorkOrder.canClose()`; grep tên quyền `PERM_WORK_ORDER_CLOSE`/`PERM_PRODUCTION_COST_CALCULATE`/`PERM_COST_RATE_MANAGE` trong `src/main` (**0 kết quả**); grep cột giá trị trong migration (**0 kết quả**); trường `released_at`/`routing_captured_at`/`schedule_*` của `WorkOrder` (chưa có cột "cost baseline"). **Chưa rà:** vị trí và thân các hook của `WorkOrderCostAccumulatorService` (file không còn ở `workorder/service/` — tìm lại); `CostingService`/`ItemStandardCostLookupService`; `WorkOrderVarianceService` (nó trả `costVariance` hôm nay như thế nào, FE Q1); `MaterialSourceLedger`/`OperationLedger` (đọc nốt để chốt cách cộng nhiều dòng cấp); dữ liệu `production_executions` để biết bắt chồng giờ cùng công đoạn có thể xảy ra không (Q12); `ProductionReceiptContributionRepository`/`ProductionQualityDecisionRepository` thứ tự lũy kế; `DeliveryLine` ↔ `StockMovement`; **mọi đường ghi chặn `CLOSED`** (`MaterialIssueService`, `MaterialReturnService`, `ProductionExecutionService`, `OperationService`, `ProductionReceiptService` + QC, `WorkOrderService.completeProduction`/`releaseReservations`/`reserve` — R24/A34 đòi tất cả, mới chỉ biết `canExecute`/`canReceipt`/`canReserve` loại `CLOSED` từ `P6`); `StockBalanceRepository` để kiểm "pool cô lập" (D3); `PermissionGuard` mẫu `hasResourceAccess` cho quyền ở cấp nhà máy; cách `WorkOrderScheduler` đọc `capacityUnits` lúc phát hành (G8a) để chụp cùng giá trị.
+
+| Nhóm | FE yêu cầu | Hiện trạng code | Loại |
+|---|---|---|---|
+| **Đơn giá giờ theo trung tâm** (R03, R04, C1/C2/C13) | `laborRate`/`overheadRate` VND/giờ, phiên bản, lịch sử, lý do 5–2000, `expectedVersion` | 🔴 `WorkCenter` không có cột giá; không bảng rate | **CODE** + migration |
+| Phạm vi quyền đơn giá (R28, Q30) | Chỉ có quyền rate-manage ⇒ xem được **tối thiểu** trung tâm + rate, không cần đọc cả master trung tâm | `PERM_WORK_CENTER_READ` đã có (ADMIN+MANAGER+OPERATOR); chưa có quyền rate | **CODE**, 🔴 `D6` |
+| **Cơ sở chi phí lúc phát hành** (R05–R07, C5) | Chụp một lần cùng RELEASE: định mức vật tư + giá + kho nguồn + routing + `capacityUnits` + rate | 🔴 Chưa có. Có `routing_captured_at` + snapshot công đoạn (`B49`/`B56`) + snapshot lịch (`G8a`, `B208`); **không** có giá | **CODE** + migration; 🔴 `D1` |
+| Giá bình quân kho tại lúc phát hành (§3.3, Q4/Q7) | "Known inventory average at RELEASE" | 🔴 **Không tồn tại** — kho không biết giá. Thứ có: `ItemStandardCost` (nhập tay, cộng dồn BOM) | 🔴 `D1` — quyết định gốc của phase |
+| Công thức planned (R07, §3.5 mục 1–2) | vật tư = `required × giá`; phút = `(setup + run×qty)/capacityUnits`; nhân công = `phút × rate / 60` | Chỉ có `required` (`work_order_component_lines`), `setup/run` (snapshot công đoạn), `capacityUnits` (trung tâm). Phép tính chưa có | **CODE** (thuần hàm, dễ test) |
+| **Vật tư thực dùng** (R08, R09, Q13–Q16) | `issued = consumed + returned + unused` theo dòng cấp, giá trị tương ứng, hoàn nhiều lần khớp tổng | Số lượng ✅ (`MaterialSourceLedger`). **Giá trị** ❌: `material_issue_lines` không có giá; hoàn không ghi giá | **CODE**; phụ thuộc `D1` |
+| Hoàn lẻ nhiều lần (A09, Q15) | `.333333` + `.333334`, phần dư dồn vào lần hoàn cuối | Số lượng hoàn đã đúng (`B222`); quy tắc phần dư **giá trị** chưa có | **CODE** nhỏ, 🔴 trả lời nợ `GĐ8 Q37` còn mở |
+| **Thời gian thực + retry** (R10, R11, Q11, Q12) | Phút theo từng lượt báo, retry tính một lần, thiếu/sai/chồng ⇒ block | ✅ dữ liệu có (`actual_started/ended`, `source_execution_id`); **chưa có** phép cộng phút theo công đoạn, chưa có kiểm chồng giờ | **CODE** |
+| Sản lượng cuối + phân bổ (R12–R15, Q17–Q20) | `G` = good công đoạn cuối; scrap hấp thụ; QC rejected giữ giá trị; `Good=0` ⇒ `unitCost null` + `loss` | `G` ✅ (`B219`); phiếu nhập 5+4, QC 8/1 ✅ (`G9`). Phân bổ lũy kế ba tầng ❌ | **CODE** |
+| Thứ tự lũy kế (Q20) | Theo "thứ tự ghi sổ bất biến" | Phiếu nhập: `posted_at`/`approved_at` + id; QC: `created_at` + id (bất biến). Chưa có số thứ tự đơn điệu; µs trùng nhau (bẫy `§0.51` #3) ⇒ cần tie-break id **dạng chuỗi** (`§0.57` #2) | **CODE**, trả lời |
+| **Tính thử + lần chạy** (R16, R18, C7–C9) | Lưu preview bất biến; không đổi tồn/giá trị/trạng thái lệnh | ❌ Chưa có | **CODE** + migration |
+| `sourceVersion` mờ (Q31, R18) | Token bao mọi nguồn liên quan, không lộ tiền | Có mẫu `billingSnapshotVersion` (`G10c`, `B247`), `PLANNING_SOURCE_STALE` (`G6b`) | **CODE** (khuôn có sẵn) |
+| **Checklist 11 mã** (R17, §3.6) | `STATE`, `OPERATIONS`, `ISSUES`, `RESERVATIONS`, `RECEIPTS`, `QC`, `BASELINE`, `COST`, `VALUATION`, `PREVIEW`, … | Mỗi điều kiện có nguồn sẵn ở `G8`/`G9`; chưa có hàm gộp | **CODE** |
+| **Chốt giá + đóng nguyên tử** (R21–R23, C10, Q23) | Một transaction: snapshot cuối, phân bổ, điều chỉnh, `CLOSED`, audit, replay; hai lệnh cạnh tranh chỉ một thắng | 🔴 Chưa có. `close()` cũ không kiểm gì (xem trên). Mẫu có: `touch()`+`flushTouched` (`B212`), khoá bi quan (`B151`/`B194`), idempotency (`G8a`) | **CODE**, phần rủi ro nhất |
+| Đường đóng cũ (R32, Q1, Q27) | Không để API cũ là đường né; không đổi ngầm body | `POST …/close` không body, `PERM_WORK_ORDER_MANAGE` | **CODE** nhỏ, 🔴 `D5` |
+| Chặn mọi đường ghi sau CLOSED (R24, A34) | Cấp/hoàn/báo/nhập/QC đều từ chối | `P6`: các `can*()` là danh sách khẳng định ⇒ **phần lớn đã đúng**. Chưa rà từng đường (xem "Chưa rà") | **Trả lời** + test canh |
+| Điều chỉnh giá trị tồn (R20, §3.6) | Bút toán "value-only" gắn phiếu giao / phần QC, `quantity = 0` | ❌ Không có sổ giá trị | 🔴 `D3` |
+| Chi phí hiệu lực của phiếu giao (R20, C11) | Giá vốn từng dòng giao, có biết/chưa biết | ❌ (`G10b` cố ý `valuationStatus = PENDING_COSTING`) | **CODE** nhỏ nếu `D3` làm |
+| Quyền (R27–R29, Q28–Q30) | `CALCULATE`, `RATE_MANAGE`, `CLOSE` + "Cost view" = `VARIANCE_READ` hoặc `CALCULATE` | Chỉ có `PERM_WORK_ORDER_VARIANCE_READ`, `PERM_COSTING_READ/_MANAGE` (ADMIN+MANAGER). 3 quyền mới | **CODE** + migration; 🔴 `C10` kích hoạt |
+| Payload không tiền cho người vận hành (R27) | Danh sách đóng lệnh/checklist **không** có tiền/rate/token | Mẫu `G10a` (`B240`): object tiền **vắng mặt** | **CODE** (tái dùng mẫu) |
+| MRP/SO (R31, A47) | CLOSED không là cung tương lai; saved run không đổi | ✅ đã đúng (`aggregateOpenSupply` chỉ `RELEASED`/`IN_PROGRESS`; run đã lưu bất biến `G6b`) | **Trả lời** |
+| Thanh toán không là điều kiện (R25, Q25, A33) | Đóng lệnh độc lập hoá đơn/thanh toán | ✅ module `billing`/`delivery` không bị `workorder` đọc ngược | **Trả lời** |
+| Idempotency + quyền hiện tại trước replay (R23, A36–A39) | Cùng khoá ⇒ cùng kết quả; đổi intent ⇒ 409; kiểm quyền trước replay | Khuôn `G8a` (`UNIQUE (key, command)`, replay **trước** version). "Kiểm quyền trước replay" = `@PreAuthorize` chạy trước thân hàm ✅ | **CODE** (khuôn có sẵn) |
+| Múi giờ + phân trang (R01, Q34, A45) | Lọc ngày theo múi giờ nhà máy, không fallback; `size 1..100` | Khuôn `G9a` (`plantToday`, múi giờ thiếu ⇒ 422); `PageableFactory` | **CODE** (khuôn có sẵn) |
+| 404 cho ID ngoài phạm vi (R29, Q35) | Không lộ tồn tại | 🔴 Repo trả **403** (guard tra bản ghi rồi từ chối trước service, `§0.50` #9) | **Trả lời** (lệch, không sửa) |
+| Di trú dữ liệu cũ (R30, A06) | Giữ id/lịch sử, `unknown`, không dùng giá hôm nay | Lệnh cũ không có baseline ⇒ để trống đúng nghĩa; **không backfill** (`B77`) | **CODE** nhỏ |
+
+### 18.2 Quyết định phải chốt với user trước khi code
+
+> ✅ **Đã chốt 2026-10-27 (`AskUserQuestion`): cả 13 quyết định theo cột "Khuyến nghị BE"** — `D0` tách 3 làm liền, `D1` giá chuẩn chụp lúc phát hành, `D3` chỉ pool cô lập, `D2`/`D4`–`D12` theo khuyến nghị.
+
+| # | Quyết định | Hai phương án | Khuyến nghị BE |
+|---|---|---|---|
+| **D0** | **Tách phase hay một lượt** | (a) một lượt `G11`; (b) tách **3**: `G11a` đơn giá giờ + cơ sở chi phí chụp lúc phát hành + 3 quyền → `G11b` mô hình đọc giá thành (vật tư/công đoạn/chênh lệch/phân bổ), tính thử, checklist → `G11c` chốt giá + đóng nguyên tử, điều chỉnh giá trị, chặn đường cũ | 🔴 **(b)**, đúng tiền lệ `G6`–`G10`. `G11c` là phần duy nhất đổi trạng thái lệnh thật và duy nhất cần mutation nặng + smoke hai transaction cạnh tranh; `G11a`/`G11b` chỉ ghi dữ liệu mới, không đụng tồn/lệnh |
+| **D1** | 🔴 **Cơ sở giá vật tư — quyết định gốc** | (a) **Giá chuẩn chụp lúc phát hành**: `unitCost` baseline = `ItemStandardCost` (đã có, `P3`) tại giây RELEASE; actual vật tư = `lượng tiêu thụ × giá đã chụp`. Không có giá bình quân kho. (b) **Dựng giá bình quân kho thật**: cột giá/giá trị trên `stock_balances` + `stock_movements`, cập nhật ở mọi nhập/xuất/chuyển/kiểm đếm/QC/tách lô | **(a).** (b) đổi **mọi** đường ghi tồn kho (`receive`, `issue`, `adjust`, `transfer`, `count`, `splitLot`, hoàn, đảo nhập…), cần backfill vô nghĩa cho dữ liệu cũ (`B77`: không backfill), và là phase riêng cỡ `G4`. Hệ quả phải nói thẳng với FE: "giá vật tư thực tế" ở đây là **giá chuẩn × lượng thực dùng** — chênh lệch đo được là **chênh lệch lượng + thời gian**, **không** phải chênh lệch giá mua (Material Price Variance vẫn loại, `§0.31`). Ví dụ F1 (RM 1000đ/KG, opening 100000) tái hiện được **nếu** vật tư được seed `ItemStandardCost = 1000` |
+| **D2** | 🔴 **Hai hệ giá thành cùng tồn tại** | (a) G11 là hệ **mới, riêng** (đường `/production-costs`, `/cost-runs`); giữ nguyên `P3` (`/variance`, `work_order_cost_accumulators`) không đổi, tài liệu ghi rõ khác nghĩa; (b) viết lại `/variance` đọc từ G11; (c) xoá accumulator `P3` | **(a)** — đúng Q1 của FE ("extension riêng, không đổi ngầm variance/close"). Rủi ro nêu thẳng: hai con số "chi phí thực tế" khác công thức cho cùng một lệnh. Giảm nhẹ: ghi vào `docs/api-guide-for-frontend.md` + `module/costing/CLAUDE.md` rằng `/variance.costVariance` = giá chuẩn **theo vật tư** (P3, tức thời), `/production-costs` = giá thành **theo trung tâm + thời gian** (G11, có chốt). (b)/(c) là breaking change cho FE đang dùng `/variance` |
+| **D3** | 🔴 **Phạm vi định giá & sổ điều chỉnh giá trị** | (a) **Chỉ pool cô lập** (FE §3.5 "ranh giới bắt buộc"): kho đầu ra chỉ có phiếu nhập/QC/giao của đúng lệnh này; giá trị lưu ở bảng riêng `production_cost_allocations` (phiếu nhập → phần QC → dòng giao), **không** thêm cột giá vào kho; pool lẫn (tồn đầu kỳ, lệnh khác, chuyển kho, tiêu thụ tiếp theo) ⇒ `VALUATION_UNRECONCILED`. (b) Dựng replay giá trị tổng quát | **(a).** Đúng Q21 của FE và đúng `D1`(a). "Giá trị còn kho" chỉ là **phân bổ ghi nhận**, không phải số dư kế toán. Phải chốt cách kiểm "pool cô lập": đếm biến động của cặp (vật tư, kho đầu ra) có `referenceType` ngoài `PRODUCTION_RECEIPT`/`PRODUCTION_QC_DECISION`/`DELIVERY` của chính lệnh |
+| **D4** | **Thiếu rate/giá có chặn phát hành không** (Q8) | (a) không chặn: ghi `unknown`, chỉ chặn chốt giá; (b) chặn RELEASE | **(a)** — khớp FE. Phát hành đang là cổng sản xuất (`B107`...), thêm ràng buộc tiền vào đó chặn xưởng vì thiếu dữ liệu kế toán. Thêm giá **sau** không hồi tố baseline cũ (R06, A04) |
+| **D5** | **Đường đóng lệnh cũ** (Q1, Q27, R32) | (a) lệnh **có** cơ sở chi phí (phát hành sau G11): `POST …/close` cũ trả `409` kèm mã chỉ sang `finalize-cost-and-close`; lệnh **không** có cơ sở (cũ): giữ nguyên hành vi `P6`; (b) bỏ hẳn đường cũ; (c) giữ nguyên cho mọi lệnh | **(a).** (c) là đường né toàn bộ checklist; (b) vỡ FE/seed/E2E (`ProductionFlowE2EIT` gọi `close`). Hệ quả: hai kiểu đóng cùng tồn tại, phân biệt bằng `baselineId != null`. `PERM_WORK_ORDER_CLOSE` mới chỉ gác đường mới |
+| **D6** | **Quyền** (R27–R29, Q28–Q30, Q29) | (a) 3 quyền mới: `PERM_PRODUCTION_COST_CALCULATE`, `PERM_COST_RATE_MANAGE`, `PERM_WORK_ORDER_CLOSE` (ADMIN + MANAGER); "xem giá thành" = `PERM_WORK_ORDER_VARIANCE_READ` **hoặc** `CALCULATE` (đúng FE §1.3); đóng đòi `CLOSE` **và** xem giá; người tính được tự chốt; (b) tái dùng `PERM_COSTING_*` | **(a).** `PERM_COSTING_*` là quyền chuẩn theo vật tư (`P3`), nghĩa khác. `C10` kích hoạt: seed + `docs/roles-and-permissions.md`. Không thêm duyệt hai người (Q29) |
+| **D7** | **Độ chính xác & dạng tiền trên wire** (Q3–Q5) | (a) `NUMERIC(19,6)` toàn bộ (trần `9 999 999 999 999,999999`), giá bình quân/phút `NUMERIC(19,12)`, JSON **số**, rate `0..999 999 999` scale ≤ 6; (b) chuỗi, trần `10^32` như FE | **(a).** FE đề xuất `abs < 10^32` — `NUMERIC(19,6)` không chứa nổi; 10^13 đồng vẫn gấp ~4 lần GDP Việt Nam một năm trên một lệnh sản xuất. Số JSON nhất quán với `G10 D5` và toàn repo (`§0.50` #8); JS `Number` an toàn tới ~9×10^15 nên scale 6 vẫn chính xác tới ~10^9 đơn vị, **thấp hơn** trần cột — nêu rõ cho FE (có thể cần chuỗi sau này) |
+| **D8** | **Hình dạng response theo quyền & null nội bộ** (R27, Q6) | (a) tái dùng khuôn `G10a`: object tiền **vắng mặt** khi không có quyền xem giá; trong object được xem, trường chưa biết là `null` kèm `unknownReasons[]`; (b) bản response riêng | **(a)** — đã giải được vì `default-property-inclusion: always` in `null` **bên trong** object còn vắng mặt **cả object** nhờ `@JsonInclude(NON_NULL)` trên component (`B240`). Trả lời Q6: **Có** |
+| **D9** | **`sourceVersion` mờ, `runVersion` riêng, `expectedRunVersion`** (Q31, Q32) | (a) băm ổn định các revision nguồn (version lệnh, tổng số/đến thời điểm của sổ cấp/hoàn/báo/nhập/QC/giao, version rate/baseline) + `version` của run; (b) không có token | **(a)** — khuôn `B247`. Cố ý **không** gồm hoá đơn/thanh toán (R18: độc lập). Lệnh chốt đòi `runId` + `expectedRunVersion` + `expectedSourceVersion` |
+| **D10** | **Lệnh `Good = 0` (toàn phế)** (Q24, R15) | (a) ghi `loss = actualTotal` trong run cuối, **không** biến động tồn, không "settlement WIP" (WIP là read model sống, không có giá trị, `B225`/`D8` của GĐ8); (b) thêm sổ WIP giá trị | **(a)** — khớp FE; xác nhận Q24: "WIP-value settlement authoritative" **không tồn tại** trong repo |
+| **D11** | **Chồng giờ & thời gian bất hợp lệ** (Q11, Q12, R11) | (a) block khi hai lượt cùng công đoạn chồng giờ **hoặc** thiếu/âm thời lượng; chỉ kiểm trong **một công đoạn**, không kiểm cùng trung tâm giữa các lệnh; (b) kiểm rộng | **(a)** — đúng ranh giới FE tự đặt. `F7` đã bắt buộc `actualStartedAt`/`actualEndedAt` nên "thiếu" chỉ xảy ra với dữ liệu rất cũ |
+| **D12** | **Hết hạn xử lý ID ngoài phạm vi** (Q35) | 403 như toàn repo vs 404 | **403** — lệch FE, đã nêu ở `G2`/`G9`/`G10`; không sửa riêng cho `G11` |
+
+> **Không hỏi vì code đã trả lời:** Q2 (rate áp cho trung tâm — `WorkCenter` là thực thể duy nhất có công suất), Q9 (planned = `(setup + run×qty)/capacityUnits` — chính công thức `G5` D9 đã dùng cho xem trước lịch), Q10 (rate đã chụp × thời lượng ghi nhận), Q13/Q14 (tiêu thụ thay vì cấp; thiếu bằng chứng ⇒ `null`, không `0` — đúng nguyên tắc `B77`), Q16 (không sửa hoàn cũ — bất biến sổ), Q17/Q18 (scrap hấp thụ; QC loại giữ giá trị — `G9 D4`), Q25/Q26 (xem bảng trên), Q33 (5–2000 — `ReasonRules`), Q34 (múi giờ nhà máy thiếu ⇒ 422 — `G9a`), Q36 (gộp bút toán 0 — không ràng buộc).
+>
+> 🔴 **Lệch cần nêu trong bản trả lời FE, không phải quyết định:** (1) tiền **số JSON, trần ~10^13** (`D7`), không phải chuỗi `10^32`; (2) **403** thay 404 (`D12`); (3) "giá bình quân kho" **không tồn tại** — baseline dùng giá chuẩn đã chụp (`D1`); (4) `GĐ8 Q37` (phần dư giá trị khi hoàn lẻ) FE nói "mock đã bổ sung nhưng BE chưa quyết" — `G11` là nơi nó thành quy tắc có thật, cần ghi vào bản trả lời của cả hai giai đoạn; (5) lệnh không có routing vẫn đóng được qua đường cũ (`D5`), không qua đường mới (Q27).
+
+### 18.3 Gói công việc *(thứ tự thực thi; mỗi gói một commit theo `dev-workflow.md §6.6`)*
+
+**`G11-0` — đọc nốt + baseline *(trước khi viết dòng code nào)***
+Đọc hết phần "chưa rà" §18.1, ưu tiên: vị trí/thân hook của `WorkOrderCostAccumulatorService` và `WorkOrderVarianceService` (để chốt `D2` bằng số đo, không bằng suy luận), `MaterialSourceLedger`, **từng** đường ghi có thể chạm lệnh `CLOSED` (R24 — lập bảng, mỗi đường một test), và dữ liệu `production_executions` để biết chồng giờ có xảy ra thật không. Đo baseline trên `git worktree` **sạch** (bẫy `§0.52` #10a). Chạy live lệnh đã `COMPLETED` → `close` hiện có để có ảnh A/B trước khi đổi.
+
+**`G11a` — đơn giá giờ + cơ sở chi phí *(migration `V90`)***
+Bảng `production_cost_rates` (trung tâm × phiên bản, bất biến; lịch sử = các dòng) + `production_cost_baselines` (+ dòng vật tư/công đoạn, chụp **một lần** trong transaction RELEASE); 3 quyền (`D6`); C1/C2/C13 (`PUT` đòi `expectedVersion` + lý do); chụp baseline trong `WorkOrderService.release` (thiếu rate/giá ⇒ `unknown`, **không** chặn — `D4`); `GET …/cost-baseline` (C5). 🔴 Baseline phải nằm **trong** transaction release và dùng đúng `capacityUnits` mà `WorkOrderScheduler` dùng (G8a) — hai nơi đọc cùng giá trị.
+
+**`G11b` — mô hình đọc giá thành + tính thử + checklist *(migration `V91`)***
+Hàm thuần `ProductionCostCalculator` (planned/actual/variance, hoàn lẻ, lũy kế ba tầng — toàn bộ `HALF_UP` ở `module/costing`/`workorder`, **không** dùng `double`); `production_cost_runs` (+ snapshot bất biến, `runVersion`); C3 (danh sách, hai `mode`), C4 (năm `section`), C6 (checklist 11 mã), C7 (tạo run), C8/C9 (lịch sử/đọc run); `sourceVersion` mờ (`D9`); tiền vắng mặt theo quyền (`D8`). Preview **không** đổi gì ngoài hàng run mới (A19). Trọng tâm test: bất biến `Σ phân bổ = actualTotal` trên fixture F1 (19166.666667 + 15333.333333) và F4 (số lẻ), mutation vào từng tầng lũy kế.
+
+**`G11c` — chốt giá + đóng nguyên tử *(migration `V92`)***
+`production_cost_allocations` + `production_cost_adjustments` (value-only, `quantity = 0`); C10 `finalize-cost-and-close`: `@PreAuthorize` (CLOSE + xem giá) → khoá lệnh theo khuôn `B194`/`B151` → replay idempotency → đọc lại **mọi** revision nguồn → kiểm state/version/source/run/checks/lý do → **tính lại phía server** (không tin tổng client, A21) → ghi snapshot cuối + phân bổ + điều chỉnh + `CLOSED` + audit → `touch()`/`flushTouched` đúng +1; C11/C12 (giá vốn hiệu lực của phiếu giao, bút toán); chặn đường `close` cũ cho lệnh có baseline (`D5`); canh **từng** đường ghi sau `CLOSED` (R24). 🔴 IT bắt buộc có **hai transaction thật** cạnh tranh (A35), một ca lỗi chèn giữa ghi giá trị và ghi audit để chứng minh rollback toàn bộ (A40), và một ca thu hồi quyền trong lúc chờ khoá (A39) — mock không thấy cả ba.
+
+**`G11-9` — nghiệm thu**
+`mvn -o clean verify` + nghiệm thu mutation (nhắm: công thức lũy kế từng tầng, `Σ phân bổ = tổng`, retry tính một lần, `consumed` không phải `issued`, hoàn lẻ dồn phần dư, baseline không hồi tố khi thêm rate, `unknown ≠ 0`, `Good = 0`, checklist từng mã, replay trước version, source stale, hai lệnh cạnh tranh, mọi đường ghi sau `CLOSED`, tiền vắng mặt theo quyền) + smoke HTTP thật + `BE_RESPONSE_GD_11_<ngày>[_v2…].md` + `CLAUDE.md §0.1`/`§0.2`/bản ghi + `docs/roles-and-permissions.md` (🔴 `C10`: **3 quyền mới**) + `docs/api-guide-for-frontend.md` (🔴 có mục **hai hệ giá thành**, `D2`) + seed `scripts/demo-capstone2` (đặt `ItemStandardCost`, rate trung tâm).
+
+> 🔴 **Migration kế tiếp là `V90`** (`V89` của `G10d` là mới nhất) ⇒ `MANUFACTURING_PHASE_PLAN_P7_P11.md` (hiện đã dành `V90`–`V94`) phải **đánh số lại từ `V93`**; `P7` (WIP Valuation + Variance snapshot) và `P8`–`P10` **chạm đúng vùng này** — nên đọc lại trước khi làm `G11` để tránh dựng hai lần.
+>
+> ⚠️ **Ba thứ sẽ phải sửa/chạy lại sau `G11`:** `ProductionFlowE2EIT` (bước `close` — lệnh phát hành sau G11 có baseline nên đường cũ trả 409; phải đi đường mới hoặc giữ lệnh không baseline); `scripts/demo-capstone2` + `scripts/demo` (cần rate trung tâm + giá chuẩn vật tư để lệnh có baseline đầy đủ); dữ liệu demo hiện có (lệnh cũ = không baseline ⇒ giá thành `unknown`, đóng bằng đường cũ — đúng thiết kế, không phải lỗi).
+
+### 18.4 Breaking changes dự kiến *(ghi đầy đủ vào `BE_RESPONSE_GD_11_*` khi làm)*
+
+| Thay đổi | Breaking? |
+|---|---|
+| Endpoint/field/quyền mới (rate, baseline, run, checklist, finalize, adjustments, effective delivery cost) | **Không** (additive) |
+| `POST /v1/work-orders/{id}/close` trả `409` cho lệnh có cơ sở chi phí (`D5`) | **Có, hẹp** — chỉ lệnh phát hành sau G11; lệnh cũ giữ hành vi |
+| `RELEASE` ghi thêm cơ sở chi phí trong cùng transaction | **Không** về wire; thêm vài truy vấn (độ trễ), thiếu giá không chặn (`D4`) |
+| Chặn thêm đường ghi sau `CLOSED` nếu `G11-0` tìm ra đường chưa chặn (R24) | **Có, hẹp**, chỉ sửa lỗ hổng — nghiệm thu bằng bảng đường ghi |
+| `valuationStatus` của phiếu nhập/phiếu giao đổi từ luôn `PENDING_COSTING` sang `KNOWN` cho pool cô lập sau chốt | **Có, hẹp, additive** — field đã có (`G9c`/`G10b`), nghĩa mở rộng |
+| `/variance.costVariance` (P3) | **Không đổi** (`D2`(a)) |
+| Tiền là số JSON, trần ~10^13 (`D7`) | **Lệch FE** (xin chuỗi `10^32`) — nêu trong bản trả lời |
+
+### 18.5 Ngoài phạm vi *(theo FE §1.1 + quyết định BE)*
+
+Sổ cái / chứng từ kế toán pháp lý; payroll, lương từng người, hoá đơn chi phí thực trả; VAT, ngoại tệ, đa tiền tệ; OEE / MES; đổi giá bán, hoá đơn, thanh toán; tự xoá sổ hàng QC loại; đảo bút toán, mở lại lệnh, hiệu chỉnh; sửa chứng từ đã ghi sổ; **hồi tố dữ liệu cũ bằng giá hôm nay** (`B77`); replay giá bình quân di động cho mọi chuyển kho / đồ thị tiêu thụ phía sau (`D1`, `D3`); **giá bình quân kho theo từng lần nhập** (`D1`(b) — phase riêng cỡ `G4`, và là việc `P7` đang chờ); chênh lệch giá mua vật tư (Material Price Variance, `§0.31`); settlement giá trị WIP (`D10`); kiểm chồng giờ giữa các lệnh cùng trung tâm (`D11`); duyệt hai người (`D6`); và **không** tự đóng các câu còn mở của GĐ6/8/9/10 — FE §5 nói rõ chúng độc lập, riêng `GĐ8 Q7` (kho đầu ra của nháp MAKE) và `GĐ8 Q37` (phần dư giá trị khi hoàn) được nhắc lại ở đây, trong đó **Q37 sẽ có đáp án thật ở `G11b`**.
+
+---
+
+### 18.6 Kết quả `G11` *(2026-10-27)*
+
+`G11a`/`G11b`/`G11c` code liền một lượt và **một commit** (lệch "mỗi gói một commit" của §18.3: controller và E2E dùng chung cả ba
+phần, tách commit sau khi viết sẽ để lại các commit trung gian không biên dịch được). Migration `V90`–`V92`; 13 endpoint C1–C13;
+4 mã lỗi mới; 3 quyền mới; bất biến `B256`–`B262` (`module/workorder/CLAUDE.md`). Lệch kế hoạch có chủ đích:
+
+- Code đặt trong `module/workorder` (`service/cost/`), không phải `module/costing`: nguồn là sổ của lệnh (C7). `module/costing` chỉ
+  thêm `findKnownStandardUnitCost`.
+- Phút kế hoạch chia `capacityUnits` **của trung tâm** lúc phát hành — `WorkOrderScheduler` **không** chia (§0.53 #6), nên "dùng đúng
+  `capacityUnits` mà scheduler dùng" của §18.3 là không đúng sự thật; baseline đọc thẳng từ trung tâm.
+- Không có bảng `production_cost_allocations`: phân bổ nằm trong snapshot JSONB của run; bảng chỉ-giá-trị là `production_cost_adjustments`
+  (thêm cột `covered_quantity` để tính giá vốn phiếu giao sau khi đóng).
+- R24 không cần sửa code (bảng đường ghi ở cuối `module/workorder/CLAUDE.md`).
+- Không có test riêng cho A39 (thu hồi quyền lúc chờ khoá) và A40 (lỗi chèn giữa lúc ghi): bảo đảm bằng thiết kế (kiểm quyền lại dưới
+  khoá; một transaction).
+
+Nghiệm thu: `mvn -o clean verify` **2141 unit + 315 IT**, 0 lỗi; E2E đầu-cuối gồm hai lệnh chốt song song thật (200 + 409); mutation
+13/13 bị giết (2 sau khi thêm ca số lẻ — số F1/F4 của FE không phân biệt được công thức lũy kế). **Chưa:** smoke HTTP trên app chạy
+thật; `V90`–`V92` trên DB dev có dữ liệu demo; cập nhật `scripts/demo-capstone2` (giá chuẩn + đơn giá + đóng bằng C10).
+
+---
+
 ## Phụ lục — nợ nhỏ không thành phase riêng (đọc để biết, không phải action item)
 
 | Nợ | Trạng thái | Ghi chú |
@@ -1599,6 +1737,14 @@ Vận chuyển / vận đơn / POD / xác nhận khách đã nhận (`POSTED` ch
   - [x] `G10c` Hoá đơn: preview, hạn mức theo dòng giao, làm tròn HALF_UP cộng dồn, `PRICE_STALE` (`V88`)
   - [ ] `G10d` Thanh toán + màn hình đọc: phân bổ nhiều hoá đơn, `paid`/`outstanding`, tiến độ đơn, liên kết ngược (`V89`)
   - [ ] `G10-9` `mvn -o clean verify` + mutation + smoke + `BE_RESPONSE_GD_10_*.md` + docs (🔴 `C10` **có** kích hoạt: 10 quyền mới ⇒ `docs/roles-and-permissions.md`)
+  - [ ] FE nghiệm thu A01–A48
+- [x] **`G11`** — FE handoff Giai đoạn 11: giá thành, chênh lệch và đóng lệnh *(BE xong 2026-10-27, §18.6)*
+  - [x] `G11-0` đọc nốt phần "chưa rà" §18.1 + bảng đường ghi sau `CLOSED` (R24: đã đúng từ trước). Baseline lấy số `G10d` (2085 + 312), **không** đo lại trên worktree sạch
+  - [x] Chốt `D0`–`D12` — cả 13 theo khuyến nghị (`AskUserQuestion`, 2026-10-27)
+  - [x] `G11a` Đơn giá giờ + cơ sở chi phí lúc phát hành + 3 quyền (`V90`)
+  - [x] `G11b` Mô hình đọc giá thành, tính thử + lần chạy, checklist 11 mã, `sourceVersion` mờ (`V91`)
+  - [x] `G11c` Chốt giá + đóng nguyên tử, bút toán chỉ-giá-trị, chặn `close` cũ (`V92`)
+  - [x] `G11-9` `mvn -o clean verify` (2141 + 315) + mutation 13/13 + `BE_RESPONSE_GD_11_2026-10-27.md` + docs. ⚠️ **Smoke HTTP trên app chạy thật chưa chạy** (cần thông tin đăng nhập admin); seed demo chưa cập nhật
   - [ ] FE nghiệm thu A01–A48
 
 ---

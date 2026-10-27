@@ -29,14 +29,14 @@ import java.util.stream.Collectors;
  */
 @Component
 @RequiredArgsConstructor
-class OperationLedger {
+public class OperationLedger {
 
     private final WorkOrderOperationRepository operationRepository;
     private final WorkOrderOperationInputRepository inputRepository;
     private final ProductionExecutionRepository executionRepository;
 
     /** Every operation of the work order in sequence order, with its pools. */
-    List<OperationState> load(UUID workOrderId) {
+    public List<OperationState> load(UUID workOrderId) {
         List<WorkOrderOperation> operations = operationRepository.findByWorkOrderWorkOrderIdOrderBySequenceAsc(workOrderId);
         if (operations.isEmpty()) {
             return List.of();
@@ -111,7 +111,7 @@ class OperationLedger {
     }
 
     /** One operation and its pools. Quantities are never null. */
-    record OperationState(WorkOrderOperation operation,
+    public record OperationState(WorkOrderOperation operation,
                           WorkOrderOperation predecessor,
                           boolean last,
                           BigDecimal input,
@@ -132,17 +132,17 @@ class OperationLedger {
         }
 
         /** {@code input − fresh processed} (FE §3.1): retries never draw on it. */
-        BigDecimal freshRemaining() {
+        public BigDecimal freshRemaining() {
             return input.subtract(freshProcessed);
         }
 
         /** {@code historical rework − processed by retries}: retries reference sources of the same operation only. */
-        BigDecimal pendingRework() {
+        public BigDecimal pendingRework() {
             return rework.subtract(retryProcessed);
         }
 
         /** {@code good − transferred}: what the next operation may still take as input. */
-        BigDecimal transferable() {
+        public BigDecimal transferable() {
             return good.subtract(transferred);
         }
 

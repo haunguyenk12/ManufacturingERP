@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -27,6 +28,19 @@ public class ItemStandardCostLookupService {
     @Transactional(readOnly = true)
     public BigDecimal findStandardUnitCost(UUID companyId, UUID itemId) {
         return costingService.calculateStandardCost(companyId, itemId).totalCost();
+    }
+
+    /**
+     * G11a (D1): the fully-loaded standard cost of one unit, or empty when nobody ever priced the item. Unlike
+     * {@link #findStandardUnitCost} — which reads a missing row as 0 (B92) — production costing must tell "no price"
+     * from "priced at 0" (FE R06, A05).
+     */
+    @Transactional(readOnly = true)
+    public Optional<BigDecimal> findKnownStandardUnitCost(UUID companyId, UUID itemId) {
+        if (itemStandardCostRepository.findByItemItemId(itemId).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(costingService.calculateStandardCost(companyId, itemId).totalCost());
     }
 
     @Transactional(readOnly = true)

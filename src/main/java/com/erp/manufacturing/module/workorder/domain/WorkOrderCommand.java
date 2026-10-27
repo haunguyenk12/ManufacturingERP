@@ -22,5 +22,11 @@ public enum WorkOrderCommand {
     RECEIPT_CANCEL,
     RECEIPT_APPROVE,
     RECEIPT_REJECT,
-    RECEIPT_QC
+    RECEIPT_QC,
+    /** G11a: save the hourly rate of a work center (resource = the work center). */
+    COST_RATE_SET,
+    /** G11b: calculate a production cost preview (resource = the run). */
+    COST_RUN_CREATE,
+    /** G11c: finalize the production cost and close the work order. */
+    COST_FINALIZE_CLOSE
 }

@@ -63,4 +63,18 @@ public class WorkCenterLookupService {
         return workCenterRepository.findByPlantPlantIdAndCodeIn(plantId, codes).stream()
                 .collect(Collectors.toMap(WorkCenter::getCode, Function.identity()));
     }
+
+    /** G11a: work centers of a plant for the rate table — minimal master data, paged (FE R28). */
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<WorkCenter> searchWorkCenters(UUID plantId,
+            com.erp.manufacturing.module.organization.domain.OrganizationStatus status, String search,
+            org.springframework.data.domain.Pageable pageable) {
+        return workCenterRepository.search(plantId, status, search, pageable);
+    }
+
+    /** G11a: one work center, whatever its status; empty when it does not exist. */
+    @Transactional(readOnly = true)
+    public java.util.Optional<WorkCenter> findWorkCenter(UUID workCenterId) {
+        return workCenterRepository.findById(workCenterId);
+    }
 }

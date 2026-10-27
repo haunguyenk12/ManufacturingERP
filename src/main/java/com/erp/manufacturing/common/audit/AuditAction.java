@@ -136,6 +136,12 @@ public enum AuditAction {
     CUSTOMER_PAYMENT_UPDATED,
     CUSTOMER_PAYMENT_POSTED,
     CUSTOMER_PAYMENT_CANCELLED,
+    /** G11a: an hourly labor/overhead rate of a work center was saved (new version). */
+    PRODUCTION_COST_RATE_SET,
+    /** G11b: a production cost preview run was calculated. */
+    PRODUCTION_COST_RUN_CREATED,
+    /** G11c: the production cost was finalized and the work order closed in one transaction. */
+    WORK_ORDER_COST_FINALIZED,
     MRP_RUN,
     PLANNING_DEMAND_CREATED,
     PLANNING_DEMAND_CANCELLED,

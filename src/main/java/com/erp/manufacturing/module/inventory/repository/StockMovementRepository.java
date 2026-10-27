@@ -90,4 +90,21 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, UU
             order by m.createdAt desc, m.movementId desc
             """)
     List<StockMovement> findRecentByWarehouseIds(@Param("warehouseIds") Collection<UUID> warehouseIds, Pageable pageable);
+
+    /**
+     * G11 (D3): every movement of one item in one warehouse posted at or after {@code since}, oldest first — what the
+     * production cost valuation reads to prove the output pool of a work order holds nothing but its own output.
+     */
+    @Query("""
+            select m
+            from StockMovement m
+            left join fetch m.lot
+            where m.item.itemId = :itemId
+              and m.warehouse.warehouseId = :warehouseId
+              and m.createdAt >= :since
+            order by m.createdAt asc, m.movementId asc
+            """)
+    List<StockMovement> findPoolMovements(@Param("itemId") UUID itemId,
+                                          @Param("warehouseId") UUID warehouseId,
+                                          @Param("since") java.time.Instant since);
 }

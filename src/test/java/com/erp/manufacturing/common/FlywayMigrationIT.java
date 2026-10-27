@@ -14,6 +14,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -52,7 +53,7 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("89");
+        assertThat(current.getVersion().getVersion()).isEqualTo("92");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -886,6 +887,65 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
                     "update work_orders set terminal_shortfall_quantity = -1 where work_order_no = 'WO-FRESH'"))
                     .hasMessageContaining("chk_work_orders_terminal_shortfall");
         }
+    }
+
+    /**
+     * G11 / {@code V90}: the three production cost permissions go to ADMIN and MANAGER only (D6) — OPERATOR may read the
+     * checklist through PERM_WORK_ORDER_READ but never calculate, set rates or close. Only a real database answers which
+     * role holds what (the {@code migrate_v41_*} lesson).
+     */
+    @Test
+    void migrate_v90_grantsProductionCostPermissionsToAdminAndManagerOnly() throws Exception {
+        migratePublicSchema();
+        List<String> codes = List.of("PERM_PRODUCTION_COST_CALCULATE", "PERM_COST_RATE_MANAGE", "PERM_WORK_ORDER_CLOSE");
+
+        assertThat(granted("ADMIN", codes)).containsExactlyInAnyOrderElementsOf(codes);
+        assertThat(granted("MANAGER", codes)).containsExactlyInAnyOrderElementsOf(codes);
+        assertThat(granted("OPERATOR", codes)).isEmpty();
+    }
+
+    /**
+     * G11c / {@code V92}: a cost entry never moves quantity, and a delivery entry never changes the stock value — the
+     * two rules of a value-only entry (FE §3.6) are CHECKs, not only service code.
+     */
+    @Test
+    void migrate_v92_cost_adjustments_areValueOnly() throws Exception {
+        migratePublicSchema();
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+                     WHERE conrelid = 'public.production_cost_adjustments'::regclass AND contype = 'c'
+                     """)) {
+            java.util.Map<String, String> checks = new java.util.HashMap<>();
+            while (rows.next()) {
+                checks.put(rows.getString("conname"), rows.getString("definition"));
+            }
+            assertThat(checks.get("chk_production_cost_adjustments_quantity")).contains("quantity = (0)");
+            assertThat(checks.get("chk_production_cost_adjustments_kind"))
+                    .contains("stock_value_delta = allocated_amount").contains("stock_value_delta = (0)");
+        }
+    }
+
+    private Set<String> granted(String roleCode, List<String> codes) throws Exception {
+        Set<String> granted = new TreeSet<>();
+        String in = codes.stream().map(code -> "'" + code + "'").collect(java.util.stream.Collectors.joining(", "));
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("""
+                     SELECT p.code
+                     FROM role_permissions rp
+                     JOIN roles r ON r.role_id = rp.role_id
+                     JOIN permissions p ON p.permission_id = rp.permission_id
+                     WHERE r.code = '%s' AND p.code IN (%s)
+                     """.formatted(roleCode, in))) {
+            while (rows.next()) {
+                granted.add(rows.getString("code"));
+            }
+        }
+        return granted;
     }
 
     private Set<String> grantedCostingPermissions(String roleCode) throws Exception {

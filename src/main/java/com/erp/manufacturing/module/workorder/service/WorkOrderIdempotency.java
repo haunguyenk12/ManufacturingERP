@@ -35,6 +35,14 @@ public class WorkOrderIdempotency {
         return StringUtils.hasText(rawKey) ? idempotency.normalizeKey(rawKey) : null;
     }
 
+    /**
+     * G11: normalised key of a command that requires the header (FE §3.4, like the commercial commands of G10);
+     * {@code MISSING_REQUIRED_FIELD} when it was not sent.
+     */
+    public String requiredKey(String rawKey) {
+        return idempotency.normalizeKey(rawKey);
+    }
+
     /** The resource a previous use of this key ran on, after checking the payload is the same. */
     public Optional<UUID> replay(String key, WorkOrderCommand command, Object fingerprint) {
         if (key == null) {

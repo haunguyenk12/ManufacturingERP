@@ -118,6 +118,18 @@ public enum BusinessErrorCode implements ErrorCode {
      * saves and confirms again — the server never changes an amount inside the old confirmation.
      */
     PRICE_STALE               ("PRICE_STALE",               "The invoice was priced on a billing base that has changed", HttpStatus.CONFLICT),
+    /**
+     * G11 (FE Q31): the sources of a work order's cost (version, issues, consumption, returns, executions, receipts,
+     * QC, deliveries, output pool) changed since the cost was calculated. The user calculates again — reloading alone
+     * would hand back the same stale run.
+     */
+    COST_SOURCE_STALE         ("COST_SOURCE_STALE",         "The cost sources changed; calculate the cost again", HttpStatus.CONFLICT),
+    /** G11c (FE §3.6): an operational close condition is not met — the shop floor has to finish it first. */
+    CLOSE_BLOCKED             ("CLOSE_BLOCKED",             "The work order cannot be closed yet", HttpStatus.CONFLICT),
+    /** G11c: the baseline, a price, a rate, consumption or execution time is missing — no number is invented for it. */
+    COST_DATA_INCOMPLETE      ("COST_DATA_INCOMPLETE",      "The cost data of the work order is incomplete", HttpStatus.CONFLICT),
+    /** G11c (D3): the output pool holds stock or movements that are not this work order's own — no value is assigned. */
+    VALUATION_UNRECONCILED    ("VALUATION_UNRECONCILED",    "The output value cannot be attributed to this work order", HttpStatus.CONFLICT),
     SOURCE_LOCKED             ("SOURCE_LOCKED",             "These fields come from planning and cannot be changed", HttpStatus.CONFLICT),
     /**
      * G8c (FE Q14): the first operation of a work order takes input only after material was issued to it. Not

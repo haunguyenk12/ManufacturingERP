@@ -312,6 +312,7 @@ class WorkOrderMethodSecurityTest {
                     mock(WorkOrderPlanningLinkService.class),
                     idempotency,
                     mock(SecurityAuditorAware.class),
+                    mock(com.erp.manufacturing.module.workorder.service.cost.ProductionCostBaselineService.class),
                     mapper);
         }
 
