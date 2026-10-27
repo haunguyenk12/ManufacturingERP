@@ -166,6 +166,7 @@ for required in \
     /v1/purchase-orders /v1/purchase-orders/{purchaseOrderId}/send \
     /v1/purchase-orders/{purchaseOrderId}/goods-receipts \
     /v1/inventory/receive /v1/inventory/balances /v1/inventory/lots \
+    /v1/companies/{companyId}/customers \
     /sales-orders/v1 /sales-orders/v1/{salesOrderId}/confirm \
     /v1/planning/demands /v1/planning-runs \
     /v1/supply-suggestions/{suggestionId}/approve \
@@ -639,8 +640,13 @@ while IFS='|' read -r orderno customer state duedays lines; do
     done
     linejson="$linejson]"
 
+    # G10a: confirming an order needs a master customer, not just a name.
+    cusid=$(call POST "/v1/companies/$CO/customers" \
+        "{\"code\":\"$NS-CUS-${orderno##*-}\",\"name\":\"$customer\"}" | rid customerId)
+    remember "customers.$NS-CUS-${orderno##*-}" "$cusid"
+
     soid=$(call POST /sales-orders/v1 \
-        "{\"companyId\":\"$CO\",\"plantId\":\"$PLANT\",\"orderNo\":\"$orderno\",\"customerName\":\"$customer\",\"orderDate\":\"$(d_today)\",\"note\":\"Sales order of the demo dataset\",\"lines\":$linejson}" \
+        "{\"companyId\":\"$CO\",\"plantId\":\"$PLANT\",\"orderNo\":\"$orderno\",\"customerId\":\"$cusid\",\"customerName\":\"$customer\",\"orderDate\":\"$(d_today)\",\"note\":\"Sales order of the demo dataset\",\"lines\":$linejson}" \
         | rid salesOrderId)
     remember "salesOrders.$orderno" "$soid"
 

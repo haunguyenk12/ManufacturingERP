@@ -133,6 +133,7 @@ D26-FG-ROAD700  Road Racer 700C              (lot-tracked)
 | Bảng năng lực (Capacity Board) | 14 dòng có tải/sức chứa/% sử dụng theo từng tổ và từng ngày |
 | Hoạch định (MRP) | 3 lượt chạy; lượt `backlog` còn **32 đề xuất `DRAFT`** để demo thao tác duyệt |
 | Lệnh sản xuất | 8 lệnh phủ **6 trạng thái**, có lệnh nối thẳng về đơn bán hàng |
+| Khách hàng | *(chỉ công ty `D26-`)* 6 khách master `D26-CUS-1001`…`1006`, mỗi đơn bán hàng một khách (cần cho CONFIRM từ GĐ10). Bộ dữ liệu **chưa** có giá bán, phiếu giao, hoá đơn, phiếu thu |
 | Phiếu xuất vật tư / ghi sản lượng / nhập kho | Sinh từ 4 lệnh sản xuất đã chạy thật |
 | Lô hàng | 6 lô, trong đó **`D26-BIKE20-B002` đang `HOLD`**: tồn thực tế 2 nhưng khả dụng 0 |
 | Mua hàng | 3 yêu cầu + 5 đơn mua phủ 4 trạng thái, có phiếu nhập kho thật làm tăng tồn |
@@ -154,7 +155,7 @@ từ bước 1.
 
 | # | Ai | Làm gì | Kết quả phải thấy |
 |---|---|---|---|
-| 0 | `quanly.demo` | *(chỉ với công ty `DEMO-`)* Tạo đơn bán hàng, ví dụ 10 cái `DEMO-FG-BIKE16`, rồi CONFIRM | Đơn → `CONFIRMED`, sinh dòng nhu cầu hoạch định |
+| 0 | `quanly.demo` | *(chỉ với công ty `DEMO-`)* Tạo khách hàng (từ 2026-10-25 đơn **phải** có khách master mới CONFIRM được), rồi tạo đơn bán hàng cho khách đó, ví dụ 10 cái `DEMO-FG-BIKE16`, rồi CONFIRM | Đơn → `CONFIRMED`, sinh dòng nhu cầu hoạch định |
 
 | 1 | `quanly.demo` | Chạy Planning cho đơn hàng đó, kho nhu cầu là kho thành phẩm | Nhu cầu cấp 0 thiếu hàng, các cấp dưới `COVERED` · **0 đề xuất bị chặn** |
 | 2 | `quanly.demo` | Duyệt đề xuất MAKE rồi chuyển thành lệnh sản xuất | Lệnh sản xuất mang **số lượng ròng** (đã trừ tồn kho sẵn có) |

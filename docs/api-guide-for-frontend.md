@@ -1431,6 +1431,27 @@ Quyền: cần **cả** READ và MANAGE **của chính loại** — `PERM_ITEM_*
 > `errors[].field` (vd `lines[0].quantity`). Trước đây Postgres làm tròn im lặng.
 > Không có định giá tồn kho (giá bình quân, giá trị tồn, snapshot giá) — để phase sau.
 
+### Giao hàng, hoá đơn, thu tiền — FE giai đoạn 10 *(`G10a`–`G10d`, 2026-10-25 → 27)*
+
+Lệnh ghi GĐ10 (phiếu giao, hoá đơn, phiếu thu, bổ sung giá) **bắt buộc** `Idempotency-Key` và trả `{documentId, type, version}` — đọc lại chi tiết
+sau đó. Tiền là **số JSON nguyên đồng** ≤ 9007199254740991, `currency` luôn `"VND"`. Không đụng tồn kho trừ ghi sổ phiếu giao.
+
+| Việc | Endpoint | Ghi chú |
+|---|---|---|
+| Giá trên đơn | dòng nháp (`POST /sales-orders/v1/drafts`, `PATCH …/{id}/draft`) nhận `unitPrice?` · `POST /sales-orders/v1/{id}/commercial-prices {expectedVersion, prices[]{salesOrderLineId, unitPrice}}` · `PERM_SALES_PRICE_MANAGE` | Bổ sung giá thiếu cho đơn đã xác nhận; giá đã biết (kể cả 0) khoá ⇒ `409 PRICE_LOCKED` |
+| Khách bắt buộc | `POST …/{id}/confirm` | đơn không có `customerId` ⇒ `422 OPERATION_NOT_ALLOWED` field `customerId`. Đường tạo cũ `POST /sales-orders/v1` nhận `customerId?` |
+| Phiếu giao | `GET /v1/deliveries?plantId…` · `GET …/{id}` · `…/{id}/history` · `GET /sales-orders/v1/{id}/delivery-candidates` · `GET /sales-orders/v1/{id}/lines/{lineId}/delivery-sources?warehouseId` · `POST /v1/deliveries {salesOrderId, expectedOrderVersion, documentDate, note?, lines[]{salesOrderLineId, sourceKey, quantity}}` · `PATCH /{id}` · `POST /{id}/post` · `POST /{id}/cancel` | `PERM_DELIVERY_*`; `sourceKey` lấy từ `delivery-sources`, không tự ghép. Hạn mức `đặt − đã giao − nháp khác`. Ghi sổ lấy phần giữ của chính đơn trước rồi hàng tự do; lô `HOLD`/`REJECTED`/hết hạn ⇒ `409 LOT_NOT_ELIGIBLE`. Huỷ đơn còn phiếu giao ⇒ `409` |
+| Phiếu giao liên quan | `GET /v1/deliveries/related?plantId` + **đúng một** `lotId` / `productionReceiptId` / `workOrderId` | phiếu nhập/WO = lô đầu ra đã duyệt + lô con QC chấp nhận; không có lô ⇒ trang rỗng |
+| Hoá đơn | `GET /v1/sales-invoices?plantId…&paymentState?` · `GET …/{id}` · `…/{id}/history` · `…/{id}/payments` · `GET /sales-orders/v1/{id}/invoice-candidates` · `POST /v1/sales-invoices/preview` · `POST /v1/sales-invoices {…, billingSnapshotVersion, documentDate, dueDate, lines[]{deliveryLineId, quantity}}` · `PATCH /{id}` · `POST /{id}/post` · `POST /{id}/cancel` | `PERM_SALES_INVOICE_*`. Server tự tính tiền (HALF_UP cộng dồn theo dòng đơn); lưu bằng `billingSnapshotVersion` của lần xem trước cuối; nền đổi ⇒ `409 PRICE_STALE` (xem trước + lưu lại). Thiếu giá ⇒ `409 PRICE_UNKNOWN`. Hoá đơn `POSTED` có `paidAmount`/`outstandingAmount`/`paymentState` |
+| Thu tiền | `GET /v1/customer-payments?plantId…` · `GET …/{id}` · `…/{id}/history` · `GET /v1/customer-payments/invoice-candidates?plantId&customerId&editingPaymentId?` · `POST /v1/customer-payments {customerId, documentDate, method, reference?, note?, amount, allocations[]{invoiceId, expectedInvoiceVersion, amount}}` · `PATCH /{id}` · `POST /{id}/post` · `POST /{id}/cancel` | `PERM_CUSTOMER_PAYMENT_*`. `amount` = tổng phân bổ; mỗi hoá đơn ≤ `availableToAllocate`. Ghi sổ tăng `version` mỗi hoá đơn được trả |
+| Tiến độ đơn | `GET /sales-orders/v1/{id}/fulfillment-summary` | lượng cho mọi người đọc đơn; giá dòng chỉ với quyền giá/hoá đơn; khoản phải thu chỉ với quyền hoá đơn |
+
+> 🔴 **Thiếu quyền tiền ⇒ object `commercial` vắng mặt** (không phải `null`) trên chi tiết đơn, dòng đơn và tiến độ đơn. Kiểm bằng `'commercial' in x`.
+> 🔴 **Đơn xác nhận trước GĐ10** có `deliveryBaselineKnown = false` (`deliveryBaselineUnknownReason = "LEGACY_ORDER"`): không giao / lập hoá đơn
+> được (`409 SOURCE_UNKNOWN`), số giao/lập là `null`.
+> 🔴 Trạng thái đơn **không** đi theo giao/thu (giao đủ, thu đủ vẫn có thể `CONFIRMED`). Hiển thị bằng `deliveryProgress` + `outstandingAmount`.
+> Chi tiết, ví dụ và mã lỗi đầy đủ: `BE_RESPONSE_GD_10_2026-10-25.md`, `…-26_v2.md`, `…-27_v3.md`.
+
 ### Vòng đời đơn mua hàng — FE giai đoạn 7 phần 1 *(`G7a`, 2026-10-18)*
 
 | Việc | Endpoint | Ghi chú |
@@ -1521,11 +1542,11 @@ Field mới trên phiếu: `code`, `version`, `receivedDate`, `reference`, `comp
 | Sửa nháp | `PATCH /sales-orders/v1/{id}/draft` — `{expectedVersion, customerId, customerReference?, orderDate, note?, lines[]}` | **Thay toàn bộ**: field vắng = xoá (khác `PATCH /{id}` cũ) |
 | Xác nhận / huỷ | `POST .../{id}/confirm` body tuỳ chọn `{expectedVersion}` · `POST .../{id}/cancel` body tuỳ chọn `{expectedVersion?, reason}` | Huỷ trả hết tồn đơn đang giữ; gửi body thì `reason` bắt buộc |
 | Danh sách | `GET /sales-orders/v1?…&search=&orderDateFrom/To=&dueDateFrom/To=` | `search` gồm mã đơn, tên/mã khách, tham chiếu; khoảng ngày cần theo **ngày cần sớm nhất**; mỗi dòng có `earliestDueDate`/`latestDueDate`/`lineCount` |
-| Chi tiết | `GET /sales-orders/v1/{id}` | Mỗi dòng: `heldStockQuantity`, `workOrderCoveredQuantity`, `producedQuantity` (**null**), `qcAcceptedQuantity`, `deliveredQuantity` (**null**), `uncoveredQuantity`, `metricsEvidence`; `linkedDocuments[]` (lệnh SX) |
+| Chi tiết | `GET /sales-orders/v1/{id}` | Mỗi dòng: `heldStockQuantity`, `workOrderCoveredQuantity`, `producedQuantity` (**null**), `qcAcceptedQuantity`, `deliveredQuantity` (**null** tới `G10b`; nay là tổng phiếu giao đã ghi sổ, `null` với đơn cũ), `uncoveredQuantity`, `metricsEvidence`; `linkedDocuments[]` (lệnh SX) |
 | Giữ tồn | `GET .../{id}/lines/{lineId}/allocation-candidates?warehouseId=` · `POST .../{id}/reservations {expectedVersion, salesOrderLineId, warehouseId, lotId?, quantity}` · `POST .../{id}/reservations/{rid}/release {expectedVersion, reason?}` · `GET .../{id}/reservations` | Bỏ `lotId` ⇒ FEFO; response giữ/bỏ giữ trả `{reservations[], salesOrder}` (version mới); vượt phần chưa phủ ⇒ `409 PLANNED_QUANTITY_EXCEEDED` |
 | Nhu cầu hoạch định | `GET /sales-orders/v1/planning-demands?…&uncoveredOnly=true` | Thêm `heldStockQuantity`, `workOrderCoveredQuantity`, `uncoveredQuantity` |
 
-> 🔴 `uncoveredQuantity = max(0, ordered − qcAccepted − heldStock − workOrderCovered)`. `fulfilledQuantity` = QC chấp nhận, **không** phải đã giao.
+> 🔴 `uncoveredQuantity = max(0, ordered − max(qcAccepted, delivered) − heldStock − workOrderCovered)` (`G10b`; trước đó không có `delivered`). `fulfilledQuantity` = QC chấp nhận, **không** phải đã giao.
 > 🔴 Tồn khả dụng ở mọi màn hình nay trừ cả phần đơn bán đang giữ; `GET /v1/inventory/reservations` có dòng `ownerType = "SALES_ORDER"` (field lệnh SX `null`).
 > Đổi trạng thái lô đang bị đơn giữ ⇒ `409 RESERVED_STOCK` — bỏ giữ trước.
 
@@ -1723,6 +1744,10 @@ File nhập vượt 5 MiB (giới hạn của đường nhập mẫu cố địn
 | `RESERVED_STOCK` 🆕 `G4` | Đổi trạng thái lô còn reservation, hoặc đếm xuống dưới lượng đã giữ cho WO — giải phóng reservation trước |
 | **`IMPORT_REVALIDATION_FAILED`** 🆕 `G3` | Commit batch nhập mà dữ liệu đã đổi kể từ lúc kiểm tra. **Có `result`** = batch đã `INVALID` kèm lỗi mới. Không tạo master nào |
 | **`DEFAULT_CONFLICT`** 🆕 | Lưu thiết lập kho với `replaceDefaults=false` khi kho khác đang giữ vai trò default. Không có gì được ghi — hỏi người dùng rồi gửi lại với `replaceDefaults=true` |
+| `PRICE_LOCKED` 🆕 `G10a` | Bổ sung giá cho dòng đơn đã có giá (kể cả 0) — giá đã chốt không sửa |
+| `SOURCE_UNKNOWN` 🆕 `G10b` | Đơn không có baseline giao hàng (xác nhận trước GĐ10) hoặc không có khách master — không giao / lập hoá đơn được |
+| `PRICE_UNKNOWN` 🆕 `G10c` | Dòng đơn chưa có giá nên không lập hoá đơn được (không bao giờ tính 0) |
+| `PRICE_STALE` 🆕 `G10c` | Nền tính tiền hoá đơn đã đổi — xem trước lại, cho người dùng xác nhận số mới, lưu lại |
 | `CONCURRENT_MODIFICATION` | Hai người sửa cùng bản ghi — **refetch rồi thử lại** |
 | `RESOURCE_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `EMAIL_ALREADY_EXISTS` | Trùng khoá |
 | `LOT_CODE_ALREADY_EXISTS` | Mã lô đã tồn tại cho vật tư đó |
