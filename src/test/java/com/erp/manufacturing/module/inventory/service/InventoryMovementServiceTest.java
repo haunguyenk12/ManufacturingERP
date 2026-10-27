@@ -491,6 +491,76 @@ class InventoryMovementServiceTest {
         verifyNoInteractions(movementRepository, itemRepository, warehouseRepository, lotRepository, balanceRepository);
     }
 
+    /**
+     * CF-1 (B263): the lot guard sees the resolved lot and, when it refuses, nothing is written — no
+     * balance change, no ledger row (R5).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void adjust_lotGuardRefusesTheResolvedLot_noBalanceOrMovementIsWritten() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID lotId = UUID.randomUUID();
+        Item item = item(itemId, companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        InventoryLot lot = InventoryLot.builder().lotId(lotId).item(item).lotCode("LOT-QC").status(LotStatus.HOLD).build();
+        java.util.function.Consumer<InventoryLot> lotGuard = mock(java.util.function.Consumer.class);
+        doThrow(com.erp.manufacturing.common.exception.ExceptionFactory.custom(BusinessErrorCode.STATE_CONFLICT, "QC owns it"))
+                .when(lotGuard).accept(lot);
+
+        when(movementRepository.findByIdempotencyKeyAndMovementType("ADJ-QC", MovementType.ADJUST_OUT)).thenReturn(Optional.empty());
+        when(itemRepository.findById(itemId)).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouseId)).thenReturn(Optional.of(warehouse));
+        when(lotRepository.findById(lotId)).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> service.adjust(new InventoryAdjustCommand(
+                itemId, warehouseId, lotId, null, new BigDecimal("-1"), "Correction", null, null, null, null), "ADJ-QC", lotGuard))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verify(lotGuard).accept(lot);
+        verifyNoInteractions(balanceRepository, serialNumberRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
+    /**
+     * CF-1: a replay returns the original movement even if QC now owns the lot — the guard runs only on
+     * the first call, after the replay lookup.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void adjust_replayOfAnExistingKey_returnsTheOriginalMovementWithoutConsultingTheLotGuard() {
+        UUID companyId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID lotId = UUID.randomUUID();
+        Item item = item(itemId, companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(warehouseId, companyId, OrganizationStatus.ACTIVE);
+        InventoryAdjustCommand command = new InventoryAdjustCommand(
+                itemId, warehouseId, lotId, null, new BigDecimal("-1"), "Correction", null, null, null, null);
+        StockMovement existing = StockMovement.builder()
+                .item(item)
+                .warehouse(warehouse)
+                .movementType(MovementType.ADJUST_OUT)
+                .direction(MovementDirection.OUT)
+                .quantity(BigDecimal.ONE)
+                .idempotencyKey("ADJ-REPLAY")
+                .payloadHash(idempotency.payloadHash(command))
+                .createdAt(Instant.now())
+                .build();
+        when(movementRepository.findByIdempotencyKeyAndMovementType("ADJ-REPLAY", MovementType.ADJUST_OUT))
+                .thenReturn(Optional.of(existing));
+        java.util.function.Consumer<InventoryLot> lotGuard = mock(java.util.function.Consumer.class);
+
+        InventoryMovementResult result = service.adjust(command, "ADJ-REPLAY", lotGuard);
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.movement()).isSameAs(existing);
+        verifyNoInteractions(lotGuard, itemRepository, warehouseRepository, lotRepository, balanceRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
     @Test
     void issue_insufficientStock_failsAndDoesNotCreateMovement() {
         UUID companyId = UUID.randomUUID();

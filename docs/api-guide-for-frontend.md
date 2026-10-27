@@ -1594,6 +1594,12 @@ Field mới trên phiếu: `code`, `version`, `receivedDate`, `reference`, `comp
 
 ---
 
+### 5.CF — Bổ sung theo bộ Capstone 3 follow-up (`CF-*`, 2026-10-27)
+
+| Phase | Endpoint | Thay đổi | Lỗi mới |
+|---|---|---|---|
+| CF-1 | `POST /v1/inventory/adjust` | Lô còn thuộc nguồn QC bị từ chối: lô còn phần chờ QC mua, lô còn phần chờ QC sản xuất, lô con bị QC (mua hoặc sản xuất) loại. Lô `HOLD` đặt tay (không phiếu nhận) và lô con đạt vẫn điều chỉnh được. Replay cùng key trả chứng từ cũ | `409 STATE_CONFLICT` |
+
 ## 6. Tham chiếu DTO
 
 Chỉ liệt kê DTO trên luồng chính. Schema đầy đủ: Swagger UI.

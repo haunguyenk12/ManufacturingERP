@@ -7,7 +7,10 @@ import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.service.InventoryAdjustCommand;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
+import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
+import com.erp.manufacturing.module.inventory.service.LotQcOwnershipGuard;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.*;
 import com.erp.manufacturing.module.organization.repository.CompanyRepository;
@@ -21,7 +24,9 @@ import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptLineReposi
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.SupplierRepository;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
+import com.erp.manufacturing.module.workorder.service.query.LotQcOriginLookupService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
@@ -46,6 +51,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Purchase QC on a real database (G7c). Only Postgres answers what is checked here (rule R7): the lot
@@ -61,7 +67,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({PurchaseQualityService.class, GoodsReceiptDraftService.class, GoodsReceiptPoster.class, PurchasingIdempotency.class,
         PurchasingMapper.class, IdempotencySupport.class, TraceIdProvider.class, InventoryMovementService.class,
-        ItemLookupService.class, OrganizationLookupService.class, UserLookupService.class, PurchaseQualityIT.Config.class})
+        ItemLookupService.class, OrganizationLookupService.class, UserLookupService.class, LotQcOwnershipGuard.class,
+        PurchaseQcLookupService.class, LotQcOriginLookupService.class, PurchaseQualityIT.Config.class})
 class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
 
     private static final String ZONE = "Asia/Ho_Chi_Minh";
@@ -91,6 +98,8 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
     @Autowired CompanyRepository companyRepository;
     @Autowired PlantRepository plantRepository;
     @Autowired WarehouseRepository warehouseRepository;
+    @Autowired InventoryMovementService movementService;
+    @Autowired LotQcOwnershipGuard lotQcOwnershipGuard;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactions;
 
@@ -276,6 +285,86 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
             assertThat(jdbc.queryForObject("select count(*) from purchase_quality_decisions where goods_receipt_line_id = ?",
                     Integer.class, lineId)).isEqualTo(1);
         }
+    }
+
+    /**
+     * CF-1 (B263) on a real database: once purchase QC owns a lot, a generic adjustment through the
+     * real guard is refused — the parent still holding pending quantity and the rejected child — and
+     * leaves no ledger row; the accepted child is ordinary stock and adjusts normally.
+     */
+    @Test
+    void adjust_lotsPurchaseQcStillOwns_areRefused_acceptedChildAdjusts() {
+        Fixture f = fixture();
+        Item item = item(f, true);
+        GoodsReceiptResponse receipt = posted(order(f, item, "10"), "4", "LOT-" + f.suffix());
+        GoodsReceiptLineResponse line = receipt.lines().get(0);
+        PurchaseQcDecisionResult result = qualityService.decide(receipt.goodsReceiptId(), line.goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("2.5"), new BigDecimal("0.5"), "0.5 failed"),
+                null);
+        UUID parentLotId = line.lotId();
+        UUID acceptedLotId = lotId(item, "LOT-" + f.suffix() + "-A1");
+        UUID rejectedLotId = lotId(item, "LOT-" + f.suffix() + "-R1");
+        assertThat(result.pendingQuantity()).isEqualByComparingTo("1");
+        int movementsBefore = movementCount(item);
+
+        assertRefused(item, f, parentLotId, "1", "CF1-P-IN-" + f.suffix());
+        assertRefused(item, f, parentLotId, "-1", "CF1-P-OUT-" + f.suffix());
+        assertRefused(item, f, rejectedLotId, "-0.5", "CF1-R-" + f.suffix());
+
+        assertThat(movementCount(item)).isEqualTo(movementsBefore);
+        assertThat(lotQuantity(parentLotId)).isEqualByComparingTo("1");
+        assertThat(lotQuantity(rejectedLotId)).isEqualByComparingTo("0.5");
+
+        var accepted = movementService.adjust(adjustCommand(item, f, acceptedLotId, "-1"), "CF1-A-" + f.suffix(),
+                lotQcOwnershipGuard::ensureAdjustable);
+
+        assertThat(accepted.created()).isTrue();
+        assertThat(lotQuantity(acceptedLotId)).isEqualByComparingTo("1.5");
+        assertThat(movementCount(item)).isEqualTo(movementsBefore + 1);
+        assertThat(onHand(item)).isEqualByComparingTo("3");
+    }
+
+    /** CF-1: the guard is narrow — a lot an operator put on HOLD outside any receipt stays adjustable. */
+    @Test
+    void adjust_lotHeldWithoutAnyReceipt_staysAdjustable() {
+        Fixture f = fixture();
+        Item item = item(f, true);
+        String lotCode = "HAND-" + f.suffix();
+        movementService.receive(new InventoryReceiveCommand(item.getItemId(), f.warehouse().getWarehouseId(), null, lotCode,
+                new BigDecimal("3"), "Opening stock", null, null, null, null, null), "CF1-RCV-" + f.suffix(), LotStatus.HOLD);
+        UUID lotId = lotId(item, lotCode);
+        assertThat(jdbc.queryForObject("select status from inventory_lots where lot_id = ?", String.class, lotId)).isEqualTo("HOLD");
+
+        var adjusted = movementService.adjust(adjustCommand(item, f, lotId, "-1"), "CF1-HAND-" + f.suffix(),
+                lotQcOwnershipGuard::ensureAdjustable);
+
+        assertThat(adjusted.created()).isTrue();
+        assertThat(lotQuantity(lotId)).isEqualByComparingTo("2");
+    }
+
+    private void assertRefused(Item item, Fixture f, UUID lotId, String delta, String key) {
+        assertThatThrownBy(() -> movementService.adjust(adjustCommand(item, f, lotId, delta), key,
+                lotQcOwnershipGuard::ensureAdjustable))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+    }
+
+    private static InventoryAdjustCommand adjustCommand(Item item, Fixture f, UUID lotId, String delta) {
+        return new InventoryAdjustCommand(item.getItemId(), f.warehouse().getWarehouseId(), lotId, null,
+                new BigDecimal(delta), "Correction", null, null, null, null);
+    }
+
+    private UUID lotId(Item item, String lotCode) {
+        return jdbc.queryForObject("select lot_id from inventory_lots where item_id = ? and lot_code = ?",
+                UUID.class, item.getItemId(), lotCode);
+    }
+
+    private BigDecimal lotQuantity(UUID lotId) {
+        return jdbc.queryForObject("select quantity from stock_balances where lot_id = ?", BigDecimal.class, lotId);
+    }
+
+    private int movementCount(Item item) {
+        return jdbc.queryForObject("select count(*) from stock_movements where item_id = ?", Integer.class, item.getItemId());
     }
 
     private static void await(CyclicBarrier barrier) {

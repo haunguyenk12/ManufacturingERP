@@ -465,6 +465,16 @@ public class InventoryMovementService {
      */
     @Transactional
     public InventoryMovementResult adjust(InventoryAdjustCommand command, String idempotencyKey) {
+        return adjust(command, idempotencyKey, lot -> { });
+    }
+
+    /**
+     * CF-1: {@code lotGuard} runs after the replay lookup (a replay returns the original movement even if the
+     * lot is now guarded) and after the lot is resolved, before any balance changes.
+     */
+    @Transactional
+    public InventoryMovementResult adjust(InventoryAdjustCommand command, String idempotencyKey,
+                                         java.util.function.Consumer<InventoryLot> lotGuard) {
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
 
         BigDecimal delta = command.quantityDelta();
@@ -485,6 +495,7 @@ public class InventoryMovementService {
         Warehouse warehouse = findActiveWarehouse(command.warehouseId());
         ensureSameCompany(item, warehouse);
         InventoryLot lot = resolveExistingLotForAdjustment(item, command.lotId(), command.lotCode());
+        lotGuard.accept(lot);
 
         BigDecimal quantity = delta.abs();
         SerialNumber serial = resolveExistingSerialForAdjustment(item, command.serialId(), quantity);

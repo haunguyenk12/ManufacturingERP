@@ -64,7 +64,8 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | **`G11` — FE handoff Giai đoạn 11: giá thành, chênh lệch và đóng lệnh** (`FE_HANDOFF_GD_11_2026-10-15.md`, P1) ✅ **BE XONG** (2026-10-27) — 13 quyết định D0–D12 user chốt theo khuyến nghị (D1 giá chuẩn chụp lúc phát hành, D3 chỉ pool cô lập); `G11a`/`G11b`/`G11c` code liền một lượt (`V90`–`V92`), chờ FE nghiệm thu; phase kế tiếp chưa chốt. `G2`–`G10` chờ FE nghiệm thu. Kế hoạch: `NEXT_PHASE_PLAN.md §18` |
+| **Phase đang chạy** | **`CF-*` — Capstone 3 follow-up** (`BE_GAP_NEXT_PLAN.md`, nguồn `CAPSTONE3_BE_FOLLOWUP_2026-10-20/`). PO chốt 2026-10-27: làm `CF-0`→`CF-5`; `CF-6` (sổ giá trị tồn kho, gộp `P7`) **hoãn**; `CF-7` chọn **phương án A** (giữ giới hạn scale 6, không hỗ trợ BOM 1/3). Tiến độ: **`CF-1` ✅** (2026-10-27). `G2`–`G11` chờ FE nghiệm thu. Bản ghi: **§0.72** |
+| **Việc mới nhất** *(CF)* | **`CF-1` — chặn `POST /v1/inventory/adjust` trên lô QC còn sở hữu** ✅ (2026-10-27): lô còn chờ QC mua/sản xuất, lô con bị QC loại ⇒ `409 STATE_CONFLICT`; lô `HOLD` đặt tay vẫn điều chỉnh được. Không migration, không quyền mới. Bất biến **`B263`** (`module/inventory`). **Breaking wire: hẹp** (200 → 409). Bản ghi: **§0.72** |
 | **Việc mới nhất** | **`G11` — giá thành sản xuất: đơn giá giờ theo trung tâm, cơ sở chi phí lúc phát hành, giá thành theo lệnh, tính thử, checklist 11 mã, chốt giá + đóng nguyên tử** ✅ **BE XONG** (2026-10-27). Migration **`V90`** (`production_cost_rates` bất biến theo phiên bản; `production_cost_baselines` + dòng vật tư/công đoạn; 3 quyền `PERM_PRODUCTION_COST_CALCULATE`/`PERM_COST_RATE_MANAGE`/`PERM_WORK_ORDER_CLOSE` cho ADMIN + MANAGER), **`V91`** (`production_cost_runs`, snapshot JSONB, một run `FINALIZED`/lệnh), **`V92`** (`production_cost_adjustments` chỉ-giá-trị, CHECK `quantity = 0`). 13 endpoint C1–C13 (`ProductionCostController`). Mã lỗi mới `COST_SOURCE_STALE`, `CLOSE_BLOCKED`, `COST_DATA_INCOMPLETE`, `VALUATION_UNRECONCILED`. 🔴 Giá vật tư = **giá chuẩn `P3` chụp lúc phát hành** (kho chỉ biết lượng); thực tế vật tư = tiêu thụ × giá đó; hệ này **khác** `/variance` (D2). 🔴 Chốt: khoá dòng lệnh (native + `refresh`) → kiểm quyền lại dưới khoá → tính lại phía server → 11 kiểm tra → snapshot + bút toán + `CLOSED`; đường `close` cũ ⇒ `409 CLOSE_BLOCKED` cho lệnh có baseline (D5). 🔴 Mutation lộ hai lỗ hổng test: số F1/F4 của FE tình cờ không phân biệt phân bổ lũy kế với chia riêng, và luật phần dư với chia tỷ lệ — đã thêm ca số lẻ. Bất biến **`B256`–`B262`** (`module/workorder`). **Breaking change wire: CÓ, hẹp** (§0.71). Bản ghi: **§0.71** |
 | **Việc trước** *(2026-10-27, `G10d`)* | **`G10d` — thanh toán khách hàng + tiến độ đơn + liên kết ngược phiếu giao** ✅ **BE XONG** (2026-10-27) — **GĐ10 đủ cả 4 phần ở BE**; `G10-9` cùng ngày: seed demo tạo khách master + giá bán + (profile `sample`) giao hàng / hoá đơn / thu tiền, chạy thật trên Postgres trắng 49/49 + 19/19 PASS; guide FE thêm mục GĐ10. Migration **`V89`** (`customer_payment_number_seq`, `customer_payments` — tiền `NUMERIC(19,0)` > 0, phương thức `CASH`/`TRANSFER`/`OTHER`; `customer_payment_allocations` — `UNIQUE (payment_id, invoice_id)`, CHECK > 0). Endpoint mới: `GET /v1/customer-payments` (`plantId` bắt buộc), `…/{id}`, `…/{id}/history`, `…/invoice-candidates?plantId&customerId`, `POST`, `PATCH /{id}`, `POST /{id}/post`, `POST /{id}/cancel`, `GET /v1/sales-invoices/{id}/payments`, `GET /sales-orders/v1/{id}/fulfillment-summary`; hoá đơn thêm `paidAmount`/`outstandingAmount`/`paymentState` + bộ lọc `paymentState`; `GET /v1/deliveries/related` thêm `productionReceiptId`/`workOrderId` (đúng một nguồn). Không quyền mới, không mã lỗi mới. 🔴 Trần phân bổ `amount − P − Cp` dẫn xuất từ sổ phân bổ; mọi lệnh khoá hàng hoá đơn theo id rồi `refresh`; ghi sổ kiểm lại dưới khoá và dời version mỗi hoá đơn đúng +1. 🔴 Tiến độ đơn sống ở `module/billing`; tiền vắng mặt (không `null`) khi thiếu quyền. Bất biến **`B251`–`B255`** (`module/billing`). **Breaking change wire: KHÔNG** (§0.70). Bản ghi: **§0.70** |
 | **Việc trước** *(2026-10-26, `G10c`)* | **`G10c` — hoá đơn bán hàng: hạn mức theo dòng phiếu giao, HALF_UP cộng dồn theo dòng đơn, `billingSnapshotVersion` + `PRICE_STALE`** ✅ **BE XONG** (2026-10-26). Migration **`V88`** (`sales_invoice_number_seq`, `sales_invoices` — tiền `NUMERIC(19,0)`, CHECK `due_date ≥ document_date`; `sales_invoice_lines` — giá + nền đã lập trước, `UNIQUE (invoice_id, delivery_line_id)`). Module mới `module/billing`. Endpoint mới: `GET /v1/sales-invoices` (`plantId` bắt buộc), `GET …/{id}`, `…/{id}/history`, `POST /v1/sales-invoices/preview`, `POST`, `PATCH /{id}`, `POST /{id}/post`, `POST /{id}/cancel`, `GET /sales-orders/v1/{id}/invoice-candidates`. Mã lỗi mới `PRICE_UNKNOWN`, `PRICE_STALE`. Không quyền mới (seed ở `V86`). 🔴 Server tự tính tiền (giá từ dòng đơn), lưu đòi đúng snapshot vừa xem trước, ghi sổ tính lại dưới khoá đơn — nền dời mà tiền không đổi **vẫn** stale. 🔴 Hoá đơn không đụng tồn, không đổi version đơn. Mutation lộ một lỗ hổng test (ca nền dời mà tiền giữ nguyên) — đã thêm IT. Bất biến **`B246`–`B250`** (`module/billing`, file **mới**). **Breaking change wire: KHÔNG** (§0.69). Bản ghi: **§0.69** |
@@ -3411,6 +3412,26 @@ ca/lịch/trung tâm còn tham chiếu → 422 `REFERENCE_IN_USE`; lịch gán c
 `activateBom`/`activate` (routing) +1 tham số, `listBoms`/`list` (routing, ca, lịch, trung tâm) thêm tham số; constructor
 `ShiftService`, `WorkCalendarService`, `WorkCenterService`, `CapacityBoardService`, `ScheduleAdjustmentService`,
 `FixedTemplateValidator`, `DataImportBatchCommitter`, `CapacityBoardService.DayContext` đổi.
+
+---
+
+### 0.72 Track `CF-*` – Capstone 3 Follow-up (từ 2026-10-27)
+
+Nguồn: `BE_GAP_NEXT_PLAN.md` + `CAPSTONE3_BE_FOLLOWUP_2026-10-20/`. Quyết định PO (2026-10-27, `AskUserQuestion`): làm `CF-0`→`CF-5`
+theo đề xuất mặc định của BE; `CF-6` hoãn; `CF-7` phương án **A**. Test của mỗi phase do sub agent viết và chạy (yêu cầu user).
+
+#### CF-1 – Chặn điều chỉnh lô QC còn sở hữu (2026-10-27)
+
+`POST /v1/inventory/adjust` trên lô còn phần chờ QC mua (`PurchaseQcLookupService`), còn phần chờ QC sản xuất (`LotQcOriginLookupService`)
+hoặc lô con `REJECTED` nguồn `PURCHASE_QC_DECISION`/`PRODUCTION_QC_DECISION` ⇒ `409 STATE_CONFLICT`. Guard (`LotQcOwnershipGuard`) chạy qua overload
+`InventoryMovementService.adjust(command, key, lotGuard)`: sau replay, sau resolve lô, trước ghi. Lô `HOLD` đặt tay, lô con đạt, hàng không lô
+**không** bị chặn. `count` tracked/non-tracked đã chặn từ G4 (`canIssue` / `counted < reserved + qualityHold`). Bất biến **`B263`**.
+**Hệ quả:** chưa có workflow "sửa số lượng nguồn" — lô nguồn QC không điều chỉnh/kiểm đếm được cho tới khi QC quyết. Lô con bị QC **sản xuất** loại
+cũng bị chặn (rộng hơn plan một bước, cùng lý do với `changeStatus`).
+**Nghiệm thu mutation (5/5 bị giết):** bỏ guard · `STATE_CONFLICT` → `IDEMPOTENCY_CONFLICT` (cùng 409) · mở rộng sang mọi lô ≠ `AVAILABLE` · gọi
+guard trên đường replay · bỏ vế `PRODUCTION_QC_DECISION`.
+**Nghiệm thu:** `mvn -o clean verify` — **2151 unit + 317 IT**, 0 failures/errors (baseline 2141 + 315). **Breaking wire: hẹp** — `adjust` lô nguồn
+QC 200 → 409. **Java positional:** `InventoryService` constructor +1 (`LotQcOwnershipGuard`).
 
 ---
 

@@ -34,6 +34,7 @@ public class InventoryService {
     private final StockMovementRepository movementRepository;
     private final InventoryMapper mapper;
     private final UserLookupService userLookupService;
+    private final LotQcOwnershipGuard lotQcOwnershipGuard;
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
@@ -70,6 +71,7 @@ public class InventoryService {
         return toResponse(movement);
     }
 
+    /** CF-1 (B263): a lot QC still owns (pending purchase/production QC, or a QC-rejected child) is not adjustable. */
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
     @Auditable(action = AuditAction.INVENTORY_ADJUSTED, entityType = "StockMovement", entityIdExpression = "movementId.toString()",
@@ -83,7 +85,8 @@ public class InventoryService {
                 request.quantityDelta(),
                 request.reason(),
                 request.referenceType(),
-                request.referenceId(), null, null), idempotencyKey).movement();
+                request.referenceId(), null, null), idempotencyKey,
+                lotQcOwnershipGuard::ensureAdjustable).movement();
         return toResponse(movement);
     }
 

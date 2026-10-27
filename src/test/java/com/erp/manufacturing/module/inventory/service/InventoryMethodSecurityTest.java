@@ -198,7 +198,8 @@ class InventoryMethodSecurityTest {
                     balanceRepository,
                     movementRepository,
                     mapper,
-                    userLookupService);
+                    userLookupService,
+                    mock(LotQcOwnershipGuard.class));
         }
 
         @Bean
