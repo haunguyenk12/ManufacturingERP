@@ -60,11 +60,11 @@ yêu cầu.
 ## 2. Bộ dữ liệu có gì
 
 Số liệu dưới đây là **đếm thật trong cơ sở dữ liệu** sau lượt seed gần nhất, cho công ty **mẫu
-`D26-`** (97 giây, 42/42 mục preflight PASS).
+`D26-`** (176 giây, 49/49 mục preflight PASS — đo lại 2026-10-27 trên một Postgres trắng, sau G10).
 
 Công ty **demo `DEMO-`** có **y hệt phần master data** (40 vật tư, 9 định mức, 9 quy trình, 8 tổ
 sản xuất, 2 ca, 2 lịch, 3 nhà cung cấp, giá thành chuẩn, tồn kho đầu kỳ, 4 tài khoản) nhưng
-**0 đơn mua, 0 đơn bán, 0 lượt MRP, 0 lệnh sản xuất** — 67 giây, 20/20 mục preflight PASS.
+**0 đơn mua, 0 đơn bán, 0 lượt MRP, 0 lệnh sản xuất** — 85 giây, 19/19 mục preflight PASS (đo lại 2026-10-27).
 
 | Bảng | Số dòng | Ghi chú |
 |---|---|---|
@@ -133,7 +133,8 @@ D26-FG-ROAD700  Road Racer 700C              (lot-tracked)
 | Bảng năng lực (Capacity Board) | 14 dòng có tải/sức chứa/% sử dụng theo từng tổ và từng ngày |
 | Hoạch định (MRP) | 3 lượt chạy; lượt `backlog` còn **32 đề xuất `DRAFT`** để demo thao tác duyệt |
 | Lệnh sản xuất | 8 lệnh phủ **6 trạng thái**, có lệnh nối thẳng về đơn bán hàng |
-| Khách hàng | *(chỉ công ty `D26-`)* 6 khách master `D26-CUS-1001`…`1006`, mỗi đơn bán hàng một khách (cần cho CONFIRM từ GĐ10). Bộ dữ liệu **chưa** có giá bán, phiếu giao, hoá đơn, phiếu thu |
+| Khách hàng | *(chỉ công ty `D26-`)* 6 khách master `D26-CUS-1001`…`1006`, mỗi đơn bán hàng một khách (cần cho CONFIRM từ GĐ10) |
+| Giá bán / giao hàng / hoá đơn / thu tiền | *(chỉ công ty `D26-`)* Mọi đơn đã xác nhận có giá (`BIKE16` 3 200 000, `BIKE20` 3 650 000, `ROAD700` 9 800 000; đơn nháp để trống). `D26-SO-1004`: 2 phiếu giao (6 + 4), 2 hoá đơn — một `PAID` (19 200 000), một `PARTIALLY_PAID` (đã thu 6 400 / 12 800 nghìn). `D26-SO-1005`: 1 phiếu giao, 1 hoá đơn `UNPAID`. Màn hình tiến độ đơn của `D26-SO-1004` báo `DELIVERED` |
 | Phiếu xuất vật tư / ghi sản lượng / nhập kho | Sinh từ 4 lệnh sản xuất đã chạy thật |
 | Lô hàng | 6 lô, trong đó **`D26-BIKE20-B002` đang `HOLD`**: tồn thực tế 2 nhưng khả dụng 0 |
 | Mua hàng | 3 yêu cầu + 5 đơn mua phủ 4 trạng thái, có phiếu nhập kho thật làm tăng tồn |
@@ -243,8 +244,9 @@ vụ nào; nó đổi tiền tố `D26-` sang namespace của profile ngay sau k
 ## 6. Nghiệm thu
 
 `seed.sh` tự chạy preflight ở cuối và **từ chối bàn giao** nếu có mục nào trượt:
-**42 mục** với `PROFILE=sample`, **20 mục** với `PROFILE=demo` (profile demo không có chứng từ
-nghiệp vụ nên bỏ các mục PF-10…PF-14).
+**49 mục** với `PROFILE=sample`, **19 mục** với `PROFILE=demo` (profile demo không có chứng từ
+nghiệp vụ nên bỏ các mục PF-10…PF-16). Bản trước ghi 42/20; lượt đo 2026-10-27 của script **chưa** thêm
+PF-16 cho ra 41/19 — chênh lệch có từ trước GĐ10, không tìm nguyên nhân.
 
 - PF-01…PF-07 — tổ chức, vật tư, cấu hình kho, BOM, routing, tổ sản xuất đều `ACTIVE` và đủ số
   lượng **suy ra từ chính `catalogue.sh`** (đổi bảng dữ liệu thì preflight tự đổi theo).
@@ -254,6 +256,8 @@ nghiệp vụ nên bỏ các mục PF-10…PF-14).
 - PF-13 — lệnh sản xuất phủ đủ 6 trạng thái và **không có `BLOCKED`** nào.
 - PF-14 — đơn bán hàng phủ đủ 5 trạng thái.
 - PF-15 — cả 4 tài khoản vận hành của công ty đó đăng nhập được và thấy đúng nhà máy của mình.
+- PF-16 — GĐ10: hai đơn đi qua MRP không thiếu giá; 3 phiếu giao + 3 hoá đơn đã ghi sổ; có hoá đơn ở cả
+  `PAID`, `PARTIALLY_PAID`, `UNPAID`; đơn giao đủ báo `deliveryProgress = DELIVERED`.
 
 > 🔴 **PF-03 từng đúng vì may.** `GET /v1/inventory/item-warehouse-settings` **không có** tham số
 > `plantId` — truyền vào thì nó bị bỏ qua im lặng và endpoint trả cấu hình của **mọi** công ty. Với

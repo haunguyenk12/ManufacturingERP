@@ -1407,8 +1407,16 @@ Bất biến `B251`–`B255`. Không quyền mới, không mã lỗi mới. Lệ
 ✅ `scripts/demo-capstone2/seed.sh` tạo một khách master mỗi đơn bán (`<NS>-CUS-<số đơn>`) và gửi `customerId` khi tạo đơn — không có khách
 master thì bước CONFIRM nay `422`. `docs/api-guide-for-frontend.md` thêm mục GĐ10 + 4 mã lỗi, sửa hai dòng G6a đã lỗi thời
 (`deliveredQuantity`, công thức `uncovered`). `docs/demo-capstone2-guide.md` ghi khách master. Mutation/verify/smoke đã chạy ở từng phần
-(§17.3a–§17.3d). 🔴 **Chưa:** chạy lại `seed.sh` trên DB trắng (cần `reset-db.sh`, xoá DB dev — chưa được yêu cầu; đã `bash -n`); bộ dữ liệu
-demo chưa có giá bán / phiếu giao / hoá đơn / phiếu thu; `MANUFACTURING_PHASE_PLAN_P7_P11.md` (file chưa commit) vẫn cần đánh số migration lại từ `V90`.
+(§17.3a–§17.3d).
+
+**Bổ sung cùng ngày (user: "làm tiếp cho xong"):** `seed.sh` đặt giá bán cho mọi đơn đã xác nhận (`SALE_PRICE_ROWS` trong `catalogue.sh`,
+qua `commercial-prices`) và — profile `sample` — đưa `D26-SO-1004` qua 2 phiếu giao + 2 hoá đơn (`PAID`, `PARTIALLY_PAID`) và `D26-SO-1005`
+qua 1 phiếu giao + 1 hoá đơn `UNPAID`; preflight thêm **PF-16** (8 mục). **Đã chạy thật** trên một Postgres trắng dùng một lần (container
+riêng cổng 5440 + app cổng 8091, **không** đụng DB dev): `sample` **49/49** PASS (176 s), rồi `demo` trên cùng DB **19/19** PASS (85 s); số
+tiền đúng (6 × 3 200 000 = 19 200 000 đã thu đủ; 12 800 000 thu 6 400 000; 3 650 000 chưa thu). Script chưa sửa cũng chạy sạch (41/19) —
+chênh với số 42/20 ghi trong guide có từ trước GĐ10. `MANUFACTURING_PHASE_PLAN_P7_P11.md` đã đánh số migration lại `V69`–`V73` → **`V90`–`V94`**
+(21 chỗ; nội dung kế hoạch **chưa** rà lại theo `G8`/`G9` — WIP và trạng thái công đoạn ở đó viết trước khi có sổ của `G8c`/`G8d`).
+**Không làm:** chạy lại seed trên DB dev (cần `reset-db.sh`, xoá dữ liệu dev — để user tự chạy khi muốn).
 
 ### 17.4 Breaking changes dự kiến *(ghi đầy đủ vào `BE_RESPONSE_GD_10_*` khi làm)*
 

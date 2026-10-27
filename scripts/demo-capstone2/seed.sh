@@ -90,7 +90,7 @@ esac
 # catalogue.sh viết cứng namespace D26-; đổi tiền tố tại chỗ thay vì nhân đôi cả bảng dữ liệu.
 # Mọi chuỗi chứa "D26-" trong catalogue đều LÀ mã namespace, không có ngoại lệ nào.
 if [ "$NS" != "D26" ]; then
-    for var in WAREHOUSE_ROWS ITEM_ROWS IWS_ROWS SHIFT_ROWS CALENDAR_ROWS WC_ROWS ROUTING_ROWS                BOM_ROWS COST_ROWS STOCK_ROWS SUPPLIER_ROWS SUPPLIER_ITEM_ROWS PR_ROWS PO_ROWS                SO_ROWS WO_ROWS CO_CODE PLANT_CODE SCOPE_CODE WH_RM WH_WIP WH_FG WH_QC WH_SCRAP                SHIFT_DAY SHIFT_EVE PR3_PO_NO LOT_SO1004 LOT_SO1005 LOT_WO2004 LOT_WO2005                DEMO_OUTPUT_LOT
+    for var in WAREHOUSE_ROWS ITEM_ROWS IWS_ROWS SHIFT_ROWS CALENDAR_ROWS WC_ROWS ROUTING_ROWS                BOM_ROWS COST_ROWS STOCK_ROWS SUPPLIER_ROWS SUPPLIER_ITEM_ROWS PR_ROWS PO_ROWS                SO_ROWS SALE_PRICE_ROWS WO_ROWS CO_CODE PLANT_CODE SCOPE_CODE WH_RM WH_WIP WH_FG WH_QC WH_SCRAP                SHIFT_DAY SHIFT_EVE PR3_PO_NO LOT_SO1004 LOT_SO1005 LOT_WO2004 LOT_WO2005                DEMO_OUTPUT_LOT
     do
         eval "$var=\"\${$var//D26-/$NS-}\""
     done
@@ -628,6 +628,29 @@ stage_banner "13. Đơn bán hàng"
 SO_PLANNED_FULL=""; SO_PLANNED_FULL_NO=""
 SO_PLANNED_PARTIAL=""; SO_PLANNED_PARTIAL_NO=""
 
+declare -A SALE_PRICE
+while IFS='|' read -r icode price; do
+    [ -n "$icode" ] && SALE_PRICE[$icode]="$price"
+done < <(rows "$SALE_PRICE_ROWS")
+
+# set_prices SO_ID "itemCode:qty;..." — G10a: a confirmed order gets its sale prices through
+# commercial-prices (lines in lineNo order = the order they were sent in).
+set_prices() {
+    local so_ ver_ ids_ lrows_ pjson="[" i=0 first_=1 l_ icode_
+    so_=$(call GET "/sales-orders/v1/$1")
+    ver_=$(echo "$so_" | rid version)
+    read -ra ids_ <<<"$(echo "$so_" | extract "' '.join(l['salesOrderLineId'] for l in sorted(d['result']['lines'], key=lambda l: l['lineNo']))")"
+    IFS=';' read -ra lrows_ <<<"$2"
+    for l_ in "${lrows_[@]}"; do
+        icode_="${l_%%:*}"
+        [ $first_ -eq 0 ] && pjson="$pjson,"
+        pjson="$pjson{\"salesOrderLineId\":\"${ids_[$i]}\",\"unitPrice\":${SALE_PRICE[$icode_]}}"
+        first_=0; i=$((i + 1))
+    done
+    call POST "/sales-orders/v1/$1/commercial-prices" "{\"expectedVersion\":$ver_,\"prices\":$pjson]}" \
+        -H "Idempotency-Key: $NS-PRICE-$1" >/dev/null
+}
+
 while IFS='|' read -r orderno customer state duedays lines; do
     [ -z "$orderno" ] && continue
     linejson="["; first=1
@@ -656,7 +679,8 @@ while IFS='|' read -r orderno customer state duedays lines; do
             call POST "/sales-orders/v1/$soid/confirm" >/dev/null
             call POST "/sales-orders/v1/$soid/cancel" >/dev/null ;;
         *)
-            call POST "/sales-orders/v1/$soid/confirm" >/dev/null ;;
+            call POST "/sales-orders/v1/$soid/confirm" >/dev/null
+            set_prices "$soid" "$lines" ;;
     esac
     [ "$state" = "PLANNED_FULL" ]    && { SO_PLANNED_FULL="$soid";    SO_PLANNED_FULL_NO="$orderno"; }
     [ "$state" = "PLANNED_PARTIAL" ] && { SO_PLANNED_PARTIAL="$soid"; SO_PLANNED_PARTIAL_NO="$orderno"; }
@@ -851,6 +875,76 @@ receipt_and_qc "$WO_PART" "$QTY_PART" "$LOT_SO1005" "$NS-RECEIPT-1005" yes >/dev
 assert_status "/sales-orders/v1/$SO_PLANNED_PARTIAL" "PARTIALLY_FULFILLED"
 info "$NS-WO-1005 -> IN_PROGRESS, $SO_PLANNED_PARTIAL_NO -> PARTIALLY_FULFILLED"
 
+# ── D. Giao hàng, hoá đơn, thu tiền (GĐ10) ───────────────────────────────────
+# Mọi lệnh GĐ10 bắt buộc Idempotency-Key. Các helper đặt biến toàn cục (không echo) vì chúng gọi
+# remember — chạy trong $(...) là subshell, manifest sẽ mất id (bẫy §0.45 #10).
+log "D. Giao hàng / hoá đơn / thu tiền"
+
+# deliver SO_ID QTY KEY — một phiếu giao một dòng (dòng đầu của đơn) từ kho thành phẩm, ghi sổ luôn.
+deliver() {
+    local so_ line_ src_ dn_ ver_
+    so_=$(call GET "/sales-orders/v1/$1")
+    line_=$(echo "$so_" | extract "sorted(d['result']['lines'], key=lambda l: l['lineNo'])[0]['salesOrderLineId']")
+    src_=$(call GET "/sales-orders/v1/$1/lines/$line_/delivery-sources?warehouseId=${ID[warehouses.$WH_FG]}&page=0&size=50" \
+        | extract "next(s['sourceKey'] for s in d['result']['content'] if float(s['availableForLine']) >= $2)")
+    dn_=$(call POST /v1/deliveries \
+        "{\"salesOrderId\":\"$1\",\"expectedOrderVersion\":$(echo "$so_" | rid version),\"documentDate\":\"$(plant_today)\",\"note\":\"Delivery of the demo dataset\",\"lines\":[{\"salesOrderLineId\":\"$line_\",\"sourceKey\":\"$src_\",\"quantity\":$2}]}" \
+        -H "Idempotency-Key: $3")
+    ver_=$(echo "$dn_" | rid version)
+    NEW_DN=$(echo "$dn_" | rid documentId)
+    call POST "/v1/deliveries/$NEW_DN/post" "{\"expectedVersion\":$ver_}" -H "Idempotency-Key: $3-post" >/dev/null
+    NEW_DN_LINE=$(call GET "/v1/deliveries/$NEW_DN" | extract "d['result']['lines'][0]['deliveryLineId']")
+    remember "deliveries.$3" "$NEW_DN"
+}
+
+# invoice SO_ID DELIVERY_LINE_ID QTY KEY — xem trước, lưu với snapshot vừa xem, ghi sổ.
+invoice() {
+    local over_ lines_ snap_ inv_
+    over_=$(call GET "/sales-orders/v1/$1" | rid version)
+    lines_="[{\"deliveryLineId\":\"$2\",\"quantity\":$3}]"
+    snap_=$(call POST /v1/sales-invoices/preview "{\"salesOrderId\":\"$1\",\"expectedOrderVersion\":$over_,\"lines\":$lines_}" \
+        | rid billingSnapshotVersion)
+    inv_=$(call POST /v1/sales-invoices \
+        "{\"salesOrderId\":\"$1\",\"expectedOrderVersion\":$over_,\"billingSnapshotVersion\":\"$snap_\",\"documentDate\":\"$(plant_today)\",\"dueDate\":\"$(date -u -d '+7 hours +30 days' +%F)\",\"note\":\"Invoice of the demo dataset\",\"lines\":$lines_}" \
+        -H "Idempotency-Key: $4")
+    NEW_INV=$(echo "$inv_" | rid documentId)
+    call POST "/v1/sales-invoices/$NEW_INV/post" "{\"expectedVersion\":$(echo "$inv_" | rid version)}" \
+        -H "Idempotency-Key: $4-post" >/dev/null
+    remember "invoices.$4" "$NEW_INV"
+}
+
+# pay CUSTOMER_ID INVOICE_ID AMOUNT KEY — một phiếu thu chuyển khoản cho một hoá đơn, ghi sổ luôn.
+pay() {
+    local iver_ p_
+    iver_=$(call GET "/v1/sales-invoices/$2" | rid version)
+    p_=$(call POST /v1/customer-payments \
+        "{\"customerId\":\"$1\",\"documentDate\":\"$(plant_today)\",\"method\":\"TRANSFER\",\"reference\":\"$4\",\"amount\":$3,\"allocations\":[{\"invoiceId\":\"$2\",\"expectedInvoiceVersion\":$iver_,\"amount\":$3}]}" \
+        -H "Idempotency-Key: $4")
+    call POST "/v1/customer-payments/$(echo "$p_" | rid documentId)/post" "{\"expectedVersion\":$(echo "$p_" | rid version)}" \
+        -H "Idempotency-Key: $4-post" >/dev/null
+    remember "payments.$4" "$(echo "$p_" | rid documentId)"
+}
+invoice_amount() { call GET "/v1/sales-invoices/$1" | rid amount; }
+
+CUS_FULL="${ID[customers.$NS-CUS-${SO_PLANNED_FULL_NO##*-}]}"
+CUS_PART="${ID[customers.$NS-CUS-${SO_PLANNED_PARTIAL_NO##*-}]}"
+QTY_FULL_ORDERED=$(call GET "/sales-orders/v1/$SO_PLANNED_FULL" | extract "int(float(d['result']['lines'][0]['orderedQuantity']))")
+QTY_FULL_FIRST=$(( QTY_FULL_ORDERED * 6 / 10 ))
+
+# Đơn giao đủ: hai phiếu giao, hai hoá đơn — một thu đủ (PAID), một thu nửa (PARTIALLY_PAID).
+deliver "$SO_PLANNED_FULL" "$QTY_FULL_FIRST" "$NS-DN-1004-1"
+invoice "$SO_PLANNED_FULL" "$NEW_DN_LINE" "$QTY_FULL_FIRST" "$NS-INV-1004-1"
+pay "$CUS_FULL" "$NEW_INV" "$(invoice_amount "$NEW_INV")" "$NS-PAY-1004-1"
+deliver "$SO_PLANNED_FULL" "$(( QTY_FULL_ORDERED - QTY_FULL_FIRST ))" "$NS-DN-1004-2"
+invoice "$SO_PLANNED_FULL" "$NEW_DN_LINE" "$(( QTY_FULL_ORDERED - QTY_FULL_FIRST ))" "$NS-INV-1004-2"
+pay "$CUS_FULL" "$NEW_INV" "$(( $(invoice_amount "$NEW_INV") / 2 ))" "$NS-PAY-1004-2"
+info "$SO_PLANNED_FULL_NO: giao $QTY_FULL_FIRST + $(( QTY_FULL_ORDERED - QTY_FULL_FIRST )), hai hoá đơn (PAID, PARTIALLY_PAID)"
+
+# Đơn giao một phần: giao đúng phần QC đã chấp nhận, một hoá đơn chưa thu (UNPAID).
+deliver "$SO_PLANNED_PARTIAL" "$QTY_PART" "$NS-DN-1005-1"
+invoice "$SO_PLANNED_PARTIAL" "$NEW_DN_LINE" "$QTY_PART" "$NS-INV-1005-1"
+info "$SO_PLANNED_PARTIAL_NO: giao $QTY_PART, một hoá đơn UNPAID"
+
 # ── C. Lệnh sản xuất thủ công phủ nốt các trạng thái còn lại ─────────────────
 log "C. Lệnh sản xuất thủ công"
 while IFS='|' read -r wono icode qty state; do
@@ -997,6 +1091,18 @@ for st in DRAFT CONFIRMED CANCELLED FULFILLED PARTIALLY_FULFILLED; do
         "$(echo "$SO_JSON" | extract "'yes' if any(o['status']=='$st' for o in d['result']['content']) else 'no'")" "yes"
 done
 
+# PF-16 GĐ10: giá trên đơn đã xác nhận, phiếu giao, hoá đơn, thu tiền
+for pair in "$SO_PLANNED_FULL|$SO_PLANNED_FULL_NO" "$SO_PLANNED_PARTIAL|$SO_PLANNED_PARTIAL_NO"; do
+    pf PF-16 "${pair#*|} không thiếu giá"         "$(call GET "/sales-orders/v1/${pair%%|*}" | extract "d['result']['commercial']['missingPriceLineCount']")" "0"
+done
+pf PF-16 "phiếu giao đã ghi sổ"     "$(call GET "/v1/deliveries?plantId=$PLANT&status=POSTED&page=0&size=50" | extract "d['result']['totalElements']")" "3"
+INV_JSON=$(call GET "/v1/sales-invoices?plantId=$PLANT&status=POSTED&page=0&size=50")
+pf PF-16 "hoá đơn đã ghi sổ" "$(echo "$INV_JSON" | extract "d['result']['totalElements']")" "3"
+for st in PAID PARTIALLY_PAID UNPAID; do
+    pf PF-16 "có hoá đơn ở trạng thái thanh toán $st"         "$(echo "$INV_JSON" | extract "'yes' if any(i['paymentState']=='$st' for i in d['result']['content']) else 'no'")" "yes"
+done
+pf PF-16 "$SO_PLANNED_FULL_NO giao đủ"     "$(call GET "/sales-orders/v1/$SO_PLANNED_FULL/fulfillment-summary" | extract "d['result']['deliveryProgress']")" "DELIVERED"
+
 fi   # kết thúc preflight của phần chứng từ nghiệp vụ
 
 # PF-15 RBAC: tài khoản vận hành đăng nhập được và thấy đúng nhà máy demo
@@ -1049,6 +1155,7 @@ info "Ca / lịch / tổ sản xuất : $(count_rows "$SHIFT_ROWS") / $(count_ro
 if [ "$SEED_TRANSACTIONS" = "yes" ]; then
     info "Nhà cung cấp / yêu cầu mua / đơn mua : $(count_rows "$SUPPLIER_ROWS") / $(count_rows "$PR_ROWS") / $(( $(count_rows "$PO_ROWS") + 1 ))"
     info "Đơn bán hàng / lượt MRP / lệnh sản xuất : $(count_rows "$SO_ROWS") / 3 / $(( $(count_rows "$WO_ROWS") + 2 ))"
+    info "Khách hàng / phiếu giao / hoá đơn / phiếu thu : $(count_rows "$SO_ROWS") / 3 / 3 / 2"
 else
     info "Nhà cung cấp : $(count_rows "$SUPPLIER_ROWS") (chưa có chứng từ mua hàng nào)"
     info "Đơn bán hàng / lượt MRP / lệnh sản xuất : 0 / 0 / 0 — người trình bày tự tạo"

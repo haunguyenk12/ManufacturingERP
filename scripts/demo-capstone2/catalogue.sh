@@ -343,6 +343,15 @@ D26-PO-0003|D26-SUP-FRAME|PARTIALLY_RECEIVED|D26-RM-FRAME16:40:420;D26-RM-FRAME2
 D26-PO-0004|D26-SUP-COMP|FULLY_RECEIVED|D26-RM-CARTON:100:35;D26-RM-TOOLKIT:30:95
 '
 
+# ── giá bán (G10a) ───────────────────────────────────────────────────────────
+# itemCode|unitPrice   (đồng, nguyên — khác COST_ROWS: hoá đơn và phiếu thu tính bằng đồng)
+# Đơn đã xác nhận nhận giá này qua POST /sales-orders/v1/{id}/commercial-prices; đơn nháp để trống.
+SALE_PRICE_ROWS='
+D26-FG-BIKE16|3200000
+D26-FG-BIKE20|3650000
+D26-FG-ROAD700|9800000
+'
+
 # ── đơn bán hàng ─────────────────────────────────────────────────────────────
 # orderNo|customer|finalState|dueInDays|itemCode:qty;...
 #   finalState ∈ DRAFT | CONFIRMED | CANCELLED | PLANNED_FULL | PLANNED_PARTIAL
