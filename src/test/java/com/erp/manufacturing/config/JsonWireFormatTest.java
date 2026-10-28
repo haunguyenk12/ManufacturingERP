@@ -1,6 +1,7 @@
 package com.erp.manufacturing.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -9,6 +10,7 @@ import org.springframework.boot.test.context.ConfigDataApplicationContextInitial
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -85,6 +87,90 @@ class JsonWireFormatTest {
             assertThat(mapper.readValue("{\"leadTimeDays\":5}", IntegerPayload.class).leadTimeDays())
                     .isEqualTo(5);
         });
+    }
+
+    record DecimalPayload(BigDecimal v) {}
+
+    /**
+     * Quantities are {@code NUMERIC(19,6)}: up to 13 integer and 6 fraction digits. They must leave the
+     * server as a JSON number carrying every digit — not a string, not scientific notation, not a
+     * double that loses the tail. {@code application.yml} sets no BigDecimal-specific option; this pins
+     * what {@code BigDecimal.toString()} produces for these values (scale 6 and up keeps plain form).
+     */
+    @Test
+    void bigDecimal_atTheNumeric19_6Limits_isWrittenAsAPlainJsonNumberWithEveryDigit() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            assertThat(writeDecimal(mapper, "9999999999999.999999")).isEqualTo("{\"v\":9999999999999.999999}");
+            assertThat(writeDecimal(mapper, "999999999.999999")).isEqualTo("{\"v\":999999999.999999}");
+            assertThat(writeDecimal(mapper, "0.000001")).isEqualTo("{\"v\":0.000001}");
+            assertThat(writeDecimal(mapper, "0")).isEqualTo("{\"v\":0}");
+            // What a NUMERIC(19,6) zero reads back as from the database.
+            assertThat(writeDecimal(mapper, "0.000000")).isEqualTo("{\"v\":0.000000}");
+        });
+    }
+
+    /**
+     * Documents current behaviour: trailing zeros are NOT stripped. The scale of the BigDecimal goes on
+     * the wire as-is, so a value read back from the database ({@code 100.000000}) and the same value as
+     * a client sent it ({@code 100}) produce different JSON text for the same number.
+     */
+    @Test
+    void bigDecimal_withTrailingZeros_keepsItsScaleOnTheWire() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            assertThat(writeDecimal(mapper, "100.000000")).isEqualTo("{\"v\":100.000000}");
+            assertThat(writeDecimal(mapper, "100")).isEqualTo("{\"v\":100}");
+        });
+    }
+
+    /**
+     * Jackson binds every digit it is given; rejecting a 7th fraction digit is Bean Validation's job
+     * ({@code @Digits(fraction = 6)} on the request DTO), not the deserializer's.
+     */
+    @Test
+    void bigDecimal_withSevenFractionDigits_isReadWithEveryDigitKept() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            BigDecimal read = mapper.readValue("{\"v\":1.1234567}", DecimalPayload.class).v();
+            assertThat(read.toPlainString()).isEqualTo("1.1234567");
+            assertThat(read.scale()).isEqualTo(7);
+        });
+    }
+
+    /**
+     * Documents current behaviour, not a decision: a JSON string holding a number is ACCEPTED for a
+     * BigDecimal field (Jackson's default scalar coercion; nothing in {@code application.yml} turns it
+     * off) and binds to {@code 1.5}.
+     */
+    @Test
+    void numericString_isAcceptedForABigDecimalField_currentBehaviour() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            BigDecimal read = mapper.readValue("{\"v\":\"1.5\"}", DecimalPayload.class).v();
+            assertThat(read).isEqualByComparingTo("1.5");
+            assertThat(read.toPlainString()).isEqualTo("1.5");
+        });
+    }
+
+    /**
+     * Documents current behaviour: the string {@code "1.5"} is REJECTED for an Integer field — not
+     * truncated to 1 — with {@code InvalidFormatException} (a {@code MismatchedInputException}, so the
+     * global handler reports it as 400 VALIDATION_ERROR with the field name).
+     */
+    @Test
+    void fractionalNumericString_isRejectedForAnIntegerField_currentBehaviour() {
+        contextRunner.run(context -> {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            assertThatThrownBy(() -> mapper.readValue("{\"leadTimeDays\":\"1.5\"}", IntegerPayload.class))
+                    .isInstanceOf(InvalidFormatException.class)
+                    .hasMessageStartingWith("Cannot deserialize value of type `java.lang.Integer` from String \"1.5\": "
+                            + "not a valid `java.lang.Integer` value");
+        });
+    }
+
+    private String writeDecimal(ObjectMapper mapper, String value) throws Exception {
+        return mapper.writeValueAsString(new DecimalPayload(new BigDecimal(value)));
     }
 
     private String serialize(ObjectMapper mapper) throws Exception {
