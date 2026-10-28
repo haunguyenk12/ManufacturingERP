@@ -139,6 +139,25 @@ public interface MaterialReservationRepository extends JpaRepository<MaterialRes
     List<ComponentQuantityProjection> sumActiveRemainingByWorkOrderId(@Param("workOrderId") UUID workOrderId);
 
     /**
+     * CF-2 (B265): the part of {@link #sumActiveRemainingByWorkOrderId} that sits on a lot no longer issuable — not
+     * {@code AVAILABLE}, or past its {@code expiresAt} on the server clock. The release gate and readiness subtract it
+     * from coverage; the reservations themselves are left untouched (the planner releases them).
+     */
+    @Query("""
+            select r.componentLine.componentLineId as componentLineId,
+                   coalesce(sum(r.quantity - r.consumedQuantity), 0) as quantity
+            from MaterialReservation r
+            join r.lot l
+            where r.workOrder.workOrderId = :workOrderId
+              and r.status = com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus.ACTIVE
+              and (l.status <> com.erp.manufacturing.module.inventory.domain.LotStatus.AVAILABLE
+                   or (l.expiresAt is not null and l.expiresAt <= :now))
+            group by r.componentLine.componentLineId
+            """)
+    List<ComponentQuantityProjection> sumIneligibleActiveRemainingByWorkOrderId(@Param("workOrderId") UUID workOrderId,
+                                                                               @Param("now") java.time.Instant now);
+
+    /**
      * Batch form of {@link #sumActiveRemainingByWorkOrderId} — one query for a whole page of work
      * orders instead of one per row (rule C14). Added in F9 so
      * {@code WorkOrderComponentLineResponse.reservedQuantity} (spec §3.3 "Requirement") can be filled

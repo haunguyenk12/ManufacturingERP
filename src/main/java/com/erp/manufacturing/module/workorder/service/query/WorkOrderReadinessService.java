@@ -66,7 +66,7 @@ public class WorkOrderReadinessService {
         for (WorkOrderMaterialReadinessLineResponse line : lines) {
             BigDecimal remaining = line.requiredQuantity().subtract(line.issuedQuantity()).max(BigDecimal.ZERO);
             outstanding = outstanding.add(remaining);
-            covered = covered.add(line.reservedQuantity().min(remaining));
+            covered = covered.add(line.eligibleReservedQuantity().max(BigDecimal.ZERO).min(remaining));
         }
         if (outstanding.compareTo(BigDecimal.ZERO) == 0) {
             return HUNDRED;

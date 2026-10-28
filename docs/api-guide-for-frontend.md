@@ -1599,6 +1599,7 @@ Field mới trên phiếu: `code`, `version`, `receivedDate`, `reference`, `comp
 | Phase | Endpoint | Thay đổi | Lỗi mới |
 |---|---|---|---|
 | CF-1 | `POST /v1/inventory/adjust` | Lô còn thuộc nguồn QC bị từ chối: lô còn phần chờ QC mua, lô còn phần chờ QC sản xuất, lô con bị QC (mua hoặc sản xuất) loại. Lô `HOLD` đặt tay (không phiếu nhận) và lô con đạt vẫn điều chỉnh được. Replay cùng key trả chứng từ cũ | `409 STATE_CONFLICT` |
+| CF-2 | MRP (`/planning-runs`, `/planning-runs/commercial`), `POST /work-orders/{id}/reserve`, `.../material-reservations`, `.../material-issues` + `/approve`, `/material-issues`, `GET .../material-readiness`, `POST .../release` | Lô `AVAILABLE` có `expiresAt <= giờ server` không còn là tồn khả dụng của MRP (nhu cầu mua có thể tăng; `excludedLotCount` tính cả lô hết hạn), không giữ chỗ/xuất được. Readiness thêm `ineligibleReservedQuantity` + `blocker` (`RESERVED_LOT_INELIGIBLE`), `reservedPercent` chỉ tính phần đủ điều kiện; `reservedQuantity` không đổi nghĩa. Reservation cũ trên lô hết hạn không tự huỷ — dùng `release-reservations`. Replay cùng key trả phiếu cũ | `409 LOT_NOT_ELIGIBLE` (giữ chỗ/xuất/duyệt), `409 STATE_CONFLICT` + WO `BLOCKED` (release) |
 
 ## 6. Tham chiếu DTO
 

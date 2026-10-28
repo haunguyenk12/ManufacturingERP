@@ -192,6 +192,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
      * Issuable balances of one item across a set of warehouses, in FEFO order — earliest expiry
      * first, then earliest received, with undated (non-lot-tracked) stock last so perishable stock
      * is always consumed before it can expire. Used by automatic work order reservation (F5).
+     * CF-2 (B264): a lot whose {@code expiresAt} is not after {@code now} is not issuable and is skipped.
      * <p>
      * Same {@code left join b.lot l} requirement as {@link #aggregateAvailableQuantities} — see the
      * note there.
@@ -202,20 +203,19 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             left join b.lot l
             where b.item.itemId = :itemId
               and b.warehouse.warehouseId in :warehouseIds
-              and (l is null or l.status = :availableStatus)
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
               and b.quantity - b.reservedQuantity - b.qualityHoldQuantity > 0
             order by l.expiresAt asc nulls last, l.receivedAt asc nulls last, b.createdAt asc
             """)
     List<StockBalance> findIssuableBalancesFefo(@Param("itemId") UUID itemId,
                                                 @Param("warehouseIds") Collection<UUID> warehouseIds,
-                                                @Param("availableStatus") LotStatus availableStatus);
+                                                @Param("availableStatus") LotStatus availableStatus,
+                                                @Param("now") Instant now);
 
     /**
      * Positions stock can be held from for a sales order line (G6a): free quantity above zero, lot
-     * {@code AVAILABLE} <b>and not expired</b> — unlike {@link #findIssuableBalancesFefo}, which work
-     * orders use and which deliberately does not look at expiry (G4 kept the expiry gate to manual
-     * inventory flows so MRP numbers did not move). Same FEFO order, with a stable id tie-break so
-     * pages do not shuffle. Same load-bearing {@code left join} on the lot as every query here.
+     * {@code AVAILABLE} <b>and not expired</b> — the same eligibility as {@link #findIssuableBalancesFefo}
+     * since CF-2, paged. Same FEFO order, with a stable id tie-break so pages do not shuffle. Same load-bearing {@code left join} on the lot as every query here.
      */
     @Query(value = """
             select b
@@ -246,6 +246,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
      * The {@code left join b.lot l} is load-bearing: dereferencing {@code b.lot.status} as a path
      * expression makes Hibernate emit an INNER JOIN, which drops every non-lot-tracked balance
      * ({@code lot_id IS NULL}) before the {@code l is null} branch can match it — violating B3.
+     * CF-2 (B264): a lot past its {@code expiresAt} (on the server clock) is not available either.
      */
     @Query("""
             select b.item.itemId as itemId,
@@ -254,13 +255,14 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             left join b.lot l
             where b.item.itemId in :itemIds
               and b.warehouse.warehouseId in :warehouseIds
-              and (l is null or l.status = :availableStatus)
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
             group by b.item.itemId
             """)
     List<StockAvailabilityProjection> aggregateAvailableQuantities(
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
-            @Param("availableStatus") LotStatus availableStatus);
+            @Param("availableStatus") LotStatus availableStatus,
+            @Param("now") Instant now);
 
     /**
      * Same eligibility rule as {@link #aggregateAvailableQuantities} (including the load-bearing
@@ -284,13 +286,14 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             left join b.lot l
             where b.item.itemId in :itemIds
               and b.warehouse.warehouseId in :warehouseIds
-              and (l is null or l.status = :availableStatus)
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
             group by b.item.itemId, b.warehouse.warehouseId
             """)
     List<StockQuantityByWarehouseProjection> aggregateStockQuantitiesByWarehouse(
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
-            @Param("availableStatus") LotStatus availableStatus);
+            @Param("availableStatus") LotStatus availableStatus,
+            @Param("now") Instant now);
 
     @Query("""
             select b.item.itemId as itemId,
@@ -301,19 +304,21 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             left join b.lot l
             where b.item.itemId in :itemIds
               and b.warehouse.warehouseId in :warehouseIds
-              and (l is null or l.status = :availableStatus)
+              and (l is null or (l.status = :availableStatus and (l.expiresAt is null or l.expiresAt > :now)))
             group by b.item.itemId
             """)
     List<StockPlanningQuantityProjection> aggregatePlanningQuantities(
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
-            @Param("availableStatus") LotStatus availableStatus);
+            @Param("availableStatus") LotStatus availableStatus,
+            @Param("now") Instant now);
 
     /**
      * How many distinct lots holding stock were left out of {@link #aggregatePlanningQuantities}
      * because their status is not {@code AVAILABLE} (B3). MRP surfaces this as
      * {@code excludedLotCount} so a planner can tell "no stock" apart from "stock exists but is on
-     * QC hold" (spec §2.4). The inner join is deliberate — a non-lot-tracked balance can never be
+     * QC hold" (spec §2.4). CF-2: an AVAILABLE lot past its expiry is excluded from planning too, so it
+     * is counted here. The inner join is deliberate — a non-lot-tracked balance can never be
      * excluded, so it must not be counted.
      */
     @Query("""
@@ -322,14 +327,15 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, UUID
             join b.lot l
             where b.item.itemId in :itemIds
               and b.warehouse.warehouseId in :warehouseIds
-              and l.status <> :availableStatus
+              and (l.status <> :availableStatus or (l.expiresAt is not null and l.expiresAt <= :now))
               and b.quantity > 0
             group by b.item.itemId
             """)
     List<StockExcludedLotCountProjection> aggregateExcludedLotCounts(
             @Param("itemIds") Collection<UUID> itemIds,
             @Param("warehouseIds") Collection<UUID> warehouseIds,
-            @Param("availableStatus") LotStatus availableStatus);
+            @Param("availableStatus") LotStatus availableStatus,
+            @Param("now") Instant now);
 
     /** G11: everything on hand of one item in one warehouse, every lot and quality bucket included. */
     @Query("""

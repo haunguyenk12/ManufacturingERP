@@ -135,6 +135,8 @@ public class MaterialReservationService {
                 .resolveScope(ScopeResourceType.PLANT, workOrder.getPlant().getPlantId())
                 .warehouseIds();
 
+        // CF-2 (B264): FEFO skips lots past their expiry on this one server clock reading.
+        java.time.Instant now = java.time.Instant.now();
         List<MaterialReservation> created = new ArrayList<>();
         for (WorkOrderComponentLine componentLine : workOrder.getComponentLines()) {
             List<UUID> warehouseIds = componentLine.getWarehouse() != null
@@ -149,7 +151,7 @@ public class MaterialReservationService {
                 continue;
             }
             for (StockBalance balance : stockBalanceRepository.findIssuableBalancesFefo(
-                    componentLine.getComponentItem().getItemId(), warehouseIds, LotStatus.AVAILABLE)) {
+                    componentLine.getComponentItem().getItemId(), warehouseIds, LotStatus.AVAILABLE, now)) {
                 if (outstanding.compareTo(BigDecimal.ZERO) <= 0) {
                     break;
                 }

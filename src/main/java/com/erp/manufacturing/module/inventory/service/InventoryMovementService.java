@@ -136,10 +136,10 @@ public class InventoryMovementService {
     }
 
     /**
-     * {@code POST /v1/inventory/issue} (G4): the same free-stock issue as {@link #issue}, but a lot past
-     * its {@code expiresAt} is refused. Kept apart from {@link #issue} on purpose - work-order material
-     * issue and FEFO reservation still treat an AVAILABLE lot as issuable regardless of its date; moving
-     * that rule into planning is a separate decision (NEXT_PHASE_PLAN.md section 11, user choice 2026-10-15).
+     * The same free-stock issue as {@link #issue}, but a lot past its {@code expiresAt} is refused. Used by
+     * {@code POST /v1/inventory/issue} (G4) and, since CF-2 (B264, PO reversed the 2026-10-15 choice on
+     * 2026-10-27), by work-order material issue post and approve. {@link #issue} without the expiry gate is
+     * left for internal flows that move stock already judged (e.g. QC).
      */
     @Transactional
     public InventoryMovementResult issueManual(InventoryIssueCommand command, String idempotencyKey) {

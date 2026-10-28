@@ -4,9 +4,11 @@ import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
+import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
+import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
 import com.erp.manufacturing.module.organization.domain.Plant;
@@ -138,6 +140,97 @@ class MaterialReservationRepositoryIT extends AbstractPostgresIntegrationTest {
 
         assertThat(reserved(withReservation, withNone))
                 .containsOnlyKeys(withReservation.getComponentLines().get(0).getComponentLineId());
+    }
+
+    // ── CF-2 (B265): reservations on a lot that is no longer issuable do not cover the requirement ──────────
+
+    /**
+     * Only ACTIVE remaining on a lot that is not AVAILABLE or whose {@code expiresAt <= now} counts. Every exclusion
+     * case is seeded next to rows that must count, and the AVAILABLE-future, undated and non-lot rows prove the
+     * {@code join r.lot} plus the expiry predicate do not sweep everything in.
+     */
+    @Test
+    void sumIneligibleActiveRemainingByWorkOrderId_countsExpiredAndHeldLotsOnly_activeRemainingOnly() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        WorkOrder otherWorkOrder = persistWorkOrder(fixture);
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+
+        InventoryLot expired = persistLot(fixture, LotStatus.AVAILABLE, now.minus(1, java.time.temporal.ChronoUnit.DAYS));
+        InventoryLot atNow = persistLot(fixture, LotStatus.AVAILABLE, now);
+        InventoryLot hold = persistLot(fixture, LotStatus.HOLD, now.plus(1, java.time.temporal.ChronoUnit.DAYS));
+        InventoryLot future = persistLot(fixture, LotStatus.AVAILABLE, now.plusSeconds(1));
+        InventoryLot undated = persistLot(fixture, LotStatus.AVAILABLE, null);
+
+        // counted: 4 - 1 = 3 (expired) + 1.5 (expires exactly now) + 2 (HOLD, not expired) = 6.5
+        persistLotReservation(workOrder, line, fixture, expired, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("4.000000"), new BigDecimal("1.000000"));
+        persistLotReservation(workOrder, line, fixture, atNow, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("1.500000"), BigDecimal.ZERO);
+        persistLotReservation(workOrder, line, fixture, hold, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("2.000000"), BigDecimal.ZERO);
+        // not counted: issuable lots, non-lot stock, released/consumed rows, another work order
+        persistLotReservation(workOrder, line, fixture, future, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("5.000000"), BigDecimal.ZERO);
+        persistLotReservation(workOrder, line, fixture, undated, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("1.000000"), BigDecimal.ZERO);
+        persistReservation(workOrder, line, fixture, MaterialReservationStatus.ACTIVE,
+                new BigDecimal("6.000000"), BigDecimal.ZERO);
+        persistLotReservation(workOrder, line, fixture, expired, MaterialReservationStatus.RELEASED,
+                new BigDecimal("9.000000"), BigDecimal.ZERO);
+        persistLotReservation(workOrder, line, fixture, expired, MaterialReservationStatus.CONSUMED,
+                new BigDecimal("7.000000"), new BigDecimal("7.000000"));
+        persistLotReservation(otherWorkOrder, otherWorkOrder.getComponentLines().get(0), fixture, expired,
+                MaterialReservationStatus.ACTIVE, new BigDecimal("8.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        List<ComponentQuantityProjection> ineligible =
+                repository.sumIneligibleActiveRemainingByWorkOrderId(workOrder.getWorkOrderId(), now);
+
+        assertThat(ineligible).singleElement().satisfies(row -> {
+            assertThat(row.getComponentLineId()).isEqualTo(line.getComponentLineId());
+            assertThat(row.getQuantity()).isEqualByComparingTo("6.5");
+        });
+        // reservedQuantity keeps its meaning (F9): every ACTIVE remaining, eligible or not = 3 + 1.5 + 2 + 5 + 1 + 6.
+        assertThat(repository.sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId()))
+                .singleElement().satisfies(row -> assertThat(row.getQuantity()).isEqualByComparingTo("18.5"));
+    }
+
+    /** A work order whose reservations all sit on issuable lots has no ineligible row at all (group by, not zero). */
+    @Test
+    void sumIneligibleActiveRemainingByWorkOrderId_allLotsIssuable_returnsNoRow() {
+        Fixture fixture = persistFixture();
+        WorkOrder workOrder = persistWorkOrder(fixture);
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        persistLotReservation(workOrder, line, fixture,
+                persistLot(fixture, LotStatus.AVAILABLE, now.plus(2, java.time.temporal.ChronoUnit.DAYS)),
+                MaterialReservationStatus.ACTIVE, new BigDecimal("3.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+
+        assertThat(repository.sumIneligibleActiveRemainingByWorkOrderId(workOrder.getWorkOrderId(), now)).isEmpty();
+    }
+
+    private InventoryLot persistLot(Fixture fixture, LotStatus status, Instant expiresAt) {
+        Instant now = Instant.now();
+        InventoryLot lot = InventoryLot.builder().item(fixture.component).lotCode("LOT_" + UUID.randomUUID())
+                .status(status).receivedAt(now).expiresAt(expiresAt).build();
+        lot.setCreatedAt(now);
+        lot.setUpdatedAt(now);
+        return entityManager.persistFlushFind(lot);
+    }
+
+    private void persistLotReservation(WorkOrder workOrder, WorkOrderComponentLine line, Fixture fixture,
+                                       InventoryLot lot, MaterialReservationStatus status,
+                                       BigDecimal quantity, BigDecimal consumedQuantity) {
+        Instant now = Instant.now();
+        MaterialReservation reservation = MaterialReservation.builder()
+                .workOrder(workOrder).componentLine(line).item(fixture.component).warehouse(fixture.warehouse)
+                .lot(lot).quantity(quantity).consumedQuantity(consumedQuantity).status(status).build();
+        reservation.setCreatedAt(now);
+        reservation.setUpdatedAt(now);
+        entityManager.persistAndFlush(reservation);
     }
 
     private Map<UUID, BigDecimal> reserved(WorkOrder... workOrders) {

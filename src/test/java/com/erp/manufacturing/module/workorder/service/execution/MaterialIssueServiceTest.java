@@ -611,7 +611,7 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
         when(reservationService.findActiveReservationForIssue(workOrder.getWorkOrderId(), reservation.getReservationId()))
                 .thenReturn(reservation);
-        when(movementService.issueReserved(any(InventoryIssueCommand.class), eq("KEY-ISSUE:L1")))
+        when(movementService.issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-ISSUE:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -663,7 +663,7 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-SERIAL:L1")))
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-SERIAL:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -673,7 +673,7 @@ class MaterialIssueServiceTest {
         service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest), 0L, null), "KEY-SERIAL");
 
         ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
-        verify(movementService).issue(commandCaptor.capture(), eq("KEY-SERIAL:L1"));
+        verify(movementService).issueManual(commandCaptor.capture(), eq("KEY-SERIAL:L1"));
         assertThat(commandCaptor.getValue().serialId()).isEqualTo(serialId);
 
         ArgumentCaptor<MaterialIssue> issueCaptor = ArgumentCaptor.forClass(MaterialIssue.class);
@@ -706,7 +706,7 @@ class MaterialIssueServiceTest {
                 .thenReturn(warehouse);
         when(reservationService.findActiveReservationForIssue(workOrder.getWorkOrderId(), reservation.getReservationId()))
                 .thenReturn(reservation);
-        when(movementService.issueReserved(any(InventoryIssueCommand.class), eq("KEY-SERIAL-RES:L1")))
+        when(movementService.issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-SERIAL-RES:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -716,7 +716,7 @@ class MaterialIssueServiceTest {
         service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(lineRequest), 0L, null), "KEY-SERIAL-RES");
 
         ArgumentCaptor<InventoryIssueCommand> commandCaptor = ArgumentCaptor.forClass(InventoryIssueCommand.class);
-        verify(movementService).issueReserved(commandCaptor.capture(), eq("KEY-SERIAL-RES:L1"));
+        verify(movementService).issueReservedManual(commandCaptor.capture(), eq("KEY-SERIAL-RES:L1"));
         assertThat(commandCaptor.getValue().serialId()).isEqualTo(serialId);
         assertThat(reservation.getConsumedQuantity()).isEqualByComparingTo("1");
     }
@@ -778,7 +778,7 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-WITHIN:L1")))
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-WITHIN:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -802,7 +802,7 @@ class MaterialIssueServiceTest {
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
         when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
                 .thenReturn(warehouse);
-        when(movementService.issue(any(InventoryIssueCommand.class), eq("KEY-COST:L1")))
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-COST:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -847,7 +847,7 @@ class MaterialIssueServiceTest {
         MaterialIssueResponse response = service.post(workOrderId, request, "KEY-OVER");
 
         assertThat(response.status()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL.name());
-        verify(movementService, never()).issue(any(), anyString());
+        verify(movementService, never()).issueManual(any(), anyString());
         assertThat(line.getIssuedQuantity()).isZero();
     }
 
@@ -872,7 +872,7 @@ class MaterialIssueServiceTest {
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.MISSING_REQUIRED_FIELD));
 
-        verify(movementService, never()).issue(any(), anyString());
+        verify(movementService, never()).issueManual(any(), anyString());
         verify(issueRepository, never()).saveAndFlush(any());
     }
 
@@ -982,7 +982,7 @@ class MaterialIssueServiceTest {
         StockMovement movement = movement(line.getComponentItem(), warehouse);
 
         when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
-        when(movementService.issue(any(InventoryIssueCommand.class), eq(pending.getIdempotencyKey() + ":approve:L1")))
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq(pending.getIdempotencyKey() + ":approve:L1")))
                 .thenReturn(new InventoryMovementResult(movement, true));
         when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -1055,6 +1055,170 @@ class MaterialIssueServiceTest {
     }
 
     /** G8b: the stock pre-check of a pending request finds more than enough free stock at every source. */
+    // ── CF-2 (B264): work-order material issue goes through the expiry-gated movement entry points ──────
+
+    @Test
+    void post_freeStockLine_usesTheExpiryGatedIssueManual_neverThePlainIssue() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-CF2")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-CF2:L1")))
+                .thenReturn(new InventoryMovementResult(movement(line.getComponentItem(), warehouse), true));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("3"), null)), 0L, null), "KEY-CF2");
+
+        verify(movementService).issueManual(any(InventoryIssueCommand.class), eq("KEY-CF2:L1"));
+        verify(movementService, never()).issue(any(), anyString());
+        verify(movementService, never()).issueReserved(any(), anyString());
+    }
+
+    @Test
+    void post_reservedLine_usesTheExpiryGatedIssueReservedManual_neverThePlainIssueReserved() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialReservation reservation = MaterialReservation.builder().reservationId(UUID.randomUUID())
+                .workOrder(workOrder).componentLine(line).item(line.getComponentItem()).warehouse(warehouse)
+                .quantity(new BigDecimal("5")).consumedQuantity(BigDecimal.ZERO)
+                .status(MaterialReservationStatus.ACTIVE).build();
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-CF2-RES")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(reservationService.findActiveReservationForIssue(workOrder.getWorkOrderId(), reservation.getReservationId()))
+                .thenReturn(reservation);
+        when(movementService.issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-CF2-RES:L1")))
+                .thenReturn(new InventoryMovementResult(movement(line.getComponentItem(), warehouse), true));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                new MaterialIssueLineRequest(line.getComponentLineId(), reservation.getReservationId(),
+                        warehouse.getWarehouseId(), null, null, null, new BigDecimal("4"), "Issue reserved", null)),
+                0L, null), "KEY-CF2-RES");
+
+        verify(movementService).issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-CF2-RES:L1"));
+        verify(movementService, never()).issueReserved(any(), anyString());
+        verify(movementService, never()).issue(any(), anyString());
+    }
+
+    /** A posting refused because the lot expired leaves the component line and cost untouched and saves nothing. */
+    @Test
+    void post_lineOnAnExpiredLot_isLotNotEligible_andRollsNothingForward() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-CF2-EXP")).thenReturn(Optional.empty());
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-CF2-EXP:L1")))
+                .thenThrow(com.erp.manufacturing.common.exception.ExceptionFactory.custom(
+                        BusinessErrorCode.LOT_NOT_ELIGIBLE, "Lot expired"));
+
+        assertThatThrownBy(() -> service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(line, warehouse, new BigDecimal("3"), null)), 0L, null), "KEY-CF2-EXP"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        assertThat(line.getIssuedQuantity()).isEqualByComparingTo("0");
+        verifyNoInteractions(costAccumulatorService, wipTransactionService);
+        verify(issueRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void approve_freeStockLine_usesIssueManual_neverThePlainIssue() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialIssue pending = pendingIssue(workOrder, line, warehouse, new BigDecimal("12"));
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-PENDING:approve:L1")))
+                .thenReturn(new InventoryMovementResult(movement(line.getComponentItem(), warehouse), true));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), pending.getIssueId(), new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null);
+
+        verify(movementService).issueManual(any(InventoryIssueCommand.class), eq("KEY-PENDING:approve:L1"));
+        verify(movementService, never()).issue(any(), anyString());
+        verify(movementService, never()).issueReserved(any(), anyString());
+    }
+
+    @Test
+    void approve_reservedLine_usesIssueReservedManual_neverThePlainIssueReserved() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialReservation reservation = MaterialReservation.builder().reservationId(UUID.randomUUID())
+                .workOrder(workOrder).componentLine(line).item(line.getComponentItem()).warehouse(warehouse)
+                .quantity(new BigDecimal("12")).consumedQuantity(BigDecimal.ZERO)
+                .status(MaterialReservationStatus.ACTIVE).build();
+        MaterialIssue pending = pendingIssue(workOrder, line, warehouse, new BigDecimal("12"));
+        pending.getLines().get(0).setReservation(reservation);
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(reservationService.findActiveReservationForIssue(workOrder.getWorkOrderId(), reservation.getReservationId()))
+                .thenReturn(reservation);
+        when(movementService.issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-PENDING:approve:L1")))
+                .thenReturn(new InventoryMovementResult(movement(line.getComponentItem(), warehouse), true));
+        when(issueRepository.saveAndFlush(any(MaterialIssue.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.approve(workOrder.getWorkOrderId(), pending.getIssueId(), new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null);
+
+        verify(movementService).issueReservedManual(any(InventoryIssueCommand.class), eq("KEY-PENDING:approve:L1"));
+        verify(movementService, never()).issueReserved(any(), anyString());
+        verify(movementService, never()).issue(any(), anyString());
+        assertThat(reservation.getConsumedQuantity()).isEqualByComparingTo("12");
+    }
+
+    /**
+     * The lot of the last line expired between request and approval: the movement service refuses it. Nothing is
+     * rolled forward — the issue stays pending, nothing is saved, no WIP and no cost for that line (the in-memory
+     * change on the first line is undone by the transaction rollback, which a unit test cannot show).
+     */
+    @Test
+    void approve_lastLineOnAnExpiredLot_isLotNotEligible_andTheIssueStaysPending() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.RELEASED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        MaterialIssue pending = pendingIssue(workOrder, line, warehouse, new BigDecimal("12"));
+        when(issueRepository.findWithLinesByIssueId(pending.getIssueId())).thenReturn(Optional.of(pending));
+        when(movementService.issueManual(any(InventoryIssueCommand.class), eq("KEY-PENDING:approve:L1")))
+                .thenThrow(com.erp.manufacturing.common.exception.ExceptionFactory.custom(
+                        BusinessErrorCode.LOT_NOT_ELIGIBLE, "Lot expired"));
+
+        assertThatThrownBy(() -> service.approve(workOrder.getWorkOrderId(), pending.getIssueId(),
+                new MaterialIssueVersionedDecisionRequest(0L, 0L, null), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        assertThat(pending.getStatus()).isEqualTo(MaterialIssueStatus.PENDING_APPROVAL);
+        assertThat(line.getIssuedQuantity()).isEqualByComparingTo("0");
+        verifyNoInteractions(costAccumulatorService, wipTransactionService);
+        verify(issueRepository, never()).saveAndFlush(any());
+        verify(workOrderRepository, never()).saveAndFlush(any());
+    }
+
+    /** A retried post with the key of an issue already posted answers with it — no second movement, no second cost. */
+    @Test
+    void post_replayedKeyOfAPostedIssue_returnsTheStoredIssueWithoutASecondMovement() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.IN_PROGRESS, new BigDecimal("10"));
+        MaterialIssue existing = issue(workOrder, UUID.randomUUID());
+        when(issueRepository.findWithLinesByIdempotencyKey("KEY-CF2-REPLAY")).thenReturn(Optional.of(existing));
+
+        var response = service.post(workOrder.getWorkOrderId(), new MaterialIssuePostRequest("Issue", List.of(
+                issueLine(workOrder.getComponentLines().get(0), workOrder.getOutputWarehouse(), new BigDecimal("3"), null)),
+                0L, null), "KEY-CF2-REPLAY");
+
+        assertThat(response.issueId()).isEqualTo(existing.getIssueId());
+        verifyNoInteractions(movementService, costAccumulatorService, wipTransactionService);
+        verify(issueRepository, never()).saveAndFlush(any());
+    }
+
     private void freeStockIsPlentiful() {
         lenient().when(inventoryAvailabilityService.getStockBalanceForIssue(any(), any(), any()))
                 .thenAnswer(invocation -> StockBalance.builder()

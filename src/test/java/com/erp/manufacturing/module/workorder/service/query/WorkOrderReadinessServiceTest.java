@@ -89,6 +89,61 @@ class WorkOrderReadinessServiceTest {
         assertThat(service.getMaterialReadiness(workOrder.getWorkOrderId()).ready()).isTrue();
     }
 
+    /**
+     * CF-2 (B265): a line reserved 10 of 10 where all 10 sit on an expired lot is 0% covered, not ready, and still
+     * reports reservedQuantity 10 next to the blocker.
+     */
+    @Test
+    void materialReadiness_reservationEntirelyIneligible_reservedPercentIsZero() {
+        WorkOrder workOrder = workOrder();
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(releaseGate.evaluate(workOrder)).thenReturn(List.of(new WorkOrderMaterialReadinessLineResponse(
+                line.getComponentLineId(), line.getComponentItem().getItemId(), "RM-001", "RM-001",
+                new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("10"), new BigDecimal("10"),
+                new BigDecimal("10"), WorkOrderMaterialReadinessLineResponse.BLOCKER_RESERVED_LOT_INELIGIBLE)));
+
+        WorkOrderMaterialReadinessResponse response = service.getMaterialReadiness(workOrder.getWorkOrderId());
+
+        assertThat(response.ready()).isFalse();
+        assertThat(response.reservedPercent()).isEqualByComparingTo("0");
+        assertThat(response.lines().get(0).reservedQuantity()).isEqualByComparingTo("10");
+        assertThat(response.lines().get(0).blocker()).isEqualTo("RESERVED_LOT_INELIGIBLE");
+    }
+
+    @Test
+    void materialReadiness_partlyIneligible_reservedPercentCountsOnlyTheEligiblePart() {
+        WorkOrder workOrder = workOrder();
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(releaseGate.evaluate(workOrder)).thenReturn(List.of(new WorkOrderMaterialReadinessLineResponse(
+                line.getComponentLineId(), line.getComponentItem().getItemId(), "RM-001", "RM-001",
+                new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("10"), new BigDecimal("4"),
+                new BigDecimal("4"), WorkOrderMaterialReadinessLineResponse.BLOCKER_RESERVED_LOT_INELIGIBLE)));
+
+        assertThat(service.getMaterialReadiness(workOrder.getWorkOrderId()).reservedPercent())
+                .isEqualByComparingTo("60.00");
+    }
+
+    @Test
+    void materialReadiness_noIneligibleReservation_fullyReservedIs100Percent() {
+        WorkOrder workOrder = workOrder();
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(releaseGate.evaluate(workOrder)).thenReturn(List.of(new WorkOrderMaterialReadinessLineResponse(
+                line.getComponentLineId(), line.getComponentItem().getItemId(), "RM-001", "RM-001",
+                new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("10"), BigDecimal.ZERO,
+                BigDecimal.ZERO, null)));
+
+        WorkOrderMaterialReadinessResponse response = service.getMaterialReadiness(workOrder.getWorkOrderId());
+
+        assertThat(response.reservedPercent()).isEqualByComparingTo("100");
+        assertThat(response.lines().get(0).blocker()).isNull();
+    }
+
     @Test
     void materialReadiness_unknownWorkOrder_shouldThrowNotFound() {
         UUID workOrderId = UUID.randomUUID();

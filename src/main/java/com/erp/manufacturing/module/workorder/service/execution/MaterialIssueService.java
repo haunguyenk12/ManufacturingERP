@@ -359,7 +359,7 @@ public class MaterialIssueService {
             if (lineRequest.reservationId() != null) {
                 reservation = reservationService.findActiveReservationForIssue(workOrderId, lineRequest.reservationId());
                 validateReservationForIssue(reservation, componentLine, warehouse, lineRequest, quantity);
-                movementResult = movementService.issueReserved(issueCommand(
+                movementResult = movementService.issueReservedManual(issueCommand(
                         componentLine,
                         warehouse,
                         reservation.getLot() != null ? reservation.getLot().getLotId() : null,
@@ -373,7 +373,7 @@ public class MaterialIssueService {
                     reservation.consume(quantity);
                 }
             } else {
-                movementResult = movementService.issue(issueCommand(
+                movementResult = movementService.issueManual(issueCommand(
                         componentLine,
                         warehouse,
                         lineRequest.lotId(),
@@ -680,12 +680,12 @@ public class MaterialIssueService {
                         storedRequest, line.getQuantity());
             }
             InventoryMovementResult result = reservation == null
-                    ? movementService.issue(issueCommand(
+                    ? movementService.issueManual(issueCommand(
                             line.getComponentLine(), line.getWarehouse(), line.getRequestedLotId(),
                             line.getRequestedLotCode(), line.getRequestedSerialId(), line.getQuantity(),
                             line.getIssueReason(), workOrder),
                             idempotency.childKey(issue.getIdempotencyKey() + ":approve", index))
-                    : movementService.issueReserved(issueCommand(
+                    : movementService.issueReservedManual(issueCommand(
                             line.getComponentLine(), line.getWarehouse(),
                             reservation.getLot() == null ? null : reservation.getLot().getLotId(),
                             null, line.getRequestedSerialId(), line.getQuantity(), line.getIssueReason(), workOrder),

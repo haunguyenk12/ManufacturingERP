@@ -17,11 +17,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,14 +54,14 @@ class InventoryAvailabilityServiceTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         when(stockBalanceRepository.aggregateAvailableQuantities(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class)))
                 .thenReturn(List.of(new TestProjection(itemId, new BigDecimal("12.500"))));
 
         Map<UUID, BigDecimal> result = service.getAvailableQuantities(List.of(itemId), List.of(warehouseId));
 
         assertThat(result).containsEntry(itemId, new BigDecimal("12.500"));
         verify(stockBalanceRepository).aggregateAvailableQuantities(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class));
     }
 
     @Test
@@ -66,7 +69,7 @@ class InventoryAvailabilityServiceTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         when(stockBalanceRepository.aggregateStockQuantitiesByWarehouse(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class)))
                 .thenReturn(List.of(new TestWarehouseProjection(itemId, warehouseId,
                         new BigDecimal("12"), new BigDecimal("3"), new BigDecimal("1"), new BigDecimal("8"))));
 
@@ -81,7 +84,7 @@ class InventoryAvailabilityServiceTest {
         assertThat(quantity.qualityHoldQuantity()).isEqualByComparingTo("1");
         assertThat(quantity.availableQuantity()).isEqualByComparingTo("8");
         verify(stockBalanceRepository).aggregateStockQuantitiesByWarehouse(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class));
     }
 
     @Test
@@ -97,7 +100,7 @@ class InventoryAvailabilityServiceTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         when(stockBalanceRepository.aggregatePlanningQuantities(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class)))
                 .thenReturn(List.of(new TestPlanningQuantityProjection(
                         itemId,
                         new BigDecimal("20"),
@@ -123,7 +126,7 @@ class InventoryAvailabilityServiceTest {
         assertThat(quantity.leadTimeDays()).isEqualTo(3);
         assertThat(quantity.hasItemWarehouseSetting()).isTrue();
         verify(stockBalanceRepository).aggregateExcludedLotCounts(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class));
     }
 
     @Test
@@ -131,11 +134,11 @@ class InventoryAvailabilityServiceTest {
         UUID itemId = UUID.randomUUID();
         UUID warehouseId = UUID.randomUUID();
         when(stockBalanceRepository.aggregatePlanningQuantities(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class)))
                 .thenReturn(List.of(new TestPlanningQuantityProjection(
                         itemId, new BigDecimal("4"), BigDecimal.ZERO, new BigDecimal("4"))));
         when(stockBalanceRepository.aggregateExcludedLotCounts(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE))
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class)))
                 .thenReturn(List.of(new TestExcludedLotCountProjection(itemId, 2L)));
         when(itemWarehouseSettingRepository.aggregatePlanningSettings(
                 List.of(itemId), List.of(warehouseId), ItemWarehouseSettingStatus.ACTIVE))
@@ -148,7 +151,48 @@ class InventoryAvailabilityServiceTest {
         assertThat(quantity.safetyStockQuantity()).isEqualByComparingTo("0");
         assertThat(quantity.excludedLotCount()).isEqualTo(2);
         verify(stockBalanceRepository, times(1)).aggregateExcludedLotCounts(
-                List.of(itemId), List.of(warehouseId), LotStatus.AVAILABLE);
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("CF-2: both planning queries use one server clock reading, so a lot cannot be expired in one and not the other")
+    void getPlanningQuantities_passesTheSameCurrentInstantToBothPlanningQueries() {
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Instant before = Instant.now();
+
+        service.getPlanningQuantities(List.of(itemId), List.of(warehouseId));
+
+        Instant after = Instant.now();
+        org.mockito.ArgumentCaptor<Instant> planningNow = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        org.mockito.ArgumentCaptor<Instant> excludedNow = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(stockBalanceRepository).aggregatePlanningQuantities(
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), planningNow.capture());
+        verify(stockBalanceRepository).aggregateExcludedLotCounts(
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), excludedNow.capture());
+        assertThat(planningNow.getValue()).isSameAs(excludedNow.getValue());
+        assertThat(planningNow.getValue()).isBetween(before, after);
+    }
+
+    @Test
+    @DisplayName("CF-2: available and by-warehouse aggregates are evaluated at the current server instant")
+    void availabilityQueries_passTheCurrentInstant() {
+        UUID itemId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Instant before = Instant.now();
+
+        service.getAvailableQuantities(List.of(itemId), List.of(warehouseId));
+        service.getStockQuantitiesByWarehouse(List.of(itemId), List.of(warehouseId));
+
+        Instant after = Instant.now();
+        org.mockito.ArgumentCaptor<Instant> availableNow = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        org.mockito.ArgumentCaptor<Instant> byWarehouseNow = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(stockBalanceRepository).aggregateAvailableQuantities(
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), availableNow.capture());
+        verify(stockBalanceRepository).aggregateStockQuantitiesByWarehouse(
+                eq(List.of(itemId)), eq(List.of(warehouseId)), eq(LotStatus.AVAILABLE), byWarehouseNow.capture());
+        assertThat(availableNow.getValue()).isBetween(before, after);
+        assertThat(byWarehouseNow.getValue()).isBetween(before, after);
     }
 
     private record TestProjection(UUID itemId, BigDecimal quantity) implements StockAvailabilityProjection {

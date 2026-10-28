@@ -266,8 +266,9 @@ class MaterialReservationServiceTest {
                         ScopeResourceType.PLANT, workOrder.getPlant().getPlantId(), UUID.randomUUID(),
                         java.util.List.of(raw.getWarehouseId(), UUID.randomUUID())));
         when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId())).thenReturn(BigDecimal.ZERO);
-        when(stockBalanceRepository.findIssuableBalancesFefo(line.getComponentItem().getItemId(),
-                java.util.List.of(raw.getWarehouseId()), LotStatus.AVAILABLE)).thenReturn(java.util.List.of(fifteen));
+        when(stockBalanceRepository.findIssuableBalancesFefo(eq(line.getComponentItem().getItemId()),
+                eq(java.util.List.of(raw.getWarehouseId())), eq(LotStatus.AVAILABLE), any(java.time.Instant.class)))
+                .thenReturn(java.util.List.of(fifteen));
         when(reservationRepository.save(any(MaterialReservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
 
@@ -277,7 +278,7 @@ class MaterialReservationServiceTest {
         assertThat(created).hasSize(1);
         assertThat(created.get(0).quantity()).isEqualByComparingTo("15");
         assertThat(fifteen.getReservedQuantity()).isEqualByComparingTo("15");
-        verify(stockBalanceRepository).findIssuableBalancesFefo(any(), eq(java.util.List.of(raw.getWarehouseId())), any());
+        verify(stockBalanceRepository).findIssuableBalancesFefo(any(), eq(java.util.List.of(raw.getWarehouseId())), any(), any());
         // touch(): reservations are child rows, so without it the work order's @Version would not move (B112).
         assertThat(workOrder.getUpdatedAt()).isNotNull();
         verify(workOrderRepository).saveAndFlush(workOrder);
@@ -325,6 +326,103 @@ class MaterialReservationServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
         verifyNoInteractions(stockBalanceRepository);
+    }
+
+    // ── CF-2 (B264): an AVAILABLE lot past its expiry is not reservable ───────────────────────────────
+
+    @Test
+    void reserve_onAnAvailableLotPastItsExpiry_isLotNotEligible_andNothingIsSaved() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(line.getComponentItem())
+                .lotCode("LOT-A").status(LotStatus.AVAILABLE).expiresAt(java.time.Instant.now().minusSeconds(1)).build();
+        StockBalance balance = StockBalance.builder().item(line.getComponentItem()).warehouse(warehouse).lot(lot)
+                .quantity(new BigDecimal("10")).reservedQuantity(BigDecimal.ZERO).build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId())).thenReturn(BigDecimal.ZERO);
+        when(inventoryAvailabilityService.getStockBalanceForIssue(line.getComponentItem(), warehouse.getWarehouseId(),
+                lot.getLotId())).thenReturn(balance);
+
+        assertThatThrownBy(() -> service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
+                line.getComponentLineId(), warehouse.getWarehouseId(), lot.getLotId(), new BigDecimal("4"), 0L), null))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        assertThat(balance.getReservedQuantity()).isEqualByComparingTo("0");
+        verifyNoInteractions(stockBalanceRepository, idempotencyRecordRepository);
+        verify(reservationRepository, never()).save(any());
+        verify(workOrderRepository, never()).saveAndFlush(any());
+    }
+
+    /** Positive control for the case above: the same lot one day before its expiry reserves normally. */
+    @Test
+    void reserve_onAnAvailableLotNotYetExpired_reserves() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(line.getComponentItem())
+                .lotCode("LOT-B").status(LotStatus.AVAILABLE)
+                .expiresAt(java.time.Instant.now().plus(1, java.time.temporal.ChronoUnit.DAYS)).build();
+        StockBalance balance = StockBalance.builder().item(line.getComponentItem()).warehouse(warehouse).lot(lot)
+                .quantity(new BigDecimal("6")).reservedQuantity(BigDecimal.ZERO).build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), workOrder.getPlant().getPlantId()))
+                .thenReturn(warehouse);
+        when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId())).thenReturn(BigDecimal.ZERO);
+        when(inventoryAvailabilityService.getStockBalanceForIssue(line.getComponentItem(), warehouse.getWarehouseId(),
+                lot.getLotId())).thenReturn(balance);
+        when(reservationRepository.save(any(MaterialReservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.reserve(workOrder.getWorkOrderId(), new MaterialReservationCreateRequest(
+                line.getComponentLineId(), warehouse.getWarehouseId(), lot.getLotId(), new BigDecimal("6"), 0L), null);
+
+        assertThat(balance.getReservedQuantity()).isEqualByComparingTo("6");
+        verify(reservationRepository).save(argThat(r -> r.getLot() == lot));
+    }
+
+    /**
+     * FE fixture: needs 10, lot A (10, expired) is not offered by FEFO, lot B (6, expiring tomorrow) is. Automatic
+     * reservation reserves 6 and stops — partial, never touching lot A. The query side of "never offers lot A" is
+     * pinned against Postgres in StockBalanceRepositoryIT.feFixture_*; here the service must ask for it with the current
+     * instant and must not reach for any other source.
+     */
+    @Test
+    void reserveAutomatically_feFixture_reservesOnlyTheSixOnTheFreshLot_andAsksFefoAtTheCurrentInstant() {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.PLANNED, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        Warehouse warehouse = workOrder.getOutputWarehouse();
+        InventoryLot lotB = InventoryLot.builder().lotId(UUID.randomUUID()).item(line.getComponentItem())
+                .lotCode("LOT-B").status(LotStatus.AVAILABLE)
+                .expiresAt(java.time.Instant.now().plus(1, java.time.temporal.ChronoUnit.DAYS)).build();
+        StockBalance six = StockBalance.builder().item(line.getComponentItem()).warehouse(warehouse).lot(lotB)
+                .quantity(new BigDecimal("6")).reservedQuantity(BigDecimal.ZERO).build();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId())).thenReturn(Optional.of(workOrder));
+        when(organizationLookupService.resolveScope(ScopeResourceType.PLANT, workOrder.getPlant().getPlantId()))
+                .thenReturn(new com.erp.manufacturing.module.organization.service.OrganizationScopeResolution(
+                        ScopeResourceType.PLANT, workOrder.getPlant().getPlantId(), UUID.randomUUID(),
+                        java.util.List.of(warehouse.getWarehouseId())));
+        when(reservationRepository.sumActiveRemainingByComponentLineId(line.getComponentLineId())).thenReturn(BigDecimal.ZERO);
+        when(stockBalanceRepository.findIssuableBalancesFefo(eq(line.getComponentItem().getItemId()),
+                eq(java.util.List.of(warehouse.getWarehouseId())), eq(LotStatus.AVAILABLE), any(java.time.Instant.class)))
+                .thenReturn(java.util.List.of(six));
+        when(reservationRepository.save(any(MaterialReservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+        java.time.Instant before = java.time.Instant.now();
+
+        var created = service.reserveAutomatically(workOrder.getWorkOrderId(),
+                new com.erp.manufacturing.module.workorder.dto.core.WorkOrderVersionRequest(0L), null);
+
+        java.time.Instant after = java.time.Instant.now();
+        assertThat(created).singleElement().satisfies(r -> assertThat(r.quantity()).isEqualByComparingTo("6"));
+        assertThat(six.getReservedQuantity()).isEqualByComparingTo("6");
+        org.mockito.ArgumentCaptor<java.time.Instant> now = org.mockito.ArgumentCaptor.forClass(java.time.Instant.class);
+        verify(stockBalanceRepository).findIssuableBalancesFefo(any(), any(), any(), now.capture());
+        assertThat(now.getValue()).isBetween(before, after);
+        verify(reservationRepository, times(1)).save(argThat(r -> r.getLot() == lotB));
     }
 
     private MaterialReservation reservation(WorkOrder workOrder,

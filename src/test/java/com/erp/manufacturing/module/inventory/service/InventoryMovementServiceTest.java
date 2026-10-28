@@ -1136,7 +1136,7 @@ class InventoryMovementServiceTest {
         verify(movementRepository, never()).save(any());
     }
 
-    // ── G4: manual issue refuses an expired lot; work-order issue does not ──
+    // ── G4: manual issue refuses an expired lot; CF-2: work-order issue now goes through issueManual too ──
 
     @Test
     @DisplayName("issueManual: an AVAILABLE lot past its expiry is LOT_NOT_ELIGIBLE and stock is untouched")
@@ -1161,8 +1161,8 @@ class InventoryMovementServiceTest {
     }
 
     @Test
-    @DisplayName("issue (work-order path): the expiry gate is not applied — decision G4, manual flows only")
-    void issue_workOrderPath_stillIssuesFromAnExpiredAvailableLot() {
+    @DisplayName("issue (internal flows, e.g. QC): the expiry gate is not applied — since CF-2 work-order issue uses issueManual")
+    void issue_internalPath_stillIssuesFromAnExpiredAvailableLot() {
         UUID companyId = UUID.randomUUID();
         Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
         Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
@@ -1182,6 +1182,53 @@ class InventoryMovementServiceTest {
                 null, "WORK_ORDER", "WO-1", null, null), "ISSUE-WO");
 
         assertThat(result.created()).isTrue();
+    }
+
+    @Test
+    @DisplayName("CF-2: issueReservedManual refuses an expired lot (work-order issue from a reservation) and touches no stock")
+    void issueReservedManual_expiredLot_throwsLotNotEligible() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(item).lotCode("OLD")
+                .status(LotStatus.AVAILABLE).expiresAt(Instant.now().minusSeconds(1)).build();
+        when(itemRepository.findById(item.getItemId())).thenReturn(Optional.of(item));
+        when(warehouseRepository.findById(warehouse.getWarehouseId())).thenReturn(Optional.of(warehouse));
+        when(lotRepository.findById(lot.getLotId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> service.issueReservedManual(new InventoryIssueCommand(
+                item.getItemId(), warehouse.getWarehouseId(), lot.getLotId(), null, BigDecimal.ONE,
+                null, "WORK_ORDER", "WO-1", null, null), "ISSUE-RES-EXP"))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+
+        verifyNoInteractions(balanceRepository);
+        verify(movementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("CF-2: a replay of an issue already posted is answered from the ledger before the expiry check")
+    void issueManual_replayOfAnIssuePostedBeforeTheLotExpired_returnsTheStoredMovement() {
+        UUID companyId = UUID.randomUUID();
+        Item item = item(UUID.randomUUID(), companyId, true, ItemStatus.ACTIVE);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), companyId, OrganizationStatus.ACTIVE);
+        InventoryLot lot = InventoryLot.builder().lotId(UUID.randomUUID()).item(item).lotCode("OLD")
+                .status(LotStatus.AVAILABLE).expiresAt(Instant.now().minusSeconds(60)).build();
+        StockMovement stored = StockMovement.builder().movementId(UUID.randomUUID()).item(item).warehouse(warehouse)
+                .lot(lot).movementType(MovementType.ISSUE).direction(MovementDirection.OUT).quantity(BigDecimal.ONE)
+                .idempotencyKey("WO-KEY:L1").build();
+        when(movementRepository.findByIdempotencyKeyAndMovementType("WO-KEY:L1", MovementType.ISSUE))
+                .thenReturn(Optional.of(stored));
+
+        InventoryMovementResult result = service.issueManual(new InventoryIssueCommand(
+                item.getItemId(), warehouse.getWarehouseId(), lot.getLotId(), null, BigDecimal.ONE,
+                null, "WORK_ORDER", "WO-1", null, null), "WO-KEY:L1");
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.movement()).isSameAs(stored);
+        verifyNoInteractions(itemRepository, lotRepository, balanceRepository);
+        verify(movementRepository, never()).save(any());
     }
 
     // ── G4-4: expiresAt on receipt ─────────────────────────────────────────

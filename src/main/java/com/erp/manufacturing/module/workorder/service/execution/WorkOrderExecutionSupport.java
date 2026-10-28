@@ -132,6 +132,12 @@ class WorkOrderExecutionSupport {
             throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
                     "Lot cannot be reserved in status: " + balance.getLot().getStatus());
         }
+        // CF-2 (B264): an AVAILABLE lot past its expiry (server clock) is not reservable either.
+        if (balance.getLot() != null && balance.getLot().getExpiresAt() != null
+                && !balance.getLot().getExpiresAt().isAfter(java.time.Instant.now())) {
+            throw ExceptionFactory.custom(BusinessErrorCode.LOT_NOT_ELIGIBLE,
+                    "Lot expired at " + balance.getLot().getExpiresAt() + " and cannot be reserved");
+        }
         if (balance.availableQuantity().compareTo(quantity) < 0) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.INSUFFICIENT_STOCK);
         }

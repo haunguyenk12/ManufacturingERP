@@ -252,7 +252,7 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         entityManager.clear();
 
         List<StockAvailabilityProjection> result = repository.aggregateAvailableQuantities(
-                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE);
+                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE, Instant.now());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getItemId()).isEqualTo(item.getItemId());
@@ -275,7 +275,7 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         entityManager.clear();
 
         List<StockPlanningQuantityProjection> result = repository.aggregatePlanningQuantities(
-                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE);
+                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE, Instant.now());
 
         assertThat(result).hasSize(1);
         StockPlanningQuantityProjection projection = result.get(0);
@@ -312,7 +312,7 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         List<StockQuantityByWarehouseProjection> result = repository.aggregateStockQuantitiesByWarehouse(
                 List.of(item.getItemId()),
                 List.of(warehouseA.getWarehouseId(), warehouseB.getWarehouseId()),
-                LotStatus.AVAILABLE);
+                LotStatus.AVAILABLE, Instant.now());
 
         assertThat(result).hasSize(2);
         StockQuantityByWarehouseProjection a = result.stream()
@@ -349,11 +349,182 @@ class StockBalanceRepositoryIT extends AbstractPostgresIntegrationTest {
         entityManager.clear();
 
         List<StockExcludedLotCountProjection> result = repository.aggregateExcludedLotCounts(
-                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE);
+                List.of(item.getItemId()), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE, Instant.now());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getItemId()).isEqualTo(item.getItemId());
         assertThat(result.get(0).getExcludedLotCount()).isEqualTo(2L);
+    }
+
+    // ── CF-2 (B264): an AVAILABLE lot past its expiresAt is not available to planning / work orders ────────────
+
+    /**
+     * Two warehouses in two plants (persistWarehouse makes a company + plant each). In warehouse A: undated non-lot stock,
+     * an AVAILABLE lot expiring exactly at {@code now} (boundary, excluded), one expiring {@code now + 1s} (included),
+     * an AVAILABLE lot with no expiry (included), a HOLD lot that is not expired (excluded) and one expired yesterday
+     * (excluded). In warehouse B: an expired lot and a future one. Reserved quantities on the excluded rows are large on
+     * purpose so a query that let them in would move every figure.
+     */
+    private record ExpiryFixture(Item item, Warehouse warehouseA, Warehouse warehouseB, Instant now,
+                                 StockBalance nonLot, StockBalance atNow, StockBalance inOneSecond,
+                                 StockBalance undatedLot, StockBalance holdFuture, StockBalance expiredYesterday,
+                                 StockBalance expiredInB, StockBalance futureInB) {}
+
+    private ExpiryFixture persistExpiryFixture() {
+        Warehouse warehouseA = persistWarehouse();
+        Warehouse warehouseB = persistWarehouse();
+        Item item = persistItem(warehouseA.getPlant().getCompany());
+        // Postgres keeps microseconds; truncate so "expiresAt == now" is an exact equality in SQL.
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+        StockBalance nonLot = persistBalance(item, warehouseA, null, new BigDecimal("4.000000"), BigDecimal.ZERO);
+        StockBalance atNow = persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_NOW_" + UUID.randomUUID(), now),
+                new BigDecimal("100.000000"), new BigDecimal("40.000000"));
+        StockBalance inOneSecond = persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_1S_" + UUID.randomUUID(), now.plusSeconds(1)),
+                new BigDecimal("7.000000"), new BigDecimal("2.000000"));
+        StockBalance undatedLot = persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_UNDATED_" + UUID.randomUUID(), null),
+                new BigDecimal("5.000000"), BigDecimal.ZERO);
+        StockBalance holdFuture = persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.HOLD, "LOT_HOLD_" + UUID.randomUUID(), now.plus(1, ChronoUnit.DAYS)),
+                new BigDecimal("50.000000"), BigDecimal.ZERO);
+        StockBalance expiredYesterday = persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_OLD_" + UUID.randomUUID(), now.minus(1, ChronoUnit.DAYS)),
+                new BigDecimal("30.000000"), new BigDecimal("10.000000"));
+        StockBalance expiredInB = persistBalance(item, warehouseB,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_B_OLD_" + UUID.randomUUID(), now.minus(1, ChronoUnit.HOURS)),
+                new BigDecimal("200.000000"), BigDecimal.ZERO);
+        StockBalance futureInB = persistBalance(item, warehouseB,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_B_NEW_" + UUID.randomUUID(), now.plus(1, ChronoUnit.DAYS)),
+                new BigDecimal("3.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+        return new ExpiryFixture(item, warehouseA, warehouseB, now, nonLot, atNow, inOneSecond, undatedLot, holdFuture,
+                expiredYesterday, expiredInB, futureInB);
+    }
+
+    @Test
+    void aggregateAvailableQuantities_cf2_excludesLotsExpiredAtOrBeforeNow_keepsFutureUndatedAndNonLotStock() {
+        ExpiryFixture f = persistExpiryFixture();
+
+        List<StockAvailabilityProjection> onlyA = repository.aggregateAvailableQuantities(
+                List.of(f.item().getItemId()), List.of(f.warehouseA().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+        List<StockAvailabilityProjection> both = repository.aggregateAvailableQuantities(
+                List.of(f.item().getItemId()),
+                List.of(f.warehouseA().getWarehouseId(), f.warehouseB().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+
+        // A: 4 non-lot + (7 - 2) lot expiring in 1s + 5 undated lot = 14. The lot expiring exactly at now, the
+        // expired one and the HOLD one add nothing.
+        assertThat(onlyA).singleElement().satisfies(row -> assertThat(row.getQuantity()).isEqualByComparingTo("14"));
+        // + B: 3 from the future lot, the expired 200 stays out.
+        assertThat(both).singleElement().satisfies(row -> assertThat(row.getQuantity()).isEqualByComparingTo("17"));
+    }
+
+    @Test
+    void aggregatePlanningQuantities_cf2_treatsAnExpiredLotLikeAHeldOne_onHandReservedAndAvailableAllLeaveIt() {
+        ExpiryFixture f = persistExpiryFixture();
+
+        List<StockPlanningQuantityProjection> result = repository.aggregatePlanningQuantities(
+                List.of(f.item().getItemId()),
+                List.of(f.warehouseA().getWarehouseId(), f.warehouseB().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+
+        assertThat(result).singleElement().satisfies(row -> {
+            // 4 + 7 + 5 + 3; the 100 at-now, 30 yesterday, 200 in B and the 50 HOLD are not counted.
+            assertThat(row.getOnHandQuantity()).isEqualByComparingTo("19");
+            // only the 2 on the lot expiring in 1s; the 40 / 10 reserved on expired lots are not.
+            assertThat(row.getReservedQuantity()).isEqualByComparingTo("2");
+            assertThat(row.getAvailableQuantity()).isEqualByComparingTo("17");
+        });
+    }
+
+    @Test
+    void aggregateStockQuantitiesByWarehouse_cf2_dropsExpiredLotsPerWarehouse() {
+        ExpiryFixture f = persistExpiryFixture();
+
+        List<StockQuantityByWarehouseProjection> result = repository.aggregateStockQuantitiesByWarehouse(
+                List.of(f.item().getItemId()),
+                List.of(f.warehouseA().getWarehouseId(), f.warehouseB().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+
+        assertThat(result).hasSize(2);
+        StockQuantityByWarehouseProjection a = result.stream()
+                .filter(row -> row.getWarehouseId().equals(f.warehouseA().getWarehouseId())).findFirst().orElseThrow();
+        StockQuantityByWarehouseProjection b = result.stream()
+                .filter(row -> row.getWarehouseId().equals(f.warehouseB().getWarehouseId())).findFirst().orElseThrow();
+        assertThat(a.getOnHandQuantity()).isEqualByComparingTo("16");
+        assertThat(a.getReservedQuantity()).isEqualByComparingTo("2");
+        assertThat(a.getAvailableQuantity()).isEqualByComparingTo("14");
+        assertThat(b.getOnHandQuantity()).isEqualByComparingTo("3");
+        assertThat(b.getAvailableQuantity()).isEqualByComparingTo("3");
+    }
+
+    @Test
+    void aggregateExcludedLotCounts_cf2_countsExpiredAvailableLotsAsWellAsNonAvailableOnes() {
+        ExpiryFixture f = persistExpiryFixture();
+        // An expired lot that is already empty is not stock a planner could recover — still not counted.
+        Warehouse warehouseA = entityManager.find(Warehouse.class, f.warehouseA().getWarehouseId());
+        Item item = entityManager.find(Item.class, f.item().getItemId());
+        persistBalance(item, warehouseA,
+                persistLot(item, LotStatus.AVAILABLE, "LOT_EMPTY_" + UUID.randomUUID(), f.now().minusSeconds(5)),
+                BigDecimal.ZERO, BigDecimal.ZERO);
+        entityManager.clear();
+
+        List<StockExcludedLotCountProjection> onlyA = repository.aggregateExcludedLotCounts(
+                List.of(f.item().getItemId()), List.of(f.warehouseA().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+        List<StockExcludedLotCountProjection> both = repository.aggregateExcludedLotCounts(
+                List.of(f.item().getItemId()),
+                List.of(f.warehouseA().getWarehouseId(), f.warehouseB().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+
+        // A: at-now (boundary), yesterday, HOLD-future = 3. The 1s lot, undated lot and non-lot stock are not excluded.
+        assertThat(onlyA).singleElement().satisfies(row -> assertThat(row.getExcludedLotCount()).isEqualTo(3L));
+        // + the expired lot in B = 4.
+        assertThat(both).singleElement().satisfies(row -> assertThat(row.getExcludedLotCount()).isEqualTo(4L));
+    }
+
+    @Test
+    void findIssuableBalancesFefo_cf2_skipsExpiredAndHeldLots_keepsFefoOrderWithUndatedStockLast() {
+        ExpiryFixture f = persistExpiryFixture();
+
+        List<StockBalance> result = repository.findIssuableBalancesFefo(f.item().getItemId(),
+                List.of(f.warehouseA().getWarehouseId(), f.warehouseB().getWarehouseId()), LotStatus.AVAILABLE, f.now());
+
+        List<UUID> ids = result.stream().map(StockBalance::getBalanceId).toList();
+        assertThat(ids).containsExactlyInAnyOrder(f.inOneSecond().getBalanceId(), f.futureInB().getBalanceId(),
+                f.undatedLot().getBalanceId(), f.nonLot().getBalanceId());
+        // FEFO: the lot expiring in 1s, then the one expiring tomorrow; undated stock after both.
+        assertThat(ids.subList(0, 2)).containsExactly(f.inOneSecond().getBalanceId(), f.futureInB().getBalanceId());
+    }
+
+    /**
+     * FE fixture (CAPSTONE3 follow-up): the item needs 10; lot A has 10 AVAILABLE but expired at T, lot B has 6
+     * expiring at T + 1 day. Planning sees 6 on hand and 6 available, counts one excluded lot, and FEFO offers lot B
+     * only — so automatic reservation can cover at most 6, never from lot A.
+     */
+    @Test
+    void feFixture_expiredLotA_freshLotB_planningSeesSix_excludesOne_fefoOffersOnlyLotB() {
+        Warehouse warehouse = persistWarehouse();
+        Item item = persistItem(warehouse.getPlant().getCompany());
+        Instant t = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        persistBalance(item, warehouse, persistLot(item, LotStatus.AVAILABLE, "FE_LOT_A_" + UUID.randomUUID(), t),
+                new BigDecimal("10.000000"), BigDecimal.ZERO);
+        StockBalance lotB = persistBalance(item, warehouse,
+                persistLot(item, LotStatus.AVAILABLE, "FE_LOT_B_" + UUID.randomUUID(), t.plus(1, ChronoUnit.DAYS)),
+                new BigDecimal("6.000000"), BigDecimal.ZERO);
+        entityManager.clear();
+        List<UUID> items = List.of(item.getItemId());
+        List<UUID> warehouses = List.of(warehouse.getWarehouseId());
+
+        assertThat(repository.aggregatePlanningQuantities(items, warehouses, LotStatus.AVAILABLE, t))
+                .singleElement().satisfies(row -> {
+                    assertThat(row.getOnHandQuantity()).isEqualByComparingTo("6");
+                    assertThat(row.getAvailableQuantity()).isEqualByComparingTo("6");
+                });
+        assertThat(repository.aggregateExcludedLotCounts(items, warehouses, LotStatus.AVAILABLE, t))
+                .singleElement().satisfies(row -> assertThat(row.getExcludedLotCount()).isEqualTo(1L));
+        assertThat(repository.aggregateAvailableQuantities(items, warehouses, LotStatus.AVAILABLE, t))
+                .singleElement().satisfies(row -> assertThat(row.getQuantity()).isEqualByComparingTo("6"));
+        assertThat(repository.findIssuableBalancesFefo(item.getItemId(), warehouses, LotStatus.AVAILABLE, t))
+                .extracting(StockBalance::getBalanceId).containsExactly(lotB.getBalanceId());
     }
 
     @Test

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,7 +22,8 @@ import java.util.stream.Collectors;
 
 /**
  * Gate 1a – a work order may only be released once every component requirement is
- * fully covered by an active material reservation.
+ * fully covered by an active material reservation. CF-2 (B265): only a reservation on a lot that is still
+ * issuable (AVAILABLE, not past its expiry) counts as coverage.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,10 +42,17 @@ public class WorkOrderReleaseGate {
                 .collect(Collectors.toMap(
                         ComponentQuantityProjection::getComponentLineId,
                         ComponentQuantityProjection::getQuantity));
+        // CF-2 (B265): a reservation on an expired / no-longer-AVAILABLE lot does not cover the requirement.
+        Map<UUID, BigDecimal> ineligibleByLine = reservationRepository
+                .sumIneligibleActiveRemainingByWorkOrderId(workOrder.getWorkOrderId(), Instant.now()).stream()
+                .collect(Collectors.toMap(
+                        ComponentQuantityProjection::getComponentLineId,
+                        ComponentQuantityProjection::getQuantity));
 
         return workOrder.getComponentLines().stream()
-                .map(line -> toReadinessLine(line, reservedByLine.getOrDefault(
-                        line.getComponentLineId(), BigDecimal.ZERO)))
+                .map(line -> toReadinessLine(line,
+                        reservedByLine.getOrDefault(line.getComponentLineId(), BigDecimal.ZERO),
+                        ineligibleByLine.getOrDefault(line.getComponentLineId(), BigDecimal.ZERO)))
                 .toList();
     }
 
@@ -79,9 +88,11 @@ public class WorkOrderReleaseGate {
     }
 
     private WorkOrderMaterialReadinessLineResponse toReadinessLine(WorkOrderComponentLine line,
-                                                                   BigDecimal reservedQuantity) {
+                                                                   BigDecimal reservedQuantity,
+                                                                   BigDecimal ineligibleQuantity) {
         BigDecimal requiredRemaining = line.remainingQuantity();
-        BigDecimal shortage = requiredRemaining.subtract(reservedQuantity).max(BigDecimal.ZERO);
+        BigDecimal shortage = requiredRemaining.subtract(reservedQuantity.subtract(ineligibleQuantity))
+                .max(BigDecimal.ZERO);
         return new WorkOrderMaterialReadinessLineResponse(
                 line.getComponentLineId(),
                 line.getComponentItem().getItemId(),
@@ -90,6 +101,9 @@ public class WorkOrderReleaseGate {
                 line.getRequiredQuantity(),
                 line.getIssuedQuantity(),
                 reservedQuantity,
-                shortage);
+                shortage,
+                ineligibleQuantity,
+                ineligibleQuantity.signum() > 0
+                        ? WorkOrderMaterialReadinessLineResponse.BLOCKER_RESERVED_LOT_INELIGIBLE : null);
     }
 }

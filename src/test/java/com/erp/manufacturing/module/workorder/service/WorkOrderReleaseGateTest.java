@@ -29,6 +29,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -132,9 +134,105 @@ class WorkOrderReleaseGateTest {
         assertThat(lines.get(0).shortageQuantity()).isEqualByComparingTo("4");
         assertThat(lines.get(1).reservedQuantity()).isEqualByComparingTo("0");
         assertThat(lines.get(1).shortageQuantity()).isEqualByComparingTo("10");
-        // Exactly one aggregate query for the whole work order — no per-component loop.
+        // Exactly one aggregate query for the whole work order — no per-component loop. CF-2 adds exactly one more
+        // (the ineligible part), still one per work order, not one per line.
         verify(reservationRepository, times(1)).sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId());
+        verify(reservationRepository, times(1)).sumIneligibleActiveRemainingByWorkOrderId(
+                eq(workOrder.getWorkOrderId()), any(java.time.Instant.class));
         verifyNoMoreInteractions(reservationRepository);
+    }
+
+    // ── CF-2 (B265) ─────────────────────────────────────────────────────────────────────────────────
+
+    /** A reservation of 10 that sits entirely on an expired / held lot covers nothing; reservedQuantity keeps 10 (F9). */
+    @Test
+    void evaluate_reservationEntirelyOnIneligibleLots_isShortInFull_andCarriesTheBlocker() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10"), 1);
+        UUID lineId = workOrder.getComponentLines().get(0).getComponentLineId();
+        when(reservationRepository.sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(projection(lineId, "10")));
+        when(reservationRepository.sumIneligibleActiveRemainingByWorkOrderId(
+                eq(workOrder.getWorkOrderId()), any(java.time.Instant.class)))
+                .thenReturn(List.of(projection(lineId, "10")));
+
+        WorkOrderMaterialReadinessLineResponse line = gate.evaluate(workOrder).get(0);
+
+        assertThat(line.reservedQuantity()).isEqualByComparingTo("10");
+        assertThat(line.ineligibleReservedQuantity()).isEqualByComparingTo("10");
+        assertThat(line.eligibleReservedQuantity()).isEqualByComparingTo("0");
+        assertThat(line.shortageQuantity()).isEqualByComparingTo("10");
+        assertThat(line.blocker()).isEqualTo(WorkOrderMaterialReadinessLineResponse.BLOCKER_RESERVED_LOT_INELIGIBLE);
+        assertThat(line.blocker()).isEqualTo("RESERVED_LOT_INELIGIBLE");
+    }
+
+    @Test
+    void evaluate_partlyIneligible_onlyTheIneligiblePartIsShort() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10"), 1);
+        UUID lineId = workOrder.getComponentLines().get(0).getComponentLineId();
+        when(reservationRepository.sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(projection(lineId, "10")));
+        when(reservationRepository.sumIneligibleActiveRemainingByWorkOrderId(
+                eq(workOrder.getWorkOrderId()), any(java.time.Instant.class)))
+                .thenReturn(List.of(projection(lineId, "4")));
+
+        WorkOrderMaterialReadinessLineResponse line = gate.evaluate(workOrder).get(0);
+
+        assertThat(line.reservedQuantity()).isEqualByComparingTo("10");
+        assertThat(line.shortageQuantity()).isEqualByComparingTo("4");
+        assertThat(line.blocker()).isEqualTo("RESERVED_LOT_INELIGIBLE");
+    }
+
+    @Test
+    void evaluate_noIneligibleReservation_hasNoBlocker() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10"), 1);
+        UUID lineId = workOrder.getComponentLines().get(0).getComponentLineId();
+        when(reservationRepository.sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(projection(lineId, "10")));
+        when(reservationRepository.sumIneligibleActiveRemainingByWorkOrderId(
+                eq(workOrder.getWorkOrderId()), any(java.time.Instant.class)))
+                .thenReturn(List.of());
+
+        WorkOrderMaterialReadinessLineResponse line = gate.evaluate(workOrder).get(0);
+
+        assertThat(line.shortageQuantity()).isEqualByComparingTo("0");
+        assertThat(line.ineligibleReservedQuantity()).isEqualByComparingTo("0");
+        assertThat(line.blocker()).isNull();
+    }
+
+    /** Release with full but ineligible coverage goes down the existing gate path: BLOCKED is recorded, 409. */
+    @Test
+    void ensureMaterialReady_fullReservationOnAnExpiredLot_shouldBlockAndThrow() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10"), 1);
+        UUID lineId = workOrder.getComponentLines().get(0).getComponentLineId();
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(reservationRepository.sumActiveRemainingByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(List.of(projection(lineId, "10")));
+        when(reservationRepository.sumIneligibleActiveRemainingByWorkOrderId(
+                eq(workOrder.getWorkOrderId()), any(java.time.Instant.class)))
+                .thenReturn(List.of(projection(lineId, "10")));
+        UUID workOrderId = workOrder.getWorkOrderId();
+
+        assertThatThrownBy(() -> gate.ensureMaterialReady(workOrderId))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+
+        verify(blockRecorder).recordBlocked(workOrderId, "1/1 components short on reservation");
+    }
+
+    /** The ineligible query is asked at the current server instant, not some fixed or stale time. */
+    @Test
+    void evaluate_asksForIneligibleCoverageAtTheCurrentInstant() {
+        WorkOrder workOrder = workOrder(new BigDecimal("10"), 1);
+        java.time.Instant before = java.time.Instant.now();
+
+        gate.evaluate(workOrder);
+
+        java.time.Instant after = java.time.Instant.now();
+        org.mockito.ArgumentCaptor<java.time.Instant> now = org.mockito.ArgumentCaptor.forClass(java.time.Instant.class);
+        verify(reservationRepository).sumIneligibleActiveRemainingByWorkOrderId(eq(workOrder.getWorkOrderId()), now.capture());
+        assertThat(now.getValue()).isBetween(before, after);
     }
 
     private ComponentQuantityProjection projection(UUID componentLineId, String quantity) {

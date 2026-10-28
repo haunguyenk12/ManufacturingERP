@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,7 +48,7 @@ public class InventoryAvailabilityService {
             return Map.of();
         }
 
-        return stockBalanceRepository.aggregateAvailableQuantities(itemIds, warehouseIds, LotStatus.AVAILABLE).stream()
+        return stockBalanceRepository.aggregateAvailableQuantities(itemIds, warehouseIds, LotStatus.AVAILABLE, Instant.now()).stream()
                 .collect(Collectors.toMap(
                         StockAvailabilityProjection::getItemId,
                         StockAvailabilityProjection::getQuantity));
@@ -65,7 +66,8 @@ public class InventoryAvailabilityService {
             return Map.of();
         }
 
-        return stockBalanceRepository.aggregateStockQuantitiesByWarehouse(itemIds, warehouseIds, LotStatus.AVAILABLE)
+        return stockBalanceRepository.aggregateStockQuantitiesByWarehouse(
+                        itemIds, warehouseIds, LotStatus.AVAILABLE, Instant.now())
                 .stream()
                 .collect(Collectors.toMap(
                         projection -> new ItemWarehouseAvailabilityKey(projection.getItemId(), projection.getWarehouseId()),
@@ -83,8 +85,10 @@ public class InventoryAvailabilityService {
             return Map.of();
         }
 
+        // CF-2 (B264): one clock reading for both queries, so a lot cannot be "expired" in one and not the other.
+        Instant now = Instant.now();
         Map<UUID, PlanningInventoryQuantity> quantities = new HashMap<>();
-        stockBalanceRepository.aggregatePlanningQuantities(itemIds, warehouseIds, LotStatus.AVAILABLE)
+        stockBalanceRepository.aggregatePlanningQuantities(itemIds, warehouseIds, LotStatus.AVAILABLE, now)
                 .forEach(projection -> quantities.put(projection.getItemId(), new PlanningInventoryQuantity(
                         defaultZero(projection.getOnHandQuantity()),
                         defaultZero(projection.getReservedQuantity()),
@@ -95,7 +99,7 @@ public class InventoryAvailabilityService {
                         false,
                         0)));
 
-        stockBalanceRepository.aggregateExcludedLotCounts(itemIds, warehouseIds, LotStatus.AVAILABLE)
+        stockBalanceRepository.aggregateExcludedLotCounts(itemIds, warehouseIds, LotStatus.AVAILABLE, now)
                 .forEach(projection -> {
                     PlanningInventoryQuantity current = quantities.getOrDefault(
                             projection.getItemId(), PlanningInventoryQuantity.empty());
