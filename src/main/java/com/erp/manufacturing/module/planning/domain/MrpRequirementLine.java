@@ -115,4 +115,14 @@ public class MrpRequirementLine extends BaseEntity {
     @Column(name = "warehouse_resolution_source", nullable = false, length = 40)
     @Builder.Default
     private WarehouseResolutionSource warehouseResolutionSource = WarehouseResolutionSource.UNRESOLVED;
+
+    /**
+     * CF-4 (B267): purchase stock received for this item and warehouse(s) but still awaiting QC when the run ran. Shown,
+     * never netted. {@code null} = run before V93 (not captured), not zero.
+     */
+    @Column(name = "pending_qc_quantity", precision = 19, scale = 6)
+    private BigDecimal pendingQcQuantity;
+
+    @Column(name = "pending_qc_source_count")
+    private Integer pendingQcSourceCount;
 }

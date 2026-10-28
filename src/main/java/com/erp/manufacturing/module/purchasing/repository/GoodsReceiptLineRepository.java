@@ -116,4 +116,32 @@ public interface GoodsReceiptLineRepository extends JpaRepository<GoodsReceiptLi
             @Param("itemIds") java.util.Collection<UUID> itemIds,
             @Param("warehouseIds") java.util.Collection<UUID> warehouseIds,
             @Param("posted") GoodsReceiptStatus posted);
+
+    /**
+     * CF-4: every line of a POSTED, on-hold receipt that still has pending purchase-QC quantity (received − accepted −
+     * rejected), lot lines included — a pending lot is stock awaiting QC just like a pending bucket. Rejected quantity is
+     * never pending. Stable order: receipt number, then line id.
+     */
+    @Query("""
+            select gr.goodsReceiptId as goodsReceiptId,
+                   l.goodsReceiptLineId as goodsReceiptLineId,
+                   gr.receiptNo as receiptNo,
+                   gr.version as receiptVersion,
+                   l.item.itemId as itemId,
+                   gr.warehouse.warehouseId as warehouseId,
+                   l.item.unit as uomCode,
+                   l.receivedQuantity - l.acceptedQuantity - l.rejectedQuantity as pendingQuantity
+            from GoodsReceiptLine l
+            join l.goodsReceipt gr
+            where gr.status = :posted
+              and gr.qualityHeld = true
+              and l.receivedQuantity - l.acceptedQuantity - l.rejectedQuantity > 0
+              and gr.warehouse.warehouseId in :warehouseIds
+              and l.item.itemId in :itemIds
+            order by gr.receiptNo asc, l.goodsReceiptLineId asc
+            """)
+    java.util.List<PendingQcLineProjection> findPendingQualityLines(
+            @Param("itemIds") java.util.Collection<UUID> itemIds,
+            @Param("warehouseIds") java.util.Collection<UUID> warehouseIds,
+            @Param("posted") GoodsReceiptStatus posted);
 }

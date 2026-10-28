@@ -53,7 +53,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        assertThat(current.getVersion().getVersion()).isEqualTo("92");
+        // V93 (MRP pending purchase-QC snapshot) is CF-4.
+        assertThat(current.getVersion().getVersion()).isEqualTo("93");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -925,6 +926,125 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             assertThat(checks.get("chk_production_cost_adjustments_quantity")).contains("quantity = (0)");
             assertThat(checks.get("chk_production_cost_adjustments_kind"))
                     .contains("stock_value_delta = allocated_amount").contains("stock_value_delta = (0)");
+        }
+    }
+
+    /**
+     * CF-4 / {@code V93}: a requirement line of a run made before V93 keeps {@code NULL} pending-QC columns — "not
+     * captured", never backfilled to zero. The two columns are both NULL or both {@code >= 0}; a source row holds a
+     * strictly positive pending quantity and one row per (requirement line, receipt line).
+     */
+    @Test
+    void migrate_v93_pendingQcColumnsStayNullOnOldLines_checkPairsThem_sourceTableHasItsChecks() throws Exception {
+        String schema = "flyway_v93_pending_qc";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("92")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111119301";
+        String plant = "22222222-2222-4222-8222-222222229301";
+        String item = "55555555-5555-4555-8555-555555559301";
+        String run = "77777777-7777-4777-8777-777777779301";
+        String line = "88888888-8888-4888-8888-888888889301";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V93', 'V93')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'RM', 'RM', 'RAW_MATERIAL', 'KG')".formatted(item, company));
+            statement.execute(("insert into mrp_runs (mrp_run_id, code, company_id, plant_id, horizon_start_date,"
+                    + " horizon_end_date, status) values ('%s', 'RUN-V93', '%s', '%s', DATE '2026-10-01',"
+                    + " DATE '2026-10-31', 'COMPLETED')").formatted(run, company, plant));
+            statement.execute(("insert into mrp_requirement_lines (mrp_requirement_line_id, mrp_run_id, item_id,"
+                    + " requirement_level, gross_required_quantity, net_required_quantity, due_date, requirement_status)"
+                    + " values ('%s', '%s', '%s', 0, 40, 25, DATE '2026-10-20', 'SHORTAGE')").formatted(line, run, item));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            try (ResultSet rows = statement.executeQuery(
+                    "select pending_qc_quantity, pending_qc_source_count from mrp_requirement_lines")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getBigDecimal("pending_qc_quantity")).isNull();
+                assertThat(rows.getObject("pending_qc_source_count")).isNull();
+            }
+            assertThatThrownBy(() -> statement.execute(
+                    "update mrp_requirement_lines set pending_qc_quantity = -1, pending_qc_source_count = 1"))
+                    .hasMessageContaining("chk_mrp_req_pending_qc");
+            assertThatThrownBy(() -> statement.execute(
+                    "update mrp_requirement_lines set pending_qc_quantity = 1, pending_qc_source_count = -1"))
+                    .hasMessageContaining("chk_mrp_req_pending_qc");
+            statement.execute("update mrp_requirement_lines set pending_qc_quantity = 0, pending_qc_source_count = 0");
+            statement.execute("update mrp_requirement_lines set pending_qc_quantity = 25, pending_qc_source_count = 1");
+
+            java.util.Map<String, String> constraints = new java.util.HashMap<>();
+            try (ResultSet rows = statement.executeQuery(("""
+                    SELECT c.conname, pg_get_constraintdef(c.oid) AS definition FROM pg_constraint c
+                    JOIN pg_class t ON t.oid = c.conrelid
+                    WHERE t.relname = 'mrp_pending_qc_sources' AND c.connamespace = '%s'::regnamespace
+                    """).formatted(schema))) {
+                while (rows.next()) {
+                    constraints.put(rows.getString("conname"), rows.getString("definition"));
+                }
+            }
+            assertThat(constraints.get("chk_mrp_pending_qc_sources_quantity")).contains("pending_quantity > (0)");
+            assertThat(constraints.get("uk_mrp_pending_qc_sources_line_receipt_line"))
+                    .contains("UNIQUE (requirement_line_id, goods_receipt_line_id)");
+        }
+    }
+
+    /**
+     * CF-4 / {@code V93}: "both NULL or both {@code >= 0}" must reject a line with only one of the two pending-QC
+     * columns set — a quantity without its source count (or the reverse) is neither "not captured" nor a capture.
+     * SQL three-valued logic makes {@code 5 >= 0 AND NULL >= 0} NULL, and a CHECK lets NULL through, so the pairing has
+     * to be stated explicitly.
+     */
+    @Test
+    void migrate_v93_checkRejectsALineWithOnlyOneOfThePendingQcColumns() throws Exception {
+        migratePublicSchema();
+        String company = "11111111-1111-4111-8111-111111119311";
+        String plant = "22222222-2222-4222-8222-222222229311";
+        String item = "55555555-5555-4555-8555-555555559311";
+        String run = "77777777-7777-4777-8777-777777779311";
+        String line = "88888888-8888-4888-8888-888888889311";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V93B', 'V93B')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'RM', 'RM', 'RAW_MATERIAL', 'KG')".formatted(item, company));
+            statement.execute(("insert into mrp_runs (mrp_run_id, code, company_id, plant_id, horizon_start_date,"
+                    + " horizon_end_date, status) values ('%s', 'RUN-V93B', '%s', '%s', DATE '2026-10-01',"
+                    + " DATE '2026-10-31', 'COMPLETED')").formatted(run, company, plant));
+            statement.execute(("insert into mrp_requirement_lines (mrp_requirement_line_id, mrp_run_id, item_id,"
+                    + " requirement_level, gross_required_quantity, net_required_quantity, due_date, requirement_status)"
+                    + " values ('%s', '%s', '%s', 0, 40, 25, DATE '2026-10-20', 'SHORTAGE')").formatted(line, run, item));
+
+            String where = " where mrp_requirement_line_id = '" + line + "'";
+            assertThatThrownBy(() -> statement.execute(
+                    "update mrp_requirement_lines set pending_qc_quantity = 5, pending_qc_source_count = null" + where))
+                    .hasMessageContaining("chk_mrp_req_pending_qc");
+            assertThatThrownBy(() -> statement.execute(
+                    "update mrp_requirement_lines set pending_qc_quantity = null, pending_qc_source_count = 1" + where))
+                    .hasMessageContaining("chk_mrp_req_pending_qc");
         }
     }
 

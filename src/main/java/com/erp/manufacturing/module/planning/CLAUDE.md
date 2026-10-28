@@ -173,3 +173,15 @@ trả lại được gì vì đề xuất vẫn `CONVERTED`. `sumBySuggestionIds
 chỉ Postgres chứng minh được (`PlanningConversionRepositoryIT.ledgerSum_*`). `PurchaseOrderPlanningLinkService` là đường duy nhất purchasing
 chạm ledger (đọc nguồn + giải phóng), không `@PreAuthorize`, caller duy nhất `PurchaseOrderService`. Giải phóng tăng `conversionVersion` của
 từng lượt liên quan (khoá theo thứ tự id). Bất biến chính ở `module/purchasing/CLAUDE.md` B190.
+
+## CF-4 — Hàng mua chờ QC hiện cạnh nhu cầu MRP (2026-10-28)
+
+Migration `V93`. Endpoint mới `GET /v1/planning-runs/{runId}/pending-qc-supplies`. Không quyền mới, không mã lỗi mới. Netting **không đổi**.
+
+| # | Bất biến | Test bảo vệ |
+|---|---|---|
+| B267 | **Mỗi run chụp một lần** hàng mua đang chờ QC (phiếu nhận `POSTED` + `quality_held`, `received − accepted − rejected > 0`, **cả dòng lô lẫn không lô**) của vật tư của từng dòng nhu cầu, ở kho của dòng — dòng không có kho dùng các kho trong phạm vi run (cùng tập kho netting đã dùng). Lưu `pending_qc_quantity` + `pending_qc_source_count` trên dòng (**0 khi không có nguồn**; `NULL` chỉ ở run trước `V93`) và từng dòng phiếu ở `mrp_pending_qc_sources`. **Không** trừ vào `netRequiredQuantity`, **không** cộng vào khả dụng. QC quyết sau đó **không** sửa ảnh chụp. Một query cho cả run (`C14`) | `MrpRunServiceTest.run_pendingQc_isShownNextToAnUnchangedNet_andTheBuyProposalWarns`, `.run_lineWithoutWarehouseUsesTheScope_lineWithWarehouseOnlyItsOwn`, `.run_withoutPendingQc_recordsZeroNotNull_andAddsNoWarning`, `CommercialPlanningRunServiceTest.runCommercial_capturesPendingQcOnceWithThePlantScope_andWarnsTheBuyProposal`, `PurchaseQualityIT.findPendingQualityLines_*`, `.pendingQcSnapshot_keepsWhatTheRunCaptured_afterQcDecides_*`, `FlywayMigrationIT.migrate_v93_*` |
+| B268 | **Đề xuất MUA** của dòng có chờ QC > 0 mang thêm `PENDING_QC_SUPPLY` và `READY` → `WARNING`; đề xuất `MAKE` không bao giờ; `BLOCKED`/`WARNING` giữ nguyên. Danh sách nguồn chỉ đọc ảnh chụp của run (không gọi lại QC sống), `PERM_MRP_READ` trên run, run lạ ⇒ 404 trước khi đọc | `MrpRunServiceTest.run_pendingQcWarning_isForBuyOnly_andNeverDowngradesBlockedOrWarning`, `.listPendingQcSupplies_readsTheRunsSnapshotOnly_neverTheLiveQc`, `.listPendingQcSupplies_unknownRun_isNotFoundBeforeTheSnapshotIsRead`, `MrpPlanningMethodSecurityTest.listPendingQcSupplies_*`, `PlanningRunControllerTest.listPendingQcSupplies_*` |
+
+**Quyết định cần nhớ:** chờ QC sản xuất **không** vào ảnh chụp này (PO chốt — chỉ hàng mua). Ảnh chụp là bằng chứng "lúc chạy có bao nhiêu
+đang chờ", không phải số dư sống: muốn số hiện tại thì xem hàng đợi QC mua (`GET /v1/purchase-qc`).

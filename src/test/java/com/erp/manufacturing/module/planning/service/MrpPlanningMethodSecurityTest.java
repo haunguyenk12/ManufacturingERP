@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.planning.repository.SupplySuggestionConversionRepository;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,10 +47,13 @@ class MrpPlanningMethodSecurityTest {
     @Autowired PermissionGuard permissionGuard;
     @Autowired MrpRunRepository mrpRunRepository;
     @Autowired OrganizationLookupService organizationLookupService;
+    @Autowired MrpPlanningPermissionGuard mrpPlanningPermissionGuard;
+    @Autowired MrpPendingQcSourceRepository pendingQcSourceRepository;
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, mrpRunRepository, organizationLookupService);
+        reset(permissionGuard, mrpRunRepository, organizationLookupService, mrpPlanningPermissionGuard,
+                pendingQcSourceRepository);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, java.util.List.of()));
     }
@@ -106,6 +110,34 @@ class MrpPlanningMethodSecurityTest {
                 .doesNotThrowAnyException();
     }
 
+    /** CF-4: reading the pending-QC sources a run captured needs {@code PERM_MRP_READ} on that run. */
+    @Test
+    void listPendingQcSupplies_deniedWithoutMrpReadOnTheRun() {
+        UUID runId = UUID.randomUUID();
+        when(mrpPlanningPermissionGuard.hasRunAccess(any(), eq("PERM_MRP_READ"), eq(runId))).thenReturn(false);
+
+        assertThatThrownBy(() -> mrpRunService.listPendingQcSupplies(runId, null, null, PageRequest.of(0, 20)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(mrpPlanningPermissionGuard).hasRunAccess(any(), eq("PERM_MRP_READ"), eq(runId));
+        verifyNoInteractions(mrpRunRepository, pendingQcSourceRepository);
+    }
+
+    @Test
+    void listPendingQcSupplies_allowedWithMrpReadOnTheRun() {
+        UUID runId = UUID.randomUUID();
+        when(mrpPlanningPermissionGuard.hasRunAccess(any(), eq("PERM_MRP_READ"), eq(runId))).thenReturn(true);
+        when(mrpRunRepository.existsById(runId)).thenReturn(true);
+        when(pendingQcSourceRepository.search(eq(runId), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        assertThatCode(() -> mrpRunService.listPendingQcSupplies(runId, null, null, PageRequest.of(0, 20)))
+                .doesNotThrowAnyException();
+
+        verify(mrpPlanningPermissionGuard).hasRunAccess(any(), eq("PERM_MRP_READ"), eq(runId));
+        verify(pendingQcSourceRepository).search(eq(runId), isNull(), isNull(), any(Pageable.class));
+    }
+
     @Configuration
     @EnableMethodSecurity
     static class Config {
@@ -121,7 +153,8 @@ class MrpPlanningMethodSecurityTest {
                                     MrpPlanningMapper mapper,
                                     AuditLogService auditLogService,
                                     IdempotencySupport idempotency,
-                                    MrpRunStateRecorder runStateRecorder) {
+                                    MrpRunStateRecorder runStateRecorder,
+                                    MrpPendingQcSourceRepository pendingQcSourceRepository) {
             // G6b collaborators: only the commercial path and the requirement read touch them.
             return new MrpRunService(
                     mrpRunRepository,
@@ -138,7 +171,9 @@ class MrpPlanningMethodSecurityTest {
                     mock(SalesOrderPlanningSourceService.class),
                     mock(PlanningSourceVersionCalculator.class),
                     mock(SupplySuggestionConversionRepository.class),
-                    mock(ItemLookupService.class));
+                    mock(ItemLookupService.class),
+                    mock(PurchaseQcLookupService.class),
+                    pendingQcSourceRepository);
         }
 
         @Bean
@@ -199,6 +234,16 @@ class MrpPlanningMethodSecurityTest {
         @Bean
         MrpRunStateRecorder mrpRunStateRecorder() {
             return mock(MrpRunStateRecorder.class);
+        }
+
+        @Bean
+        MrpPendingQcSourceRepository mrpPendingQcSourceRepository() {
+            return mock(MrpPendingQcSourceRepository.class);
+        }
+
+        @Bean(name = "mrpPlanningPermissionGuard")
+        MrpPlanningPermissionGuard mrpPlanningPermissionGuard() {
+            return mock(MrpPlanningPermissionGuard.class);
         }
     }
 }

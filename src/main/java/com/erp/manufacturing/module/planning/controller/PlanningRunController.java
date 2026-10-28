@@ -147,6 +147,22 @@ public class PlanningRunController {
                 runId, PageableFactory.of(page, size, "createdAt", "asc"))));
     }
 
+    /**
+     * CF-4: goods receipt lines that held pending purchase-QC quantity when the run ran, as the run captured them.
+     * Stable order (receipt code, line id) — the query's own order is the contract, so no sort parameter.
+     */
+    @GetMapping("/v1/planning-runs/{runId}/pending-qc-supplies")
+    @Operation(summary = "List purchase supply awaiting QC captured by a planning run")
+    public ResponseEntity<ApiResponse<PageResult<PendingQcSupplyResponse>>> listPendingQcSupplies(
+            @PathVariable UUID runId,
+            @RequestParam(required = false) UUID requirementId,
+            @RequestParam(required = false) UUID warehouseId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(mrpRunService.listPendingQcSupplies(
+                runId, requirementId, warehouseId, PageableFactory.unsorted(page, size))));
+    }
+
     @GetMapping("/v1/planning-runs/{runId}/suggestions")
     @Operation(summary = "List planning run supply suggestions")
     public ResponseEntity<ApiResponse<PageResult<SupplySuggestionResponse>>> listSuggestions(

@@ -12,6 +12,7 @@ import com.erp.manufacturing.config.RateLimitProperties;
 import com.erp.manufacturing.module.planning.dto.MrpRequirementLineResponse;
 import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
+import com.erp.manufacturing.module.planning.dto.PendingQcSupplyResponse;
 import com.erp.manufacturing.module.planning.dto.SupplySuggestionResponse;
 import com.erp.manufacturing.module.planning.service.MrpRunService;
 import com.erp.manufacturing.module.planning.service.PlanningConversionService;
@@ -34,6 +35,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -352,6 +354,106 @@ class PlanningRunControllerTest {
         mockMvc.perform(get("/v1/planning-runs/{runId}/requirements/{lineId}", RUN_ID, lineId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    // ── CF-4: pending purchase QC captured by a run ─────────────────────
+
+    @Test
+    @DisplayName("pending-qc-supplies: page envelope, filters forwarded, default page 0 / size 20 unsorted")
+    void listPendingQcSupplies_returnsThePageAndForwardsTheFilters() throws Exception {
+        UUID requirementId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID receiptId = UUID.randomUUID();
+        PendingQcSupplyResponse row = new PendingQcSupplyResponse(UUID.randomUUID(), requirementId, receiptId,
+                UUID.randomUUID(), "GR-000025", 3L, UUID.randomUUID(), warehouseId, "EA", new BigDecimal("25.000000"));
+        when(mrpRunService.listPendingQcSupplies(eq(RUN_ID), eq(requirementId), eq(warehouseId), any()))
+                .thenReturn(new PageResult<>(List.of(row), 0, 20, 1, 1, true, true));
+
+        mockMvc.perform(get("/v1/planning-runs/{runId}/pending-qc-supplies", RUN_ID)
+                        .param("requirementId", requirementId.toString())
+                        .param("warehouseId", warehouseId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.content[0].goodsReceiptId").value(receiptId.toString()))
+                .andExpect(jsonPath("$.result.content[0].receiptCode").value("GR-000025"))
+                .andExpect(jsonPath("$.result.content[0].receiptVersion").value(3))
+                .andExpect(jsonPath("$.result.content[0].pendingQuantity").value(25.0))
+                .andExpect(jsonPath("$.result.content[0].uomCode").value("EA"))
+                // FE Q2: PERM_MRP_READ is enough because no price travels on this row.
+                .andExpect(jsonPath("$.result.content[0].unitPrice").doesNotExist())
+                .andExpect(jsonPath("$.result.page").value(0))
+                .andExpect(jsonPath("$.result.size").value(20))
+                .andExpect(jsonPath("$.result.totalElements").value(1))
+                .andExpect(jsonPath("$.result.totalPages").value(1))
+                .andExpect(jsonPath("$.result.first").value(true))
+                .andExpect(jsonPath("$.result.last").value(true));
+
+        org.mockito.ArgumentCaptor<org.springframework.data.domain.Pageable> pageable =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        verify(mrpRunService).listPendingQcSupplies(eq(RUN_ID), eq(requirementId), eq(warehouseId), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(0);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(20);
+        // The query's own ORDER BY (receipt code, line id) is the contract — no client sort reaches it.
+        assertThat(pageable.getValue().getSort().isUnsorted()).isTrue();
+    }
+
+    @Test
+    @DisplayName("pending-qc-supplies: filters are optional and size above 100 is clamped to 100")
+    void listPendingQcSupplies_sizeAboveMax_isClampedToHundred() throws Exception {
+        when(mrpRunService.listPendingQcSupplies(eq(RUN_ID), isNull(), isNull(), any()))
+                .thenReturn(new PageResult<>(List.of(), 2, 100, 0, 0, false, true));
+
+        mockMvc.perform(get("/v1/planning-runs/{runId}/pending-qc-supplies", RUN_ID)
+                        .param("page", "2")
+                        .param("size", "500"))
+                .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<org.springframework.data.domain.Pageable> pageable =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        verify(mrpRunService).listPendingQcSupplies(eq(RUN_ID), isNull(), isNull(), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("pending-qc-supplies: a malformed requirementId is 400 VALIDATION_ERROR before the service")
+    void listPendingQcSupplies_malformedRequirementId_returns400() throws Exception {
+        mockMvc.perform(get("/v1/planning-runs/{runId}/pending-qc-supplies", RUN_ID)
+                        .param("requirementId", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors[0].field").value("requirementId"));
+
+        verifyNoInteractions(mrpRunService);
+    }
+
+    @Test
+    @DisplayName("requirements: carry pendingQcQuantity + pendingQcSourceCount next to an unchanged net")
+    void listRequirements_exposesThePendingQcCapturedByTheRun() throws Exception {
+        when(mrpRunService.listRequirements(eq(RUN_ID), any()))
+                .thenReturn(new PageResult<>(List.of(requirementLineWithPendingQc()), 0, 20, 1, 1, true, true));
+
+        mockMvc.perform(get("/v1/planning-runs/" + RUN_ID + "/requirements"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.content[0].pendingQcQuantity").value(25.0))
+                .andExpect(jsonPath("$.result.content[0].pendingQcSourceCount").value(1))
+                .andExpect(jsonPath("$.result.content[0].netRequiredQuantity").value(25.0))
+                .andExpect(jsonPath("$.result.content[0].messages[0]").value("PENDING_QC_SUPPLY"));
+    }
+
+    /** FE fixture: demand 40, open PO 15, available 0, pending QC 25 — the net shortage stays 25. */
+    private MrpRequirementLineResponse requirementLineWithPendingQc() {
+        return new MrpRequirementLineResponse(
+                UUID.randomUUID(), RUN_ID, null, null,
+                UUID.randomUUID(), "RM-100", "Bolt", "EA",
+                UUID.randomUUID(), "WH-RM", 0,
+                new BigDecimal("40.000000"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new BigDecimal("15.000000"), BigDecimal.ZERO,
+                new BigDecimal("15.000000"), new BigDecimal("25.000000"),
+                LocalDate.of(2026, 8, 1), "SHORTAGE", "ITEM_WAREHOUSE", "ITEM_DEFAULT", 0, null, Instant.now(),
+                null, List.of(), List.of(), "CALCULATED", UUID.randomUUID(), "BUY", "WARNING",
+                List.of("PENDING_QC_SUPPLY"), null, null, null,
+                new BigDecimal("25.000000"), 1);
     }
 
     private MrpRequirementLineResponse sampleRequirementLine() {

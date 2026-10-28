@@ -20,11 +20,20 @@ import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.repository.PlantRepository;
 import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.planning.domain.MrpPendingQcSource;
+import com.erp.manufacturing.module.planning.domain.MrpRequirementLine;
+import com.erp.manufacturing.module.planning.domain.MrpRequirementStatus;
+import com.erp.manufacturing.module.planning.domain.MrpRun;
+import com.erp.manufacturing.module.planning.domain.MrpRunStatus;
+import com.erp.manufacturing.module.planning.repository.MrpPendingQcSourceRepository;
+import com.erp.manufacturing.module.planning.repository.MrpRequirementLineRepository;
+import com.erp.manufacturing.module.planning.repository.MrpRunRepository;
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptLineRepository;
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
+import com.erp.manufacturing.module.purchasing.repository.PendingQcLineProjection;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseQcHoldProjection;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.SupplierRepository;
@@ -107,6 +116,9 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
     @Autowired LotQcOwnershipGuard lotQcOwnershipGuard;
     @Autowired PurchaseQcLookupService purchaseQcLookupService;
     @Autowired InventoryService inventoryService;
+    @Autowired MrpRunRepository mrpRunRepository;
+    @Autowired MrpRequirementLineRepository requirementLineRepository;
+    @Autowired MrpPendingQcSourceRepository pendingQcSourceRepository;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactions;
 
@@ -467,6 +479,156 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
         assertThat(afterSecond.rejectedPurchaseQcQuantity()).isEqualByComparingTo("5");
         assertThat(afterSecond.unclassifiedQualityHoldQuantity()).isEqualByComparingTo("0");
         assertThat(afterSecond.qualityBreakdownKnown()).isTrue();
+    }
+
+    /**
+     * CF-4: the lines MRP shows as purchase supply awaiting QC — lot and non-lot lines of POSTED, on-hold receipts that
+     * still have pending (received - accepted - rejected) quantity, in receipt-number order. Fully decided, DRAFT,
+     * CANCELLED and pre-G7b receipts, another warehouse and an item not asked for are left out.
+     */
+    @Test
+    void findPendingQualityLines_returnsPendingLotAndNonLotLines_ofOnHoldPostedReceipts_inReceiptOrder() {
+        Fixture f = fixture();
+        Plant plantB = plantRepository.save(Plant.builder().company(f.company()).code("PB_" + f.suffix()).name("Plant B")
+                .timezone(ZONE).status(OrganizationStatus.ACTIVE).build());
+        Warehouse warehouseB = warehouseRepository.save(Warehouse.builder().plant(plantB).code("WB_" + f.suffix())
+                .name("Wh B").type(WarehouseType.GENERAL).status(OrganizationStatus.ACTIVE).build());
+        Item itemX = item(f, false);
+        Item itemY = item(f, false);
+        Item lotItem = item(f, true);
+        UUID whA = f.warehouse().getWarehouseId();
+        UUID whB = warehouseB.getWarehouseId();
+
+        // r1: X @ A, 25 received, QC 10/5 => pending 10 (partial).
+        GoodsReceiptResponse r1 = posted(order(f, itemX, "40"), "25", null);
+        PurchaseQcDecisionResult d1 = qualityService.decide(r1.goodsReceiptId(), r1.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(r1.version(), new BigDecimal("10"), new BigDecimal("5"), "5 failed"), null);
+        // r2: a lot line @ A, 2 received, QC 0.5/0.5 => pending 1 stays on the parent lot.
+        GoodsReceiptResponse r2 = posted(order(f, lotItem, "40"), "2", "LOT-" + f.suffix());
+        PurchaseQcDecisionResult d2 = qualityService.decide(r2.goodsReceiptId(), r2.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(r2.version(), new BigDecimal("0.5"), new BigDecimal("0.5"), "0.5 failed"), null);
+        // r3: X @ A, untouched => pending 0.5.
+        GoodsReceiptResponse r3 = posted(order(f, itemX, "40"), "0.5", null);
+
+        // Excluded: fully decided, DRAFT, CANCELLED, pre-G7b (not on hold), another warehouse, an item not asked for.
+        GoodsReceiptResponse decided = posted(order(f, itemX, "40"), "4", null);
+        qualityService.decide(decided.goodsReceiptId(), decided.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(decided.version(), new BigDecimal("3"), new BigDecimal("1"), "1 failed"), null);
+        PurchaseOrder draftOrder = order(f, itemX, "40");
+        receiptService.createDraft(new GoodsReceiptDraftCreateRequest(draftOrder.getPurchaseOrderId(),
+                LocalDate.now(ZoneId.of(ZONE)), null, null, List.of(new GoodsReceiptDraftLineRequest(null,
+                orderLineId(draftOrder), new BigDecimal("4"), null, null))), null);
+        GoodsReceiptResponse cancelled = posted(order(f, itemX, "40"), "6", null);
+        jdbc.update("update goods_receipts set status = 'CANCELLED', cancelled_at = now() where goods_receipt_id = ?",
+                cancelled.goodsReceiptId());
+        GoodsReceiptResponse legacy = posted(order(f, itemX, "40"), "9", null);
+        jdbc.update("update goods_receipts set quality_held = false where goods_receipt_id = ?", legacy.goodsReceiptId());
+        GoodsReceiptResponse otherWarehouse = posted(order(f, plantB, warehouseB, itemX, "40"), "11", null);
+        GoodsReceiptResponse otherItem = posted(order(f, itemY, "40"), "3", null);
+
+        List<PendingQcLineProjection> rows = receiptLineRepository.findPendingQualityLines(
+                List.of(itemX.getItemId(), lotItem.getItemId()), List.of(whA), GoodsReceiptStatus.POSTED);
+
+        assertThat(rows).extracting(PendingQcLineProjection::getGoodsReceiptLineId).containsExactly(
+                r1.lines().get(0).goodsReceiptLineId(), r2.lines().get(0).goodsReceiptLineId(),
+                r3.lines().get(0).goodsReceiptLineId());
+        assertThat(rows).extracting(PendingQcLineProjection::getReceiptNo)
+                .containsExactly(r1.receiptNo(), r2.receiptNo(), r3.receiptNo());
+        assertThat(rows.get(0).getPendingQuantity()).isEqualByComparingTo("10");
+        assertThat(rows.get(1).getPendingQuantity()).isEqualByComparingTo("1");
+        assertThat(rows.get(2).getPendingQuantity()).isEqualByComparingTo("0.5");
+        assertThat(rows.get(0).getGoodsReceiptId()).isEqualTo(r1.goodsReceiptId());
+        // The version the receipt has now — a decision moved it.
+        assertThat(rows.get(0).getReceiptVersion()).isEqualTo(d1.receiptVersion());
+        assertThat(rows.get(1).getReceiptVersion()).isEqualTo(d2.receiptVersion());
+        assertThat(rows.get(0).getItemId()).isEqualTo(itemX.getItemId());
+        assertThat(rows.get(1).getItemId()).isEqualTo(lotItem.getItemId());
+        assertThat(rows).extracting(PendingQcLineProjection::getWarehouseId).containsOnly(whA);
+        assertThat(rows).extracting(PendingQcLineProjection::getUomCode).containsOnly("KG");
+
+        // Both warehouses and item Y asked for: the other-warehouse and other-item receipts appear, the excluded do not.
+        List<PurchaseQcLookupService.PendingQcLine> wide = purchaseQcLookupService.pendingQualityLines(
+                List.of(itemX.getItemId(), itemY.getItemId(), lotItem.getItemId()), List.of(whA, whB));
+        assertThat(wide).extracting(PurchaseQcLookupService.PendingQcLine::goodsReceiptId).containsExactly(
+                r1.goodsReceiptId(), r2.goodsReceiptId(), r3.goodsReceiptId(),
+                otherWarehouse.goodsReceiptId(), otherItem.goodsReceiptId());
+        assertThat(wide.get(3).warehouseId()).isEqualTo(whB);
+        assertThat(wide.get(3).pendingQuantity()).isEqualByComparingTo("11");
+        assertThat(wide.get(4).receiptCode()).isEqualTo(otherItem.receiptNo());
+        // Nothing asked for, nothing read.
+        assertThat(purchaseQcLookupService.pendingQualityLines(List.of(), List.of(whA))).isEmpty();
+        assertThat(purchaseQcLookupService.pendingQualityLines(List.of(itemX.getItemId()), List.of())).isEmpty();
+    }
+
+    /**
+     * CF-4 FE flow: a run captures 25 pending; QC 20/5 afterwards does not rewrite what that run shows (a snapshot
+     * table, read by run / requirement line / warehouse with every filter optional), while a capture made now — what a
+     * new run would store — sees 0.
+     */
+    @Test
+    void pendingQcSnapshot_keepsWhatTheRunCaptured_afterQcDecides_andSearchFiltersAreOptional() {
+        Fixture f = fixture();
+        Warehouse warehouse2 = warehouseRepository.save(Warehouse.builder().plant(f.plant()).code("W2_" + f.suffix())
+                .name("Wh 2").type(WarehouseType.GENERAL).status(OrganizationStatus.ACTIVE).build());
+        Item item = item(f, false);
+        UUID whA = f.warehouse().getWarehouseId();
+        UUID wh2 = warehouse2.getWarehouseId();
+        GoodsReceiptResponse r1 = posted(order(f, item, "40"), "25", null);
+        GoodsReceiptResponse r2 = posted(order(f, f.plant(), warehouse2, item, "40"), "7", null);
+
+        MrpRun run = mrpRunRepository.saveAndFlush(MrpRun.builder().company(f.company()).plant(f.plant())
+                .horizonStartDate(LocalDate.now()).horizonEndDate(LocalDate.now().plusDays(30))
+                .status(MrpRunStatus.COMPLETED).build());
+        MrpRequirementLine lineA = requirementLineRepository.saveAndFlush(requirementLine(run, item, f.warehouse()));
+        MrpRequirementLine line2 = requirementLineRepository.saveAndFlush(requirementLine(run, item, warehouse2));
+
+        List<PurchaseQcLookupService.PendingQcLine> captured =
+                purchaseQcLookupService.pendingQualityLines(List.of(item.getItemId()), List.of(whA, wh2));
+        assertThat(captured).hasSize(2);
+        for (PurchaseQcLookupService.PendingQcLine source : captured) {
+            MrpRequirementLine owner = source.warehouseId().equals(whA) ? lineA : line2;
+            pendingQcSourceRepository.saveAndFlush(MrpPendingQcSource.builder()
+                    .mrpRunId(run.getMrpRunId()).requirementLineId(owner.getMrpRequirementLineId())
+                    .goodsReceiptId(source.goodsReceiptId()).goodsReceiptLineId(source.goodsReceiptLineId())
+                    .receiptCode(source.receiptCode()).receiptVersion(source.receiptVersion())
+                    .itemId(source.itemId()).warehouseId(source.warehouseId()).uomCode(source.uomCode())
+                    .pendingQuantity(source.pendingQuantity()).build());
+        }
+
+        qualityService.decide(r1.goodsReceiptId(), r1.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(r1.version(), new BigDecimal("20"), new BigDecimal("5"), "5 kg failed"), null);
+
+        List<MrpPendingQcSource> all = pendingQcSourceRepository.search(run.getMrpRunId(), null, null,
+                PageRequest.of(0, 20)).getContent();
+        assertThat(all).extracting(MrpPendingQcSource::getGoodsReceiptId)
+                .containsExactly(r1.goodsReceiptId(), r2.goodsReceiptId());
+        assertThat(all.get(0).getPendingQuantity()).isEqualByComparingTo("25");
+        assertThat(all.get(0).getReceiptVersion()).isEqualTo(r1.version());
+        assertThat(all.get(0).getReceiptCode()).isEqualTo(r1.receiptNo());
+        assertThat(all.get(1).getPendingQuantity()).isEqualByComparingTo("7");
+
+        assertThat(pendingQcSourceRepository.search(run.getMrpRunId(), lineA.getMrpRequirementLineId(), null,
+                PageRequest.of(0, 20)).getContent()).extracting(MrpPendingQcSource::getGoodsReceiptId)
+                .containsExactly(r1.goodsReceiptId());
+        assertThat(pendingQcSourceRepository.search(run.getMrpRunId(), null, wh2, PageRequest.of(0, 20)).getContent())
+                .extracting(MrpPendingQcSource::getGoodsReceiptId).containsExactly(r2.goodsReceiptId());
+        assertThat(pendingQcSourceRepository.search(run.getMrpRunId(), lineA.getMrpRequirementLineId(), wh2,
+                PageRequest.of(0, 20)).getContent()).isEmpty();
+        assertThat(pendingQcSourceRepository.search(UUID.randomUUID(), null, null, PageRequest.of(0, 20)).getContent())
+                .isEmpty();
+        // Paging keeps the order: the second page of size 1 is r2.
+        assertThat(pendingQcSourceRepository.search(run.getMrpRunId(), null, null, PageRequest.of(1, 1)).getContent())
+                .extracting(MrpPendingQcSource::getGoodsReceiptId).containsExactly(r2.goodsReceiptId());
+
+        // A run made now would capture nothing pending in warehouse A.
+        assertThat(purchaseQcLookupService.pendingQualityLines(List.of(item.getItemId()), List.of(whA))).isEmpty();
+    }
+
+    private static MrpRequirementLine requirementLine(MrpRun run, Item item, Warehouse warehouse) {
+        return MrpRequirementLine.builder().mrpRun(run).item(item).warehouse(warehouse).requirementLevel(0)
+                .grossRequiredQuantity(new BigDecimal("40")).netRequiredQuantity(new BigDecimal("25"))
+                .dueDate(LocalDate.now().plusDays(10)).requirementStatus(MrpRequirementStatus.SHORTAGE)
+                .pendingQcQuantity(new BigDecimal("25")).pendingQcSourceCount(1).build();
     }
 
     private StockBalanceAggregateResponse aggregateRow(Fixture f, Item item) {

@@ -136,7 +136,23 @@ public class MrpPlanningMapper {
                 suggestion == null ? List.of() : suggestion.messages(),
                 converted,
                 converted == null ? null : remaining(suggestion.getSuggestedQuantity(), converted),
-                conversions);
+                conversions,
+                line.getPendingQcQuantity(),
+                line.getPendingQcSourceCount());
+    }
+
+    public PendingQcSupplyResponse toResponse(MrpPendingQcSource source) {
+        return new PendingQcSupplyResponse(
+                source.getSourceId(),
+                source.getRequirementLineId(),
+                source.getGoodsReceiptId(),
+                source.getGoodsReceiptLineId(),
+                source.getReceiptCode(),
+                source.getReceiptVersion(),
+                source.getItemId(),
+                source.getWarehouseId(),
+                source.getUomCode(),
+                source.getPendingQuantity());
     }
 
     public PlanningConversionResponse toResponse(SupplySuggestionConversion conversion) {

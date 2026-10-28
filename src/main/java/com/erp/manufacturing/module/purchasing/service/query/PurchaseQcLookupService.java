@@ -50,4 +50,23 @@ public class PurchaseQcLookupService {
                         new QualityHold(row.getPendingQuantity(), row.getRejectedQuantity())));
         return holds;
     }
+
+    /** CF-4: one goods receipt line holding pending purchase-QC quantity, as MRP shows it (no price, no supplier contact). */
+    public record PendingQcLine(UUID goodsReceiptId, UUID goodsReceiptLineId, String receiptCode, Long receiptVersion,
+                                UUID itemId, UUID warehouseId, String uomCode, BigDecimal pendingQuantity) {
+    }
+
+    /** One query for a whole run (C14): every pending line of the given items in the given warehouses. */
+    @Transactional(readOnly = true)
+    public List<PendingQcLine> pendingQualityLines(Collection<UUID> itemIds, Collection<UUID> warehouseIds) {
+        if (itemIds.isEmpty() || warehouseIds.isEmpty()) {
+            return List.of();
+        }
+        return goodsReceiptLineRepository.findPendingQualityLines(itemIds, warehouseIds, GoodsReceiptStatus.POSTED)
+                .stream()
+                .map(row -> new PendingQcLine(row.getGoodsReceiptId(), row.getGoodsReceiptLineId(), row.getReceiptNo(),
+                        row.getReceiptVersion(), row.getItemId(), row.getWarehouseId(), row.getUomCode(),
+                        row.getPendingQuantity()))
+                .toList();
+    }
 }

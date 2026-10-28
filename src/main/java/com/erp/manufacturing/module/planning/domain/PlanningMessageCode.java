@@ -18,5 +18,7 @@ public enum PlanningMessageCode {
     MISSING_WAREHOUSE_POLICY,
     AMBIGUOUS_WAREHOUSE_POLICY,
     SYSTEM_FALLBACK_USED,
-    PURCHASING_DEFERRED
+    PURCHASING_DEFERRED,
+    /** CF-4: purchase stock of the item is received but still awaiting QC; a warning, never a block. */
+    PENDING_QC_SUPPLY
 }

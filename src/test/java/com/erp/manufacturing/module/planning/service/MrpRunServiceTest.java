@@ -18,7 +18,12 @@ import com.erp.manufacturing.module.planning.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.planning.repository.SupplySuggestionConversionRepository;
+import com.erp.manufacturing.module.planning.dto.PendingQcSupplyResponse;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
+import com.erp.manufacturing.common.response.PageResult;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +63,8 @@ class MrpRunServiceTest {
     @Mock PlanningSourceVersionCalculator sourceVersionCalculator;
     @Mock SupplySuggestionConversionRepository conversionRepository;
     @Mock ItemLookupService itemLookupService;
+    @Mock PurchaseQcLookupService purchaseQcLookupService;
+    @Mock MrpPendingQcSourceRepository pendingQcSourceRepository;
 
     MrpRunService service;
 
@@ -78,7 +85,9 @@ class MrpRunServiceTest {
                 salesOrderPlanningSourceService,
                 sourceVersionCalculator,
                 conversionRepository,
-                itemLookupService);
+                itemLookupService,
+                purchaseQcLookupService,
+                pendingQcSourceRepository);
     }
 
     @Test
@@ -324,6 +333,299 @@ class MrpRunServiceTest {
                         .isEqualTo(BusinessErrorCode.STATE_CONFLICT));
 
         verifyNoInteractions(mrpRunRepository, mrpRunDemandRepository, calculationService);
+    }
+
+    // ── CF-4: purchase stock awaiting QC is shown next to a requirement, never netted ─────────────
+
+    /**
+     * FE fixture: demand 40, open PO 15, available 0, 25 received but awaiting QC. The calculation (mocked, so
+     * unchanged) says net 25 — and the persisted line still says 25: the pending 25 sits next to it, it does not cover
+     * it. One source row carries every field of the receipt line it came from; the BUY proposal warns, READY ⇒ WARNING.
+     */
+    @Test
+    void run_pendingQc_isShownNextToAnUnchangedNet_andTheBuyProposalWarns() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item item = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        MrpCalculationService.RequirementDraft draft = draft(item, warehouse, "40", "0", "15", "15", "25");
+        PurchaseQcLookupService.PendingQcLine pending = pendingLine(item, warehouse.getWarehouseId(), "25");
+        when(purchaseQcLookupService.pendingQualityLines(anyCollection(), anyCollection())).thenReturn(List.of(pending));
+
+        UUID runId = runWith(company, plant, warehouse, null, new MrpCalculationService.MrpCalculationResult(
+                List.of(draft), List.of(suggestion(draft, SupplySuggestionType.PURCHASE_REQUISITION,
+                        SupplySuggestionExceptionState.READY))));
+
+        MrpRequirementLine line = singleSavedLine();
+        // Netting untouched: every quantity is the draft's own.
+        assertThat(line.getGrossRequiredQuantity()).isEqualByComparingTo("40");
+        assertThat(line.getAvailableQuantity()).isEqualByComparingTo("0");
+        assertThat(line.getOpenSupplyQuantity()).isEqualByComparingTo("15");
+        assertThat(line.getProjectedAvailableQuantity()).isEqualByComparingTo("15");
+        assertThat(line.getNetRequiredQuantity()).isEqualByComparingTo("25");
+        assertThat(line.getPendingQcQuantity()).isEqualByComparingTo("25");
+        assertThat(line.getPendingQcSourceCount()).isEqualTo(1);
+
+        List<MrpPendingQcSource> sources = savedSources();
+        assertThat(sources).singleElement().satisfies(source -> {
+            assertThat(source.getMrpRunId()).isEqualTo(runId);
+            assertThat(source.getRequirementLineId()).isEqualTo(line.getMrpRequirementLineId());
+            assertThat(source.getGoodsReceiptId()).isEqualTo(pending.goodsReceiptId());
+            assertThat(source.getGoodsReceiptLineId()).isEqualTo(pending.goodsReceiptLineId());
+            assertThat(source.getReceiptCode()).isEqualTo("GR-000025");
+            assertThat(source.getReceiptVersion()).isEqualTo(3L);
+            assertThat(source.getItemId()).isEqualTo(item.getItemId());
+            assertThat(source.getWarehouseId()).isEqualTo(warehouse.getWarehouseId());
+            assertThat(source.getUomCode()).isEqualTo("KG");
+            assertThat(source.getPendingQuantity()).isEqualByComparingTo("25");
+        });
+
+        SupplySuggestion proposal = singleSavedSuggestion();
+        assertThat(proposal.getExceptionState()).isEqualTo(SupplySuggestionExceptionState.WARNING);
+        assertThat(proposal.messages()).containsExactly("MATERIAL_SHORTAGE", "PENDING_QC_SUPPLY");
+        assertThat(proposal.getSuggestedQuantity()).isEqualByComparingTo("25");
+
+        // One lookup for the whole run (C14), for the run's items and warehouses.
+        verify(purchaseQcLookupService, times(1)).pendingQualityLines(any(), any());
+        verify(purchaseQcLookupService).pendingQualityLines(
+                eq(java.util.Set.of(item.getItemId())), eq(java.util.Set.of(warehouse.getWarehouseId())));
+    }
+
+    /** The warning is for BUY only, and it never downgrades: BLOCKED stays BLOCKED, WARNING stays WARNING. */
+    @Test
+    void run_pendingQcWarning_isForBuyOnly_andNeverDowngradesBlockedOrWarning() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item make = item(UUID.randomUUID(), company, ItemType.FINISHED_GOOD);
+        Item blockedBuy = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        Item warningBuy = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        MrpCalculationService.RequirementDraft makeDraft = draft(make, warehouse, "10", "0", "0", "0", "10");
+        MrpCalculationService.RequirementDraft blockedDraft = draft(blockedBuy, warehouse, "10", "0", "0", "0", "10");
+        MrpCalculationService.RequirementDraft warningDraft = draft(warningBuy, warehouse, "10", "0", "0", "0", "10");
+        UUID wh = warehouse.getWarehouseId();
+        when(purchaseQcLookupService.pendingQualityLines(anyCollection(), anyCollection())).thenReturn(List.of(
+                pendingLine(make, wh, "4"), pendingLine(blockedBuy, wh, "5"), pendingLine(warningBuy, wh, "6")));
+
+        runWith(company, plant, warehouse, null, new MrpCalculationService.MrpCalculationResult(
+                List.of(makeDraft, blockedDraft, warningDraft),
+                List.of(suggestion(makeDraft, SupplySuggestionType.WORK_ORDER, SupplySuggestionExceptionState.READY),
+                        suggestion(blockedDraft, SupplySuggestionType.PURCHASE_REQUISITION,
+                                SupplySuggestionExceptionState.BLOCKED),
+                        suggestion(warningDraft, SupplySuggestionType.PURCHASE_REQUISITION,
+                                SupplySuggestionExceptionState.WARNING))));
+
+        Map<UUID, SupplySuggestion> byItem = new HashMap<>();
+        savedSuggestions().forEach(s -> byItem.put(s.getItem().getItemId(), s));
+        // MAKE: the pending stock is still captured on its line, but its proposal is untouched.
+        assertThat(byItem.get(make.getItemId()).getExceptionState()).isEqualTo(SupplySuggestionExceptionState.READY);
+        assertThat(byItem.get(make.getItemId()).messages()).containsExactly("MATERIAL_SHORTAGE");
+        assertThat(byItem.get(blockedBuy.getItemId()).getExceptionState())
+                .isEqualTo(SupplySuggestionExceptionState.BLOCKED);
+        assertThat(byItem.get(blockedBuy.getItemId()).messages()).contains("PENDING_QC_SUPPLY");
+        assertThat(byItem.get(warningBuy.getItemId()).getExceptionState())
+                .isEqualTo(SupplySuggestionExceptionState.WARNING);
+        assertThat(byItem.get(warningBuy.getItemId()).messages())
+                .containsExactly("MATERIAL_SHORTAGE", "PENDING_QC_SUPPLY");
+        assertThat(savedLines()).extracting(MrpRequirementLine::getPendingQcQuantity)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("4"), new BigDecimal("5"), new BigDecimal("6"));
+    }
+
+    /**
+     * A line without a warehouse is matched against the run's scope warehouses (the set its netting used); a line with
+     * a warehouse only against its own. Receipt lines outside both, or of another item, are left out.
+     */
+    @Test
+    void run_lineWithoutWarehouseUsesTheScope_lineWithWarehouseOnlyItsOwn() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse w1 = warehouse(UUID.randomUUID(), plant);
+        UUID w2 = UUID.randomUUID();
+        UUID w3 = UUID.randomUUID();
+        Item noWarehouseItem = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        Item warehouseItem = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        MrpCalculationService.RequirementDraft noWarehouse = draft(noWarehouseItem, null, "30", "0", "0", "0", "30");
+        MrpCalculationService.RequirementDraft withWarehouse = draft(warehouseItem, w1, "20", "0", "0", "0", "20");
+        when(purchaseQcLookupService.pendingQualityLines(anyCollection(), anyCollection())).thenReturn(List.of(
+                pendingLine(noWarehouseItem, w1.getWarehouseId(), "10"),
+                pendingLine(noWarehouseItem, w2, "5"),
+                pendingLine(noWarehouseItem, w3, "7"),          // outside the scope
+                pendingLine(warehouseItem, w1.getWarehouseId(), "4"),
+                pendingLine(warehouseItem, w2, "6")));           // in scope, but not the line's warehouse
+
+        runWith(company, plant, null, List.of(w1.getWarehouseId(), w2), new MrpCalculationService.MrpCalculationResult(
+                List.of(noWarehouse, withWarehouse), List.of()));
+
+        List<MrpRequirementLine> lines = savedLines();
+        assertThat(lines.get(0).getPendingQcQuantity()).isEqualByComparingTo("15");
+        assertThat(lines.get(0).getPendingQcSourceCount()).isEqualTo(2);
+        assertThat(lines.get(1).getPendingQcQuantity()).isEqualByComparingTo("4");
+        assertThat(lines.get(1).getPendingQcSourceCount()).isEqualTo(1);
+        assertThat(savedSources()).extracting(MrpPendingQcSource::getWarehouseId)
+                .containsExactly(w1.getWarehouseId(), w2, w1.getWarehouseId());
+        verify(purchaseQcLookupService, times(1)).pendingQualityLines(any(), any());
+        verify(purchaseQcLookupService).pendingQualityLines(
+                eq(java.util.Set.of(noWarehouseItem.getItemId(), warehouseItem.getItemId())),
+                eq(java.util.Set.of(w1.getWarehouseId(), w2)));
+    }
+
+    /** Captured and nothing pending is zero, not "not captured" (null is reserved for runs before V93). */
+    @Test
+    void run_withoutPendingQc_recordsZeroNotNull_andAddsNoWarning() {
+        Company company = company(UUID.randomUUID());
+        Plant plant = plant(UUID.randomUUID(), company);
+        Warehouse warehouse = warehouse(UUID.randomUUID(), plant);
+        Item item = item(UUID.randomUUID(), company, ItemType.RAW_MATERIAL);
+        MrpCalculationService.RequirementDraft draft = draft(item, warehouse, "40", "0", "15", "15", "25");
+        when(purchaseQcLookupService.pendingQualityLines(anyCollection(), anyCollection())).thenReturn(List.of());
+
+        runWith(company, plant, warehouse, null, new MrpCalculationService.MrpCalculationResult(
+                List.of(draft), List.of(suggestion(draft, SupplySuggestionType.PURCHASE_REQUISITION,
+                        SupplySuggestionExceptionState.READY))));
+
+        MrpRequirementLine line = singleSavedLine();
+        assertThat(line.getPendingQcQuantity()).isNotNull().isEqualByComparingTo("0");
+        assertThat(line.getPendingQcSourceCount()).isZero();
+        assertThat(savedSources()).isEmpty();
+        SupplySuggestion proposal = singleSavedSuggestion();
+        assertThat(proposal.getExceptionState()).isEqualTo(SupplySuggestionExceptionState.READY);
+        assertThat(proposal.messages()).containsExactly("MATERIAL_SHORTAGE");
+        verify(purchaseQcLookupService, times(1)).pendingQualityLines(any(), any());
+    }
+
+    /**
+     * FE R05: what an old run showed is what it captured. Listing reads only the snapshot table — never the live QC
+     * lookup, so a decision made after the run cannot change the answer.
+     */
+    @Test
+    void listPendingQcSupplies_readsTheRunsSnapshotOnly_neverTheLiveQc() {
+        UUID runId = UUID.randomUUID();
+        UUID requirementId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        MrpPendingQcSource source = MrpPendingQcSource.builder()
+                .sourceId(UUID.randomUUID()).mrpRunId(runId).requirementLineId(requirementId)
+                .goodsReceiptId(UUID.randomUUID()).goodsReceiptLineId(UUID.randomUUID())
+                .receiptCode("GR-000025").receiptVersion(3L).itemId(UUID.randomUUID()).warehouseId(warehouseId)
+                .uomCode("KG").pendingQuantity(new BigDecimal("25")).build();
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(mrpRunRepository.existsById(runId)).thenReturn(true);
+        when(pendingQcSourceRepository.search(runId, requirementId, warehouseId, pageable))
+                .thenReturn(new PageImpl<>(List.of(source), pageable, 1));
+
+        PageResult<PendingQcSupplyResponse> page =
+                service.listPendingQcSupplies(runId, requirementId, warehouseId, pageable);
+
+        assertThat(page.totalElements()).isEqualTo(1);
+        PendingQcSupplyResponse row = page.content().get(0);
+        assertThat(row.sourceId()).isEqualTo(source.getSourceId());
+        assertThat(row.requirementLineId()).isEqualTo(requirementId);
+        assertThat(row.goodsReceiptId()).isEqualTo(source.getGoodsReceiptId());
+        assertThat(row.goodsReceiptLineId()).isEqualTo(source.getGoodsReceiptLineId());
+        assertThat(row.receiptCode()).isEqualTo("GR-000025");
+        assertThat(row.receiptVersion()).isEqualTo(3L);
+        assertThat(row.itemId()).isEqualTo(source.getItemId());
+        assertThat(row.warehouseId()).isEqualTo(warehouseId);
+        assertThat(row.uomCode()).isEqualTo("KG");
+        assertThat(row.pendingQuantity()).isEqualByComparingTo("25");
+        verifyNoInteractions(purchaseQcLookupService);
+    }
+
+    @Test
+    void listPendingQcSupplies_unknownRun_isNotFoundBeforeTheSnapshotIsRead() {
+        UUID runId = UUID.randomUUID();
+        when(mrpRunRepository.existsById(runId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.listPendingQcSupplies(runId, null, null, PageRequest.of(0, 20)))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+        verifyNoInteractions(pendingQcSourceRepository, purchaseQcLookupService);
+    }
+
+    /** Runs a standard MRP run whose calculation returns {@code result}; returns the run id. */
+    private UUID runWith(Company company, Plant plant, Warehouse runWarehouse, List<UUID> plantScope,
+                         MrpCalculationService.MrpCalculationResult result) {
+        when(organizationLookupService.getActiveCompany(company.getCompanyId())).thenReturn(company);
+        when(organizationLookupService.getActivePlant(plant.getPlantId())).thenReturn(plant);
+        if (runWarehouse != null) {
+            when(organizationLookupService.getActiveWarehouse(runWarehouse.getWarehouseId())).thenReturn(runWarehouse);
+        } else {
+            when(organizationLookupService.resolveScope(ScopeResourceType.PLANT, plant.getPlantId()))
+                    .thenReturn(new OrganizationScopeResolution(
+                            ScopeResourceType.PLANT, plant.getPlantId(), company.getCompanyId(), plantScope));
+        }
+        stubRunCreation();
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(planningDemandRepository.findOpenDemandsForRun(any(), any(), any(), any(), any())).thenReturn(List.of());
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection())).thenReturn(result);
+        when(requirementLineRepository.save(any(MrpRequirementLine.class))).thenAnswer(invocation -> {
+            MrpRequirementLine line = invocation.getArgument(0);
+            line.setMrpRequirementLineId(UUID.randomUUID());
+            return line;
+        });
+
+        MrpRunResponse response = service.run(new MrpRunCreateRequest(company.getCompanyId(), plant.getPlantId(),
+                runWarehouse == null ? null : runWarehouse.getWarehouseId(),
+                LocalDate.now(), LocalDate.now().plusDays(30), null), null);
+        assertThat(response.status()).isEqualTo(MrpRunStatus.COMPLETED.name());
+        return response.mrpRunId();
+    }
+
+    private MrpCalculationService.RequirementDraft draft(Item item, Warehouse warehouse, String gross, String available,
+                                                         String openSupply, String projected, String net) {
+        return new MrpCalculationService.RequirementDraft(null, null, item, warehouse, 0,
+                new BigDecimal(gross), new BigDecimal(available), BigDecimal.ZERO, new BigDecimal(openSupply),
+                BigDecimal.ZERO, new BigDecimal(projected), new BigDecimal(net), LocalDate.now().plusDays(10),
+                MrpRequirementStatus.SHORTAGE, null, LocalDate.now().plusDays(5), PlanningSettingSource.ITEM_WAREHOUSE, 0);
+    }
+
+    private static MrpCalculationService.SuggestionDraft suggestion(MrpCalculationService.RequirementDraft requirement,
+                                                                   SupplySuggestionType type,
+                                                                   SupplySuggestionExceptionState state) {
+        return new MrpCalculationService.SuggestionDraft(requirement, type, state,
+                List.of(PlanningMessageCode.MATERIAL_SHORTAGE), null, null);
+    }
+
+    private static PurchaseQcLookupService.PendingQcLine pendingLine(Item item, UUID warehouseId, String quantity) {
+        return new PurchaseQcLookupService.PendingQcLine(UUID.randomUUID(), UUID.randomUUID(), "GR-000025", 3L,
+                item.getItemId(), warehouseId, "KG", new BigDecimal(quantity));
+    }
+
+    private List<MrpRequirementLine> savedLines() {
+        ArgumentCaptor<MrpRequirementLine> captor = ArgumentCaptor.forClass(MrpRequirementLine.class);
+        verify(requirementLineRepository, atLeastOnce()).save(captor.capture());
+        return captor.getAllValues();
+    }
+
+    private MrpRequirementLine singleSavedLine() {
+        List<MrpRequirementLine> lines = savedLines();
+        assertThat(lines).hasSize(1);
+        return lines.get(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<MrpPendingQcSource> savedSources() {
+        ArgumentCaptor<Iterable<MrpPendingQcSource>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(pendingQcSourceRepository, atLeast(0)).saveAll(captor.capture());
+        List<MrpPendingQcSource> all = new java.util.ArrayList<>();
+        captor.getAllValues().forEach(batch -> batch.forEach(all::add));
+        return all;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<SupplySuggestion> savedSuggestions() {
+        ArgumentCaptor<Iterable<SupplySuggestion>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(supplySuggestionRepository).saveAll(captor.capture());
+        List<SupplySuggestion> all = new java.util.ArrayList<>();
+        captor.getValue().forEach(all::add);
+        return all;
+    }
+
+    private SupplySuggestion singleSavedSuggestion() {
+        List<SupplySuggestion> suggestions = savedSuggestions();
+        assertThat(suggestions).hasSize(1);
+        return suggestions.get(0);
     }
 
     private MrpCalculationService.RequirementDraft requirement(PlanningDemand demand,

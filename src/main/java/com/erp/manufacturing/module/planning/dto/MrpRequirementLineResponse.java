@@ -53,8 +53,39 @@ public record MrpRequirementLineResponse(
         BigDecimal convertedQuantity,
         BigDecimal remainingConvertibleQuantity,
         /** Ledger rows of this requirement — only on {@code GET .../requirements/{id}}, {@code null} on the list. */
-        List<PlanningConversionResponse> conversions
+        List<PlanningConversionResponse> conversions,
+        /**
+         * CF-4: purchase stock of this item and warehouse(s) received but still awaiting QC when the run ran — shown, not
+         * netted. {@code null} for a run before V93 (not captured), which is not the same as zero.
+         */
+        BigDecimal pendingQcQuantity,
+        /** Number of goods receipt lines behind {@code pendingQcQuantity}; read them via {@code .../pending-qc-supplies}. */
+        Integer pendingQcSourceCount
 ) {
+    /** Pre-CF-4 shape: pending purchase QC not captured. */
+    public MrpRequirementLineResponse(UUID mrpRequirementLineId, UUID mrpRunId, UUID parentRequirementLineId,
+                                      UUID sourceDemandId, UUID itemId, String itemSku, String itemName, String uom,
+                                      UUID warehouseId, String warehouseCode, Integer requirementLevel,
+                                      BigDecimal grossRequiredQuantity, BigDecimal availableQuantity,
+                                      BigDecimal reservedQuantity, BigDecimal openSupplyQuantity,
+                                      BigDecimal safetyStockQuantity, BigDecimal projectedAvailableQuantity,
+                                      BigDecimal netRequiredQuantity, LocalDate dueDate, String requirementStatus,
+                                      String settingSource, String warehouseResolutionSource, Integer excludedLotCount,
+                                      String note, Instant createdAt, String sourceKind,
+                                      List<UUID> sourceSalesOrderLineIds, List<UUID> parentRequirementLineIds,
+                                      String calculationState, UUID supplySuggestionId, String supplyType,
+                                      String exceptionState, List<String> messages, BigDecimal convertedQuantity,
+                                      BigDecimal remainingConvertibleQuantity,
+                                      List<PlanningConversionResponse> conversions) {
+        this(mrpRequirementLineId, mrpRunId, parentRequirementLineId, sourceDemandId, itemId, itemSku, itemName, uom,
+                warehouseId, warehouseCode, requirementLevel, grossRequiredQuantity, availableQuantity,
+                reservedQuantity, openSupplyQuantity, safetyStockQuantity, projectedAvailableQuantity,
+                netRequiredQuantity, dueDate, requirementStatus, settingSource, warehouseResolutionSource,
+                excludedLotCount, note, createdAt, sourceKind, sourceSalesOrderLineIds, parentRequirementLineIds,
+                calculationState, supplySuggestionId, supplyType, exceptionState, messages, convertedQuantity,
+                remainingConvertibleQuantity, conversions, null, null);
+    }
+
     public MrpRequirementLineResponse(UUID mrpRequirementLineId, UUID mrpRunId,
                                       UUID parentRequirementLineId, UUID sourceDemandId,
                                       UUID itemId, String itemSku, String itemName, String uom,

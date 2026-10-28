@@ -20,6 +20,7 @@ import com.erp.manufacturing.module.planning.dto.MrpRequirementLineResponse;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSource;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -63,6 +64,8 @@ class CommercialPlanningRunServiceTest {
     @Mock PlanningSourceVersionCalculator sourceVersionCalculator;
     @Mock SupplySuggestionConversionRepository conversionRepository;
     @Mock ItemLookupService itemLookupService;
+    @Mock PurchaseQcLookupService purchaseQcLookupService;
+    @Mock MrpPendingQcSourceRepository pendingQcSourceRepository;
 
     MrpRunService service;
     Company company;
@@ -77,7 +80,7 @@ class CommercialPlanningRunServiceTest {
                 requirementLineRepository, supplySuggestionRepository, organizationLookupService, calculationService,
                 new MrpPlanningMapper(), auditLogService, new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
                 runStateRecorder, salesOrderPlanningSourceService, sourceVersionCalculator, conversionRepository,
-                itemLookupService);
+                itemLookupService, purchaseQcLookupService, pendingQcSourceRepository);
         company = Company.builder().companyId(UUID.randomUUID()).code("C").name("C").status(OrganizationStatus.ACTIVE).build();
         plant = Plant.builder().plantId(UUID.randomUUID()).company(company).code("P").name("P").status(OrganizationStatus.ACTIVE).build();
         warehouse = Warehouse.builder().warehouseId(UUID.randomUUID()).plant(plant).code("W").name("W")
@@ -202,6 +205,74 @@ class CommercialPlanningRunServiceTest {
         assertThat(response.inputSnapshot().salesOrderLineIds()).containsExactly(lineId);
         // Stored at microsecond precision, so the response must already be: a later read must not differ.
         assertThat(response.completedAt().getNano() % 1_000).isZero();
+    }
+
+    /**
+     * CF-4 on the commercial path: the run captures pending purchase QC once, with the plant scope as the warehouses
+     * of a line that has none, and a BUY proposal on that line warns.
+     */
+    @Test
+    void runCommercial_capturesPendingQcOnceWithThePlantScope_andWarnsTheBuyProposal() {
+        stubOrganization();
+        when(itemLookupService.getActiveItem(product.getItemId())).thenReturn(product);
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouse.getWarehouseId(), plant.getPlantId()))
+                .thenReturn(warehouse);
+        when(organizationLookupService.resolveScope(ScopeResourceType.PLANT, plant.getPlantId()))
+                .thenReturn(new OrganizationScopeResolution(ScopeResourceType.PLANT, plant.getPlantId(),
+                        company.getCompanyId(), List.of(warehouse.getWarehouseId())));
+        when(salesOrderPlanningSourceService.findSources(List.of(lineId)))
+                .thenReturn(Map.of(lineId, source(plant.getPlantId(), true, "70")));
+        PlanningDemand demand = PlanningDemand.builder()
+                .planningDemandId(UUID.randomUUID()).company(company).plant(plant).item(product)
+                .demandType(PlanningDemandType.SALES_ORDER).requiredQuantity(new BigDecimal("100"))
+                .dueDate(LocalDate.of(2026, 1, 20)).status(PlanningDemandStatus.OPEN)
+                .referenceType(PlanningDemandService.REFERENCE_TYPE_SALES_ORDER_LINE).referenceId(lineId.toString())
+                .build();
+        when(planningDemandRepository.findOpenByReference(eq("SALES_ORDER_LINE"), eq(List.of(lineId.toString()))))
+                .thenReturn(List.of(demand));
+        when(planningDemandRepository.findSelectedDemandsForRun(List.of(demand.getPlanningDemandId())))
+                .thenReturn(List.of(demand));
+        stubRunCreation();
+        when(mrpRunRepository.save(any(MrpRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        Item raw = Item.builder().itemId(UUID.randomUUID()).company(company).code("RM").name("RM")
+                .type(ItemType.RAW_MATERIAL).unit("KG").status(ItemStatus.ACTIVE).build();
+        MrpCalculationService.RequirementDraft rawLine = new MrpCalculationService.RequirementDraft(null, demand, raw,
+                null, 1, new BigDecimal("40"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("15"), BigDecimal.ZERO,
+                new BigDecimal("15"), new BigDecimal("25"), LocalDate.of(2026, 1, 15), MrpRequirementStatus.SHORTAGE,
+                null, LocalDate.of(2026, 1, 10), PlanningSettingSource.ITEM_WAREHOUSE, 0);
+        when(calculationService.calculate(any(MrpRun.class), anyList(), anyCollection(), anyMap()))
+                .thenReturn(new MrpCalculationService.MrpCalculationResult(List.of(rawLine),
+                        List.of(new MrpCalculationService.SuggestionDraft(rawLine, SupplySuggestionType.PURCHASE_REQUISITION,
+                                SupplySuggestionExceptionState.READY, List.of(PlanningMessageCode.MATERIAL_SHORTAGE),
+                                null, null))));
+        when(requirementLineRepository.save(any(MrpRequirementLine.class))).thenAnswer(invocation -> {
+            MrpRequirementLine saved = invocation.getArgument(0);
+            saved.setMrpRequirementLineId(UUID.randomUUID());
+            return saved;
+        });
+        when(sourceVersionCalculator.compute(eq(company.getCompanyId()), eq(List.of(lineId)), anyCollection()))
+                .thenReturn("sha-1");
+        when(purchaseQcLookupService.pendingQualityLines(anyCollection(), anyCollection())).thenReturn(List.of(
+                new PurchaseQcLookupService.PendingQcLine(UUID.randomUUID(), UUID.randomUUID(), "GR-000025", 3L,
+                        raw.getItemId(), warehouse.getWarehouseId(), "KG", new BigDecimal("25"))));
+
+        service.runCommercial(
+                validRequest(List.of(new ItemWarehouseMappingRequest(product.getItemId(), warehouse.getWarehouseId(), null))),
+                null);
+
+        verify(purchaseQcLookupService, times(1)).pendingQualityLines(any(), any());
+        verify(purchaseQcLookupService).pendingQualityLines(
+                eq(java.util.Set.of(raw.getItemId())), eq(java.util.Set.of(warehouse.getWarehouseId())));
+        ArgumentCaptor<MrpRequirementLine> line = ArgumentCaptor.forClass(MrpRequirementLine.class);
+        verify(requirementLineRepository).save(line.capture());
+        assertThat(line.getValue().getNetRequiredQuantity()).isEqualByComparingTo("25");
+        assertThat(line.getValue().getPendingQcQuantity()).isEqualByComparingTo("25");
+        assertThat(line.getValue().getPendingQcSourceCount()).isEqualTo(1);
+        verify(supplySuggestionRepository).saveAll(argThat(rows -> {
+            SupplySuggestion saved = rows.iterator().next();
+            return saved.getExceptionState() == SupplySuggestionExceptionState.WARNING
+                    && saved.messages().equals(List.of("MATERIAL_SHORTAGE", "PENDING_QC_SUPPLY"));
+        }));
     }
 
     @Test

@@ -24,9 +24,11 @@ import com.erp.manufacturing.module.planning.dto.ItemWarehouseMappingRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRequirementLineResponse;
 import com.erp.manufacturing.module.planning.dto.MrpRunCreateRequest;
 import com.erp.manufacturing.module.planning.dto.MrpRunResponse;
+import com.erp.manufacturing.module.planning.dto.PendingQcSupplyResponse;
 import com.erp.manufacturing.module.planning.dto.SupplySuggestionResponse;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSource;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -78,6 +81,8 @@ public class MrpRunService {
     private final PlanningSourceVersionCalculator sourceVersionCalculator;
     private final SupplySuggestionConversionRepository conversionRepository;
     private final ItemLookupService itemLookupService;
+    private final PurchaseQcLookupService purchaseQcLookupService;
+    private final MrpPendingQcSourceRepository pendingQcSourceRepository;
 
     /** FE R08 / A15: the commercial period is at most 90 days, both ends included. */
     static final long MAX_COMMERCIAL_PERIOD_DAYS = 90;
@@ -162,7 +167,7 @@ public class MrpRunService {
         try {
             MrpCalculationService.MrpCalculationResult result = calculationService.calculate(
                     persistedRun, demands, scopeWarehouseIds);
-            persistResult(persistedRun, demands.size(), result);
+            persistResult(persistedRun, demands.size(), result, scopeWarehouseIds);
             auditRunOutcome(AuditAction.MRP_RUN_COMPLETED, persistedRun, null);
         } catch (RuntimeException e) {
             String recorded = clientSafeFailureMessage(e);
@@ -265,9 +270,10 @@ public class MrpRunService {
                 .toList());
 
         try {
+            List<UUID> scopeWarehouseIds = resolveScopeWarehouseIds(plant, null);
             MrpCalculationService.MrpCalculationResult result = calculationService.calculate(
-                    persistedRun, topLevels, resolveScopeWarehouseIds(plant, null), itemWarehouses);
-            persistResult(persistedRun, demands.size(), result);
+                    persistedRun, topLevels, scopeWarehouseIds, itemWarehouses);
+            persistResult(persistedRun, demands.size(), result, scopeWarehouseIds);
             persistedRun.setSourceVersion(sourceVersionCalculator.compute(
                     company.getCompanyId(),
                     lineIds,
@@ -336,6 +342,19 @@ public class MrpRunService {
                     ledger != null,
                     null);
         }));
+    }
+
+    /**
+     * CF-4 (B267): the pending purchase-QC sources a run captured. {@code PERM_MRP_READ} on the run is enough — the
+     * projection carries no price or supplier contact (FE Q2). A run before V93 simply has none.
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize("@mrpPlanningPermissionGuard.hasRunAccess(authentication, 'PERM_MRP_READ', #runId)")
+    public PageResult<PendingQcSupplyResponse> listPendingQcSupplies(UUID runId, UUID requirementLineId,
+                                                                     UUID warehouseId, Pageable pageable) {
+        ensureRunExists(runId);
+        return PageResult.from(pendingQcSourceRepository.search(runId, requirementLineId, warehouseId, pageable)
+                .map(mapper::toResponse));
     }
 
     /** One requirement line with its proposal and every conversion made from it (G6b). */
@@ -437,9 +456,11 @@ public class MrpRunService {
 
     private Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> persistRequirements(
             MrpRun run,
-            List<MrpCalculationService.RequirementDraft> drafts) {
+            List<MrpCalculationService.RequirementDraft> drafts,
+            Map<MrpCalculationService.RequirementDraft, List<PurchaseQcLookupService.PendingQcLine>> pendingQc) {
         Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> saved = new IdentityHashMap<>();
         for (MrpCalculationService.RequirementDraft draft : drafts) {
+            List<PurchaseQcLookupService.PendingQcLine> sources = pendingQc.get(draft);
             MrpRequirementLine line = MrpRequirementLine.builder()
                     .mrpRun(run)
                     .parentRequirementLine(draft.parent() == null ? null : saved.get(draft.parent()))
@@ -460,8 +481,27 @@ public class MrpRunService {
                     .settingSource(draft.settingSource())
                     .warehouseResolutionSource(draft.warehouseResolutionSource())
                     .excludedLotCount(draft.excludedLotCount())
+                    .pendingQcQuantity(sources.stream()
+                            .map(PurchaseQcLookupService.PendingQcLine::pendingQuantity)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add))
+                    .pendingQcSourceCount(sources.size())
                     .build();
-            saved.put(draft, requirementLineRepository.save(line));
+            MrpRequirementLine savedLine = requirementLineRepository.save(line);
+            saved.put(draft, savedLine);
+            pendingQcSourceRepository.saveAll(sources.stream()
+                    .map(source -> MrpPendingQcSource.builder()
+                            .mrpRunId(run.getMrpRunId())
+                            .requirementLineId(savedLine.getMrpRequirementLineId())
+                            .goodsReceiptId(source.goodsReceiptId())
+                            .goodsReceiptLineId(source.goodsReceiptLineId())
+                            .receiptCode(source.receiptCode())
+                            .receiptVersion(source.receiptVersion())
+                            .itemId(source.itemId())
+                            .warehouseId(source.warehouseId())
+                            .uomCode(source.uomCode())
+                            .pendingQuantity(source.pendingQuantity())
+                            .build())
+                    .toList());
         }
         return saved;
     }
@@ -469,6 +509,8 @@ public class MrpRunService {
     private void persistSuggestions(MrpRun run,
                                     List<MrpCalculationService.SuggestionDraft> suggestions,
                                     Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> savedRequirements) {
+        // CF-4 (B268): a BUY proposal whose item has purchase stock awaiting QC carries a warning; it is never blocked
+        // and the quantity it proposes does not change (pending stock is shown, not netted).
         supplySuggestionRepository.saveAll(suggestions.stream()
                 .map(draft -> {
                     MrpCalculationService.RequirementDraft requirement = draft.requirement();
@@ -490,8 +532,12 @@ public class MrpRunService {
                             .suggestedOrderDate(requirement.suggestedOrderDate())
                             .sourceRoutingCode(draft.sourceRoutingCode())
                             .sourceRoutingVersion(draft.sourceRoutingVersion())
-                            .exceptionState(draft.exceptionState())
-                            .messageCodes(draft.messages().stream()
+                            .exceptionState(withPendingQcWarning(draft, requirementLine)
+                                    && draft.exceptionState() == SupplySuggestionExceptionState.READY
+                                    ? SupplySuggestionExceptionState.WARNING : draft.exceptionState())
+                            .messageCodes(Stream.concat(draft.messages().stream(),
+                                            withPendingQcWarning(draft, requirementLine)
+                                                    ? Stream.of(PlanningMessageCode.PENDING_QC_SUPPLY) : Stream.empty())
                                     .map(Enum::name)
                                     .collect(Collectors.joining(",")))
                             .build();
@@ -499,9 +545,46 @@ public class MrpRunService {
                 .toList());
     }
 
-    private void persistResult(MrpRun persistedRun, int demandCount, MrpCalculationService.MrpCalculationResult result) {
+    private static boolean withPendingQcWarning(MrpCalculationService.SuggestionDraft draft, MrpRequirementLine line) {
+        return draft.suggestionType() == SupplySuggestionType.PURCHASE_REQUISITION
+                && line.getPendingQcQuantity() != null && line.getPendingQcQuantity().signum() > 0;
+    }
+
+    /**
+     * CF-4 (B267): which goods receipt lines held pending purchase-QC quantity of each requirement's item, in the
+     * requirement's warehouse (or the run's scope warehouses when the line has none, the same set its netting used).
+     * One query for the whole run (C14). The snapshot is never rewritten by QC decided later.
+     */
+    private Map<MrpCalculationService.RequirementDraft, List<PurchaseQcLookupService.PendingQcLine>> capturePendingQc(
+            List<MrpCalculationService.RequirementDraft> drafts, Collection<UUID> scopeWarehouseIds) {
+        Set<UUID> itemIds = new HashSet<>();
+        Set<UUID> warehouseIds = new HashSet<>(scopeWarehouseIds);
+        for (MrpCalculationService.RequirementDraft draft : drafts) {
+            itemIds.add(draft.item().getItemId());
+            if (draft.warehouse() != null) {
+                warehouseIds.add(draft.warehouse().getWarehouseId());
+            }
+        }
+        List<PurchaseQcLookupService.PendingQcLine> pending =
+                purchaseQcLookupService.pendingQualityLines(itemIds, warehouseIds);
+        Map<MrpCalculationService.RequirementDraft, List<PurchaseQcLookupService.PendingQcLine>> byDraft =
+                new IdentityHashMap<>();
+        for (MrpCalculationService.RequirementDraft draft : drafts) {
+            Collection<UUID> lineWarehouses = draft.warehouse() == null
+                    ? scopeWarehouseIds : List.of(draft.warehouse().getWarehouseId());
+            byDraft.put(draft, pending.stream()
+                    .filter(source -> source.itemId().equals(draft.item().getItemId())
+                            && lineWarehouses.contains(source.warehouseId()))
+                    .toList());
+        }
+        return byDraft;
+    }
+
+    private void persistResult(MrpRun persistedRun, int demandCount, MrpCalculationService.MrpCalculationResult result,
+                               Collection<UUID> scopeWarehouseIds) {
         Map<MrpCalculationService.RequirementDraft, MrpRequirementLine> savedRequirements =
-                persistRequirements(persistedRun, result.requirements());
+                persistRequirements(persistedRun, result.requirements(),
+                        capturePendingQc(result.requirements(), scopeWarehouseIds));
         persistSuggestions(persistedRun, result.suggestions(), savedRequirements);
         persistedRun.complete(
                 // Postgres keeps microseconds; a 100 ns Windows clock reading would make the response

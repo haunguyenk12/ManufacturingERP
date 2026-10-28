@@ -12,6 +12,7 @@ import com.erp.manufacturing.module.planning.dto.PlanningConversionRequest;
 import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.planning.repository.*;
 import com.erp.manufacturing.module.purchasing.service.PurchaseOrderService;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.sales.service.SalesOrderPlanningSourceService;
 import com.erp.manufacturing.module.workorder.service.WorkOrderService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -155,7 +156,8 @@ class PlanningConversionMethodSecurityTest {
                     mapper, mock(AuditLogService.class), new IdempotencySupport(new ObjectMapper().findAndRegisterModules()),
                     mock(MrpRunStateRecorder.class), mock(SalesOrderPlanningSourceService.class),
                     mock(PlanningSourceVersionCalculator.class), mock(SupplySuggestionConversionRepository.class),
-                    mock(ItemLookupService.class));
+                    mock(ItemLookupService.class), mock(PurchaseQcLookupService.class),
+                    mock(MrpPendingQcSourceRepository.class));
         }
 
         @Bean MrpPlanningMapper mrpPlanningMapper() { return new MrpPlanningMapper(); }
