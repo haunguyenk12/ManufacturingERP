@@ -86,6 +86,20 @@ public class WorkOrderOperation extends BaseEntity {
     private Instant plannedEndAt;
 
     /**
+     * CF-5: what release scheduled with — the work center's {@code capacityUnits} at that moment, the capacity
+     * minutes needed ({@code setup + run × planned}) and the working minutes that took ({@code required / units}).
+     * Null before release, and on operations released before V94 (their schedule did not divide).
+     */
+    @Column(name = "captured_capacity_units")
+    private Integer capturedCapacityUnits;
+
+    @Column(name = "required_resource_minutes", precision = 19, scale = 6)
+    private BigDecimal requiredResourceMinutes;
+
+    @Column(name = "active_elapsed_minutes", precision = 19, scale = 6)
+    private BigDecimal activeElapsedMinutes;
+
+    /**
      * G8c (FE R14): the explicit finish of this operation. Everything else about its progress is derived from the
      * input ledger and the executions recorded against it — this is the one fact that cannot be derived.
      */

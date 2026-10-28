@@ -444,12 +444,13 @@ class WorkOrderServiceTest {
     }
 
     /**
-     * When the operation's Work Center has a calendar, scheduling delegates the "when does this
-     * much working time fit" question to {@code WorkCalendarLookupService.computeEndInstant} instead
-     * of adding minutes directly — that method is the one that actually skips non-working time.
+     * When the operation's Work Center has a calendar, release walks its working intervals instead of adding
+     * minutes directly. CF-5 (R10): before CF-5 this case stubbed {@code computeEndInstant} and used the returned
+     * end verbatim; release now walks {@code computeWorkingIntervals} through {@code CapacityPlacement} (the plant
+     * preview's walk), and the operation starts at the first working moment rather than at the anchor.
      */
     @Test
-    void release_schedulesOperations_delegatesToTheWorkCenterCalendarWhenPresent() {
+    void release_schedulesOperations_walksTheWorkCenterCalendarWhenPresent() {
         Instant anchor = Instant.parse("2026-08-10T08:00:00Z");
         WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
         workOrder.setPlannedStartAt(anchor);
@@ -463,12 +464,12 @@ class WorkOrderServiceTest {
                 .build();
         WorkCenter workCenter = workCenter(workOrder.getPlant(), calendar);
         workOrder.getOperations().add(operation(workOrder, 1, workCenter, "5", "2"));
-        // Pretend the calendar skipped a weekend — the point is the returned instant is what gets
-        // used verbatim, not "anchor + duration".
-        Instant scheduledEnd = anchor.plus(2, java.time.temporal.ChronoUnit.DAYS);
-        when(workCalendarLookupService.computeEndInstant(
-                eq(calendar.getWorkCalendarId()), eq(anchor), any(), eq(25L)))
-                .thenReturn(scheduledEnd);
+        // The calendar has nothing until two days later (a skipped weekend).
+        Instant firstWorkingMoment = anchor.plus(2, java.time.temporal.ChronoUnit.DAYS);
+        when(workCalendarLookupService.computeWorkingIntervals(
+                eq(calendar.getWorkCalendarId()), eq(anchor), any(), any()))
+                .thenReturn(List.of(new com.erp.manufacturing.module.shift.service.TimeInterval(
+                        firstWorkingMoment, firstWorkingMoment.plusSeconds(8 * 3600))));
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));
         when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
@@ -476,8 +477,40 @@ class WorkOrderServiceTest {
         service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
 
         WorkOrderOperation operation = workOrder.getOperations().get(0);
-        assertThat(operation.getPlannedStartAt()).isEqualTo(anchor);
-        assertThat(operation.getPlannedEndAt()).isEqualTo(scheduledEnd);
+        assertThat(operation.getPlannedStartAt()).isEqualTo(firstWorkingMoment);
+        assertThat(operation.getPlannedEndAt()).isEqualTo(firstWorkingMoment.plusSeconds(25 * 60));
+        verify(workCalendarLookupService, never()).computeEndInstant(any(), any(), any(), anyLong());
+    }
+
+    /**
+     * CF-5 (B269): release divides by the work center's capacityUnits and captures what it used on the operation
+     * — units, capacity minutes (setup 5 + run 2 × 10 = 25) and working minutes (25 / 2 = 12.5) — so the schedule
+     * stays explainable if the work center changes later. The response shows the same three figures.
+     */
+    @Test
+    void release_persistsTheCapturedCapacityOfEachSlot_andTheResponseShowsIt() {
+        Instant anchor = Instant.parse("2026-08-10T08:00:00Z");
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        workOrder.setPlannedStartAt(anchor);
+        WorkCenter workCenter = workCenter(workOrder.getPlant(), null);
+        workCenter.setCapacityUnits(2);
+        workOrder.getOperations().add(operation(workOrder, 1, workCenter, "5", "2"));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        WorkOrderResponse response = service.release(workOrder.getWorkOrderId(), new WorkOrderVersionRequest(0L), null);
+
+        WorkOrderOperation operation = workOrder.getOperations().get(0);
+        assertThat(operation.getCapturedCapacityUnits()).isEqualTo(2);
+        assertThat(operation.getRequiredResourceMinutes()).isEqualByComparingTo("25");
+        assertThat(operation.getActiveElapsedMinutes()).isEqualByComparingTo("12.5");
+        assertThat(operation.getPlannedEndAt()).isEqualTo(anchor.plusSeconds(750));
+        WorkOrderOperationResponse shown = response.operations().get(0);
+        assertThat(shown.capturedCapacityUnits()).isEqualTo(2);
+        assertThat(shown.requiredResourceMinutes()).isEqualByComparingTo("25");
+        assertThat(shown.activeElapsedMinutes()).isEqualByComparingTo("12.5");
+        assertThat(shown.workMinutes()).isEqualTo(25L);
     }
 
     /** When the work order has no {@code plannedStartAt}, the first operation anchors at "now". */
@@ -824,7 +857,8 @@ class WorkOrderServiceTest {
         WorkCalendar calendar = WorkCalendar.builder().workCalendarId(UUID.randomUUID()).plant(workOrder.getPlant())
                 .code("CAL").name("Cal").effectiveFrom(LocalDate.of(2026, 1, 1)).status(OrganizationStatus.ACTIVE).build();
         workOrder.getOperations().add(operation(workOrder, 1, workCenter(workOrder.getPlant(), calendar), "5", "2"));
-        when(workCalendarLookupService.computeEndInstant(any(), any(), any(), anyLong())).thenReturn(anchor.plusSeconds(3600));
+        when(workCalendarLookupService.computeWorkingIntervals(any(), any(), any(), any())).thenReturn(List.of(
+                new com.erp.manufacturing.module.shift.service.TimeInterval(anchor, anchor.plusSeconds(3600))));
         when(workCalendarLookupService.calendarRevision(Set.of(calendar.getWorkCalendarId()))).thenReturn("0123456789abcdef");
         when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
                 .thenReturn(Optional.of(workOrder));

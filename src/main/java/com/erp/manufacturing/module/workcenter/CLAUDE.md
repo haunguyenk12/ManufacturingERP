@@ -83,3 +83,10 @@ Mục 1 cũ ghi "deactivate không kiểm routing còn tham chiếu" — **G5 đ
 `RELEASED`/`IN_PROGRESS`, `WorkCenterLoadLookupService`) ⇒ **422 `REFERENCE_IN_USE`** (bất biến `B163`, `module/shift`).
 Không có `shiftIds[]` (D8): trung tâm làm theo mọi ca của lịch. Response thêm `workCalendarCode`/`workCalendarName`; list có
 `search`. Test: `WorkCenterServiceTest.deactivate_*`, `RoutingDraftIT.existsActiveRoutingUsingWorkCenter_*`.
+
+### 9. CF-5 — `capacityUnits` vào cả release (2026-10-28)
+
+Trước CF-5 chỉ bản xem trước công suất nhà máy (G5) chia thời lượng cho `capacityUnits`; release thì không (`CLAUDE.md §0.53 #6`). Nay
+release, bản xem trước lịch của lệnh SX và điều chỉnh lịch thiếu giờ kết thúc đều đi qua **cùng** `CapacityPlacement` (bất biến `B269`,
+`module/workorder`). Release **chụp** `capacityUnits` lên từng công đoạn (`captured_capacity_units`, `V94`) — đổi `capacityUnits` của trung
+tâm sau đó **không** dời lịch đã chốt. Bảng công suất vẫn tính tải chưa chia (`B270`).

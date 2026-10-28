@@ -123,39 +123,21 @@ public class CapacityPreviewService {
 
     /**
      * Walks the work center's working time from {@code cursor} until the operation's required capacity
-     * minutes are used up. Windows are cut at the end of the period so every segment is wholly inside
-     * or wholly after it — that is what makes {@code inPeriodMinutes} a plain sum.
+     * minutes are used up — through {@link CapacityPlacement}, the same walk release schedules with (CF-5).
+     * Windows are cut at the end of the period so every segment is wholly inside or wholly after it — that
+     * is what makes {@code inPeriodMinutes} a plain sum.
      */
     private CapacityPreviewResponse.Operation place(RoutingOperation operation, BigDecimal quantity, Instant cursor,
                                                     List<TimeInterval> windows, Instant periodEnd, Instant horizon) {
         WorkCenter workCenter = operation.getWorkCenter();
-        BigDecimal units = BigDecimal.valueOf(workCenter.getCapacityUnits());
-        BigDecimal required = operation.getSetupMinutes()
-                .add(quantity.multiply(operation.getRunMinutesPerUnit()))
-                .setScale(CapacityLoadCalculator.SCALE, RoundingMode.HALF_UP);
-        BigDecimal remaining = required;
-        List<Segment> segments = new ArrayList<>();
-        for (TimeInterval window : windows) {
-            if (remaining.signum() == 0) {
-                break;
-            }
-            for (TimeInterval piece : splitAt(window.clip(cursor, horizon), periodEnd)) {
-                BigDecimal capacity = piece.minutes().multiply(units);
-                if (capacity.signum() <= 0) {
-                    continue;
-                }
-                if (remaining.compareTo(capacity) <= 0) {
-                    long seconds = remaining.multiply(BigDecimal.valueOf(60))
-                            .divide(units, 0, RoundingMode.CEILING).longValueExact();
-                    segments.add(new Segment(piece.start(), piece.start().plusSeconds(seconds), remaining));
-                    remaining = BigDecimal.ZERO.setScale(CapacityLoadCalculator.SCALE);
-                    break;
-                }
-                segments.add(new Segment(piece.start(), piece.end(), scaled(capacity)));
-                remaining = remaining.subtract(capacity);
-            }
-        }
-        if (remaining.signum() > 0) {
+        BigDecimal required = CapacityPlacement.requiredMinutes(
+                operation.getSetupMinutes(), operation.getRunMinutesPerUnit(), quantity);
+        CapacityPlacement.Result placed = CapacityPlacement.place(windows, cursor, horizon, periodEnd, required,
+                workCenter.getCapacityUnits());
+        List<Segment> segments = placed.segments().stream()
+                .map(segment -> new Segment(segment.start(), segment.end(), segment.capacityMinutes()))
+                .toList();
+        if (placed.remaining().signum() > 0) {
             throw ExceptionFactory.custom(BusinessErrorCode.SCHEDULING_UNAVAILABLE,
                     "Work center " + workCenter.getCode() + " has no working time to finish operation "
                             + operation.getSequence() + " within " + HORIZON_DAYS_AFTER_PERIOD
@@ -219,16 +201,6 @@ public class CapacityPreviewService {
                         "Work center " + workCenter.getCode() + " has no ACTIVE work calendar to schedule on");
             }
         }
-    }
-
-    private List<TimeInterval> splitAt(TimeInterval interval, Instant boundary) {
-        if (interval == null) {
-            return List.of();
-        }
-        if (interval.start().isBefore(boundary) && interval.end().isAfter(boundary)) {
-            return List.of(new TimeInterval(interval.start(), boundary), new TimeInterval(boundary, interval.end()));
-        }
-        return List.of(interval);
     }
 
     private CapacityPreviewResponse.SourceVersions sourceVersions(RoutingHeader routing, BomHeader bom,

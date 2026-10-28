@@ -70,12 +70,13 @@ class WorkOrderSchedulePreviewServiceTest {
         WorkOrderSchedulePreviewResponse preview = service.preview(workOrder.getWorkOrderId(),
                 new WorkOrderSchedulePreviewRequest(0L, START, new BigDecimal("3")));
 
-        // 5 + 1.5 × 3 = 9.5 → 10 minutes; then 2 × 3 = 6 minutes.
+        // 5 + 1.5 × 3 = 9.5 capacity minutes, shown as 10 work minutes; then 2 × 3 = 6 minutes.
+        // CF-5 (R10): the end is no longer rounded to the minute — it is ceil(9.5 × 60 / 1) = 570 s (was 600).
         assertThat(preview.rows()).extracting(WorkOrderSchedulePreviewResponse.Row::workMinutes).containsExactly(10L, 6L);
         assertThat(preview.rows().get(0).startsAt()).isEqualTo(START);
-        assertThat(preview.rows().get(0).endsAt()).isEqualTo(START.plusSeconds(600));
-        assertThat(preview.rows().get(1).startsAt()).isEqualTo(START.plusSeconds(600));
-        assertThat(preview.rows().get(1).endsAt()).isEqualTo(START.plusSeconds(960));
+        assertThat(preview.rows().get(0).endsAt()).isEqualTo(START.plusSeconds(570));
+        assertThat(preview.rows().get(1).startsAt()).isEqualTo(START.plusSeconds(570));
+        assertThat(preview.rows().get(1).endsAt()).isEqualTo(START.plusSeconds(930));
         assertThat(preview.warnings()).extracting(WorkOrderSchedulePreviewResponse.Warning::code)
                 .containsExactly("NO_CALENDAR", "NO_CALENDAR");
         assertThat(workOrder.getOperations().get(0).getPlannedStartAt()).isNull();

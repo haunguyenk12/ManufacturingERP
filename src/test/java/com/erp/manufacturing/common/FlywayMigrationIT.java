@@ -53,8 +53,8 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        // V93 (MRP pending purchase-QC snapshot) is CF-4.
-        assertThat(current.getVersion().getVersion()).isEqualTo("93");
+        // V93 (MRP pending purchase-QC snapshot) is CF-4; V94 (captured capacity on operations) is CF-5.
+        assertThat(current.getVersion().getVersion()).isEqualTo("94");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -1045,6 +1045,92 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             assertThatThrownBy(() -> statement.execute(
                     "update mrp_requirement_lines set pending_qc_quantity = null, pending_qc_source_count = 1" + where))
                     .hasMessageContaining("chk_mrp_req_pending_qc");
+        }
+    }
+
+    /**
+     * CF-5 / {@code V94}: an operation scheduled before V94 keeps the three captured-capacity columns {@code NULL} —
+     * its schedule did not divide, so a value would describe a formula that never ran. The CHECK is all three NULL or
+     * all three set with units {@code > 0}. SQL three-valued logic: {@code 2 > 0 AND NULL >= 0} is NULL and a CHECK
+     * lets NULL through, so "one of three set" is rejected only because the {@code IS NOT NULL} terms are spelled out
+     * (the exact bug of V93's first draft).
+     */
+    @Test
+    void migrate_v94_capturedCapacityStaysNullOnOldOperations_checkRequiresAllThreeOrNone() throws Exception {
+        String schema = "flyway_v94_captured_capacity";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("93")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111119401";
+        String plant = "22222222-2222-4222-8222-222222229401";
+        String warehouse = "33333333-3333-4333-8333-333333339401";
+        String item = "55555555-5555-4555-8555-555555559401";
+        String bom = "66666666-6666-4666-8666-666666669401";
+        String workOrder = "77777777-7777-4777-8777-777777779401";
+        String operation = "88888888-8888-4888-8888-888888889401";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            statement.execute("insert into companies (company_id, code, name) values ('%s', 'V94', 'V94')".formatted(company));
+            statement.execute("insert into plants (plant_id, company_id, code, name, timezone) values"
+                    + " ('%s', '%s', 'P', 'P', 'Asia/Ho_Chi_Minh')".formatted(plant, company));
+            statement.execute("insert into warehouses (warehouse_id, plant_id, code, name) values ('%s', '%s', 'W', 'W')"
+                    .formatted(warehouse, plant));
+            statement.execute("insert into items (item_id, company_id, code, name, type, unit) values"
+                    + " ('%s', '%s', 'FG', 'FG', 'FINISHED_GOOD', 'EA')".formatted(item, company));
+            statement.execute("insert into bom_headers (bom_id, company_id, parent_item_id, revision, bom_code, version_number)"
+                    + " values ('%s', '%s', '%s', 'A', 'FG-A', 1)".formatted(bom, company, item));
+            statement.execute(("insert into work_orders (work_order_id, company_id, plant_id, work_order_no, product_item_id,"
+                    + " bom_id, bom_revision, output_warehouse_id, planned_quantity, status) values ('%s', '%s', '%s',"
+                    + " 'WO-V94', '%s', '%s', 'A', '%s', 10, 'RELEASED')")
+                    .formatted(workOrder, company, plant, item, bom, warehouse));
+            statement.execute(("insert into work_order_operations (work_order_operation_id, work_order_id, sequence, name,"
+                    + " work_center_code, setup_minutes, run_minutes_per_unit, planned_start_at, planned_end_at)"
+                    + " values ('%s', '%s', 1, 'Assembly', 'WC-1', 0, 12, TIMESTAMPTZ '2026-10-13T08:00:00Z',"
+                    + " TIMESTAMPTZ '2026-10-13T10:00:00Z')").formatted(operation, workOrder));
+        }
+
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            try (ResultSet rows = statement.executeQuery("select captured_capacity_units, required_resource_minutes,"
+                    + " active_elapsed_minutes from work_order_operations")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getObject("captured_capacity_units")).isNull();
+                assertThat(rows.getBigDecimal("required_resource_minutes")).isNull();
+                assertThat(rows.getBigDecimal("active_elapsed_minutes")).isNull();
+            }
+            String update = "update work_order_operations set captured_capacity_units = %s,"
+                    + " required_resource_minutes = %s, active_elapsed_minutes = %s";
+            assertThatThrownBy(() -> statement.execute(update.formatted("2", "null", "null")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            assertThatThrownBy(() -> statement.execute(update.formatted("2", "120", "null")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            assertThatThrownBy(() -> statement.execute(update.formatted("null", "120", "60")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            assertThatThrownBy(() -> statement.execute(update.formatted("0", "120", "60")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            assertThatThrownBy(() -> statement.execute(update.formatted("2", "-1", "60")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            assertThatThrownBy(() -> statement.execute(update.formatted("2", "120", "-1")))
+                    .hasMessageContaining("chk_wo_operations_captured_capacity");
+            statement.execute(update.formatted("2", "120", "60"));
+            statement.execute(update.formatted("1", "0", "0"));
+            statement.execute(update.formatted("null", "null", "null"));
         }
     }
 

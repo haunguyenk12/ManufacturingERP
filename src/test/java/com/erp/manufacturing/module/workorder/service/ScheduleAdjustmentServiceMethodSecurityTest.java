@@ -126,7 +126,7 @@ class ScheduleAdjustmentServiceMethodSecurityTest {
             return new ScheduleAdjustmentService(workOrderOperationRepository,
                     mock(com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository.class),
                     capacityBoardService,
-                    mock(com.erp.manufacturing.module.shift.service.WorkCalendarLookupService.class));
+                    new WorkOrderScheduler(mock(com.erp.manufacturing.module.shift.service.WorkCalendarLookupService.class)));
         }
 
         @Bean(name = "workOrderPermissionGuard")

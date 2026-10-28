@@ -58,7 +58,7 @@ class ScheduleAdjustmentServiceTest {
     @BeforeEach
     void setUp() {
         service = new ScheduleAdjustmentService(workOrderOperationRepository, productionExecutionRepository,
-                capacityBoardService, workCalendarLookupService);
+                capacityBoardService, new WorkOrderScheduler(workCalendarLookupService));
     }
 
     @Test
@@ -250,6 +250,48 @@ class ScheduleAdjustmentServiceTest {
                 target.getWorkOrderOperationId(), new ScheduleAdjustmentRequest(HOUR_2, null, "Reason", 0L));
 
         assertThat(response.plannedStartAt()).isEqualTo(HOUR_2);
+        assertThat(response.plannedEndAt()).isEqualTo(HOUR_2.plusSeconds(1800));
+    }
+
+    /**
+     * CF-5: the derived end divides by the capacityUnits release captured, not by the work center's units today —
+     * the center was 2 units at release (setup 30 ⇒ 15 min), and has since been changed to 1.
+     */
+    @Test
+    void adjust_withoutPlannedEnd_usesTheCapturedCapacityUnits_notTheWorkCentersCurrentOnes() {
+        WorkOrder workOrder = workOrder();
+        WorkCenter workCenter = workCenter(); // capacityUnits 1 now
+        WorkOrderOperation target = operation(workOrder, workCenter, 1, HOUR_0, HOUR_1);
+        target.setSetupMinutes(new BigDecimal("30"));
+        target.setCapturedCapacityUnits(2);
+        stubFind(workOrder, target);
+        stubSiblings(workOrder, target);
+        when(capacityBoardService.buildDayContext(any(), any(), any(), any())).thenReturn(EMPTY_CONTEXT);
+        when(workOrderOperationRepository.saveAndFlush(target)).thenReturn(target);
+
+        ScheduleAdjustmentResponse response = service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), new ScheduleAdjustmentRequest(HOUR_2, null, "Reason", 0L));
+
+        assertThat(response.plannedEndAt()).isEqualTo(HOUR_2.plusSeconds(900));
+    }
+
+    /** CF-5: an operation released before V94 captured nothing; its schedule never divided, so it keeps one unit. */
+    @Test
+    void adjust_withoutPlannedEnd_andNothingCaptured_usesOneUnitEvenOnAMultiUnitCenter() {
+        WorkOrder workOrder = workOrder();
+        WorkCenter workCenter = workCenter();
+        workCenter.setCapacityUnits(2);
+        WorkOrderOperation target = operation(workOrder, workCenter, 1, HOUR_0, HOUR_1);
+        target.setSetupMinutes(new BigDecimal("30"));
+        stubFind(workOrder, target);
+        stubSiblings(workOrder, target);
+        when(capacityBoardService.buildDayContext(any(), any(), any(), any())).thenReturn(EMPTY_CONTEXT);
+        when(workOrderOperationRepository.saveAndFlush(target)).thenReturn(target);
+
+        ScheduleAdjustmentResponse response = service.adjust(workOrder.getWorkOrderId(),
+                target.getWorkOrderOperationId(), new ScheduleAdjustmentRequest(HOUR_2, null, "Reason", 0L));
+
+        assertThat(target.getCapturedCapacityUnits()).isNull();
         assertThat(response.plannedEndAt()).isEqualTo(HOUR_2.plusSeconds(1800));
     }
 

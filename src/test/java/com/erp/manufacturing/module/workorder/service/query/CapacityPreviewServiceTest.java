@@ -28,6 +28,7 @@ import com.erp.manufacturing.module.workorder.dto.capacity.CapacityLoadResponse;
 import com.erp.manufacturing.module.workorder.dto.capacity.CapacityPreviewRequest;
 import com.erp.manufacturing.module.workorder.dto.capacity.CapacityPreviewResponse;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderOperationRepository;
+import com.erp.manufacturing.module.workorder.service.WorkOrderScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -197,6 +198,72 @@ class CapacityPreviewServiceTest {
                 .isInstanceOf(AppException.class)
                 .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
                         .isEqualTo(ValidationErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    /**
+     * The period end still cuts a window that crosses it (CF-5 moved the walk into {@code CapacityPlacement}; the
+     * preview must keep passing the boundary). Night shift Tue 20:00 → Wed 04:00, required 30 + 2 × 465 = 960 on 2
+     * units: 480 capacity minutes before Tuesday midnight, 480 after — two segments, not one.
+     */
+    @Test
+    void preview_windowCrossingThePeriodEnd_isSplitThere() {
+        when(workCalendarLookupService.computeWorkingIntervals(
+                        eq(workCenter.getWorkCalendar().getWorkCalendarId()), any(), any(), eq(ZONE)))
+                .thenReturn(List.of(new TimeInterval(at(TUE, 20, 0), at(WED, 4, 0))));
+
+        CapacityPreviewResponse.Operation operation = service.preview(plant.getPlantId(),
+                new CapacityPreviewRequest(routing.getRoutingId(), new BigDecimal("465"), at(TUE, 20, 0), TUE, TUE))
+                .operations().get(0);
+
+        assertThat(operation.requiredMinutes()).isEqualByComparingTo("960");
+        assertThat(operation.inPeriodMinutes()).isEqualByComparingTo("480");
+        assertThat(operation.afterPeriodMinutes()).isEqualByComparingTo("480");
+        assertThat(operation.segments()).extracting(CapacityPreviewResponse.Segment::start)
+                .containsExactly(at(TUE, 20, 0), at(WED, 0, 0));
+        assertThat(operation.proposedEnd()).isEqualTo(at(WED, 4, 0));
+    }
+
+    /**
+     * CF-5 (B269): the plant preview and release now walk the same way. The same routing, work center (2 units),
+     * calendar windows and quantity go through both paths; each operation must start and end at the same instant.
+     * The start (07:00 local, before the shift) is deliberately not on a window, so both paths must snap it.
+     */
+    @Test
+    void preview_andWorkOrderRelease_placeEveryOperationAtTheSameInstants() {
+        routing.getOperations().add(RoutingOperation.builder().routingOperationId(UUID.randomUUID()).routing(routing)
+                .sequence(2).name("Kiểm tra").workCenter(workCenter)
+                .setupMinutes(new BigDecimal("15")).runMinutesPerUnit(new BigDecimal("1")).build());
+        BigDecimal quantity = new BigDecimal("500");
+        Instant requestedStart = at(TUE, 7, 0);
+
+        CapacityPreviewResponse preview = service.preview(plant.getPlantId(),
+                new CapacityPreviewRequest(routing.getRoutingId(), quantity, requestedStart, TUE, TUE));
+
+        WorkOrder workOrder = WorkOrder.builder().workOrderId(UUID.randomUUID()).plant(plant)
+                .plannedQuantity(quantity).status(WorkOrderStatus.PLANNED).operations(new ArrayList<>()).build();
+        for (RoutingOperation source : routing.getOperations()) {
+            workOrder.getOperations().add(WorkOrderOperation.builder().workOrderOperationId(UUID.randomUUID())
+                    .workOrder(workOrder).sequence(source.getSequence()).name(source.getName())
+                    .workCenterCode(source.getWorkCenter().getCode()).workCenter(source.getWorkCenter())
+                    .setupMinutes(source.getSetupMinutes()).runMinutesPerUnit(source.getRunMinutesPerUnit()).build());
+        }
+        WorkOrderScheduler.Schedule release = new WorkOrderScheduler(workCalendarLookupService)
+                .compute(workOrder, requestedStart, quantity);
+
+        assertThat(preview.operations()).hasSize(2);
+        assertThat(release.slots()).extracting(WorkOrderScheduler.Slot::start)
+                .containsExactlyElementsOf(preview.operations().stream()
+                        .map(CapacityPreviewResponse.Operation::proposedStart).toList());
+        assertThat(release.slots()).extracting(WorkOrderScheduler.Slot::end)
+                .containsExactlyElementsOf(preview.operations().stream()
+                        .map(CapacityPreviewResponse.Operation::proposedEnd).toList());
+        assertThat(release.slots()).extracting(WorkOrderScheduler.Slot::requiredMinutes)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactlyElementsOf(preview.operations().stream()
+                        .map(CapacityPreviewResponse.Operation::requiredMinutes).toList());
+        // Sanity that the comparison is not between two wrong answers: A27 ends Wednesday 08:35 local.
+        assertThat(release.slots().get(0).start()).isEqualTo(at(TUE, 8, 0));
+        assertThat(release.slots().get(0).end()).isEqualTo(at(WED, 8, 35));
     }
 
     private CapacityPreviewRequest request(String quantity, LocalDate from, LocalDate to) {

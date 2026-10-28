@@ -196,6 +196,28 @@ class CapacityBoardServiceTest {
         assertThat(period.timezone()).isEqualTo(ZONE.getId());
     }
 
+    /**
+     * CF-5: release now divides the elapsed time by capacityUnits, but the board's load stays the capacity minutes
+     * the operation needs — 10 × 12 = 120 on a 2-unit center scheduled 08:00–09:00 is 120 load, not 60. Dividing
+     * the load as well would count the parallelism twice (once in the schedule, once against units × minutes).
+     */
+    @Test
+    @DisplayName("a 2-unit operation of 120 capacity minutes still adds 120 to the load, not 60")
+    void periodLoad_isTheUndividedCapacityMinutes_evenOnAMultiUnitCenter() {
+        WorkCalendar calendar = calendar();
+        WorkCenter workCenter = workCenter(calendar, 2);
+        stubLoad(operation(workCenter, "0", "12", "10", at(DAY, 8, 0), at(DAY, 9, 0)));
+        when(workCenterLookupService.findActiveWorkCenters(plant.getPlantId())).thenReturn(List.of(workCenter));
+        when(workCalendarLookupService.computeWorkingIntervals(eq(calendar.getWorkCalendarId()), any(), any(), eq(ZONE)))
+                .thenReturn(List.of(window(DAY, 8, 16)));
+
+        CapacityLoadResponse load = service.getPeriodLoads(plant.getPlantId(), DAY, DAY, null).loads().get(0);
+
+        assertThat(load.baseInPeriodMinutes()).isEqualByComparingTo("120");
+        assertThat(load.availableMinutes()).isEqualByComparingTo("960");
+        assertThat(load.utilizationPercent()).isEqualByComparingTo("12.50");
+    }
+
     @Test
     @DisplayName("a period longer than 90 days, both ends included, is refused before anything is read")
     void getPeriodLoads_periodLongerThanNinetyDays_isRefused() {

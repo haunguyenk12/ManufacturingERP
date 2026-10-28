@@ -5,8 +5,6 @@ import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
-import com.erp.manufacturing.module.shift.service.WorkCalendarLookupService;
-import com.erp.manufacturing.module.workcenter.domain.WorkCenter;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderOperation;
 import com.erp.manufacturing.module.workorder.domain.WorkOrderStatus;
@@ -21,11 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,7 +44,7 @@ public class ScheduleAdjustmentService {
     private final WorkOrderOperationRepository workOrderOperationRepository;
     private final ProductionExecutionRepository productionExecutionRepository;
     private final CapacityBoardService capacityBoardService;
-    private final WorkCalendarLookupService workCalendarLookupService;
+    private final WorkOrderScheduler workOrderScheduler;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_CAPACITY_MANAGE', #workOrderId)")
@@ -132,21 +127,14 @@ public class ScheduleAdjustmentService {
     }
 
     /**
-     * Same rule release uses ({@code WorkOrderService.scheduleOperations}): the operation's own minutes,
-     * walked over its work center's calendar when there is one, continuous time otherwise.
+     * Same rule release uses ({@link WorkOrderScheduler}, CF-5): the operation's capacity minutes divided by the
+     * {@code capacityUnits} release captured, walked over its work center's calendar when there is one,
+     * continuous time otherwise. An operation released before V94 captured nothing; its schedule never divided,
+     * so it keeps one unit.
      */
     private Instant computeEnd(WorkOrderOperation operation, Instant start) {
-        long durationMinutes = operation.getSetupMinutes()
-                .add(operation.getRunMinutesPerUnit().multiply(operation.getWorkOrder().getPlannedQuantity()))
-                .setScale(0, RoundingMode.CEILING)
-                .longValueExact();
-        WorkCenter workCenter = operation.getWorkCenter();
-        if (workCenter.getWorkCalendar() == null) {
-            return start.plus(durationMinutes, ChronoUnit.MINUTES);
-        }
-        ZoneId zone = ZoneId.of(operation.getWorkOrder().getPlant().getTimezone());
-        return workCalendarLookupService.computeEndInstant(
-                workCenter.getWorkCalendar().getWorkCalendarId(), start, zone, durationMinutes);
+        int units = operation.getCapturedCapacityUnits() == null ? 1 : operation.getCapturedCapacityUnits();
+        return workOrderScheduler.computeEnd(operation, start, operation.getWorkOrder().getPlannedQuantity(), units);
     }
 
     /**

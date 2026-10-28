@@ -120,7 +120,10 @@ public class WorkOrderMapper {
                 operation.getPlannedStartAt(),
                 operation.getPlannedEndAt(),
                 operation.getVersion(),
-                operation.workMinutes(operation.getWorkOrder().getPlannedQuantity()));
+                operation.workMinutes(operation.getWorkOrder().getPlannedQuantity()),
+                operation.getCapturedCapacityUnits(),
+                operation.getRequiredResourceMinutes(),
+                operation.getActiveElapsedMinutes());
     }
 
     public WorkOrderComponentLineResponse toResponse(WorkOrderComponentLine line,

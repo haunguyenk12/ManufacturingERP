@@ -366,6 +366,9 @@ public class WorkOrderService {
         for (WorkOrderScheduler.Slot slot : schedule.slots()) {
             slot.operation().setPlannedStartAt(slot.start());
             slot.operation().setPlannedEndAt(slot.end());
+            slot.operation().setCapturedCapacityUnits(slot.capacityUnits());
+            slot.operation().setRequiredResourceMinutes(slot.requiredMinutes());
+            slot.operation().setActiveElapsedMinutes(slot.activeElapsedMinutes());
         }
         workOrder.commitSchedule(schedule.calendarRevision(), schedule.timeZone(),
                 now.truncatedTo(ChronoUnit.MICROS));
