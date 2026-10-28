@@ -92,4 +92,28 @@ public interface GoodsReceiptLineRepository extends JpaRepository<GoodsReceiptLi
               and l.receivedQuantity - l.acceptedQuantity - l.rejectedQuantity > 0
             """)
     boolean existsPendingQualityForLot(@Param("lotId") UUID lotId, @Param("posted") GoodsReceiptStatus posted);
+
+    /**
+     * CF-3: what purchase QC still keeps in the quality hold of non-lot stock — pending (received − accepted − rejected)
+     * and rejected quantity of lines of POSTED receipts that went on hold, per item and warehouse. A lot line is excluded:
+     * its quantity lives on the lot, not in {@code qualityHoldQuantity}. Receipts posted before G7b never held anything.
+     */
+    @Query("""
+            select l.item.itemId as itemId,
+                   gr.warehouse.warehouseId as warehouseId,
+                   coalesce(sum(l.receivedQuantity - l.acceptedQuantity - l.rejectedQuantity), 0) as pendingQuantity,
+                   coalesce(sum(l.rejectedQuantity), 0) as rejectedQuantity
+            from GoodsReceiptLine l
+            join l.goodsReceipt gr
+            where l.lot is null
+              and gr.status = :posted
+              and gr.qualityHeld = true
+              and gr.warehouse.warehouseId in :warehouseIds
+              and l.item.itemId in :itemIds
+            group by l.item.itemId, gr.warehouse.warehouseId
+            """)
+    java.util.List<PurchaseQcHoldProjection> sumNonLotQualityHold(
+            @Param("itemIds") java.util.Collection<UUID> itemIds,
+            @Param("warehouseIds") java.util.Collection<UUID> warehouseIds,
+            @Param("posted") GoodsReceiptStatus posted);
 }

@@ -199,7 +199,8 @@ class InventoryMethodSecurityTest {
                     movementRepository,
                     mapper,
                     userLookupService,
-                    mock(LotQcOwnershipGuard.class));
+                    mock(LotQcOwnershipGuard.class),
+                    mock(com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService.class));
         }
 
         @Bean

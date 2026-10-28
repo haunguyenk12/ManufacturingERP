@@ -8,9 +8,11 @@ import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.StockMovement;
 import com.erp.manufacturing.module.inventory.dto.*;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
+import com.erp.manufacturing.module.inventory.repository.StockBalanceAggregateProjection;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
+import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -19,6 +21,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +38,7 @@ public class InventoryService {
     private final InventoryMapper mapper;
     private final UserLookupService userLookupService;
     private final LotQcOwnershipGuard lotQcOwnershipGuard;
+    private final PurchaseQcLookupService purchaseQcLookupService;
 
     @Transactional
     @PreAuthorize("@permissionGuard.hasResourceAccess(authentication, 'PERM_INVENTORY_MOVE', 'WAREHOUSE', #request.warehouseId())")
@@ -127,14 +131,24 @@ public class InventoryService {
             UUID warehouseId, UUID itemId, String search, Pageable pageable) {
         ensureWarehouseExists(warehouseId);
         String normalizedSearch = search == null || search.isBlank() ? null : search.trim();
-        return PageResult.from(balanceRepository.aggregateBalances(
-                        warehouseId, itemId, normalizedSearch, Instant.now(), pageable)
-                .map(row -> new StockBalanceAggregateResponse(
-                        row.getItemId(), row.getItemCode(), row.getItemName(), row.getUom(),
-                        row.getWarehouseId(), row.getOnHandQuantity(), row.getReservedQuantity(),
-                        row.getAvailableQuantity(), row.getQualityHoldQuantity(), row.getRejectedQuantity(),
-                        row.getExpiredQuantity(), row.getHeldLotQuantity(), row.getLotCount(),
-                        row.getUpdatedAt())));
+        Page<StockBalanceAggregateProjection> page = balanceRepository.aggregateBalances(
+                warehouseId, itemId, normalizedSearch, Instant.now(), pageable);
+        // CF-3: one aggregate query for the page's items (C14); the figures belong to each row, not to a QC queue page.
+        Map<UUID, PurchaseQcLookupService.QualityHold> purchaseHolds = purchaseQcLookupService.nonLotQualityHoldByItem(
+                warehouseId, page.getContent().stream().map(StockBalanceAggregateProjection::getItemId).toList());
+        return PageResult.from(page.map(row -> {
+            PurchaseQcLookupService.QualityHold hold = purchaseHolds.getOrDefault(
+                    row.getItemId(), PurchaseQcLookupService.QualityHold.NONE);
+            BigDecimal unclassified = row.getQualityHoldQuantity()
+                    .subtract(hold.pendingQuantity()).subtract(hold.rejectedQuantity());
+            return new StockBalanceAggregateResponse(
+                    row.getItemId(), row.getItemCode(), row.getItemName(), row.getUom(),
+                    row.getWarehouseId(), row.getOnHandQuantity(), row.getReservedQuantity(),
+                    row.getAvailableQuantity(), row.getQualityHoldQuantity(), row.getRejectedQuantity(),
+                    row.getExpiredQuantity(), row.getHeldLotQuantity(), row.getLotCount(),
+                    row.getUpdatedAt(), hold.pendingQuantity(), hold.rejectedQuantity(), unclassified,
+                    unclassified.signum() == 0);
+        }));
     }
 
     @Transactional(readOnly = true)

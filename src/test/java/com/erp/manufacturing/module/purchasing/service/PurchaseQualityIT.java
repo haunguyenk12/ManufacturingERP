@@ -6,7 +6,10 @@ import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.module.inventory.domain.*;
+import com.erp.manufacturing.module.inventory.dto.StockBalanceAggregateResponse;
+import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.service.InventoryService;
 import com.erp.manufacturing.module.inventory.service.InventoryAdjustCommand;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
@@ -22,6 +25,7 @@ import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptLineRepository;
 import com.erp.manufacturing.module.purchasing.repository.GoodsReceiptRepository;
+import com.erp.manufacturing.module.purchasing.repository.PurchaseQcHoldProjection;
 import com.erp.manufacturing.module.purchasing.repository.PurchaseOrderRepository;
 import com.erp.manufacturing.module.purchasing.repository.SupplierRepository;
 import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
@@ -68,7 +72,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Import({PurchaseQualityService.class, GoodsReceiptDraftService.class, GoodsReceiptPoster.class, PurchasingIdempotency.class,
         PurchasingMapper.class, IdempotencySupport.class, TraceIdProvider.class, InventoryMovementService.class,
         ItemLookupService.class, OrganizationLookupService.class, UserLookupService.class, LotQcOwnershipGuard.class,
-        PurchaseQcLookupService.class, LotQcOriginLookupService.class, PurchaseQualityIT.Config.class})
+        PurchaseQcLookupService.class, LotQcOriginLookupService.class, InventoryService.class, InventoryMapper.class,
+        PurchaseQualityIT.Config.class})
 class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
 
     private static final String ZONE = "Asia/Ho_Chi_Minh";
@@ -100,6 +105,8 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
     @Autowired WarehouseRepository warehouseRepository;
     @Autowired InventoryMovementService movementService;
     @Autowired LotQcOwnershipGuard lotQcOwnershipGuard;
+    @Autowired PurchaseQcLookupService purchaseQcLookupService;
+    @Autowired InventoryService inventoryService;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactions;
 
@@ -123,8 +130,12 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
     }
 
     private PurchaseOrder order(Fixture f, Item item, String ordered) {
+        return order(f, f.plant(), f.warehouse(), item, ordered);
+    }
+
+    private PurchaseOrder order(Fixture f, Plant plant, Warehouse warehouse, Item item, String ordered) {
         LocalDate today = LocalDate.now(ZoneId.of(ZONE));
-        PurchaseOrder order = PurchaseOrder.builder().company(f.company()).plant(f.plant()).warehouse(f.warehouse())
+        PurchaseOrder order = PurchaseOrder.builder().company(f.company()).plant(plant).warehouse(warehouse)
                 .supplier(f.supplier()).purchaseOrderNo("PO-" + UUID.randomUUID().toString().substring(0, 8))
                 .status(PurchaseOrderStatus.CONFIRMED).orderDate(today.minusDays(2)).expectedDate(today).build();
         order.getLines().add(PurchaseOrderLine.builder().purchaseOrder(order).item(item)
@@ -340,6 +351,140 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
 
         assertThat(adjusted.created()).isTrue();
         assertThat(lotQuantity(lotId)).isEqualByComparingTo("2");
+    }
+
+    /**
+     * CF-3 on a real database: {@code sumNonLotQualityHold} sums pending (received − accepted − rejected) and rejected
+     * of non-lot lines of POSTED, on-hold receipts, per item and warehouse — over partial and repeated decisions on
+     * several receipts. A lot line, a DRAFT, a CANCELLED and a pre-G7b ({@code quality_held = false}) receipt, another
+     * warehouse (in another plant) and an item not asked for are all left out.
+     */
+    @Test
+    void sumNonLotQualityHold_sumsPendingAndRejectedOfOnHoldPostedNonLotLines_only() {
+        Fixture f = fixture();
+        Plant plantB = plantRepository.save(Plant.builder().company(f.company()).code("PB_" + f.suffix()).name("Plant B")
+                .timezone(ZONE).status(OrganizationStatus.ACTIVE).build());
+        Warehouse warehouseB = warehouseRepository.save(Warehouse.builder().plant(plantB).code("WB_" + f.suffix())
+                .name("Wh B").type(WarehouseType.GENERAL).status(OrganizationStatus.ACTIVE).build());
+        Item itemX = item(f, false);
+        Item itemY = item(f, false);
+        Item lotItem = item(f, true);
+        UUID whA = f.warehouse().getWarehouseId();
+        UUID whB = warehouseB.getWarehouseId();
+
+        // Receipt 1, item X @ A: 25 received, decided twice (10/5 then 3/2) => pending 5, rejected 7.
+        GoodsReceiptResponse r1 = posted(order(f, itemX, "40"), "25", null);
+        UUID r1Line = r1.lines().get(0).goodsReceiptLineId();
+        PurchaseQcDecisionResult d1 = qualityService.decide(r1.goodsReceiptId(), r1Line,
+                new PurchaseQcDecisionRequest(r1.version(), new BigDecimal("10"), new BigDecimal("5"), "5 failed"), null);
+        qualityService.decide(r1.goodsReceiptId(), r1Line,
+                new PurchaseQcDecisionRequest(d1.receiptVersion(), new BigDecimal("3"), new BigDecimal("2"), "2 failed"), null);
+        // Receipt 2, item X @ A: 8 received, decided 0/1 => pending 7, rejected 1.
+        GoodsReceiptResponse r2 = posted(order(f, itemX, "40"), "8", null);
+        qualityService.decide(r2.goodsReceiptId(), r2.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(r2.version(), BigDecimal.ZERO, new BigDecimal("1"), "1 failed"), null);
+        // Receipt 3, item X @ A, untouched: pending 0.5.
+        posted(order(f, itemX, "40"), "0.5", null);
+
+        // Excluded: a DRAFT, a CANCELLED and a pre-G7b receipt of item X @ A.
+        PurchaseOrder draftOrder = order(f, itemX, "40");
+        receiptService.createDraft(new GoodsReceiptDraftCreateRequest(draftOrder.getPurchaseOrderId(),
+                LocalDate.now(ZoneId.of(ZONE)), null, null, List.of(new GoodsReceiptDraftLineRequest(null,
+                orderLineId(draftOrder), new BigDecimal("4"), null, null))), null);
+        GoodsReceiptResponse cancelled = posted(order(f, itemX, "40"), "6", null);
+        jdbc.update("update goods_receipts set status = 'CANCELLED', cancelled_at = now() where goods_receipt_id = ?", cancelled.goodsReceiptId());
+        GoodsReceiptResponse legacy = posted(order(f, itemX, "40"), "9", null);
+        jdbc.update("update goods_receipts set quality_held = false where goods_receipt_id = ?", legacy.goodsReceiptId());
+
+        // Item X @ B (another plant): pending 11, kept apart from A.
+        posted(order(f, plantB, warehouseB, itemX, "40"), "11", null);
+        // Item Y @ A: pending 3, only when asked for.
+        posted(order(f, itemY, "40"), "3", null);
+        // A lot line of a lot-tracked item @ A: its quantity lives on the lot, never in this sum.
+        posted(order(f, lotItem, "40"), "2", "LOT-" + f.suffix());
+
+        Map<String, PurchaseQcHoldProjection> onlyA = byItemAndWarehouse(receiptLineRepository.sumNonLotQualityHold(
+                List.of(itemX.getItemId(), lotItem.getItemId()), List.of(whA), GoodsReceiptStatus.POSTED));
+        assertThat(onlyA).containsOnlyKeys(itemX.getItemId() + "@" + whA);
+        assertThat(onlyA.get(itemX.getItemId() + "@" + whA).getPendingQuantity()).isEqualByComparingTo("12.5");
+        assertThat(onlyA.get(itemX.getItemId() + "@" + whA).getRejectedQuantity()).isEqualByComparingTo("8");
+
+        Map<String, PurchaseQcHoldProjection> both = byItemAndWarehouse(receiptLineRepository.sumNonLotQualityHold(
+                List.of(itemX.getItemId(), itemY.getItemId(), lotItem.getItemId()), List.of(whA, whB),
+                GoodsReceiptStatus.POSTED));
+        assertThat(both).containsOnlyKeys(itemX.getItemId() + "@" + whA, itemX.getItemId() + "@" + whB,
+                itemY.getItemId() + "@" + whA);
+        assertThat(both.get(itemX.getItemId() + "@" + whA).getPendingQuantity()).isEqualByComparingTo("12.5");
+        assertThat(both.get(itemX.getItemId() + "@" + whB).getPendingQuantity()).isEqualByComparingTo("11");
+        assertThat(both.get(itemX.getItemId() + "@" + whB).getRejectedQuantity()).isEqualByComparingTo("0");
+        assertThat(both.get(itemY.getItemId() + "@" + whA).getPendingQuantity()).isEqualByComparingTo("3");
+
+        // The lookup the aggregate screen uses: one warehouse, keyed by item.
+        Map<UUID, PurchaseQcLookupService.QualityHold> holds = purchaseQcLookupService.nonLotQualityHoldByItem(
+                whA, List.of(itemX.getItemId(), itemY.getItemId(), lotItem.getItemId()));
+        assertThat(holds).containsOnlyKeys(itemX.getItemId(), itemY.getItemId());
+        assertThat(holds.get(itemX.getItemId()).pendingQuantity()).isEqualByComparingTo("12.5");
+        assertThat(holds.get(itemX.getItemId()).rejectedQuantity()).isEqualByComparingTo("8");
+    }
+
+    /**
+     * CF-3 end to end (FE fixture): a non-tracked receipt of 25 goes on hold; QC 10/5 then 10/0. The aggregate row's
+     * quality hold is fully explained by purchase QC at each step — pending and rejected, nothing unclassified.
+     */
+    @Test
+    void aggregateBalance_breaksTheQualityHoldDownIntoPendingAndRejectedPurchaseQc() {
+        Fixture f = fixture();
+        Item item = item(f, false);
+        GoodsReceiptResponse receipt = posted(order(f, item, "40"), "25", null);
+        UUID lineId = receipt.lines().get(0).goodsReceiptLineId();
+
+        StockBalanceAggregateResponse onHold = aggregateRow(f, item);
+        assertThat(onHold.pendingPurchaseQcQuantity()).isEqualByComparingTo("25");
+        assertThat(onHold.qualityHoldQuantity()).isEqualByComparingTo("25");
+        assertThat(onHold.availableQuantity()).isEqualByComparingTo("0");
+        assertThat(onHold.qualityBreakdownKnown()).isTrue();
+
+        PurchaseQcDecisionResult first = qualityService.decide(receipt.goodsReceiptId(), lineId,
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("10"), new BigDecimal("5"), "5 kg failed"), null);
+
+        StockBalanceAggregateResponse afterFirst = aggregateRow(f, item);
+        assertThat(afterFirst.onHandQuantity()).isEqualByComparingTo("25");
+        assertThat(afterFirst.qualityHoldQuantity()).isEqualByComparingTo("15");
+        assertThat(afterFirst.availableQuantity()).isEqualByComparingTo("10");
+        assertThat(afterFirst.pendingPurchaseQcQuantity()).isEqualByComparingTo("10");
+        assertThat(afterFirst.rejectedPurchaseQcQuantity()).isEqualByComparingTo("5");
+        assertThat(afterFirst.unclassifiedQualityHoldQuantity()).isEqualByComparingTo("0");
+        assertThat(afterFirst.qualityBreakdownKnown()).isTrue();
+
+        qualityService.decide(receipt.goodsReceiptId(), lineId,
+                new PurchaseQcDecisionRequest(first.receiptVersion(), new BigDecimal("10"), BigDecimal.ZERO, null), null);
+
+        StockBalanceAggregateResponse afterSecond = aggregateRow(f, item);
+        assertThat(afterSecond.onHandQuantity()).isEqualByComparingTo("25");
+        assertThat(afterSecond.qualityHoldQuantity()).isEqualByComparingTo("5");
+        assertThat(afterSecond.availableQuantity()).isEqualByComparingTo("20");
+        assertThat(afterSecond.pendingPurchaseQcQuantity()).isEqualByComparingTo("0");
+        assertThat(afterSecond.rejectedPurchaseQcQuantity()).isEqualByComparingTo("5");
+        assertThat(afterSecond.unclassifiedQualityHoldQuantity()).isEqualByComparingTo("0");
+        assertThat(afterSecond.qualityBreakdownKnown()).isTrue();
+    }
+
+    private StockBalanceAggregateResponse aggregateRow(Fixture f, Item item) {
+        List<StockBalanceAggregateResponse> rows = inventoryService.listAggregateBalances(f.warehouse().getWarehouseId(),
+                item.getItemId(), null, PageRequest.of(0, 20)).content();
+        assertThat(rows).hasSize(1);
+        return rows.get(0);
+    }
+
+    private UUID orderLineId(PurchaseOrder order) {
+        return jdbc.queryForObject("select purchase_order_line_id from purchase_order_lines where purchase_order_id = ?",
+                UUID.class, order.getPurchaseOrderId());
+    }
+
+    private static Map<String, PurchaseQcHoldProjection> byItemAndWarehouse(List<PurchaseQcHoldProjection> rows) {
+        Map<String, PurchaseQcHoldProjection> map = new HashMap<>();
+        rows.forEach(row -> assertThat(map.put(row.getItemId() + "@" + row.getWarehouseId(), row)).isNull());
+        return map;
     }
 
     private void assertRefused(Item item, Fixture f, UUID lotId, String delta, String key) {

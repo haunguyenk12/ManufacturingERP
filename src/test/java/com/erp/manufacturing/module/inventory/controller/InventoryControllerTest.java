@@ -8,6 +8,7 @@ import com.erp.manufacturing.common.security.IpExtractor;
 import com.erp.manufacturing.common.security.JwtTokenProvider;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.config.RateLimitProperties;
+import com.erp.manufacturing.module.inventory.dto.StockBalanceAggregateResponse;
 import com.erp.manufacturing.module.inventory.dto.StockBalanceResponse;
 import com.erp.manufacturing.module.inventory.dto.StockCountRequest;
 import com.erp.manufacturing.module.inventory.dto.StockCountResponse;
@@ -315,5 +316,25 @@ class InventoryControllerTest {
                 .andExpect(status().isOk());
 
         verify(inventoryService).listAggregateBalances(eq(WAREHOUSE_ID), eq(null), eq("steel"), any());
+    }
+
+    @Test
+    @DisplayName("balances/aggregate: the CF-3 purchase-QC breakdown of the quality hold reaches the wire")
+    void aggregate_exposesThePurchaseQcBreakdownOfTheQualityHold() throws Exception {
+        when(inventoryService.listAggregateBalances(eq(WAREHOUSE_ID), eq(null), eq(null), any()))
+                .thenReturn(PageResult.from(new PageImpl<>(List.of(new StockBalanceAggregateResponse(
+                        ITEM_ID, "RAW-1", "Raw", "KG", WAREHOUSE_ID, new BigDecimal("25"), BigDecimal.ZERO,
+                        new BigDecimal("10"), new BigDecimal("16"), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 0L,
+                        Instant.parse("2026-10-28T00:00:00Z"), new BigDecimal("10"), new BigDecimal("5"),
+                        new BigDecimal("1"), false)))));
+
+        mockMvc.perform(get("/v1/inventory/balances/aggregate").param("warehouseId", WAREHOUSE_ID.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.result.content[0].qualityHoldQuantity").value(16))
+                .andExpect(jsonPath("$.result.content[0].pendingPurchaseQcQuantity").value(10))
+                .andExpect(jsonPath("$.result.content[0].rejectedPurchaseQcQuantity").value(5))
+                .andExpect(jsonPath("$.result.content[0].unclassifiedQualityHoldQuantity").value(1))
+                .andExpect(jsonPath("$.result.content[0].qualityBreakdownKnown").value(false));
     }
 }

@@ -6,6 +6,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -26,5 +31,23 @@ public class PurchaseQcLookupService {
     @Transactional(readOnly = true)
     public boolean isAwaitingPurchaseQc(UUID lotId) {
         return lotId != null && goodsReceiptLineRepository.existsPendingQualityForLot(lotId, GoodsReceiptStatus.POSTED);
+    }
+
+    /** CF-3: pending and rejected purchase-QC quantity still held on non-lot stock, one row per item and warehouse. */
+    public record QualityHold(BigDecimal pendingQuantity, BigDecimal rejectedQuantity) {
+        public static final QualityHold NONE = new QualityHold(BigDecimal.ZERO, BigDecimal.ZERO);
+    }
+
+    /** One aggregate query for a whole page of rows (C14); a key absent from the map has nothing held by purchase QC. */
+    @Transactional(readOnly = true)
+    public Map<UUID, QualityHold> nonLotQualityHoldByItem(UUID warehouseId, Collection<UUID> itemIds) {
+        if (itemIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, QualityHold> holds = new HashMap<>();
+        goodsReceiptLineRepository.sumNonLotQualityHold(itemIds, List.of(warehouseId), GoodsReceiptStatus.POSTED)
+                .forEach(row -> holds.put(row.getItemId(),
+                        new QualityHold(row.getPendingQuantity(), row.getRejectedQuantity())));
+        return holds;
     }
 }
