@@ -45,6 +45,8 @@ import com.erp.manufacturing.module.workorder.service.execution.WipTransactionSe
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -216,6 +218,75 @@ class WorkOrderServiceTest {
         assertThat(response.componentLines()).hasSize(1);
         assertThat(response.componentLines().get(0).requiredQuantity()).isEqualByComparingTo("22");
         assertThat(response.notes()).isEqualTo("First run");
+    }
+
+    /**
+     * CF-11 (B273): {@code required = planned × quantityPer × (1 + scrapRate)}, rounded HALF_UP to the
+     * column's 6 decimals in Java, so the create response equals what Postgres stores and reads back.
+     * Rows 4 and 5 carry a 7th digit: 1.2000012 → 1.200001 tells HALF_UP from CEILING (MRP's rounding,
+     * which would give 1.200002), and 1.5000015 → 1.500002 tells it from HALF_DOWN / FLOOR.
+     */
+    @ParameterizedTest(name = "planned {0} x {1} x (1 + {2}) = {3}")
+    @CsvSource({
+            "10,  2,        0.100000, 22.000000",
+            "5,   2,        0.100000, 11.000000",
+            "10,  2,        0,        20.000000",
+            "1.2, 1.000001, 0,        1.200001",
+            "1.5, 1.000001, 0,        1.500002"
+    })
+    void create_requiredQuantityIsRoundedHalfUpToSixDecimals(String planned, String quantityPer, String scrapRate,
+                                                             String expected) {
+        UUID companyId = UUID.randomUUID();
+        UUID plantId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        Plant plant = plant(plantId, companyId, OrganizationStatus.ACTIVE);
+        Item product = item(productId, companyId, "FG-100", ItemType.FINISHED_GOOD, false);
+        BomHeader bom = activeBom(product);
+        bom.getLines().add(bomLine(bom, item(UUID.randomUUID(), companyId, "RM-001", ItemType.RAW_MATERIAL, false),
+                10, quantityPer, scrapRate));
+        when(organizationLookupService.getActivePlant(plantId)).thenReturn(plant);
+        when(workOrderRepository.existsByPlantPlantIdAndWorkOrderNo(plantId, "WO-001")).thenReturn(false);
+        when(itemLookupService.getActiveItem(productId)).thenReturn(product);
+        when(organizationLookupService.getActiveWarehouseInPlant(warehouseId, plantId))
+                .thenReturn(warehouse(warehouseId, plant, OrganizationStatus.ACTIVE));
+        when(bomLookupService.getActiveBom(companyId, productId)).thenReturn(bom);
+        stubSaveReturningArgument();
+
+        WorkOrderResponse response = service.create(plantId, new WorkOrderCreateRequest(
+                "WO-001", productId, warehouseId, new BigDecimal(planned), null, null, null));
+
+        ArgumentCaptor<WorkOrder> saved = ArgumentCaptor.forClass(WorkOrder.class);
+        verify(workOrderRepository).save(saved.capture());
+        BigDecimal stored = saved.getValue().getComponentLines().get(0).getRequiredQuantity();
+        // isEqualTo, not isEqualByComparingTo: the scale is part of the contract.
+        assertThat(stored).isEqualTo(new BigDecimal(expected));
+        assertThat(stored.scale()).isEqualTo(6);
+        assertThat(response.componentLines().get(0).requiredQuantity()).isEqualTo(new BigDecimal(expected));
+    }
+
+    /** CF-11: a PATCH of plannedQuantity on a draft recalculates with the same rounding as create. */
+    @ParameterizedTest(name = "PATCH planned {0} x {1} x (1 + {2}) = {3}")
+    @CsvSource({
+            "5,   2,        0.100000, 11.000000",
+            "1.2, 1.000001, 0,        1.200001"
+    })
+    void update_plannedQuantity_recalculatesRequiredQuantityWithTheSameRounding(String planned, String quantityPer,
+                                                                                String scrapRate, String expected) {
+        WorkOrder workOrder = workOrder(WorkOrderStatus.DRAFT, new BigDecimal("10"));
+        WorkOrderComponentLine line = workOrder.getComponentLines().get(0);
+        line.setQuantityPer(new BigDecimal(quantityPer));
+        line.setScrapRate(new BigDecimal(scrapRate));
+        when(workOrderRepository.findWithDetailsByWorkOrderId(workOrder.getWorkOrderId()))
+                .thenReturn(Optional.of(workOrder));
+        when(workOrderRepository.saveAndFlush(workOrder)).thenReturn(workOrder);
+
+        WorkOrderResponse response = service.update(workOrder.getWorkOrderId(), new WorkOrderUpdateRequest(
+                null, new BigDecimal(planned), null, null, null, 0L, null), null);
+
+        assertThat(line.getRequiredQuantity()).isEqualTo(new BigDecimal(expected));
+        assertThat(line.getRequiredQuantity().scale()).isEqualTo(6);
+        assertThat(response.componentLines().get(0).requiredQuantity()).isEqualTo(new BigDecimal(expected));
     }
 
     // ── routing snapshot (F4) ──────────────────────────────────────────────

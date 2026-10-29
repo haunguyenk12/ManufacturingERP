@@ -53,8 +53,9 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         assertThat(current).isNotNull();
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
-        // V93 (MRP pending purchase-QC snapshot) is CF-4; V94 (captured capacity on operations) is CF-5.
-        assertThat(current.getVersion().getVersion()).isEqualTo("94");
+        // V93 (MRP pending purchase-QC snapshot) is CF-4; V94 (captured capacity on operations) is CF-5;
+        // V95 (case-insensitive lot code index) is CF-9.
+        assertThat(current.getVersion().getVersion()).isEqualTo("95");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);
@@ -1132,6 +1133,96 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
             statement.execute(update.formatted("1", "0", "0"));
             statement.execute(update.formatted("null", "null", "null"));
         }
+    }
+
+    /**
+     * CF-9: after V95 a lot code is unique per item regardless of letter case. {@code LOT-X} and
+     * {@code lot-x} of one item collide on {@code uk_inventory_lots_item_code_ci} (V8's index alone
+     * compares case-sensitively and lets both in); the same code on another item is still allowed.
+     */
+    @Test
+    void migrate_v95_rejectsACaseOnlyDuplicateLotCodeOfOneItem_allowsItOnAnotherItem() throws Exception {
+        String schema = "flyway_v95_lot_code_ci";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111119501";
+        String itemA = "55555555-5555-4555-8555-555555559501";
+        String itemB = "55555555-5555-4555-8555-555555559502";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            seedV95CompanyAndItems(statement, company, itemA, itemB);
+            statement.execute("insert into inventory_lots (item_id, lot_code) values ('%s', 'LOT-X')".formatted(itemA));
+
+            assertThatThrownBy(() -> statement.execute(
+                    "insert into inventory_lots (item_id, lot_code) values ('%s', 'lot-x')".formatted(itemA)))
+                    .hasMessageContaining("uk_inventory_lots_item_code_ci");
+
+            statement.execute("insert into inventory_lots (item_id, lot_code) values ('%s', 'lot-x')".formatted(itemB));
+            try (ResultSet rows = statement.executeQuery("select count(*) from inventory_lots")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getInt(1)).isEqualTo(2);
+            }
+            try (ResultSet rows = statement.executeQuery("""
+                    select count(*) from pg_indexes
+                    where schemaname = '%s' and indexname = 'uk_inventory_lots_item_code_ci'
+                    """.formatted(schema))) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getInt(1)).isEqualTo(1);
+            }
+        }
+    }
+
+    /**
+     * CF-9: V95 refuses to run on a database that already holds two lots of one item whose codes
+     * differ only by case — merging or renaming a lot rewrites stock history and needs a person. The
+     * chain must stop at V94, not silently pick one of the two.
+     */
+    @Test
+    void migrate_v95_failsOnADatabaseThatAlreadyHoldsACaseOnlyDuplicate() throws Exception {
+        String schema = "flyway_v95_existing_duplicate";
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .target("94")
+                .load()
+                .migrate();
+
+        String company = "11111111-1111-4111-8111-111111119511";
+        String itemA = "55555555-5555-4555-8555-555555559511";
+        String itemB = "55555555-5555-4555-8555-555555559512";
+        try (Connection connection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.execute("SET search_path TO " + schema);
+            seedV95CompanyAndItems(statement, company, itemA, itemB);
+            statement.execute("insert into inventory_lots (item_id, lot_code) values ('%s', 'LOT-X')".formatted(itemA));
+            statement.execute("insert into inventory_lots (item_id, lot_code) values ('%s', 'lot-x')".formatted(itemA));
+        }
+
+        Flyway flyway = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .load();
+
+        assertThatThrownBy(flyway::migrate).hasMessageContaining("uk_inventory_lots_item_code_ci");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("94");
+    }
+
+    private void seedV95CompanyAndItems(Statement statement, String company, String itemA, String itemB)
+            throws SQLException {
+        statement.execute("insert into companies (company_id, code, name) values ('%s', 'V95', 'V95')".formatted(company));
+        statement.execute(("insert into items (item_id, company_id, code, name, type, unit, lot_tracked) values"
+                + " ('%s', '%s', 'RAW-A', 'RAW-A', 'RAW_MATERIAL', 'EA', true),"
+                + " ('%s', '%s', 'RAW-B', 'RAW-B', 'RAW_MATERIAL', 'EA', true)").formatted(itemA, company, itemB, company));
     }
 
     private Set<String> granted(String roleCode, List<String> codes) throws Exception {

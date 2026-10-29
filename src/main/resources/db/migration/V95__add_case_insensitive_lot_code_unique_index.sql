@@ -1,0 +1,17 @@
+-- CF-9: a lot code is unique per item regardless of letter case.
+--
+-- Every service that creates a lot already compares codes case-insensitively, but only at the
+-- application layer: two concurrent receipts of LOT-X and lot-x for the same item both pass that
+-- check and both insert, because uk_inventory_lots_item_code (V8) compares case-sensitively.
+-- This index is the guarantee the services were assuming.
+--
+-- No trim is needed: chk_inventory_lots_code_trimmed already rejects untrimmed codes.
+-- uk_inventory_lots_item_code is kept: dropping it adds no protection, and old migrations stay
+-- untouched.
+--
+-- If the database already holds two lots of one item whose codes differ only by case, this
+-- statement fails and Flyway stops. That is deliberate: merging or renaming a lot rewrites stock
+-- history and needs a person to decide (BE_GAP_NEXT_PLAN.md 12.6, PO gate). Find them with
+--   select item_id, lower(lot_code), count(*) from inventory_lots
+--   group by item_id, lower(lot_code) having count(*) > 1;
+CREATE UNIQUE INDEX uk_inventory_lots_item_code_ci ON inventory_lots (item_id, lower(lot_code));

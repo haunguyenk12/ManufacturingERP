@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.routing.dto;
 
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -13,6 +14,6 @@ public record RoutingOperationRequest(
         @NotNull @Positive Integer sequence,
         @NotBlank @Size(max = 255) String name,
         @NotNull UUID workCenterId,
-        @NotNull @PositiveOrZero BigDecimal setupMinutes,
-        @NotNull @PositiveOrZero BigDecimal runMinutesPerUnit
+        @NotNull @PositiveOrZero @Digits(integer = 13, fraction = 6) BigDecimal setupMinutes,
+        @NotNull @PositiveOrZero @Digits(integer = 13, fraction = 6) BigDecimal runMinutesPerUnit
 ) {}

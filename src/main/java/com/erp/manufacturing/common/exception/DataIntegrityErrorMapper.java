@@ -45,9 +45,14 @@ final class DataIntegrityErrorMapper {
      * ({@code .claude/rules/coding-rules.md} §11.5).
      */
     private static final Map<String, Mapping> KNOWN = Map.of(
-            // Two constraints, one meaning: the lot code is taken, or it is blank/untrimmed and
+            // Three constraints, one meaning: the lot code is taken, or it is blank/untrimmed and
             // would collide with one that is. Both were already special-cased before EH-3.
             "uk_inventory_lots_item_code", new Mapping(
+                    BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
+                    BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.message()),
+            // CF-9: the case-insensitive twin of the first entry; the loser of two concurrent
+            // receipts of LOT-X / lot-x hits it at commit, outside every service-level check.
+            "uk_inventory_lots_item_code_ci", new Mapping(
                     BusinessErrorCode.LOT_CODE_ALREADY_EXISTS,
                     BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.message()),
             "chk_inventory_lots_code_trimmed", new Mapping(

@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.planning.dto;
 
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
@@ -11,5 +12,5 @@ public record ProductionEstimateRequest(
         @NotNull UUID productItemId,
         @NotNull ScopeResourceType scopeType,
         @NotNull UUID scopeId,
-        @NotNull @Positive BigDecimal targetQuantity
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal targetQuantity
 ) {}

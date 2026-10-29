@@ -49,6 +49,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -616,16 +617,26 @@ public class WorkOrderService {
 
     private void recalculateRequirements(WorkOrder workOrder, BigDecimal plannedQuantity) {
         for (WorkOrderComponentLine line : workOrder.getComponentLines()) {
-            line.setRequiredQuantity(plannedQuantity
-                    .multiply(line.getQuantityPer())
-                    .multiply(BigDecimal.ONE.add(line.getScrapRate())));
+            line.setRequiredQuantity(requiredQuantity(plannedQuantity, line.getQuantityPer(), line.getScrapRate()));
         }
     }
 
     private BigDecimal requiredQuantity(BigDecimal plannedQuantity, BomLine bomLine) {
+        return requiredQuantity(plannedQuantity, bomLine.getQuantityPer(), bomLine.getScrapRate());
+    }
+
+    /**
+     * CF-11 (B273): {@code planned × quantityPer × (1 + scrapRate)}, rounded HALF_UP to the column's
+     * 6 decimals here rather than by Postgres on write, so the response of the create call equals
+     * what is stored and read back. MRP rounds the same product UP instead (B179), so a line can sit
+     * up to 1e-6 below the run that proposed it — MRP plans over, never under.
+     */
+    private static BigDecimal requiredQuantity(BigDecimal plannedQuantity, BigDecimal quantityPer,
+                                               BigDecimal scrapRate) {
         return plannedQuantity
-                .multiply(bomLine.getQuantityPer())
-                .multiply(BigDecimal.ONE.add(bomLine.getScrapRate()));
+                .multiply(quantityPer)
+                .multiply(BigDecimal.ONE.add(scrapRate))
+                .setScale(6, RoundingMode.HALF_UP);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.planning.dto;
 
 import com.erp.manufacturing.module.planning.domain.PlanningDemandType;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -16,7 +17,7 @@ public record PlanningDemandCreateRequest(
         @NotNull UUID itemId,
         UUID warehouseId,
         PlanningDemandType demandType,
-        @NotNull @Positive BigDecimal requiredQuantity,
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal requiredQuantity,
         @NotNull LocalDate dueDate,
         @PositiveOrZero Integer priority,
         @Size(max = 80) String referenceType,

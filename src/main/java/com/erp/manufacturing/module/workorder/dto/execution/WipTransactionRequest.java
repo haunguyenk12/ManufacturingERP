@@ -1,6 +1,7 @@
 package com.erp.manufacturing.module.workorder.dto.execution;
 
 import com.erp.manufacturing.module.workorder.domain.WipTransactionType;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -17,7 +18,7 @@ public record WipTransactionRequest(
          */
         UUID workOrderOperationId,
         @Size(max = 80) String stageCode,
-        @NotNull @Positive BigDecimal quantity,
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal quantity,
         Instant occurredAt,
         @Size(max = 1000) String note
 ) {}

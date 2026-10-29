@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.sales.dto;
 
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
@@ -13,6 +14,6 @@ import java.util.UUID;
  */
 public record SalesOrderLineRequest(
         @NotNull UUID itemId,
-        @NotNull @Positive BigDecimal orderedQuantity,
+        @NotNull @Positive @Digits(integer = 13, fraction = 6) BigDecimal orderedQuantity,
         @NotNull LocalDate dueDate
 ) {}

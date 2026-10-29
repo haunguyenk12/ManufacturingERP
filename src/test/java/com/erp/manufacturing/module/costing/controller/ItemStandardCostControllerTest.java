@@ -29,6 +29,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -98,6 +99,44 @@ class ItemStandardCostControllerTest {
                 .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
                 .andExpect(jsonPath("$.errors[0].field").value("materialCost"))
                 .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    /**
+     * CF-10: a 7th decimal does not fit NUMERIC(19,6). Before @Digits it was accepted, echoed unrounded
+     * and stored rounded; now it is a 400 naming the field, and the service is never reached.
+     */
+    @Test
+    @DisplayName("upsert: a 7th decimal returns 400 VALIDATION_ERROR naming the field, service untouched")
+    void upsert_seventhDecimal_returns400WithFieldError() throws Exception {
+        mockMvc.perform(put("/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"materialCost":5,"laborCost":1.1234567,"overheadCost":1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors.length()").value(1))
+                .andExpect(jsonPath("$.errors[0].field").value("laborCost"))
+                .andExpect(jsonPath("$.result").doesNotExist());
+
+        verifyNoInteractions(itemStandardCostService);
+    }
+
+    /** A decimal sent as a JSON string is read into BigDecimal and then bounded the same way. */
+    @Test
+    @DisplayName("upsert: a 7th decimal sent as a JSON string gets the same 400")
+    void upsert_seventhDecimalAsJsonString_returnsTheSame400() throws Exception {
+        mockMvc.perform(put("/v1/companies/" + COMPANY_ID + "/items/" + ITEM_ID + "/standard-cost")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"materialCost":5,"laborCost":"1.1234567","overheadCost":1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ValidationErrorCode.INVALID_INPUT.code()))
+                .andExpect(jsonPath("$.errors.length()").value(1))
+                .andExpect(jsonPath("$.errors[0].field").value("laborCost"));
+
+        verifyNoInteractions(itemStandardCostService);
     }
 
     @Test

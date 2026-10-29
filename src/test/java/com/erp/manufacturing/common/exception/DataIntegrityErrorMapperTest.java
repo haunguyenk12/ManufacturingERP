@@ -73,6 +73,24 @@ class DataIntegrityErrorMapperTest {
         assertThat(trimmed.code()).isEqualTo(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS);
     }
 
+    /**
+     * CF-9: the loser of two concurrent receipts of {@code LOT-X} / {@code lot-x} trips the V95
+     * case-insensitive index at commit, past every service check. It must still read as "the lot code
+     * is taken", not as the generic {@code RESOURCE_ALREADY_EXISTS} the {@code uk_} prefix would give —
+     * both are 409, so only the code tells the client which field to fix.
+     */
+    @Test
+    @DisplayName("the case-insensitive lot code index means the lot code is taken")
+    void caseInsensitiveLotCodeIndex_isLotCodeAlreadyExists() {
+        DataIntegrityErrorMapper.Mapping mapping = DataIntegrityErrorMapper.resolve(
+                "ERROR: duplicate key value violates unique constraint \"uk_inventory_lots_item_code_ci\"\n"
+                        + "  Detail: Key (item_id, lower(lot_code::text))=(1, lot-x) already exists.");
+
+        assertThat(mapping.code()).isEqualTo(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS);
+        assertThat(mapping.code().status().value()).isEqualTo(409);
+        assertThat(mapping.message()).isEqualTo(BusinessErrorCode.LOT_CODE_ALREADY_EXISTS.message());
+    }
+
     @Test
     @DisplayName("a mapped constraint can carry its own message")
     void mappedConstraint_carriesItsOwnMessage() {
