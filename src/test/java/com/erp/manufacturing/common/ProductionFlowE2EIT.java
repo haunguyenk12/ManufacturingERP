@@ -142,6 +142,21 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
     @Autowired UserRepository userRepository;
     @Autowired com.erp.manufacturing.module.sales.repository.CustomerRepository customerRepository;
     @Autowired InventoryAvailabilityService availabilityService;
+    // CF-13: lock holder, revocation, flush-before-failure.
+    @Autowired org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    @Autowired jakarta.persistence.EntityManager entityManager;
+    @Autowired com.erp.manufacturing.module.organization.repository.RoleRepository roleRepository;
+    @Autowired com.erp.manufacturing.module.organization.repository.AccessScopeRepository accessScopeRepository;
+    @Autowired com.erp.manufacturing.module.organization.repository.AccessScopeResourceRepository accessScopeResourceRepository;
+    @Autowired com.erp.manufacturing.module.organization.repository.UserRoleAssignmentRepository userRoleAssignmentRepository;
+    /**
+     * CF-13 A40: a spy that delegates to the real repository (Boot spies a Spring Data proxy with {@code delegatesTo});
+     * only that test stubs it, and Mockito resets it after each test. It is this class's own context either way — the
+     * only {@code @SpringBootTest} — so no other test class pays for a second context.
+     */
+    @org.springframework.boot.test.mock.mockito.SpyBean
+    com.erp.manufacturing.module.workorder.repository.ProductionCostRunRepository costRunRepository;
 
     private RequestPostProcessor asAdmin;
     private Fixture fixture;
@@ -847,6 +862,261 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         // Closing never moved stock: on hand is still the 10 received (FE §3.6).
         assertThat(onHandQuantity(product.itemId, fixture.warehouseId)).isEqualByComparingTo(ORDERED_QUANTITY);
     }
+
+    /**
+     * CF-13 / FE A39: the closer's assignment is revoked while its finalize waits for the work order row lock. The
+     * {@code @PreAuthorize} check passed before the wait, so only the re-check under the lock can stop it: 403, and
+     * nothing of the finalize lands — run still a preview, no value entry, the work order neither closed nor moved on,
+     * no idempotency record. The same request by an admin then closes it, so the work order was ready: the 403 was the
+     * revocation and nothing else.
+     */
+    @Test
+    @DisplayName("CF-13 A39: a close permission revoked while waiting for the lock is refused, nothing written")
+    void productionCost_permissionRevokedWhileWaitingForTheLock_isRefusedAndNothingIsWritten() throws Exception {
+        Finalizable ready = prepareFinalizable("A39");
+        CloserGrant closer = closerOnPlant(fixture.plantId);
+        String key = "E2E-A39-FIN-" + fixture.suffix;
+        String body = json(finalizeBody(ready.version(), ready.sourceVersion(), ready.runId()));
+        long movementsBefore = stockMovementRepository.count();
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch lockHeld = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseLock = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.Future<Object> holder = pool.submit(() -> transactionTemplate.execute(status -> {
+            jdbcTemplate.queryForList("select 1 from work_orders where work_order_id = ? for update", ready.workOrderId());
+            lockHeld.countDown();
+            awaitLatch(releaseLock);
+            return null;
+        }));
+        awaitLatch(lockHeld);
+        java.util.concurrent.Future<MvcResult> finalize = pool.submit(() -> mockMvc.perform(
+                post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
+                        .contentType(MediaType.APPLICATION_JSON).with(authentication(closer.authentication()))
+                        .header("Idempotency-Key", key).content(body)).andReturn());
+
+        awaitBlockedOn("%from work_orders where work_order_id%for update%");
+        assertThat(jdbcTemplate.update("update user_role_assignments set status = 'INACTIVE' where assignment_id = ?",
+                closer.assignmentId())).isEqualTo(1);
+        releaseLock.countDown();
+        holder.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        MvcResult refused = finalize.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        pool.shutdown();
+
+        assertThat(refused.getResponse().getStatus()).as(refused.getResponse().getContentAsString()).isEqualTo(403);
+        assertThat(objectMapper.readTree(refused.getResponse().getContentAsString()).get("code").asText())
+                .isEqualTo("PERMISSION_DENIED");
+        assertNothingFinalized(ready, key, movementsBefore);
+
+        // Control: the same finalize by someone still allowed goes through.
+        result(post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
+                .header("Idempotency-Key", "E2E-A39-ADMIN-" + fixture.suffix).content(body), 200);
+        assertThat(workOrderRepository.findById(ready.workOrderId()).orElseThrow().getStatus())
+                .isEqualTo(WorkOrderStatus.CLOSED);
+    }
+
+    /**
+     * CF-13 / FE A40: a failure after every write of the finalize has reached the database (value entries saved, the
+     * run turned FINALIZED, all flushed) rolls everything back — run, entries, work order, idempotency record, stock.
+     * The retry with the same key then finalizes exactly once, and a further retry is a replay.
+     */
+    @Test
+    @DisplayName("CF-13 A40: a failure midway rolls the whole finalize back; the retry finalizes once")
+    void productionCost_failureMidwayRollsEverythingBack_andTheRetryFinalizesOnce() throws Exception {
+        Finalizable ready = prepareFinalizable("A40");
+        String key = "E2E-A40-FIN-" + fixture.suffix;
+        String body = json(finalizeBody(ready.version(), ready.sourceVersion(), ready.runId()));
+        long movementsBefore = stockMovementRepository.count();
+        org.mockito.stubbing.Answer<?> realSave = org.mockito.Mockito.mockingDetails(costRunRepository)
+                .getMockCreationSettings().getDefaultAnswer();
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicLong entriesWrittenBeforeFailure = new java.util.concurrent.atomic.AtomicLong(-1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Object saved = realSave.answer(invocation);
+            com.erp.manufacturing.module.workorder.domain.ProductionCostRun run = invocation.getArgument(0);
+            if (run.isFinalized() && failed.compareAndSet(false, true)) {
+                entityManager.flush();
+                entriesWrittenBeforeFailure.set(((Number) entityManager.createNativeQuery(
+                                "select count(*) from production_cost_adjustments where run_id = :run")
+                        .setParameter("run", run.getRunId()).getSingleResult()).longValue());
+                throw new IllegalStateException("CF-13 injected failure after the finalize writes were flushed");
+            }
+            return saved;
+        }).when(costRunRepository).save(org.mockito.ArgumentMatchers.any(
+                com.erp.manufacturing.module.workorder.domain.ProductionCostRun.class));
+
+        mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
+                        .header("Idempotency-Key", key).content(body)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_SERVER_ERROR"));
+        assertThat(failed).isTrue();
+        assertThat(entriesWrittenBeforeFailure.get()).as("value entries were in the database before the failure")
+                .isEqualTo(1);
+        assertNothingFinalized(ready, key, movementsBefore);
+
+        JsonNode retried = result(post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
+                .header("Idempotency-Key", key).content(body), 200);
+        assertThat(uuid(retried, "runId")).isEqualTo(ready.runId());
+        assertThat(retried.get("workOrderVersion").asLong()).isEqualTo(ready.version() + 1);
+        JsonNode replayed = result(post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
+                .header("Idempotency-Key", key).content(body), 200);
+        assertThat(replayed.get("workOrderVersion").asLong()).isEqualTo(ready.version() + 1);
+
+        Map<String, Object> run = jdbcTemplate.queryForMap(
+                "select state, run_version from production_cost_runs where run_id = ?", ready.runId());
+        assertThat(run.get("state")).isEqualTo("FINALIZED");
+        assertThat(((Number) run.get("run_version")).intValue()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from production_cost_runs where work_order_id = ? and state = 'FINALIZED'",
+                Integer.class, ready.workOrderId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from production_cost_adjustments where work_order_id = ?",
+                Integer.class, ready.workOrderId())).isEqualTo(1);
+        WorkOrder closed = workOrderRepository.findById(ready.workOrderId()).orElseThrow();
+        assertThat(closed.getStatus()).isEqualTo(WorkOrderStatus.CLOSED);
+        assertThat(closed.getVersion()).isEqualTo(ready.version() + 1);
+        assertThat(stockMovementRepository.count()).isEqualTo(movementsBefore);
+    }
+
+    /** The finalize left no trace: preview run, no value entry, work order untouched, no idempotency record, no stock. */
+    private void assertNothingFinalized(Finalizable ready, String key, long movementsBefore) {
+        Map<String, Object> run = jdbcTemplate.queryForMap(
+                "select state, run_version, finalized_at from production_cost_runs where run_id = ?", ready.runId());
+        assertThat(run.get("state")).isEqualTo("PREVIEW");
+        assertThat(((Number) run.get("run_version")).intValue()).isEqualTo(1);
+        assertThat(run.get("finalized_at")).isNull();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from production_cost_adjustments where work_order_id = ?",
+                Integer.class, ready.workOrderId())).isZero();
+        Map<String, Object> workOrder = jdbcTemplate.queryForMap(
+                "select status, version from work_orders where work_order_id = ?", ready.workOrderId());
+        assertThat(workOrder.get("status")).isEqualTo("COMPLETED");
+        assertThat(((Number) workOrder.get("version")).longValue()).isEqualTo(ready.version());
+        assertThat(jdbcTemplate.queryForObject("select count(*) from work_order_idempotency_records where idempotency_key = ?",
+                Integer.class, key)).isZero();
+        assertThat(stockMovementRepository.count()).isEqualTo(movementsBefore);
+    }
+
+    /**
+     * A work order through the whole G11 flow up to a preview run: rate and price, baseline at release, issue, report,
+     * receipt approved and QC'd — ready for finalize-and-close (the checklist is READY but for the preview it names).
+     */
+    private Finalizable prepareFinalizable(String tag) throws Exception {
+        String prefix = "E2E-" + tag + "-";
+        NonLotFixture product = seedNonLotTrackedFinishedGood();
+        result(put("/v1/companies/{c}/items/{i}/standard-cost", fixture.companyId, fixture.componentId)
+                .content(json(Map.of("materialCost", 1000, "laborCost", 0, "overheadCost", 0))), 200);
+        result(put("/v1/plants/{p}/production-cost-rates/{w}", fixture.plantId, product.workCenterId)
+                .header("Idempotency-Key", prefix + "RATE-" + fixture.suffix)
+                .content(json(Map.of("expectedVersion", 0, "laborRate", 6000, "overheadRate", 3000,
+                        "reason", "E2E operating rate"))), 200);
+        UUID workOrderId = uuid(result(post("/v1/plants/{plantId}/work-orders", fixture.plantId)
+                .content(json(Map.of(
+                        "workOrderNo", "WO-" + tag + "-" + fixture.suffix,
+                        "productItemId", product.itemId,
+                        "outputWarehouseId", fixture.warehouseId,
+                        "plannedQuantity", ORDERED_QUANTITY))), 201), "workOrderId");
+        JsonNode reservations = result(post("/v1/work-orders/{id}/reserve", workOrderId)
+                .content(versionBody(workOrderId)), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
+        JsonNode issue = result(post("/v1/material-issues")
+                .header("Idempotency-Key", prefix + "ISSUE-" + fixture.suffix)
+                .content(json(Map.of(
+                        "workOrderId", workOrderId,
+                        "reservationId", uuid(reservations.get(0), "reservationId"),
+                        "quantity", new BigDecimal(reservations.get(0).get("quantity").asText())))), 201);
+        UUID issueLineId = uuid(issue.get("lines").get(0), "issueLineId");
+        UUID operationId = confirmFirstOperationInput(workOrderId, ORDERED_QUANTITY);
+        result(post("/v1/work-orders/{id}/production-executions", workOrderId)
+                .header("Idempotency-Key", prefix + "EXEC-" + fixture.suffix)
+                .content(json(Map.of("goodQuantity", ORDERED_QUANTITY,
+                        "actualStartedAt", EXEC_STARTED_AT,
+                        "actualEndedAt", EXEC_ENDED_AT,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "workOrderOperationId", operationId,
+                        "consumption", List.of(Map.of("issueLineId", issueLineId,
+                                "quantity", ORDERED_QUANTITY.multiply(QUANTITY_PER)))))), 201);
+        result(post("/v1/work-orders/{id}/operations/{op}/finish", workOrderId, operationId)
+                .content(versionBody(workOrderId)), 200);
+        UUID receiptId = uuid(result(post("/v1/work-orders/{id}/production-receipts", workOrderId)
+                .header("Idempotency-Key", prefix + "RECEIPT-" + fixture.suffix)
+                .content(json(Map.of(
+                        "destinationWarehouseId", fixture.warehouseId,
+                        "quantity", ORDERED_QUANTITY,
+                        "expectedWorkOrderVersion", workOrderVersion(workOrderId),
+                        "receivedOn", plantToday().toString()))), 201), "receiptId");
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        result(post("/v1/work-orders/{id}/production-receipts/{rid}/qc-disposition", workOrderId, receiptId)
+                .content(json(Map.of("result", "AVAILABLE", "reason", "Passed E2E inspection"))), 200);
+
+        String sourceVersion = result(get("/v1/work-orders/{id}/cost-checklist", workOrderId), 200)
+                .get("sourceVersion").asText();
+        long version = workOrderVersion(workOrderId);
+        UUID runId = uuid(result(post("/v1/work-orders/{id}/cost-runs", workOrderId)
+                .header("Idempotency-Key", prefix + "RUN-" + fixture.suffix)
+                .content(json(Map.of("expectedVersion", version, "expectedSourceVersion", sourceVersion))), 200), "runId");
+        assertThat(result(get("/v1/work-orders/{id}/production-costs", workOrderId), 200).get("readiness").asText())
+                .isEqualTo("READY");
+        return new Finalizable(workOrderId, runId, sourceVersion, version);
+    }
+
+    /**
+     * A plain user (not an admin) who may finalize and close on one plant: the seeded MANAGER role (V17 variance read,
+     * V90 close and calculate) through a PLANT scope on that plant.
+     */
+    private CloserGrant closerOnPlant(UUID plantId) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        User user = userRepository.save(User.builder().username("closer-" + suffix).email("closer-" + suffix + "@e2e.local")
+                .password("not-used").status(com.erp.manufacturing.module.user.domain.UserStatus.ACTIVE).build());
+        UUID managerRoleId = roleRepository.findByCodeAndCompanyIdIsNull("MANAGER").orElseThrow().getRoleId();
+        com.erp.manufacturing.module.organization.domain.AccessScope scope = accessScopeRepository.save(
+                com.erp.manufacturing.module.organization.domain.AccessScope.builder()
+                        .code("SC-CLOSE-" + suffix).name("Close scope " + suffix)
+                        .scopeType(com.erp.manufacturing.module.organization.domain.ScopeType.PLANT)
+                        .status(OrganizationStatus.ACTIVE).build());
+        accessScopeResourceRepository.save(com.erp.manufacturing.module.organization.domain.AccessScopeResource.builder()
+                .scopeId(scope.getScopeId())
+                .resourceType(com.erp.manufacturing.module.organization.domain.ScopeResourceType.PLANT)
+                .resourceId(plantId).build());
+        UUID assignmentId = userRoleAssignmentRepository.save(
+                com.erp.manufacturing.module.organization.domain.UserRoleAssignment.builder()
+                        .userId(user.getUserId()).roleId(managerRoleId).scopeId(scope.getScopeId())
+                        .status(com.erp.manufacturing.module.organization.domain.AssignmentStatus.ACTIVE).build())
+                .getAssignmentId();
+        UserPrincipal principal = new UserPrincipal(user, Set.of("MANAGER"), Set.of());
+        return new CloserGrant(new UsernamePasswordAuthenticationToken(principal, null,
+                List.of(new SimpleGrantedAuthority("ROLE_MANAGER"))), assignmentId);
+    }
+
+    /** Bounded poll: some statement matching {@code pattern} is waiting on a row lock. */
+    private void awaitBlockedOn(String pattern) throws InterruptedException {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline) {
+            Integer waiting = jdbcTemplate.queryForObject("""
+                    select count(*) from pg_stat_activity
+                    where datname = current_database() and wait_event_type = 'Lock' and query ilike ?
+                    """, Integer.class, pattern);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("no statement like " + pattern + " blocked on a lock within 30s");
+    }
+
+    private static void awaitLatch(java.util.concurrent.CountDownLatch latch) {
+        try {
+            if (!latch.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IllegalStateException("latch timed out");
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private record Finalizable(UUID workOrderId, UUID runId, String sourceVersion, long version) {}
+
+    private record CloserGrant(Authentication authentication, UUID assignmentId) {}
 
     private Map<String, Object> finalizeBody(long workOrderVersion, String sourceVersion, UUID runId) {
         return Map.of("expectedVersion", workOrderVersion, "expectedSourceVersion", sourceVersion,

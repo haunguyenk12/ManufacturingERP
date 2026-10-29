@@ -11,6 +11,7 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.inventory.service.InventoryService;
 import com.erp.manufacturing.module.inventory.service.InventoryAdjustCommand;
+import com.erp.manufacturing.module.inventory.service.InventoryCountCommand;
 import com.erp.manufacturing.module.inventory.service.InventoryMovementService;
 import com.erp.manufacturing.module.inventory.service.InventoryReceiveCommand;
 import com.erp.manufacturing.module.inventory.service.LotQcOwnershipGuard;
@@ -363,6 +364,118 @@ class PurchaseQualityIT extends AbstractPostgresIntegrationTest {
 
         assertThat(adjusted.created()).isTrue();
         assertThat(lotQuantity(lotId)).isEqualByComparingTo("2");
+    }
+
+    /**
+     * CF-12: a non-tracked item has no lot for the CF-1 guard to look at — its purchase-QC hold lives on the balance
+     * row ({@code qualityHoldQuantity}). After QC 20/5 on 25 received (available 20, hold 5, nothing reserved), neither
+     * a count nor a negative adjustment may eat into the 5 still held: a count below the hold is refused and writes
+     * nothing; a count above it moves only the free part; a negative adjustment is capped by what is available.
+     */
+    @Test
+    void nonTrackedQualityHold_countAndAdjustNeverEatIntoIt() {
+        Fixture f = fixture();
+        Item item = item(f, false);
+        GoodsReceiptResponse receipt = posted(order(f, item, "40"), "25", null);
+        qualityService.decide(receipt.goodsReceiptId(), receipt.lines().get(0).goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("20"), new BigDecimal("5"), "5 kg failed"),
+                null);
+        assertNonLotBalance(item, "25", "0", "5");
+        int movementsBefore = movementCount(item);
+        long version = nonLotBalanceVersion(item);
+
+        // Count 4: below the 5 still on quality hold — refused, nothing written, the row's version untouched.
+        assertThatThrownBy(() -> movementService.count(countCommand(item, f, "4", version), "CF12-C4-" + f.suffix()))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode()).isEqualTo(BusinessErrorCode.STATE_CONFLICT));
+        assertThat(movementCount(item)).isEqualTo(movementsBefore);
+        assertNonLotBalance(item, "25", "0", "5");
+        assertThat(nonLotBalanceVersion(item)).isEqualTo(version);
+
+        // Count 24: one unit of free stock goes; the hold stays whole.
+        var counted = movementService.count(countCommand(item, f, "24", version), "CF12-C24-" + f.suffix());
+        assertThat(counted.movement().getMovementType()).isEqualTo(MovementType.ADJUST_OUT);
+        assertThat(counted.movement().getQuantity()).isEqualByComparingTo("1");
+        assertThat(counted.previousQuantity()).isEqualByComparingTo("25");
+        assertNonLotBalance(item, "24", "0", "5");
+        assertThat(movementCount(item)).isEqualTo(movementsBefore + 1);
+
+        // Adjust -21: within on hand (24) but above available (19) — refused, the hold is not touched.
+        assertThatThrownBy(() -> movementService.adjust(adjustCommand(item, f, null, "-21"), "CF12-A21-" + f.suffix(),
+                lotQcOwnershipGuard::ensureAdjustable))
+                .isInstanceOf(AppException.class)
+                .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                        .isEqualTo(BusinessErrorCode.INSUFFICIENT_STOCK));
+        assertThat(movementCount(item)).isEqualTo(movementsBefore + 1);
+        assertNonLotBalance(item, "24", "0", "5");
+
+        // Adjust -1: free stock, allowed.
+        var adjusted = movementService.adjust(adjustCommand(item, f, null, "-1"), "CF12-A1-" + f.suffix(),
+                lotQcOwnershipGuard::ensureAdjustable);
+        assertThat(adjusted.created()).isTrue();
+        assertNonLotBalance(item, "23", "0", "5");
+        assertThat(movementCount(item)).isEqualTo(movementsBefore + 2);
+    }
+
+    /**
+     * CF-12 matrix gap: a lot-tracked count goes through {@code canIssue}, so neither the parent still awaiting
+     * purchase QC ({@code HOLD}) nor the child QC rejected can be counted; the accepted child can.
+     */
+    @Test
+    void trackedCount_lotsPurchaseQcStillOwns_areLotNotEligible_acceptedChildCounts() {
+        Fixture f = fixture();
+        Item item = item(f, true);
+        GoodsReceiptResponse receipt = posted(order(f, item, "10"), "4", "LOT-" + f.suffix());
+        GoodsReceiptLineResponse line = receipt.lines().get(0);
+        qualityService.decide(receipt.goodsReceiptId(), line.goodsReceiptLineId(),
+                new PurchaseQcDecisionRequest(receipt.version(), new BigDecimal("2.5"), new BigDecimal("0.5"), "0.5 failed"),
+                null);
+        UUID parentLotId = line.lotId();
+        UUID acceptedLotId = lotId(item, "LOT-" + f.suffix() + "-A1");
+        UUID rejectedLotId = lotId(item, "LOT-" + f.suffix() + "-R1");
+        int movementsBefore = movementCount(item);
+
+        for (UUID lotId : List.of(parentLotId, rejectedLotId)) {
+            long version = lotBalanceVersion(lotId);
+            assertThatThrownBy(() -> movementService.count(new InventoryCountCommand(item.getItemId(),
+                    f.warehouse().getWarehouseId(), lotId, new BigDecimal("0.1"), version, "Cycle count"),
+                    "CF12-T-" + lotId))
+                    .isInstanceOf(AppException.class)
+                    .satisfies(ex -> assertThat(((AppException) ex).getErrorCode())
+                            .isEqualTo(BusinessErrorCode.LOT_NOT_ELIGIBLE));
+        }
+        assertThat(movementCount(item)).isEqualTo(movementsBefore);
+        assertThat(lotQuantity(parentLotId)).isEqualByComparingTo("1");
+        assertThat(lotQuantity(rejectedLotId)).isEqualByComparingTo("0.5");
+
+        movementService.count(new InventoryCountCommand(item.getItemId(), f.warehouse().getWarehouseId(), acceptedLotId,
+                new BigDecimal("2"), lotBalanceVersion(acceptedLotId), "Cycle count"), "CF12-T-A-" + f.suffix());
+        assertThat(lotQuantity(acceptedLotId)).isEqualByComparingTo("2");
+        assertThat(movementCount(item)).isEqualTo(movementsBefore + 1);
+    }
+
+    private static InventoryCountCommand countCommand(Item item, Fixture f, String counted, long version) {
+        return new InventoryCountCommand(item.getItemId(), f.warehouse().getWarehouseId(), null, new BigDecimal(counted),
+                version, "Cycle count");
+    }
+
+    private void assertNonLotBalance(Item item, String quantity, String reserved, String qualityHold) {
+        Map<String, Object> row = jdbc.queryForMap("""
+                select quantity, reserved_quantity, quality_hold_quantity from stock_balances
+                where item_id = ? and lot_id is null
+                """, item.getItemId());
+        assertThat((BigDecimal) row.get("quantity")).isEqualByComparingTo(quantity);
+        assertThat((BigDecimal) row.get("reserved_quantity")).isEqualByComparingTo(reserved);
+        assertThat((BigDecimal) row.get("quality_hold_quantity")).isEqualByComparingTo(qualityHold);
+    }
+
+    private long nonLotBalanceVersion(Item item) {
+        return jdbc.queryForObject("select version from stock_balances where item_id = ? and lot_id is null",
+                Long.class, item.getItemId());
+    }
+
+    private long lotBalanceVersion(UUID lotId) {
+        return jdbc.queryForObject("select version from stock_balances where lot_id = ?", Long.class, lotId);
     }
 
     /**
