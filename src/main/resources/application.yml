@@ -99,6 +99,12 @@ management:
     env:
       enabled: true
 
+# CF-8.5: /actuator/info carries build.* (from build-info) plus the commit the jar was built from.
+# max(flyway version) cannot tell CF-1/2/3 apart (no migration), so the commit is the build marker.
+info:
+  app:
+    commit: ${APP_COMMIT:unknown}
+
 # OpenAPI / Swagger UI (disabled by default, enable per environment)
 springdoc:
   api-docs:
