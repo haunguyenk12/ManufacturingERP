@@ -382,19 +382,24 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         assertThat(new BigDecimal(receipt.get("contributions").get(0).get("quantity").asText()))
                 .isEqualByComparingTo(GOOD_REPORTED);
 
-        assertThat(result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
-                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200)
-                .get("status").asText()).isEqualTo("PENDING_APPROVAL");
+        JsonNode submitted = result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        assertThat(submitted.get("status").asText()).isEqualTo("PENDING_APPROVAL");
         assertThat(onHandQuantity(fixture.finishedGoodId, fixture.warehouseId))
                 .isEqualByComparingTo(BigDecimal.ZERO);
 
         // ── 9. Approve: stock arrives, but the lot is HOLD so nothing is usable yet ─────────────
         long versionBeforeApproval = workOrderVersion(workOrderId);
+        long receiptVersionBeforeApproval = submitted.get("version").asLong();
         JsonNode approved = result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
                 workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
         // The +2 trap of G8b: approval raises completedQuantity and moves stock, yet the version moves once.
         assertThat(approved.get("workOrderVersion").asLong()).isEqualTo(versionBeforeApproval + 1);
         assertThat(workOrderVersion(workOrderId)).isEqualTo(versionBeforeApproval + 1);
+        // ...and so does the receipt's own version: one command, one step, in the response and read back.
+        assertThat(approved.get("version").asLong()).isEqualTo(receiptVersionBeforeApproval + 1);
+        assertThat(result(get("/v1/work-orders/{id}/production-receipts/{rid}", workOrderId, receiptId), 200)
+                .get("version").asLong()).isEqualTo(receiptVersionBeforeApproval + 1);
         assertThat(approved.get("status").asText()).isEqualTo("APPROVED");
         assertThat(approved.get("approvedByUsername").asText()).isEqualTo("admin");
         // G9b (FE R13): the source of the receipt — its report, and the work order's material with the return.
@@ -627,10 +632,14 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         "quantity", ORDERED_QUANTITY,
                         "expectedWorkOrderVersion", workOrderVersion(workOrderId),
                         "receivedOn", plantToday().toString()))), 201), "receiptId");
-        result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
+        long receiptVersionBeforeApproval = result(post("/v1/work-orders/{id}/production-receipts/{rid}/submit",
+                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200).get("version").asLong();
+        JsonNode approved = result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
                 workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
-        result(post("/v1/work-orders/{id}/production-receipts/{rid}/approve",
-                workOrderId, receiptId).content(receiptVersions(workOrderId, receiptId)), 200);
+        // One command, one version step — also when the output has no lot to carry the hold.
+        assertThat(approved.get("version").asLong()).isEqualTo(receiptVersionBeforeApproval + 1);
+        assertThat(result(get("/v1/work-orders/{id}/production-receipts/{rid}", workOrderId, receiptId), 200)
+                .get("version").asLong()).isEqualTo(receiptVersionBeforeApproval + 1);
 
         // NON_TRACKED output has no lot row, so StockBalance.qualityHoldQuantity carries the same
         // gate: approval increases on-hand but nothing is reservable before QC.

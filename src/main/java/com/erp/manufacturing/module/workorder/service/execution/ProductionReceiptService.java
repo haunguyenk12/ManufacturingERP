@@ -351,6 +351,9 @@ public class ProductionReceiptService {
                     "approving would put " + alreadyReceipted.add(totalReceived).toPlainString()
                             + " in stock, more than the " + cap.toPlainString() + " the work order may receipt"));
         }
+        // Read before anything is changed: this query auto-flushes, and run after receipt.approve(...) it wrote the
+        // receipt once there and once more for setSourceWipTraceIds below — version +2 on non-lot output.
+        String sourceTraceIds = sourceWipTraceIds(workOrder, alreadyReceipted, totalReceived);
         idempotencyRecords.record(key, WorkOrderCommand.RECEIPT_APPROVE, receiptId, fingerprint);
 
         // F5 inversion (CLAUDE.md §0.5): approval records that output was warehoused, and nothing
@@ -389,7 +392,7 @@ public class ProductionReceiptService {
         }
 
         receipt.approve(now(), currentActor());
-        receipt.setSourceWipTraceIds(sourceWipTraceIds(workOrder, alreadyReceipted, totalReceived));
+        receipt.setSourceWipTraceIds(sourceTraceIds);
 
         ProductionReceipt saved = receiptRepository.saveAndFlush(receipt);
         wipTransactionService.recordOutputReceipted(workOrder, totalReceived, saved.getReceiptId());
