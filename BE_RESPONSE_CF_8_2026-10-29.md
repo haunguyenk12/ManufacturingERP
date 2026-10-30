@@ -406,7 +406,7 @@ Nhu cầu thủ công 50 KG vật tư `LRM-225804` + run MRP (trace `7a06616a4cf
 | Dấu hiệu CF-2 (giữ chỗ lô hết hạn) qua HTTP | API không cho ghi hạn quá khứ; phải sửa DB | Chạy kịch bản có SQL đặt hạn, ngoài phạm vi smoke |
 | Dấu hiệu CF-5 (`capacityUnits=2`) qua HTTP | Cần lịch làm việc + tổ 2 đơn vị, chưa dựng | Một lượt smoke riêng |
 | `COST_SOURCE_STALE`, `COST_DATA_INCOMPLETE`, thiếu quyền qua HTTP | Không dựng trong lượt này | Có IT/E2E (`ProductionFlowE2EIT`) |
-| OpenAPI xuất lại sau CF-9/CF-10 | `BE_OPENAPI_2026-10-28.json` (SHA-256 `220ee57728813005b48496f04cd1f358c12cc416a4defeb90a1d37c6198e95aa`) **chưa** có ràng buộc `@Digits` mới | Xuất một lần sau CF-13 (dự kiến) |
+| OpenAPI xuất lại sau CF-9…CF-13 | ✅ Đã xuất lại 2026-10-30 từ commit `448000a` — **trùng từng byte** với `BE_OPENAPI_2026-10-28.json` (cùng SHA-256 `220ee57728813005b48496f04cd1f358c12cc416a4defeb90a1d37c6198e95aa`): springdoc không đưa `@Digits` vào schema (field thập phân vẫn `type: number`) | Không cần gửi file mới; ràng buộc số ở §3 |
 | Nghiệm thu phía FE | BE nói "xong" ≠ FE nói "đạt" | FE chạy trên bản §0.1 |
 
 ### 7.4 Ma trận phủ bảo vệ QC mua (CF-12)
@@ -444,7 +444,7 @@ không xuất/giữ được theo luật trạng thái lô; chưa có test đặ
 1. `BE_RESPONSE_GD_06_2026-10-17.md` 2. `BE_RESPONSE_GD_06_2026-10-17_v2.md` 3. `BE_RESPONSE_VERSION_MAP_2026-10-28.md`
 4. `BE_RESPONSE_NUMERIC_CONTRACT_2026-10-28.md` 5. `BE_RESPONSE_BOM_RATIO_2026-10-28.md` 6–10. `BE_RESPONSE_CF_1…CF_5_2026-10-28.md`
 11. `BE_OPENAPI_2026-10-28.json` — cộng `BE_RESPONSE_GD_06_2026-10-17_v3.md` (bản sau) và `BE_REPORT_CF_COMPLETED_2026-10-28.md`.
-Gửi cùng file này. 🔴 OpenAPI ngày 28 chưa có ràng buộc CF-10 — số liệu ràng buộc theo §3 file này.
+Gửi cùng file này. OpenAPI ngày 28 vẫn là bản đúng (xuất lại ngày 30 trùng từng byte); springdoc không thể hiện `@Digits`, nên ràng buộc số đọc ở §3 file này.
 
 ### 8.3 Chưa làm (có chủ đích)
 
