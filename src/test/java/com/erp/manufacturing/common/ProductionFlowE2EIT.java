@@ -1157,6 +1157,243 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                 .isEqualByComparingTo(BigDecimal.ZERO);
     }
 
+    // ── Scrap allowance chain: BOM → MRP → MAKE conversion → WO → release baseline ───────────────
+    // FE_REQUEST_SCRAP_ALLOWANCE_ALIGNMENT_2026-10-30_v2 (R01–R06). Policy (PO 28/10, 30/10): requirement =
+    // base × (1 + scrapRate); MRP rounds component gross UP to 6 decimals (B179), the work order HALF_UP to 6
+    // (B273); the release baseline prices the work order's stored requiredQuantity at the standard cost of
+    // RELEASE and never applies the allowance again. Every quantity below comes out of a real command.
+
+    @Test
+    @DisplayName("Scrap C01 (R01, R02, R04, R05): 2 KG × 10 PCS × 1.1 ⇒ MRP gross 22, WO 22, baseline 22000, not retroactive")
+    void scrapAllowanceChain_c01_grossTwentyTwoFlowsFromBomToTheReleaseBaseline() throws Exception {
+        ScrapChain chain = runScrapChain("C01", new BigDecimal("2"), new BigDecimal("0.1"), new BigDecimal("10"));
+
+        // R05: the gross requirement is the scrap-inflated 22; net is 0 because 1000 KG are on hand.
+        assertThat(decimal(chain.rmRequirement(), "grossRequiredQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(chain.rmRequirement(), "netRequiredQuantity")).isEqualByComparingTo("0");
+        assertThat(decimal(chain.rmRequirement(), "availableQuantity")).isEqualByComparingTo("1000");
+        assertThat(decimal(chain.rmRequirement(), "safetyStockQuantity")).isEqualByComparingTo("0");
+        assertThat(decimal(chain.componentLine(), "requiredQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(chain.baselineMaterial(), "plannedQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(chain.baselineMaterial(), "unitCost")).isEqualByComparingTo("1000");
+        assertThat(decimal(chain.baselineMaterial(), "plannedAmount")).isEqualByComparingTo("22000");
+        assertThat(decimal(chain.baseline().get("planned"), "material")).isEqualByComparingTo("22000");
+
+        // R04: a standard cost saved after release reaches neither the baseline nor the run nor the work order.
+        result(put("/v1/companies/{c}/items/{i}/standard-cost", fixture.companyId, chain.rmItemId())
+                .content(json(Map.of("materialCost", 2500, "laborCost", 0, "overheadCost", 0))), 200);
+        JsonNode baselineAfter = result(get("/v1/work-orders/{id}/cost-baseline", chain.workOrderId()), 200)
+                .get("baseline");
+        assertThat(baselineAfter.get("baselineId").asText()).isEqualTo(chain.baseline().get("baselineId").asText());
+        JsonNode materialAfter = baselineAfter.get("materials").get(0);
+        assertThat(decimal(materialAfter, "plannedQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(materialAfter, "unitCost")).isEqualByComparingTo("1000");
+        assertThat(decimal(materialAfter, "plannedAmount")).isEqualByComparingTo("22000");
+        assertThat(decimal(baselineAfter.get("planned"), "material")).isEqualByComparingTo("22000");
+
+        // Read back after reload: what was stored, not what the command echoed.
+        JsonNode workOrderAgain = result(get("/v1/work-orders/{id}", chain.workOrderId()), 200);
+        assertThat(decimal(workOrderAgain.get("componentLines").get(0), "requiredQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(workOrderAgain, "plannedQuantity")).isEqualByComparingTo("10");
+        JsonNode rmAgain = requirementOf(result(get("/v1/planning-runs/{id}/requirements", chain.runId()), 200)
+                .get("content"), chain.rmItemId());
+        assertThat(decimal(rmAgain, "grossRequiredQuantity")).isEqualByComparingTo("22");
+        assertThat(decimal(rmAgain, "netRequiredQuantity")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("Scrap C02 (R03, R04): 10 × 1.000001 × 1.000001 ⇒ MRP CEILING 10.000021, WO HALF_UP 10.000020, baseline from WO")
+    void scrapAllowanceChain_c02_mrpRoundsUpTheWorkOrderHalfUpAndTheBaselineFollowsTheWorkOrder() throws Exception {
+        // Unrounded: 10 × 1.000001 × 1.000001 = 10.00002000001
+        ScrapChain chain = runScrapChain("C02", new BigDecimal("1.000001"), new BigDecimal("0.000001"),
+                new BigDecimal("10"));
+
+        BigDecimal mrp = decimal(chain.rmRequirement(), "grossRequiredQuantity");
+        BigDecimal workOrder = decimal(chain.componentLine(), "requiredQuantity");
+        assertThat(mrp).isEqualByComparingTo("10.000021");
+        assertThat(workOrder).isEqualByComparingTo("10.000020");
+        assertThat(mrp.subtract(workOrder).abs()).isLessThanOrEqualTo(new BigDecimal("0.000001"));
+        assertThat(decimal(chain.baselineMaterial(), "plannedQuantity")).isEqualByComparingTo("10.000020");
+        assertThat(decimal(chain.baselineMaterial(), "plannedAmount")).isEqualByComparingTo("10000.020000");
+        assertThat(decimal(chain.baseline().get("planned"), "material")).isEqualByComparingTo("10000.020000");
+    }
+
+    @Test
+    @DisplayName("Scrap C03 (R03): 1.2 × 1.000001 × 1.1 ⇒ MRP 1.320002, WO 1.320001, baseline 1320.001000")
+    void scrapAllowanceChain_c03_fractionalPlannedQuantityKeepsTheSameSourceRounding() throws Exception {
+        // Unrounded: 1.2 × 1.000001 × 1.1 = 1.32000132
+        ScrapChain chain = runScrapChain("C03", new BigDecimal("1.000001"), new BigDecimal("0.1"),
+                new BigDecimal("1.2"));
+
+        BigDecimal mrp = decimal(chain.rmRequirement(), "grossRequiredQuantity");
+        BigDecimal workOrder = decimal(chain.componentLine(), "requiredQuantity");
+        assertThat(mrp).isEqualByComparingTo("1.320002");
+        assertThat(workOrder).isEqualByComparingTo("1.320001");
+        assertThat(mrp.subtract(workOrder).abs()).isLessThanOrEqualTo(new BigDecimal("0.000001"));
+        assertThat(decimal(chain.baselineMaterial(), "plannedQuantity")).isEqualByComparingTo("1.320001");
+        assertThat(decimal(chain.baselineMaterial(), "plannedAmount")).isEqualByComparingTo("1320.001000");
+    }
+
+    /**
+     * One scrap-allowance chain on its own finished good (PCS, not lot-tracked, no stock, safety 0) and raw material
+     * (KG, 1000 on hand, standard material cost 1000): sales order → confirm → planning run → approve + convert the
+     * MAKE proposal → reserve → release → cost baseline. Asserts the planned quantities and that every step points
+     * at the same source (run, proposal, requirement line, BOM, BOM line, component line), so any difference left
+     * between MRP and the work order is the same-source rounding the policy allows.
+     */
+    private ScrapChain runScrapChain(String tag, BigDecimal quantityPer, BigDecimal scrapRate, BigDecimal ordered)
+            throws Exception {
+        Company company = companyRepository.findById(fixture.companyId).orElseThrow();
+        Plant plant = plantRepository.findById(fixture.plantId).orElseThrow();
+        Warehouse warehouse = warehouseRepository.findById(fixture.warehouseId).orElseThrow();
+
+        Item finishedGood = itemRepository.save(Item.builder()
+                .company(company).code("FGS-" + tag + "-" + fixture.suffix).name("E2E Scrap Finished Good")
+                .type(ItemType.FINISHED_GOOD).unit("PCS").lotTracked(false)
+                .status(ItemStatus.ACTIVE).build());
+        Item rawMaterial = itemRepository.save(Item.builder()
+                .company(company).code("RMS-" + tag + "-" + fixture.suffix).name("E2E Scrap Raw Material")
+                .type(ItemType.RAW_MATERIAL).unit("KG").lotTracked(false)
+                .status(ItemStatus.ACTIVE).build());
+
+        BomHeader bom = BomHeader.builder()
+                .company(company).parentItem(finishedGood).revision("A")
+                .bomCode("BOMS-" + UUID.randomUUID()).versionNumber(1)
+                .status(BomStatus.ACTIVE).description("E2E scrap BOM").build();
+        BomLine bomLine = BomLine.builder()
+                .bom(bom).componentItem(rawMaterial).lineNo(1)
+                .quantityPer(quantityPer).scrapRate(scrapRate).build();
+        bom.getLines().add(bomLine);
+        bom = bomHeaderRepository.save(bom);
+        UUID bomLineId = bom.getLines().get(0).getLineId();
+
+        WorkCenter workCenter = workCenterRepository.save(WorkCenter.builder()
+                .plant(plant).code("WCS-" + tag + "-" + fixture.suffix).name("E2E Scrap Work Center")
+                .capacityUnitType(CapacityUnitType.MACHINE).capacityUnits(1)
+                .status(OrganizationStatus.ACTIVE).build());
+        RoutingHeader routing = RoutingHeader.builder()
+                .company(company).item(finishedGood).code("RTS-" + tag + "-" + fixture.suffix)
+                .routingVersion("1").versionNumber(1).status(RoutingStatus.ACTIVE).build();
+        routing.getOperations().add(RoutingOperation.builder()
+                .routing(routing).sequence(10).name("Assemble").workCenter(workCenter)
+                .setupMinutes(new BigDecimal("5")).runMinutesPerUnit(new BigDecimal("1")).build());
+        routingHeaderRepository.save(routing);
+
+        // No lot sizing exists for MAKE; safety stock and reorder point 0 and no finished stock ⇒ planned = ordered.
+        itemWarehouseSettingRepository.save(ItemWarehouseSetting.builder()
+                .item(finishedGood).warehouse(warehouse).safetyStock(BigDecimal.ZERO)
+                .reorderPoint(BigDecimal.ZERO).leadTimeDays(0)
+                .status(ItemWarehouseSettingStatus.ACTIVE).build());
+        stockBalanceRepository.save(StockBalance.builder()
+                .item(rawMaterial).warehouse(warehouse).quantity(new BigDecimal("1000"))
+                .reservedQuantity(BigDecimal.ZERO).build());
+        result(put("/v1/companies/{c}/items/{i}/standard-cost", fixture.companyId, rawMaterial.getItemId())
+                .content(json(Map.of("materialCost", 1000, "laborCost", 0, "overheadCost", 0))), 200);
+
+        JsonNode order = result(post("/sales-orders/v1")
+                .content(json(Map.of(
+                        "companyId", fixture.companyId,
+                        "plantId", fixture.plantId,
+                        "orderNo", "SO-SCRAP-" + tag + "-" + fixture.suffix,
+                        "customerName", "E2E Customer",
+                        "customerId", fixture.customerId,
+                        "orderDate", ORDER_DATE.toString(),
+                        "lines", List.of(Map.of(
+                                "itemId", finishedGood.getItemId(),
+                                "orderedQuantity", ordered,
+                                "dueDate", DUE_DATE.toString()))))), 201);
+        UUID salesOrderId = uuid(order, "salesOrderId");
+        UUID salesOrderLineId = uuid(order.get("lines").get(0), "salesOrderLineId");
+        result(post("/sales-orders/v1/{id}/confirm", salesOrderId), 200);
+        PlanningDemand demand = planningDemandRepository.findAll().stream()
+                .filter(d -> salesOrderLineId.toString().equals(d.getReferenceId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Confirming the order did not create a planning demand"));
+
+        JsonNode run = result(post("/v1/planning-runs")
+                .content(json(Map.of(
+                        "companyId", fixture.companyId,
+                        "plantId", fixture.plantId,
+                        "warehouseId", fixture.warehouseId,
+                        "horizonStartDate", ORDER_DATE.toString(),
+                        "horizonEndDate", HORIZON_END.toString(),
+                        "demandLineIds", List.of(demand.getPlanningDemandId())))), 201);
+        UUID runId = uuid(run, "mrpRunId");
+        JsonNode requirements = result(get("/v1/planning-runs/{id}/requirements", runId), 200).get("content");
+        JsonNode fgRequirement = requirementOf(requirements, finishedGood.getItemId());
+        JsonNode rmRequirement = requirementOf(requirements, rawMaterial.getItemId());
+        assertThat(fgRequirement.get("requirementLevel").asInt()).isZero();
+        assertThat(decimal(fgRequirement, "grossRequiredQuantity")).isEqualByComparingTo(ordered);
+        assertThat(decimal(fgRequirement, "netRequiredQuantity")).isEqualByComparingTo(ordered);
+        assertThat(rmRequirement.get("requirementLevel").asInt()).isEqualTo(1);
+        assertThat(uuid(rmRequirement, "parentRequirementLineId"))
+                .isEqualTo(uuid(fgRequirement, "mrpRequirementLineId"));
+        assertThat(uuid(rmRequirement, "sourceDemandId")).isEqualTo(demand.getPlanningDemandId());
+
+        JsonNode suggestions = result(get("/v1/planning-runs/{id}/suggestions", runId), 200).get("content");
+        assertThat(suggestions.size()).as("suggestions were %s", suggestions).isEqualTo(1);
+        JsonNode suggestion = suggestions.get(0);
+        assertThat(suggestion.get("supplyType").asText()).isEqualTo("MAKE");
+        assertThat(uuid(suggestion, "requirementLineId")).isEqualTo(uuid(fgRequirement, "mrpRequirementLineId"));
+        assertThat(decimal(suggestion, "suggestedQuantity")).isEqualByComparingTo(ordered);
+        UUID suggestionId = uuid(suggestion, "supplySuggestionId");
+
+        result(post("/v1/supply-suggestions/{id}/approve", suggestionId)
+                .content(json(Map.of("decisionNote", "approved by E2E"))), 200);
+        UUID workOrderId = uuid(result(post("/v1/supply-suggestions/{id}/convert-to-work-order", suggestionId)
+                .content(json(Map.of("outputWarehouseId", fixture.warehouseId))), 200), "convertedWorkOrderId");
+
+        JsonNode workOrder = result(get("/v1/work-orders/{id}", workOrderId), 200);
+        assertThat(uuid(workOrder, "planningRunId")).isEqualTo(runId);
+        assertThat(uuid(workOrder, "planningProposalId")).isEqualTo(suggestionId);
+        assertThat(uuid(workOrder, "bomId")).isEqualTo(bom.getBomId());
+        assertThat(decimal(workOrder, "plannedQuantity")).isEqualByComparingTo(ordered);
+        assertThat(workOrder.get("componentLines").size()).isEqualTo(1);
+        JsonNode componentLine = workOrder.get("componentLines").get(0);
+        assertThat(uuid(componentLine, "bomLineId")).isEqualTo(bomLineId);
+        assertThat(uuid(componentLine, "componentItemId")).isEqualTo(rawMaterial.getItemId());
+        assertThat(decimal(componentLine, "quantityPer")).isEqualByComparingTo(quantityPer);
+        assertThat(decimal(componentLine, "scrapRate")).isEqualByComparingTo(scrapRate);
+
+        result(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId)), 201);
+        result(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId)), 200);
+        assertThat(result(get("/v1/work-orders/{id}", workOrderId), 200).get("status").asText()).isEqualTo("RELEASED");
+
+        JsonNode baseline = result(get("/v1/work-orders/{id}/cost-baseline", workOrderId), 200).get("baseline");
+        assertThat(baseline).as("release captures a baseline").isNotNull();
+        assertThat(decimal(baseline, "plannedQuantity")).isEqualByComparingTo(ordered);
+        assertThat(baseline.get("materials").size()).isEqualTo(1);
+        JsonNode baselineMaterial = baseline.get("materials").get(0);
+        assertThat(uuid(baselineMaterial, "componentLineId")).isEqualTo(uuid(componentLine, "componentLineId"));
+        assertThat(uuid(baselineMaterial, "itemId")).isEqualTo(rawMaterial.getItemId());
+        assertThat(baselineMaterial.get("uom").asText()).isEqualTo("KG");
+        assertThat(rmRequirement.get("uom").asText()).isEqualTo("KG");
+        assertThat(componentLine.get("uom").asText()).isEqualTo("KG");
+
+        return new ScrapChain(rawMaterial.getItemId(), runId, workOrderId, rmRequirement, componentLine,
+                baseline, baselineMaterial);
+    }
+
+    private record ScrapChain(UUID rmItemId, UUID runId, UUID workOrderId, JsonNode rmRequirement,
+                              JsonNode componentLine, JsonNode baseline, JsonNode baselineMaterial) {}
+
+    private JsonNode requirementOf(JsonNode requirements, UUID itemId) {
+        List<JsonNode> matches = new java.util.ArrayList<>();
+        requirements.forEach(line -> {
+            if (itemId.toString().equals(line.get("itemId").asText())) {
+                matches.add(line);
+            }
+        });
+        assertThat(matches).as("requirement lines of %s in %s", itemId, requirements).hasSize(1);
+        return matches.get(0);
+    }
+
+    private static BigDecimal decimal(JsonNode node, String field) {
+        assertThat(node.get(field)).as("field %s of %s", field, node).isNotNull();
+        assertThat(node.get(field).isNull()).as("field %s of %s is null", field, node).isFalse();
+        return new BigDecimal(node.get(field).asText());
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────
 
     /**
