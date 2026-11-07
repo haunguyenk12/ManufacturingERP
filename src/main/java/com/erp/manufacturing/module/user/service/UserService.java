@@ -5,10 +5,12 @@ import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
+import com.erp.manufacturing.common.security.PasswordPolicy;
 import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.module.organization.domain.Role;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserStatus;
+import com.erp.manufacturing.module.user.dto.CreateAccountCommand;
 import com.erp.manufacturing.module.user.dto.CreateUserRequest;
 import com.erp.manufacturing.module.user.dto.UpdateUserRequest;
 import com.erp.manufacturing.module.user.dto.UserResponse;
@@ -23,6 +25,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -63,28 +68,64 @@ public class UserService {
     @Auditable(action = AuditAction.USER_CREATED, entityType = "User",
                entityIdExpression = "userId.toString()")
     public UserResponse create(CreateUserRequest request) {
-        if (userRepository.existsByUsername(request.username())) {
-            throw ExceptionFactory.alreadyExists(ValidationErrorCode.USERNAME_ALREADY_EXISTS,
-                    "Username already taken: " + request.username());
+        return persistNew(request.username(), request.email(), request.password(), UserStatus.ACTIVE);
+    }
+
+    /**
+     * Admin-created account that cannot enter the ERP until its owner replaces the initial password
+     * through the emailed-code flow (see {@code PasswordFlowService}). {@code POST /users/v1} is
+     * untouched and still creates {@code ACTIVE} accounts — seeds and demo scripts depend on that.
+     *
+     * <p>Replay-safe without an {@code Idempotency-Key} table: repeating the exact command (same
+     * username, email and initial password) while the account is still {@code PENDING_SETUP}
+     * returns that account instead of {@code 409}; any other duplicate is still refused.
+     */
+    @Transactional
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
+    @Auditable(action = AuditAction.USER_CREATED, entityType = "User",
+               entityIdExpression = "userId.toString()")
+    public UserResponse createPendingSetup(CreateAccountCommand command) {
+        if (!CreateAccountCommand.CREATE.equals(command.kind())) {
+            throw ExceptionFactory.withErrors(ValidationErrorCode.INVALID_INPUT,
+                    Map.of("kind", "unsupported account command, expected " + CreateAccountCommand.CREATE));
         }
-        if (userRepository.existsByEmail(request.email())) {
+        String username = command.username().trim();
+        String email = command.email().trim().toLowerCase(Locale.ROOT);
+        PasswordPolicy.require(command.password());
+
+        Optional<User> sameCommand = userRepository.findByUsername(username)
+                .filter(u -> u.getStatus() == UserStatus.PENDING_SETUP
+                        && u.getEmail().equalsIgnoreCase(email)
+                        && passwordEncoder.matches(command.password(), u.getPassword()));
+        if (sameCommand.isPresent()) {
+            return userMapper.toResponse(sameCommand.get());
+        }
+        return persistNew(username, email, command.password(), UserStatus.PENDING_SETUP);
+    }
+
+    private UserResponse persistNew(String username, String email, String password, UserStatus status) {
+        if (userRepository.existsByUsername(username)) {
+            throw ExceptionFactory.alreadyExists(ValidationErrorCode.USERNAME_ALREADY_EXISTS,
+                    "Username already taken: " + username);
+        }
+        if (userRepository.existsByEmail(email)) {
             throw ExceptionFactory.alreadyExists(ValidationErrorCode.EMAIL_ALREADY_EXISTS,
-                    "Email already in use: " + request.email());
+                    "Email already in use: " + email);
         }
 
         Role defaultRole = roleRepository.findByName("OPERATOR")
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Role", "OPERATOR"));
 
         User user = User.builder()
-                .username(request.username())
-                .email(request.email())
-                .password(passwordEncoder.encode(request.password()))
-                .status(UserStatus.ACTIVE)
+                .username(username)
+                .email(email)
+                .password(passwordEncoder.encode(password))
+                .status(status)
                 .build();
         user.getRoles().add(defaultRole);
 
         User saved = userRepository.save(user);
-        log.info("[USER] Created user={} id={}", saved.getUsername(), saved.getUserId());
+        log.info("[USER] Created user={} id={} status={}", saved.getUsername(), saved.getUserId(), status);
         return userMapper.toResponse(saved);
     }
 

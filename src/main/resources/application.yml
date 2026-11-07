@@ -36,6 +36,26 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  # Outgoing mail for password-setup/reset codes. spring.mail.host is deliberately NOT declared:
+  # the JavaMailSender bean exists as soon as the key does (even empty), so set SPRING_MAIL_HOST
+  # only where a mail server exists (QA: an isolated mailbox such as Mailpit). Without it the app
+  # starts, codes are not sent, and the log says so.
+  mail:
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS:false}
+      # Both stop JavaMail from reverse-resolving this host's IP on every send, which cost 5-8 s per
+      # mail on a dev box with a slow PTR record (measured 2026-11-07): the HELO name, and the address
+      # it builds the Message-ID from (falls back to user@canonical-hostname when mail.from is unset).
+      mail.smtp.localhost: ${MAIL_SMTP_LOCALHOST:localhost}
+      mail.from: ${MAIL_FROM:no-reply@omniplant.local}
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+
   # Redis — token store, session state, rate-limit counters
   data:
     redis:
@@ -127,6 +147,9 @@ logging:
 
 # App-specific custom properties
 app:
+  mail:
+    from: ${MAIL_FROM:no-reply@omniplant.local}
+
   # First-run admin account creation (disabled by default — see AdminBootstrapService)
   bootstrap:
     admin:

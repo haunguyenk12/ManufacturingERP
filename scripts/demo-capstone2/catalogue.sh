@@ -343,6 +343,21 @@ D26-PO-0003|D26-SUP-FRAME|PARTIALLY_RECEIVED|D26-RM-FRAME16:40:420;D26-RM-FRAME2
 D26-PO-0004|D26-SUP-COMP|FULLY_RECEIVED|D26-RM-CARTON:100:35;D26-RM-TOOLKIT:30:95
 '
 
+# ── đơn giá giờ theo tổ sản xuất (G11) ───────────────────────────────────────
+# workCenterCode|laborRatePerHour|overheadRatePerHour   (đồng/giờ vận hành)
+# 🔴 Phải có TRƯỚC khi release bất kỳ lệnh sản xuất nào: baseline giá thành chụp đơn giá lúc release,
+# thiếu đơn giá thì checklist chốt giá thành báo MISSING_RATE.
+COST_RATE_ROWS='
+D26-WC-FRAME|85000|32000
+D26-WC-PAINT|95000|48000
+D26-WC-DRIVE|90000|30000
+D26-WC-WHEEL|88000|28000
+D26-WC-ASSEMBLY|110000|45000
+D26-WC-FINAL|80000|20000
+D26-WC-PACK|65000|15000
+D26-WC-QCLAB|120000|35000
+'
+
 # ── giá bán (G10a) ───────────────────────────────────────────────────────────
 # itemCode|unitPrice   (đồng, nguyên — khác COST_ROWS: hoá đơn và phiếu thu tính bằng đồng)
 # Đơn đã xác nhận nhận giá này qua POST /sales-orders/v1/{id}/commercial-prices; đơn nháp để trống.
@@ -377,12 +392,12 @@ D26-WO-2001|D26-FG-BIKE20|5|DRAFT
 D26-WO-2002|D26-WIP-FRAME20|10|PLANNED
 D26-WO-2003|D26-WIP-DRIVE7|10|RELEASED
 D26-WO-2004|D26-FG-BIKE20|6|IN_PROGRESS
-D26-WO-2005|D26-FG-ROAD700|3|CLOSED
+D26-WO-2005|D26-WIP-DRIVE18|3|CLOSED
 D26-WO-2006|D26-FG-BIKE16|4|CANCELLED
 '
 # Lô thành phẩm sinh ra từ hai lệnh sản xuất thủ công có nhập kho
 LOT_WO2004="D26-BIKE20-B002"
-LOT_WO2005="D26-ROAD700-B002"
+LOT_WO2005=""   # WO-2005 sản xuất bán thành phẩm không theo lô
 
 # ── tham số thời gian ────────────────────────────────────────────────────────
 # Không để trường ngày/giờ nào trống trên màn hình: mỗi cột thời gian mà API cho phép ghi thì

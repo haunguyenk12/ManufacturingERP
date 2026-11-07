@@ -1,0 +1,438 @@
+{
+ "suffix": "R0211-145453",
+ "binary": {
+  "actuatorInfo": {
+   "app": {
+    "commit": "e46fae39a8fe36f0c76741405c2c82b35bb438ff"
+   },
+   "build": {
+    "artifact": "manufacturing",
+    "name": "manufacturing-erp",
+    "time": "2026-11-02T07:52:02.830Z",
+    "version": "0.0.1-SNAPSHOT",
+    "group": "com.erp"
+   }
+  },
+  "JAR_SHA256": "a46ad3deead57b9b8c31913c41fafa2546445cafa9dc2f6705c3cb92666ed3e3",
+  "FLYWAY_MAX": "95",
+  "APP_PID": "13840",
+  "HEAD": "e46fae39a8fe36f0c76741405c2c82b35bb438ff",
+  "buildTime": "2026-11-02T07:52:02.830Z",
+  "port": 8090,
+  "managementPort": 8091,
+  "jarPath": "scratchpad/app-e46fae3.jar (copy of target/manufacturing-0.0.1-SNAPSHOT.jar)",
+  "profile": "dev",
+  "rateLimit": "disabled via -Dapp.rate-limit.enabled=false",
+  "containsFix": "448000a is an ancestor of HEAD e46fae3",
+  "uncommittedSrcMain": "application-dev.yml log levels only (show-sql false, hibernate SQL/bind loggers WARN)"
+ },
+ "cases": [
+  {
+   "req": "R01",
+   "case": "actuator info names the running build",
+   "expected": "app.commit = HEAD e46fae39a8fe36f0c76741405c2c82b35bb438ff",
+   "actual": "app.commit=e46fae39a8fe36f0c76741405c2c82b35bb438ff build.time=2026-11-02T07:52:02.830Z",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": null,
+   "evidenceN": 2,
+   "ids": {}
+  },
+  {
+   "req": "R02",
+   "case": "LOT approve receipt.version = submit.version + 1",
+   "expected": "1 + 1 = 2",
+   "actual": "submit.version=1 approve.version=2 status=APPROVED",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "b2011daef76f45f9",
+   "evidenceN": 47,
+   "ids": {
+    "workOrderId": "aa6d4b8a-314a-46d3-a443-5e447dae6f63",
+    "receiptId": "cf7b4c27-870d-41a4-a342-2c22d28affef",
+    "receiptCode": "PR-BD0F0BD3",
+    "lot": "LOT-LOT-145453"
+   }
+  },
+  {
+   "req": "R02",
+   "case": "LOT approve workOrderVersion = submit.workOrderVersion + 1",
+   "expected": "8 + 1",
+   "actual": "submit.workOrderVersion=8 approve.workOrderVersion=9",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "b2011daef76f45f9",
+   "evidenceN": 47,
+   "ids": {
+    "workOrderId": "aa6d4b8a-314a-46d3-a443-5e447dae6f63",
+    "receiptId": "cf7b4c27-870d-41a4-a342-2c22d28affef",
+    "receiptCode": "PR-BD0F0BD3",
+    "lot": "LOT-LOT-145453"
+   }
+  },
+  {
+   "req": "R02",
+   "case": "LOT GET read-back matches approve response",
+   "expected": "receipt.version=2 WO.version=9",
+   "actual": "GET receipt.version=2 receipt.workOrderVersion=9 GET WO.version=9 WO.completedQuantity=5.0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "4706b860caa14a34",
+   "evidenceN": 48,
+   "ids": {
+    "workOrderId": "aa6d4b8a-314a-46d3-a443-5e447dae6f63",
+    "receiptId": "cf7b4c27-870d-41a4-a342-2c22d28affef",
+    "receiptCode": "PR-BD0F0BD3",
+    "lot": "LOT-LOT-145453",
+    "woTrace": "408fc3dd9d4a49fb",
+    "woEvidenceN": 49
+   }
+  },
+  {
+   "req": "R02",
+   "case": "LOT approve replay does not approve twice",
+   "expected": "no new movement; receipt/WO version unchanged",
+   "actual": "replay HTTP 200 code=SUCCESS replay.version=2 replay.workOrderVersion=9; FG movements before/after/replay=0/1/1 [('RECEIVE', 5.0)]; read-back receipt.version=2 WO.version=9",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "c6c8eed6f43b4e1c",
+   "evidenceN": 51,
+   "ids": {
+    "workOrderId": "aa6d4b8a-314a-46d3-a443-5e447dae6f63",
+    "receiptId": "cf7b4c27-870d-41a4-a342-2c22d28affef",
+    "receiptCode": "PR-BD0F0BD3",
+    "lot": "LOT-LOT-145453"
+   }
+  },
+  {
+   "req": "R02",
+   "case": "NONLOT approve receipt.version = submit.version + 1",
+   "expected": "1 + 1 = 2",
+   "actual": "submit.version=1 approve.version=2 status=APPROVED",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "7a6e6ffb32d14a74",
+   "evidenceN": 72,
+   "ids": {
+    "workOrderId": "e749f20c-6ac5-4d57-955c-a9e28e1a6052",
+    "receiptId": "67cce382-e0ef-4aa9-941d-5f8244793015",
+    "receiptCode": "PR-170B6E45",
+    "lot": null
+   }
+  },
+  {
+   "req": "R02",
+   "case": "NONLOT approve workOrderVersion = submit.workOrderVersion + 1",
+   "expected": "8 + 1",
+   "actual": "submit.workOrderVersion=8 approve.workOrderVersion=9",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "7a6e6ffb32d14a74",
+   "evidenceN": 72,
+   "ids": {
+    "workOrderId": "e749f20c-6ac5-4d57-955c-a9e28e1a6052",
+    "receiptId": "67cce382-e0ef-4aa9-941d-5f8244793015",
+    "receiptCode": "PR-170B6E45",
+    "lot": null
+   }
+  },
+  {
+   "req": "R02",
+   "case": "NONLOT GET read-back matches approve response",
+   "expected": "receipt.version=2 WO.version=9",
+   "actual": "GET receipt.version=2 receipt.workOrderVersion=9 GET WO.version=9 WO.completedQuantity=5.0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "177b023a89cb4ce4",
+   "evidenceN": 73,
+   "ids": {
+    "workOrderId": "e749f20c-6ac5-4d57-955c-a9e28e1a6052",
+    "receiptId": "67cce382-e0ef-4aa9-941d-5f8244793015",
+    "receiptCode": "PR-170B6E45",
+    "lot": null,
+    "woTrace": "4cf3aa4061f648e9",
+    "woEvidenceN": 74
+   }
+  },
+  {
+   "req": "R02",
+   "case": "NONLOT approve replay does not approve twice",
+   "expected": "no new movement; receipt/WO version unchanged",
+   "actual": "replay HTTP 200 code=SUCCESS replay.version=2 replay.workOrderVersion=9; FG movements before/after/replay=0/1/1 [('RECEIVE', 5.0)]; read-back receipt.version=2 WO.version=9",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "37578db3a54244f0",
+   "evidenceN": 76,
+   "ids": {
+    "workOrderId": "e749f20c-6ac5-4d57-955c-a9e28e1a6052",
+    "receiptId": "67cce382-e0ef-4aa9-941d-5f8244793015",
+    "receiptCode": "PR-170B6E45",
+    "lot": null
+   }
+  },
+  {
+   "req": "R03",
+   "case": "output item/warehouse physical 0 before release",
+   "expected": "0",
+   "actual": "0 rows=0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "5aef254a6d4f446a",
+   "evidenceN": 80,
+   "ids": {}
+  },
+  {
+   "req": "R03",
+   "case": "baseline captured at RELEASE: planned 20000+6000+3000",
+   "expected": "planned total 29000, RM unitCost 1000",
+   "actual": "planned={'material': 20000.0, 'labor': 6000.0, 'overhead': 3000.0, 'total': 29000.0} RM unitCost=1000.0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "31d295c2fd824894",
+   "evidenceN": 94,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf"
+   }
+  },
+  {
+   "req": "R02",
+   "case": "C29 (non-lot, 29k dataset) approve +1/+1",
+   "expected": "receipt 1+1, WO 8+1",
+   "actual": "receipt 2, WO 9",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "4650c701bba14f01",
+   "evidenceN": 98,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "receiptId": "2bd8f303-ba4e-4219-9713-5f7fcba4e676"
+   }
+  },
+  {
+   "req": "R03",
+   "case": "preview writes no WO version",
+   "expected": "WO version 10",
+   "actual": "WO version 10 run={'workOrderId': 'd01f7952-0d9b-4eee-a08e-f21d2d8769cf', 'runId': 'bca5ddd2-cc4e-4999-9caf-02bd499b46d4', 'runVersion': 1, 'workOrderVersion': 10}",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "cf9be3b88ce049a0",
+   "evidenceN": 103,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  },
+  {
+   "req": "R03",
+   "case": "preview: planned = actual = 29000, unit 2900",
+   "expected": "READY, planned 29000, actual 29000, unit 2900",
+   "actual": "readiness=READY planned=29000.0 actual=29000.0 unit=2900.0 sourceVersion same=True",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "2df1031d7efb40f8",
+   "evidenceN": 105,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  },
+  {
+   "req": "R04",
+   "case": "wrong expectedVersion -> 409, nothing written",
+   "expected": "409 CONCURRENT_MODIFICATION; WO version/status unchanged; run PREVIEW; 0 adjustments",
+   "actual": "409 CONCURRENT_MODIFICATION; WO version=10 status=COMPLETED; runs=[('bca5ddd2', 'PREVIEW', 1)]; adjustments=0",
+   "verdict": "PASS",
+   "http": 409,
+   "traceId": "34a9c9e4280e49ed",
+   "evidenceN": 106,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  },
+  {
+   "req": "R03",
+   "case": "finalize-and-close: WO version +1",
+   "expected": "workOrderVersion 11",
+   "actual": "result={'workOrderId': 'd01f7952-0d9b-4eee-a08e-f21d2d8769cf', 'runId': 'bca5ddd2-cc4e-4999-9caf-02bd499b46d4', 'runVersion': 2, 'workOrderVersion': 11}",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "bd2ce176c8a1446b",
+   "evidenceN": 110,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  },
+  {
+   "req": "R06",
+   "case": "WO status after close",
+   "expected": "CLOSED",
+   "actual": "status=CLOSED closedAt=2026-11-02T07:55:00.479678Z version=11",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "4c389fa175364a21",
+   "evidenceN": 111,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf"
+   }
+  },
+  {
+   "req": "R06",
+   "case": "C9 GET cost-runs/{runId} (CostView) wire values",
+   "expected": "status (WO status enum) = CLOSED; readiness = CLOSED; closed.finalRunId = runId",
+   "actual": "status=CLOSED readiness=CLOSED closed={'closedAt': '2026-11-02T07:55:00.479678Z', 'closedBy': {'id': '23fce5b6-dd3b-4d30-a8b8-c33962a38a82', 'displayName': 'admin'}, 'closeReason': 'R0211 smoke close', 'finalRunId': 'bca5ddd2-cc4e-4999-9caf-02bd499b46d4'} actual=29000.0 unit=2900.0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "bf6bb4ee972147f9",
+   "evidenceN": 112,
+   "ids": {
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  },
+  {
+   "req": "R06",
+   "case": "run state wire value (RunSummary.state on GET /cost-runs)",
+   "expected": "FINALIZED",
+   "actual": "runs=[('bca5ddd2-cc4e-4999-9caf-02bd499b46d4', 'CST-8EBBDA5C', 'FINALIZED', 2, 29000.0, 29000.0, '2026-11-02T07:55:00.479678Z')]",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "d9b6676a2ca4489f",
+   "evidenceN": 113,
+   "ids": {
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4",
+    "runNo": "CST-8EBBDA5C"
+   }
+  },
+  {
+   "req": "R03",
+   "case": "one adjustment quantity 0 / value 29000",
+   "expected": "1 row, quantity 0, stockValueDelta 29000",
+   "actual": "[('255cafcd-c901-48f1-ba8b-087a6ab78a9d', 'COST_ADJUSTMENT', 0.0, 29000.0)]",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "6d78c66ed96b406d",
+   "evidenceN": 114,
+   "ids": {
+    "adjustmentIds": [
+     "255cafcd-c901-48f1-ba8b-087a6ab78a9d"
+    ]
+   }
+  },
+  {
+   "req": "R03",
+   "case": "FG physical 10 unchanged by close",
+   "expected": "10 (after QC 10.0)",
+   "actual": "10.0",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "efdf5623949742b6",
+   "evidenceN": 115,
+   "ids": {}
+  },
+  {
+   "req": "R04",
+   "case": "same-key replay returns same result, no extra adjustment",
+   "expected": "200 with result == first finalize; 1 adjustment; WO version 11",
+   "actual": "200 SUCCESS result={'workOrderId': 'd01f7952-0d9b-4eee-a08e-f21d2d8769cf', 'runId': 'bca5ddd2-cc4e-4999-9caf-02bd499b46d4', 'runVersion': 2, 'workOrderVersion': 11} sameAsFirst=True; adjustments=1; WO version=11 status=CLOSED",
+   "verdict": "PASS",
+   "http": 200,
+   "traceId": "fd9631b364654ed3",
+   "evidenceN": 116,
+   "ids": {
+    "workOrderId": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+    "runId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   }
+  }
+ ],
+ "ids": {
+  "company": "d806f3b3-c6fc-4215-8497-2023cb353a2d",
+  "plant": "2440446a-3eca-44f2-9513-fb7d38f77111",
+  "wh": "30357177-aba5-4ab3-92de-164ad9e0563b",
+  "RM": "689827e0-ef63-4019-90a7-b2a66b8bb348",
+  "RM29": "b495a138-b155-4d42-a354-923dcce1cd8e",
+  "FGL": "7bca3d29-317a-4ea3-b7cf-859609377b2f",
+  "FGN": "2a3af677-9167-40f4-a6e7-6796d50fc5d3",
+  "FG29": "3831a4ad-454a-4721-9438-b60628a22b90",
+  "WC": "3103d117-b542-4070-82a1-dbf76a71ea0e",
+  "WO_LOT": "aa6d4b8a-314a-46d3-a443-5e447dae6f63",
+  "RCPT_LOT": "cf7b4c27-870d-41a4-a342-2c22d28affef",
+  "WO_NONLOT": "e749f20c-6ac5-4d57-955c-a9e28e1a6052",
+  "RCPT_NONLOT": "67cce382-e0ef-4aa9-941d-5f8244793015",
+  "WO_C29": "d01f7952-0d9b-4eee-a08e-f21d2d8769cf",
+  "RUN_C29": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+ },
+ "notes": [
+  {
+   "C9 GET cost-runs/{runId} top-level keys": [
+    "allowedActions",
+    "closed",
+    "companyId",
+    "createdAt",
+    "data",
+    "moneyVisible",
+    "outputUom",
+    "plantId",
+    "productItemCode",
+    "productItemId",
+    "productItemName",
+    "readiness",
+    "section",
+    "sourceVersion",
+    "status",
+    "timeZone",
+    "workOrderId",
+    "workOrderNo",
+    "workOrderVersion"
+   ],
+   "status": "CLOSED",
+   "readiness": "CLOSED",
+   "closed": {
+    "closedAt": "2026-11-02T07:55:00.479678Z",
+    "closedBy": {
+     "id": "23fce5b6-dd3b-4d30-a8b8-c33962a38a82",
+     "displayName": "admin"
+    },
+    "closeReason": "R0211 smoke close",
+    "finalRunId": "bca5ddd2-cc4e-4999-9caf-02bd499b46d4"
+   },
+   "data.keys": [
+    "actual",
+    "approvedReceiptQuantity",
+    "currency",
+    "finalGoodQuantity",
+    "historicalReworkQuantity",
+    "issuedValue",
+    "loss",
+    "planned",
+    "plannedQuantity",
+    "productionScrapQuantity",
+    "qcAcceptedQuantity",
+    "qcPendingQuantity",
+    "qcRejectedQuantity",
+    "remainingValue",
+    "shortfallQuantity",
+    "unitCost",
+    "unknownReasons",
+    "variance",
+    "variancePercent"
+   ]
+  }
+ ],
+ "openapi": {
+  "BE_OPENAPI_2026-10-28.json": {
+   "RunSummary.state": {
+    "type": "string"
+   },
+   "CostView.status": "enum of WorkOrderStatus",
+   "CostView.readiness": [
+    "INCOMPLETE",
+    "BLOCKED",
+    "READY",
+    "STALE",
+    "CLOSED"
+   ]
+  },
+  "serverConstants": "ProductionCostRun.PREVIEW / FINALIZED (String constants, no Java enum)"
+ }
+}

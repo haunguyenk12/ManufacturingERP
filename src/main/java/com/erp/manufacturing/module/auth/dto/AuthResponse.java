@@ -17,4 +17,4 @@ public record AuthResponse(
         long    expiresIn,
         String  deviceId,
         boolean sessionKicked
-) {}
+) implements LoginResult {}

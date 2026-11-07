@@ -46,6 +46,23 @@ public enum AuthErrorCode implements ErrorCode {
      */
     RESET_TOKEN_INVALID     ("RESET_TOKEN_INVALID",    "Reset token is invalid or has expired",     HttpStatus.UNAUTHORIZED),
 
+    // ── Password setup / change (email code) ───────────────────────────────
+    /** 403: the caller skipped the initial-password login that must precede a SETUP challenge. */
+    PASSWORD_SETUP_REQUIRED ("PASSWORD_SETUP_REQUIRED", "Sign in with the initial password first",  HttpStatus.FORBIDDEN),
+    CODE_INVALID            ("CODE_INVALID",           "The code is incorrect",                     HttpStatus.BAD_REQUEST),
+    CODE_EXPIRED            ("CODE_EXPIRED",           "The code has expired",                      HttpStatus.UNPROCESSABLE_ENTITY),
+    CODE_USED               ("CODE_USED",              "The code has already been used",            HttpStatus.UNPROCESSABLE_ENTITY),
+    CODE_ATTEMPTS           ("CODE_ATTEMPTS",          "Too many incorrect codes",                  HttpStatus.TOO_MANY_REQUESTS),
+    RESEND_TOO_SOON         ("RESEND_TOO_SOON",        "A code was sent recently. Wait before requesting another", HttpStatus.TOO_MANY_REQUESTS),
+    /**
+     * 422, not 401: the caller is typing a password into a form, and a 401 on an authenticated call
+     * (change) is what makes a client end the session.
+     */
+    CURRENT_PASSWORD_INVALID("CURRENT_PASSWORD_INVALID", "The current password is incorrect",       HttpStatus.UNPROCESSABLE_ENTITY),
+    PASSWORD_POLICY         ("PASSWORD_POLICY",        "The new password does not meet the password policy", HttpStatus.UNPROCESSABLE_ENTITY),
+    /** Covers unknown, expired and already-consumed setup tokens — the store cannot tell them apart. */
+    SETUP_TOKEN_INVALID     ("SETUP_TOKEN_INVALID",    "The setup token is invalid or has expired", HttpStatus.UNPROCESSABLE_ENTITY),
+
     // ── Authorization ──────────────────────────────────────────────────────
     ACCESS_DENIED           ("PERMISSION_DENIED",      "Insufficient permissions",                  HttpStatus.FORBIDDEN);
 

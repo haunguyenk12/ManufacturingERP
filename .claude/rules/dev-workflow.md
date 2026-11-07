@@ -39,8 +39,10 @@ V5__create_audit_logs.sql
 
 Trước khi báo cáo task là xong, cập nhật tài liệu cho khớp với thay đổi vừa làm:
 
-1. **`CLAUDE.md`** (root) — nếu thay đổi ảnh hưởng phase/trạng thái/baseline test/coverage → sửa §0
-   (`0.1` Phase Hiện Tại, `0.2` Module Đã Hoàn Thành, `0.4` Nợ Kỹ Thuật). Nếu thêm/sửa module,
+1. **`CLAUDE.md`** (root) — nếu thay đổi ảnh hưởng phase/trạng thái/baseline test/coverage → chỉ sửa
+   bảng **§0.0** (vài ô). Bản ghi chi tiết của phase (nghiệm thu mutation, smoke, breaking change, hệ quả)
+   viết vào `docs/phases/<mã phase>.md` + một dòng trong `docs/phases/INDEX.md` — **không** dán vào
+   `CLAUDE.md` (file đó được nạp vào mọi phiên; từng phình tới ~534 KB). Nếu thêm/sửa module,
    permission, business rule mới → cập nhật đúng file split tương ứng (xem "BẢN ĐỒ TÀI LIỆU" ở cuối
    `CLAUDE.md`) — **không** viết đè nội dung đó thẳng vào root.
 2. **File tiến độ liên quan** — cập nhật đúng file đang track phase của thay đổi:

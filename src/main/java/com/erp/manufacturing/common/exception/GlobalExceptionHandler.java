@@ -88,6 +88,16 @@ public class GlobalExceptionHandler {
 
     // ── 2. Single custom business exception ────────────────────────────────
 
+    @ExceptionHandler(RetryAfterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRetryAfter(
+            RetryAfterException ex, HttpServletRequest request) {
+
+        log.warn("[{}] {} – retry after {}s", ex.getCode(), request.getRequestURI(), ex.getRetryAfterSeconds());
+        return ResponseEntity.status(ex.getHttpStatus())
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(ApiResponse.error(ex.getErrorCode(), ex.getMessage()));
+    }
+
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<Void>> handleAppException(
             AppException ex, HttpServletRequest request) {

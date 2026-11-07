@@ -360,7 +360,42 @@ FE phải điều hướng về màn login sau khi reset, không chỉ đóng mo
 ### `PATCH /api/v1/admin/users/{userId}/unlock` (`D8c`) — không body, role `ADMIN`
 
 Xoá bộ đếm brute-force trong Redis và đưa tài khoản về `ACTIVE`. `200 { result: null }` khi thành
-công; `403` nếu người gọi không có role `ADMIN`.
+công; `403` nếu người gọi không có role `ADMIN`. 🔴 **[2026-11-06]** Tài khoản `PENDING_SETUP` (xem mục dưới) **giữ
+nguyên** `PENDING_SETUP` — mở khoá không phải đường vòng qua bước đặt mật khẩu.
+
+### Tài khoản mới: đăng nhập lần đầu bằng mã email, và đổi mật khẩu *(2026-11-06, `V96`)*
+
+> Đường dẫn thật là `/api/auth/v1/...` và `/api/admin/users/v1/...` (nhóm này đặt `v1` sau tiền tố tài nguyên). Hợp đồng đầy đủ + câu trả lời cho
+> 7 câu hỏi của FE: `BE_RESPONSE_ACCOUNT_PASSWORD_FLOWS_2026-11-06.md`.
+
+**Admin tạo tài khoản** — `POST /api/admin/users/v1/accounts/commands`, body `{kind:"CREATE", username, email, password}` (password là mật khẩu **ban đầu**),
+quyền `PERM_ACCESS_MANAGE` ở phạm vi GLOBAL. `201` trả tài khoản với `status:"PENDING_SETUP"`. Chỉ `kind:"CREATE"` được hỗ trợ (kind khác ⇒ `400`
+field `kind`). `POST /api/users/v1` cũ **không đổi** (vẫn tạo `ACTIVE`).
+
+**Đăng nhập lần đầu** (4 bước, FE ở nguyên `/login`):
+
+| # | Gọi | Kết quả |
+|---|---|---|
+| 1 | `POST /api/auth/v1/login` `{username, password: <mật khẩu ban đầu>}` | `200`, `result = {kind:"PASSWORD_SETUP", email, challenge:{id, expiresAt, resendAt}}` — **không có token**; mã 6 số đã được gửi tới email. Sai mật khẩu ⇒ `401 INVALID_CREDENTIALS`, không gửi mã. **Rẽ nhánh theo `result.kind`**: nhánh token không có field này |
+| 2 | `POST /api/auth/v1/password-challenges/verify` `{challengeId, code}` | `result = {setupToken}` |
+| 3 | `POST /api/auth/v1/password-challenges/complete` `{setupToken, password}` | `200`, **không có `result`**. Tài khoản thành `ACTIVE`, mọi phiên cũ bị thu hồi, **không** tự đăng nhập |
+| 4 | `POST /api/auth/v1/login` với mật khẩu **mới** | token như thường |
+
+Gửi lại mã: `POST /api/auth/v1/password-challenges` `{identifier, purpose:"SETUP", previousId:<challenge.id đang có>}` ⇒ challenge mới, mã cũ chết.
+Trước `resendAt` ⇒ `429 RESEND_TOO_SOON` + header `Retry-After` (giây). Mã sống 10 phút; token setup sống 10 phút sau verify.
+
+**Quên mật khẩu bằng mã** — `POST /api/auth/v1/password-challenges` `{identifier, purpose:"RESET"}` (identifier = email hoặc username) ⇒ luôn `200` cùng hình dạng
+dù tài khoản có tồn tại hay không (không tiết lộ); rồi verify → complete như trên. Tài khoản chưa setup **không** dùng được RESET.
+Luồng cũ `forgot-password`/`reset-password` (link) vẫn còn, không đổi.
+
+**Đổi mật khẩu khi đã đăng nhập** — `POST /api/auth/v1/password/change` (Bearer) `{currentPassword, password}` ⇒ `200`, không `result`. Thu hồi **mọi** phiên kể cả phiên
+đang dùng ⇒ về `/login`. Mật khẩu hiện tại sai ⇒ **`422`** `CURRENT_PASSWORD_INVALID` (cố ý không phải 401: client sẽ hiểu 401 là hết phiên).
+
+**Policy mật khẩu mới** (complete, change, tạo tài khoản): ≥ 8 ký tự, có chữ hoa, chữ thường, số, ký tự đặc biệt, ≤ 72 byte, và khác mật khẩu hiện tại ⇒
+`422 PASSWORD_POLICY` + `errors[{field:"password", message}]`. Token **chưa bị tiêu** khi policy sai nên cùng token thử lại được.
+
+**Idempotency:** `Idempotency-Key` được nhận nhưng bỏ qua; mỗi bước tự replay-safe (xem §4 của file trả lời). Riêng `change` không replay được — sau timeout hãy thử
+đăng nhập bằng mật khẩu mới.
 
 ### Gợi ý interceptor
 
@@ -1747,6 +1782,14 @@ overIssue, overrideReason`
 | `TOKEN_REUSE_DETECTED` | Refresh token đã rotate bị dùng lại ⇒ **mọi phiên đã bị thu hồi** | Về login + báo bảo mật. Xem lưu ý serialize refresh ở §`POST /auth/refresh` |
 | `SESSION_ABSOLUTE_TIMEOUT` | Phiên quá **30 ngày** kể từ login ⇒ thu hồi theo chính sách, **không** phải sự cố bảo mật | Về login với message trung tính. **Đừng** gộp message với 2 dòng trên |
 | `RESET_TOKEN_INVALID` (`D8c`) | Token reset-password sai/hết hạn/đã dùng — một mã dùng chung cho cả ba trường hợp | Hiện lỗi chung, cho phép request forgot-password lại |
+| `PASSWORD_SETUP_REQUIRED` (403) | Gửi lại mã SETUP mà thiếu/sai `previousId` | Quay về bước login bằng mật khẩu ban đầu |
+| `CODE_INVALID` (400) | Mã sai (hoặc `challengeId` không tồn tại) — mỗi lần sai tốn một lượt | Giữ mã đã nhập, báo lỗi |
+| `CODE_EXPIRED` / `CODE_USED` (422) | Mã hết hạn hoặc đã bị thay / đã dùng | Cho gửi lại mã |
+| `CODE_ATTEMPTS` (429) | 5 lần sai trên một challenge. Có `Retry-After` | Hiện thời gian chờ, rồi xin mã mới |
+| `RESEND_TOO_SOON` (429) | Gửi lại trước `resendAt`. Có `Retry-After` | Đếm ngược tới `resendAt` |
+| `PASSWORD_POLICY` (422) | Mật khẩu mới không đạt policy hoặc trùng mật khẩu hiện tại. Có `errors[]` field `password` | Giữ form, báo ở field |
+| `CURRENT_PASSWORD_INVALID` (422) | Mật khẩu hiện tại sai khi đổi mật khẩu | Báo ở field `currentPassword`; **không** kết thúc phiên |
+| `SETUP_TOKEN_INVALID` (422) | Setup token sai / hết hạn / đã dùng (một mã chung cho cả ba) | Xin mã mới |
 | `INVALID_CREDENTIALS` | Sai user/mật khẩu | Hiện lỗi chung, **không** nói field nào sai |
 | `ACCOUNT_LOCKED` (423) | 5 lần sai liên tiếp → khoá 15 phút | |
 | `ACCOUNT_INACTIVE` (403) | Tài khoản bị vô hiệu | |

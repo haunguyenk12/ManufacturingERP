@@ -65,9 +65,11 @@ public class SecurityConfig {
                         // in declaration order and the first match wins. /me is the one auth
                         // endpoint that is NOT permit-all: it needs a valid, unexpired token.
                         .requestMatchers("/auth/v1/login", "/auth/v1/refresh",
-                                "/auth/v1/forgot-password", "/auth/v1/reset-password").permitAll()
+                                "/auth/v1/forgot-password", "/auth/v1/reset-password",
+                                "/auth/v1/password-challenges", "/auth/v1/password-challenges/verify",
+                                "/auth/v1/password-challenges/complete").permitAll()
                         .requestMatchers("/auth/v1/me", "/auth/v1/logout",
-                                "/auth/v1/logout-all").authenticated()
+                                "/auth/v1/logout-all", "/auth/v1/password/change").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // Container-level error dispatches land on /error (EH-1). Spring Boot
                         // registers the security chain for the ERROR dispatcher type as well, so

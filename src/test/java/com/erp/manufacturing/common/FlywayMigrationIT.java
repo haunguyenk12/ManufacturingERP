@@ -54,8 +54,9 @@ class FlywayMigrationIT extends AbstractPostgresIntegrationTest {
         // V69 (customers + supplier contact columns) and V70 (customer permissions) are G2-1;
         // V71 (fixed-template import batches on import_runs) is G3; V72 (stock transfers) is G4-2.
         // V93 (MRP pending purchase-QC snapshot) is CF-4; V94 (captured capacity on operations) is CF-5;
-        // V95 (case-insensitive lot code index) is CF-9.
-        assertThat(current.getVersion().getVersion()).isEqualTo("95");
+        // V95 (case-insensitive lot code index) is CF-9; V96 (password_challenges) is the account
+        // password flows (FE_REQUEST_ACCOUNT_PASSWORD_FLOWS_2026-11-06).
+        assertThat(current.getVersion().getVersion()).isEqualTo("96");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(Arrays.stream(flyway.info().all()))
                 .noneMatch(info -> info.getState() == MigrationState.FAILED);

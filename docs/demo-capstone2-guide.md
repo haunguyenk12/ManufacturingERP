@@ -86,6 +86,24 @@ sản xuất, 2 ca, 2 lịch, 3 nhà cung cấp, giá thành chuẩn, tồn kho 
 | Dòng bảng năng lực | 14 | Có tải, có sức chứa, có % sử dụng |
 | Nhật ký kiểm toán | ~370 | Sinh tự nhiên từ chính các thao tác trên |
 
+### Dữ liệu cho các module mới (bản 2026-11-04, công ty `D26-` — chạy `set-lot-expiry.sh` sau seed)
+
+| Module | Có gì |
+|---|---|
+| G11 giá thành | 8 đơn giá giờ theo tổ sản xuất; `D26-WO-1004` và `D26-WO-2005` đã **chốt giá thành + đóng** qua `finalize-cost-and-close` (run `FINALIZED`, bút toán chỉ-giá-trị) |
+| G7b/G7c phiếu nhận + QC mua | Mọi hàng nhận từ PO vào vùng chờ kiểm rồi QC theo lượng: `RM-FRAME20` còn **5 chờ QC**, `RM-CARTON` **loại 10**; 1 phiếu nhận **nháp** trên `D26-PO-0002` |
+| G8d hoàn vật tư | `D26-WO-2004`, `D26-WO-2005` mỗi lệnh hoàn một phần vật tư về đúng kho nguồn |
+| G9c QC sản xuất theo lượng | `D26-WO-2004`: nhập 2, QC chấp nhận 1 (lô con `-A1`), 1 còn chờ ở lô gốc `HOLD` |
+| G4 chuyển kho / kiểm đếm | 1 phiếu chuyển 10 `RM-GRIP` RM→WIP; kiểm đếm `RM-DECAL` thiếu 2 |
+| G6a giữ tồn cho đơn | `D26-SO-1002` giữ 2 `BIKE20` từ lô `D26-BIKE20-B001` |
+| G6b MRP thương mại | 1 lượt chạy thương mại cho `D26-SO-1003` |
+| CF-2 lô hết hạn | Lô `D26-BIKE16-EXP1` (3 cái) đã hết hạn |
+
+> ⚠️ **Giới hạn của giá thành (G11)**: pool định giá = (thành phẩm × kho đầu ra) và gom **mọi** phiếu giao
+> của pool. Vì vậy lệnh `D26-WO-2005` sản xuất bán thành phẩm `D26-WIP-DRIVE18` (pool trống, không theo lô);
+> thành phẩm có tồn đầu kỳ (`BIKE20`, `ROAD700`) hoặc đã giao hàng (`BIKE16`) không chốt giá thành được.
+> Đường `POST /close` cũ trả `409 CLOSE_BLOCKED` — seed dùng `finalize-cost-and-close`.
+
 ### Cảnh báo tồn kho trên Dashboard
 
 Ngưỡng được chọn theo tồn khả dụng **thật ở cuối lượt seed** (sau khi mua hàng nhập kho và các

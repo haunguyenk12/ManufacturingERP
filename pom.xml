@@ -52,6 +52,13 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!-- Account emails (password setup/reset codes). The JavaMailSender bean only exists when
+             spring.mail.host is set, so without it the app starts and logs instead of sending. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <!-- ── Validation ── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

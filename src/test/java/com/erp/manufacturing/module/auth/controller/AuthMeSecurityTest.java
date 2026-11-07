@@ -15,6 +15,7 @@ import com.erp.manufacturing.config.SecurityConfig;
 import com.erp.manufacturing.config.SecurityProperties;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.service.AuthService;
+import com.erp.manufacturing.module.auth.service.PasswordFlowService;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,7 @@ class AuthMeSecurityTest {
     @Autowired MockMvc mockMvc;
 
     @MockBean AuthService authService;
+    @MockBean PasswordFlowService passwordFlowService;
     @MockBean RedisTemplate<String, String> redisTemplate;
     @MockBean JwtTokenProvider jwtTokenProvider;
     @MockBean TokenStoreService tokenStoreService;
@@ -101,6 +103,28 @@ class AuthMeSecurityTest {
         // unreadable body, not 401) — the point here is that no token was required to get that far.
         mockMvc.perform(post("/auth/v1/login"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("password-challenges are permit-all, even when the client attaches a corrupt Authorization header")
+    void passwordChallenges_arePermitAll_andIgnoreAStaleToken() throws Exception {
+        for (String path : List.of("/auth/v1/password-challenges", "/auth/v1/password-challenges/verify",
+                "/auth/v1/password-challenges/complete")) {
+            // 400 (empty body reached @Valid), never 401: no token needed, and a garbage one must not turn it into a wall.
+            mockMvc.perform(post(path)).andExpect(status().isBadRequest());
+            mockMvc.perform(post(path).header("Authorization", "Bearer not.a.jwt")).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    @DisplayName("password/change requires a session: without a token → 401, request never reaches the controller")
+    void passwordChange_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/auth/v1/password/change")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"a\",\"password\":\"b\"}"))
+                .andExpect(status().isUnauthorized());
+
+        org.mockito.Mockito.verifyNoInteractions(passwordFlowService);
     }
 
     private void stubValidJwt(String username, String jti, String rawToken) {

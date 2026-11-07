@@ -2,13 +2,21 @@ package com.erp.manufacturing.module.auth.controller;
 
 import com.erp.manufacturing.common.response.ApiResponse;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
+import com.erp.manufacturing.module.auth.dto.ChallengeRequest;
+import com.erp.manufacturing.module.auth.dto.ChallengeResponse;
+import com.erp.manufacturing.module.auth.dto.ChangePasswordRequest;
+import com.erp.manufacturing.module.auth.dto.CompleteChallengeRequest;
 import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
+import com.erp.manufacturing.module.auth.dto.LoginResult;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
+import com.erp.manufacturing.module.auth.dto.VerifyChallengeRequest;
+import com.erp.manufacturing.module.auth.dto.VerifyChallengeResponse;
 import com.erp.manufacturing.module.auth.service.AuthService;
+import com.erp.manufacturing.module.auth.service.PasswordFlowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,15 +41,21 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordFlowService passwordFlowService;
 
     @PostMapping("/v1/login")
-    @Operation(summary = "Login and receive access/refresh token pair")
-    public ResponseEntity<ApiResponse<AuthResponse>> login(
+    @Operation(summary = "Login and receive access/refresh token pair",
+            description = "An account still awaiting first-login setup gets `result.kind = PASSWORD_SETUP` "
+                    + "and a challenge instead of tokens; the emailed code goes to /password-challenges/verify.")
+    public ResponseEntity<ApiResponse<LoginResult>> login(
             @Valid @RequestBody LoginRequest request,
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
 
-        AuthResponse authResponse = authService.login(request, httpRequest);
+        LoginResult result = authService.login(request, httpRequest);
+        if (!(result instanceof AuthResponse authResponse)) {
+            return ResponseEntity.ok(ApiResponse.ok(result, "Password setup required."));
+        }
 
         // Notify client if previous session was kicked
         if (authResponse.sessionKicked()) {
@@ -104,5 +118,48 @@ public class AuthController {
             HttpServletRequest httpRequest) {
         authService.resetPassword(request, httpRequest);
         return ResponseEntity.ok(ApiResponse.noContent("Password reset successfully"));
+    }
+
+    // ── Email-code password flows (setup, forgot-password) and change ──────
+    // Idempotency-Key is accepted but not required: replay safety comes from each step's own state
+    // (see PasswordFlowService).
+
+    @PostMapping("/v1/password-challenges")
+    @Operation(summary = "Request (or resend) an emailed 6-digit code",
+            description = "SETUP needs `previousId` from the login that returned PASSWORD_SETUP; RESET answers "
+                    + "identically for unknown identifiers. 429 RESEND_TOO_SOON carries Retry-After.")
+    public ResponseEntity<ApiResponse<ChallengeResponse>> requestChallenge(
+            @Valid @RequestBody ChallengeRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(passwordFlowService.request(request)));
+    }
+
+    @PostMapping("/v1/password-challenges/verify")
+    @Operation(summary = "Exchange the emailed code for a single-use setup token",
+            description = "CODE_INVALID / CODE_EXPIRED / CODE_USED, or 429 CODE_ATTEMPTS after 5 wrong codes.")
+    public ResponseEntity<ApiResponse<VerifyChallengeResponse>> verifyChallenge(
+            @Valid @RequestBody VerifyChallengeRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(passwordFlowService.verify(request)));
+    }
+
+    @PostMapping("/v1/password-challenges/complete")
+    @Operation(summary = "Set the new password with the setup token",
+            description = "Activates a PENDING_SETUP account and revokes every session; the user logs in again.")
+    public ResponseEntity<ApiResponse<Void>> completeChallenge(
+            @Valid @RequestBody CompleteChallengeRequest request,
+            HttpServletRequest httpRequest) {
+        passwordFlowService.complete(request,
+                (String) httpRequest.getAttribute("clientIp"), (String) httpRequest.getAttribute("traceId"));
+        return ResponseEntity.ok(ApiResponse.noContent("Password set successfully"));
+    }
+
+    @PostMapping("/v1/password/change")
+    @Operation(summary = "Change the password with the current password",
+            description = "Requires a session. Revokes every session, including this one.")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            HttpServletRequest httpRequest) {
+        passwordFlowService.change((String) httpRequest.getAttribute("authenticatedUserId"), request,
+                (String) httpRequest.getAttribute("clientIp"), (String) httpRequest.getAttribute("traceId"));
+        return ResponseEntity.ok(ApiResponse.noContent("Password changed successfully"));
     }
 }

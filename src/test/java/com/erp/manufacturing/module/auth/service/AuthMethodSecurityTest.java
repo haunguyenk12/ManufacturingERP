@@ -100,10 +100,11 @@ class AuthMethodSecurityTest {
                                  AccessControlService accessControlService,
                                  UserRepository userRepository,
                                  PasswordResetTokenService passwordResetTokenService,
-                                 EmailNotificationService emailNotificationService) {
+                                 EmailNotificationService emailNotificationService,
+                                 PasswordFlowService passwordFlowService) {
             return new AuthService(userDetailsService, jwtTokenProvider, tokenStore, passwordEncoder,
                     auditLogService, jwtProperties, accessControlService, userRepository,
-                    passwordResetTokenService, emailNotificationService);
+                    passwordResetTokenService, emailNotificationService, passwordFlowService);
         }
 
         @Bean UserDetailsServiceImpl userDetailsService() { return mock(UserDetailsServiceImpl.class); }
@@ -130,5 +131,7 @@ class AuthMethodSecurityTest {
         @Bean PasswordResetTokenService passwordResetTokenService() { return mock(PasswordResetTokenService.class); }
 
         @Bean EmailNotificationService emailNotificationService() { return mock(EmailNotificationService.class); }
+
+        @Bean PasswordFlowService passwordFlowService() { return mock(PasswordFlowService.class); }
     }
 }

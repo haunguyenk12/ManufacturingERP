@@ -1,0 +1,271 @@
+{
+  "meta": {
+    "seedRunId": "D26-20261104T105536Z",
+    "generatedAt": "2026-11-04T10:55:36Z",
+    "sourceDocument": "BE_CLEAN_DEMO_DATA_GUIDE_2026-08-22.docx",
+    "gitCommit": "fba3288",
+    "baseUrl": "http://localhost:8080/api",
+    "profile": "sample"
+  },
+  "company": {
+    "id": "a97ac4e6-a2c8-4f17-bd63-05e236676dfa",
+    "code": "D26-OMNIPLANT"
+  },
+  "plant": {
+    "id": "408d4a57-2c48-41a3-b062-d9ffb2238e62",
+    "code": "D26-PLANT",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "warehouses": {
+    "D26-RM": "928bb9e5-1256-4aa6-8142-d01ef1d73598",
+    "D26-WIP": "c08a19d2-f0e5-4eba-92bd-3ec599fbf0ec",
+    "D26-FG": "86aa576e-92fe-4d35-af17-f06e76d0a6ae",
+    "D26-QC": "0b842d23-d9d6-4332-9822-adac2f0c7dfb",
+    "D26-SCRAP": "bfd9eff0-9137-4b65-9564-ea3f792d5fb2"
+  },
+  "roles": {
+    "MANAGER": "4f920970-e2c1-4a0d-9839-22b70743e0b8",
+    "OPERATOR": "f92fed47-59f1-459e-bd28-1ba6269e36c3"
+  },
+  "scope": {
+    "id": "e90ed17c-97cd-4f84-a406-d5efbac643f4",
+    "code": "D26-SCOPE-PLANT"
+  },
+  "users": {
+    "quanly_sample": {
+      "id": "4287d3c6-c2fb-489e-8c55-f884717742cc",
+      "username": "quanly.sample",
+      "role": "MANAGER",
+      "scope": "D26-SCOPE-PLANT",
+      "expiresAt": "2027-11-04T10:55:43Z"
+    },
+    "kehoach_sample": {
+      "id": "f38f8c23-6dbe-43ea-b2df-f025248bdba0",
+      "username": "kehoach.sample",
+      "role": "MANAGER",
+      "scope": "D26-SCOPE-PLANT",
+      "expiresAt": "2027-11-04T10:55:43Z"
+    },
+    "congnhan_sample": {
+      "id": "8fad410f-4f0b-47e0-a850-33ff51ccd682",
+      "username": "congnhan.sample",
+      "role": "OPERATOR",
+      "scope": "D26-SCOPE-PLANT",
+      "expiresAt": "2027-11-04T10:55:43Z"
+    },
+    "kho_sample": {
+      "id": "eae9cad4-20c6-4f1a-91a0-c4d65c0c3807",
+      "username": "kho.sample",
+      "role": "OPERATOR",
+      "scope": "D26-SCOPE-PLANT",
+      "expiresAt": "2027-11-04T10:55:43Z"
+    }
+  },
+  "uoms": {
+    "EA": "da7ab9f8-67e4-487a-ace1-1b9bcfc67cbb",
+    "KG": "17aa8425-0884-441e-9eb1-2b71cbc72fbc",
+    "SET": "b7668d79-5827-4aab-ba37-6d55371e3004",
+    "PR": "bb2d36d2-65a0-4de5-b99b-141b69afde90",
+    "M": "f7e336a5-be00-4fe9-a9c1-f3b618e1ff34"
+  },
+  "items": {
+    "D26-FG-BIKE16": "980a388a-3be7-4f00-985f-8b9e4140ac4d",
+    "D26-FG-BIKE20": "c6456df4-b994-4bad-b695-eb2508ee62e2",
+    "D26-FG-ROAD700": "2274e38f-ed0d-4eef-8d34-782a19ac971f",
+    "D26-WIP-FRAME16": "abe199cf-6815-4dd5-9762-992e1de6f3c2",
+    "D26-WIP-FRAME20": "9d8c40a9-7cff-4a73-8677-8c8fb1058302",
+    "D26-WIP-FRAMERD": "97ed4818-6c59-40fb-85c3-1c632483e027",
+    "D26-WIP-DRIVE7": "99044d3e-4b3c-4be4-8b7f-8cc752c3ad50",
+    "D26-WIP-DRIVE18": "7364f96d-c413-4cc6-b817-93829fe5d1ba",
+    "D26-WIP-WHEELSET": "bddb6e33-5a54-4577-b05c-62115fd91532",
+    "D26-RM-FRAME16": "3cf3c0c1-fff2-4307-b3c5-9a0f8c8e120b",
+    "D26-RM-FRAME20": "e9dac438-1307-4279-9861-8aa8a8b1ade8",
+    "D26-RM-FRAMERD": "9b9c0a1e-ba15-4f18-af30-91ebee0ebc31",
+    "D26-RM-PAINT": "09aa3a81-7043-48aa-8561-c3f8b79fbc99",
+    "D26-RM-PRIMER": "2a50b471-e112-4f9d-85f9-f282e302ce7b",
+    "D26-RM-DECAL": "91c35557-aa8d-4b14-ab41-bd4244d44e88",
+    "D26-RM-WHEEL16": "267f5536-1010-4e5b-976e-95c68555c78a",
+    "D26-RM-WHEEL20": "363af22d-7d8c-41c7-a3c4-627f21d5b98c",
+    "D26-RM-RIM700": "27f76af8-b1f3-4f87-88eb-7929717e603f",
+    "D26-RM-HUB700": "a5f5264b-574b-48f9-aa2a-65227f96a8d1",
+    "D26-RM-SPOKE": "7b875e90-80f4-484a-b9f3-4287565747d5",
+    "D26-RM-TIRE700": "40cae9d3-ab17-4c2c-882d-8ce237372096",
+    "D26-RM-TUBE700": "2ea57df5-0afd-4ae8-8ac5-1051d8a3964c",
+    "D26-RM-CHAINRING": "50021dd9-1353-44d7-af52-120a6fa303d7",
+    "D26-RM-CHAIN": "09a13e09-e0a5-41f3-835b-2c9e5db3e08a",
+    "D26-RM-CASSETTE7": "f905eb32-28e6-40c5-8fc1-0d7c39ad2cf9",
+    "D26-RM-CASSETTE9": "7dc77887-04d6-44ac-ab22-546ca74bf523",
+    "D26-RM-DERAILLEUR": "e08f6e67-b65a-4745-8db7-b0894a08f3f5",
+    "D26-RM-SHIFTER": "29a872d7-5504-49fb-aa12-596de10667c6",
+    "D26-RM-CRANKARM": "08712573-fdae-497b-b26a-ae169bcbcd4f",
+    "D26-RM-PEDAL": "3785c1eb-e715-4c99-b3cc-5effb404fd7b",
+    "D26-RM-BRAKE": "273f4da4-5204-4ff6-84f7-acfbb2519367",
+    "D26-RM-BRAKEDISC": "5d1cd996-e28c-4910-8464-15fdb9ec0d79",
+    "D26-RM-HANDLEBAR": "ef3209c0-d3b1-48d7-b0a0-4394995db084",
+    "D26-RM-SADDLE": "f617d96b-6f2d-4f6a-919f-bff353cefa3f",
+    "D26-RM-SEATPOST": "2a1e11d7-2f0f-41e3-bad8-9d7816b9cb38",
+    "D26-RM-GRIP": "f4e18061-4b22-4255-9cfa-113bbbd6f897",
+    "D26-RM-BEARING": "7cdb1cd0-4ed8-46c1-b8cf-514cefeda089",
+    "D26-RM-TRAINWHEEL": "6055f129-7b4b-4761-b4a2-94be0dc0e5f9",
+    "D26-RM-CARTON": "7345162b-5ff0-459e-a1ae-28df1e12c533",
+    "D26-RM-TOOLKIT": "34c99543-ac6d-4cdf-8904-3a48620aec5f"
+  },
+  "shifts": {
+    "D26-SHIFT-DAY": "ac3eda73-7f35-4796-b084-6738bc1e27bf",
+    "D26-SHIFT-EVE": "6eacc1c7-efc5-4cab-85d3-ba8be1c866cb"
+  },
+  "workCalendars": {
+    "D26-CAL-DAY": "de632d8e-8e68-4410-819e-cd8a9787c88a",
+    "D26-CAL-2SHIFT": "da6c336e-1573-4505-8601-20ed7596d77d"
+  },
+  "workCenters": {
+    "D26-WC-FRAME": "a06fe8cd-a1d3-4c7a-ac98-82b5a2569b34",
+    "D26-WC-PAINT": "1c0c48d0-23bc-4e1c-831b-fa12a53a40f9",
+    "D26-WC-DRIVE": "233addef-aadb-4a34-b446-f6c44e019356",
+    "D26-WC-WHEEL": "ccdd5909-d52b-4582-8479-00af5c0d7294",
+    "D26-WC-ASSEMBLY": "3d2c4bbc-65b2-4682-9932-13b4b5fb0d11",
+    "D26-WC-FINAL": "bce9528f-d18a-47c3-8da3-85f9d38df2ea",
+    "D26-WC-PACK": "1f74d3a4-beea-46a1-9b60-d03e77bac6ab",
+    "D26-WC-QCLAB": "cc06740b-ee72-4353-93d3-f774f762367b"
+  },
+  "boms": {
+    "D26-BOM-FRAME16": "342a540d-7f69-4bf8-a748-0ead78b62f86",
+    "D26-BOM-FRAME20": "37420d1a-9e79-45c5-b448-bccb77104227",
+    "D26-BOM-FRAMERD": "74c64550-9251-4dd3-aa6b-6784f4f7f4fe",
+    "D26-BOM-DRIVE7": "bbe60844-3820-44c9-ac32-8eef033b56b5",
+    "D26-BOM-DRIVE18": "ee6045aa-19de-4be8-985d-02490abbc340",
+    "D26-BOM-WHEELSET": "96790023-183e-4eec-b944-4fedf6299ddd",
+    "D26-BOM-BIKE16": "d3148a3e-ef24-4111-8e00-c7cdbd9a879f",
+    "D26-BOM-BIKE20": "2500fccf-b3f7-4fd2-8ec1-c6a394e37718",
+    "D26-BOM-ROAD700": "1a82aefb-c93e-432a-bc4f-582a481ca375"
+  },
+  "routings": {
+    "D26-RT-FRAME16": "4935e9cf-904e-455e-805e-f0be5c2fceae",
+    "D26-RT-FRAME20": "d19268be-87c2-444c-9c34-a2f3a5b521d4",
+    "D26-RT-FRAMERD": "d94a0522-7e10-4af8-9022-2fcc5f548152",
+    "D26-RT-DRIVE7": "f69f0706-5ab4-4f6c-a6e6-7a61b87237c2",
+    "D26-RT-DRIVE18": "c6b9028f-21c7-4e40-941e-240e9521bb38",
+    "D26-RT-WHEELSET": "d8adad6a-30a6-4c03-9fa5-426c71ea3bde",
+    "D26-RT-BIKE16": "34f36b6f-98ad-464b-9f90-a8d2ad633c02",
+    "D26-RT-BIKE20": "d2074d95-b721-4c98-a450-b8278f1ec1dc",
+    "D26-RT-ROAD700": "6dd1d9e1-9e6d-45cf-84ae-c3177f58041f"
+  },
+  "suppliers": {
+    "D26-SUP-FRAME": "2652b3db-51ba-46c7-85f6-49a0d6df00a1",
+    "D26-SUP-COMP": "22d845d8-6951-4e12-9c3a-be472ce0e5f7",
+    "D26-SUP-TIRE": "0d8439a0-b0cf-457e-8f23-0352e24ddb77"
+  },
+  "openingStock": {
+    "D26-WIP-FRAME16": "20 @ D26-WIP",
+    "D26-WIP-FRAME20": "20 @ D26-WIP",
+    "D26-WIP-FRAMERD": "10 @ D26-WIP",
+    "D26-WIP-DRIVE7": "30 @ D26-WIP",
+    "D26-WIP-DRIVE18": "12 @ D26-WIP",
+    "D26-WIP-WHEELSET": "10 @ D26-WIP",
+    "D26-FG-BIKE20": "6 @ D26-FG",
+    "D26-FG-ROAD700": "2 @ D26-FG",
+    "D26-RM-FRAME16": "60 @ D26-RM",
+    "D26-RM-FRAME20": "50 @ D26-RM",
+    "D26-RM-FRAMERD": "18 @ D26-RM",
+    "D26-RM-PAINT": "24.500000 @ D26-RM",
+    "D26-RM-PRIMER": "12.000000 @ D26-RM",
+    "D26-RM-DECAL": "150 @ D26-RM",
+    "D26-RM-WHEEL16": "140 @ D26-RM",
+    "D26-RM-WHEEL20": "120 @ D26-RM",
+    "D26-RM-RIM700": "60 @ D26-RM",
+    "D26-RM-HUB700": "60 @ D26-RM",
+    "D26-RM-SPOKE": "2400 @ D26-RM",
+    "D26-RM-TIRE700": "26 @ D26-RM",
+    "D26-RM-TUBE700": "70 @ D26-RM",
+    "D26-RM-CHAINRING": "90 @ D26-RM",
+    "D26-RM-CHAIN": "90 @ D26-RM",
+    "D26-RM-CASSETTE7": "70 @ D26-RM",
+    "D26-RM-CASSETTE9": "18 @ D26-RM",
+    "D26-RM-DERAILLEUR": "45 @ D26-RM",
+    "D26-RM-SHIFTER": "45 @ D26-RM",
+    "D26-RM-CRANKARM": "85 @ D26-RM",
+    "D26-RM-PEDAL": "85 @ D26-RM",
+    "D26-RM-BRAKE": "75 @ D26-RM",
+    "D26-RM-BRAKEDISC": "26 @ D26-RM",
+    "D26-RM-HANDLEBAR": "85 @ D26-RM",
+    "D26-RM-SADDLE": "85 @ D26-RM",
+    "D26-RM-SEATPOST": "85 @ D26-RM",
+    "D26-RM-GRIP": "85 @ D26-RM",
+    "D26-RM-BEARING": "90 @ D26-RM",
+    "D26-RM-TRAINWHEEL": "45 @ D26-RM",
+    "D26-RM-CARTON": "150 @ D26-RM",
+    "D26-RM-TOOLKIT": "24 @ D26-RM"
+  },
+  "purchaseRequisitions": {
+    "D26-PR-0001": "c3b35664-4df2-42c1-aa6f-be1e4178441c",
+    "D26-PR-0002": "1b235ce3-4ddf-4b4f-b5c1-96c169e13751",
+    "D26-PR-0003": "f63df083-4e08-4a8a-9448-c0ba8ae999a0"
+  },
+  "purchaseOrders": {
+    "D26-PO-0005": "63a774b3-ec8e-44ce-b0ab-f27c2d124250",
+    "D26-PO-0001": "08e2d86d-0ed2-4267-8146-ad6c7b742125",
+    "D26-PO-0002": "9e096661-42f3-4a2c-aa76-760512b5ea4c",
+    "D26-PO-0003": "6bc20ed4-e172-4b9f-b150-e29030631d28",
+    "D26-PO-0004": "daa1c324-798d-4fae-aa3f-c6d44ba89104"
+  },
+  "customers": {
+    "D26-CUS-1001": "e35f413d-75f9-4eb6-8a6e-59b572d79178",
+    "D26-CUS-1002": "1e84c382-0202-41e1-b596-ed982e1c0d9a",
+    "D26-CUS-1003": "48297837-2b83-4593-8bc5-b76a4e310cdb",
+    "D26-CUS-1004": "0a6de64a-4196-4b36-a8ae-a8e714527072",
+    "D26-CUS-1005": "55aab8d9-167c-4fc7-8cde-3bcac6863589",
+    "D26-CUS-1006": "897d799b-3642-489d-aada-2d7fc722ae21"
+  },
+  "salesOrders": {
+    "D26-SO-1001": "40edbe42-a49e-4056-828e-806066f3d775",
+    "D26-SO-1002": "835ac446-9df3-4119-9f9e-60a216f7c130",
+    "D26-SO-1003": "08e5ea9e-21bf-40e5-95f5-f9779e754e57",
+    "D26-SO-1004": "4a6e93d6-9156-43de-99de-14dd4d2f86e1",
+    "D26-SO-1005": "b7fe5ea0-d683-4020-8d31-d229f486be37",
+    "D26-SO-1006": "89a41b03-d385-40fc-883d-30b3b1416e87"
+  },
+  "planningRuns": {
+    "full": "b8db1483-546d-4282-9030-fd6144c5c4dc",
+    "fullCode": "RUN-B8DB1483",
+    "partial": "6b5b9f6c-709e-4fe8-84d9-67f9dd1339cd",
+    "partialCode": "RUN-6B5B9F6C",
+    "backlog": "7fd98a13-1321-4086-a7bb-4376c5ee4f7e",
+    "backlogCode": "RUN-7FD98A13",
+    "commercial": "9a87fa9f-a6f9-4580-98a9-22153f247378"
+  },
+  "workOrders": {
+    "D26-WO-1004": "60b16a89-d176-4a67-879b-8bb0ff17533e",
+    "D26-WO-1005": "c8d84cb1-ed18-4cf8-b5ac-a3b969a87c4b",
+    "D26-WO-2001": "acc38e55-2381-4fc8-bcaa-b003a517a313",
+    "D26-WO-2002": "9bbd2ccc-d72a-4ecb-8fdf-d15483eec0bd",
+    "D26-WO-2003": "78cd8072-63b6-4cc7-9d40-118881cf6a88",
+    "D26-WO-2004": "4594372a-7a0e-4acd-8cf9-76648f05dbd9",
+    "D26-WO-2005": "a982f2b9-6a0d-47ee-8ce4-8c67eaf773bb",
+    "D26-WO-2006": "f0c5b146-0769-44dd-92e8-9373cb2a00c0"
+  },
+  "deliveries": {
+    "D26-DN-1004-1": "b05fdae8-1ef3-4495-b99d-cd037a31b8d7",
+    "D26-DN-1004-2": "e6944cac-836c-4a86-9cd5-e6b9f47fa6dc",
+    "D26-DN-1005-1": "4201e9d5-0382-4e8a-bbb7-11d21fd21ec0"
+  },
+  "invoices": {
+    "D26-INV-1004-1": "f122e19e-5f46-4ff0-a0d4-cc19fddef6d9",
+    "D26-INV-1004-2": "27294171-1a26-4ed5-9901-1aec70472589",
+    "D26-INV-1005-1": "5f144dbc-fd8e-4ebb-906e-48c1ab5ec2f8"
+  },
+  "payments": {
+    "D26-PAY-1004-1": "a6b5d9d7-9431-40d2-b793-963e209d559b",
+    "D26-PAY-1004-2": "3ce2ecf6-94ef-4227-a555-adeb4bb41692"
+  },
+  "demo": {
+    "outputLot": {
+      "full": "D26-BIKE16-B001",
+      "partial": "D26-BIKE20-B003",
+      "onHold": "D26-BIKE20-B002"
+    },
+    "password": "OmniPlant@2026"
+  },
+  "preflight": {
+    "failures": "0"
+  }
+}

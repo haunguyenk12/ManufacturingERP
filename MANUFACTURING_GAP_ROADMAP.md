@@ -159,6 +159,15 @@ nghiệp vụ (chỉ một dòng javadoc nhắc tên OEE). Không có gì bị l
 > mà là những yêu cầu PDF nêu tường minh nhưng code chưa có. Ba cái đầu là ba khoảng trống ở §2.0.1;
 > `P10`/`P11` là hai mức tinh chỉnh của vòng hoạch định. Trước khi bắt tay `P7`, đọc lại §2.0 để biết
 > **chính xác** ô nào của PDF đang trống — đừng làm theo trí nhớ về "costing đã xong ở `P3`".
+>
+> 🔴 **Thiết kế thi công của `P7`–`P11` nằm ở `MANUFACTURING_PHASE_PLAN_P7_P11.md`** (2026-09-25):
+> schema, service, API, bất biến `B124`–`B135`, chuẩn chống rò rỉ, chuẩn nhất quán dữ liệu, và bộ test
+> nghiệm thu chuẩn nghiệp vụ cho từng phase. **Đọc `§0` của file đó trước khi code** — nó ghi **10 chỗ
+> phác thảo trong §3 dưới đây KHÔNG khớp code thật** (đã kiểm trên entity/migration/service). Ba chỗ làm
+> đổi hẳn thiết kế `P7` (`wip_transactions` không nhận dòng âm, `work_order_operation_id` luôn `NULL` với
+> dòng vật tư, vật tư **không** quy được về công đoạn vì `bom_lines` không có link operation); một chỗ làm
+> `P10` **không chạy được** nếu làm theo đúng câu chữ ở §3 (`CapacityBoardService.getBoard` bị
+> `@PreAuthorize` và khoá vào `WorkOrderOperation`, thứ một đề xuất MRP chưa có).
 
 ### 2.1 Bảng Theo Dõi Tiến Độ  *(cập nhật: 2026-09-25)*
 
@@ -733,3 +742,12 @@ cộng dồn; `mvn -o clean verify` PASS.
 4. **`P10` (CRP đóng vòng)** — tinh chỉnh vòng hoạch định, tái dùng gần hết `C2-8`.
 5. **`P11` (MPS)** — chỉ làm khi khách hàng sản xuất make-to-stock.
 6. **Chờ OT:** toàn bộ Phase Deferred.
+
+> **Thiết kế chi tiết của cả 5 phase (schema · API · bất biến `B124`–`B135` · chuẩn chống rò rỉ ·
+> chuẩn nhất quán · test plan + nghiệm thu mutation từng phase):**
+> **`MANUFACTURING_PHASE_PLAN_P7_P11.md`**. Thứ tự và phụ thuộc ở đó **khớp** danh sách này; migration
+> dự kiến `V69` → `V73` — riêng **`P10` không cần migration nào** (đã kiểm: `supply_suggestions.message_codes`
+> không có `CHECK`, và `chk_supply_suggestions_exception_state` của `V34` đã cho `WARNING`) ⇒ nó rẻ hơn
+> bảng effort ở §2.A ghi. Chỉ `P11` có permission mới (`PERM_MPS_READ`/`_MANAGE`) ⇒ chỉ nó kích hoạt
+> `coding-rules.md C10`; bốn phase còn lại **cố ý** tái dùng permission có sẵn — `P7` tái dùng
+> `PERM_COSTING_READ` chính là biện pháp giữ tiền ra khỏi tầm OPERATOR.

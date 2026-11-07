@@ -14,6 +14,7 @@ import com.erp.manufacturing.module.auth.dto.MeResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.auth.service.AuthService;
+import com.erp.manufacturing.module.auth.service.PasswordFlowService;
 import com.erp.manufacturing.module.organization.dto.MyAccessScopeResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,9 @@ class AuthControllerTest {
 
     @MockBean
     AuthService authService;
+
+    @MockBean
+    PasswordFlowService passwordFlowService;
 
     // Unused directly by these tests – required only so the auto-detected security filters
     // (JwtAuthenticationFilter, RateLimitFilter, UserRateLimitFilter, TraceIdFilter) can be

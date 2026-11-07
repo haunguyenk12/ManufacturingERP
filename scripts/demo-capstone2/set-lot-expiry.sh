@@ -47,7 +47,13 @@ docker exec -i erp-postgres psql -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 <<SQL
 UPDATE inventory_lots
    SET expires_at = received_at + INTERVAL '$DAYS days'
  WHERE expires_at IS NULL;
+-- CF-2: lô thử nghiệm hết hạn (seed.sh tạo với hạn tương lai vì API từ chối hạn quá khứ).
+-- Lô hết hạn bị loại khỏi MRP, giữ chỗ, cấp vật tư và giao hàng — dùng để thử đúng các chặn đó.
+UPDATE inventory_lots
+   SET expires_at = now() - INTERVAL '10 days'
+ WHERE lot_code LIKE '%-EXP1';
 SELECT count(*) AS lo_co_han_dung FROM inventory_lots WHERE expires_at IS NOT NULL;
+SELECT count(*) AS lo_het_han FROM inventory_lots WHERE expires_at <= now();
 SQL
 
 echo "==> xong" >&2

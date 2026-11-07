@@ -90,7 +90,7 @@ esac
 # catalogue.sh viết cứng namespace D26-; đổi tiền tố tại chỗ thay vì nhân đôi cả bảng dữ liệu.
 # Mọi chuỗi chứa "D26-" trong catalogue đều LÀ mã namespace, không có ngoại lệ nào.
 if [ "$NS" != "D26" ]; then
-    for var in WAREHOUSE_ROWS ITEM_ROWS IWS_ROWS SHIFT_ROWS CALENDAR_ROWS WC_ROWS ROUTING_ROWS                BOM_ROWS COST_ROWS STOCK_ROWS SUPPLIER_ROWS SUPPLIER_ITEM_ROWS PR_ROWS PO_ROWS                SO_ROWS SALE_PRICE_ROWS WO_ROWS CO_CODE PLANT_CODE SCOPE_CODE WH_RM WH_WIP WH_FG WH_QC WH_SCRAP                SHIFT_DAY SHIFT_EVE PR3_PO_NO LOT_SO1004 LOT_SO1005 LOT_WO2004 LOT_WO2005                DEMO_OUTPUT_LOT
+    for var in WAREHOUSE_ROWS ITEM_ROWS IWS_ROWS SHIFT_ROWS CALENDAR_ROWS WC_ROWS ROUTING_ROWS                BOM_ROWS COST_ROWS COST_RATE_ROWS STOCK_ROWS SUPPLIER_ROWS SUPPLIER_ITEM_ROWS PR_ROWS PO_ROWS                SO_ROWS SALE_PRICE_ROWS WO_ROWS CO_CODE PLANT_CODE SCOPE_CODE WH_RM WH_WIP WH_FG WH_QC WH_SCRAP                SHIFT_DAY SHIFT_EVE PR3_PO_NO LOT_SO1004 LOT_SO1005 LOT_WO2004 LOT_WO2005                DEMO_OUTPUT_LOT
     do
         eval "$var=\"\${$var//D26-/$NS-}\""
     done
@@ -177,6 +177,14 @@ for required in \
     /v1/work-orders/{workOrderId}/production-executions     /v1/work-orders/{workOrderId}/operations     /v1/work-orders/{workOrderId}/operations/{operationId}/input     /v1/work-orders/{workOrderId}/operations/{operationId}/finish \
     /v1/work-orders/{workOrderId}/production-receipts \
     /v1/plants/{plantId}/capacity-board \
+    /v1/plants/{plantId}/production-cost-rates/{workCenterId} \
+    /v1/work-orders/{workOrderId}/cost-checklist /v1/work-orders/{workOrderId}/cost-runs \
+    /v1/work-orders/{workOrderId}/finalize-cost-and-close \
+    /v1/purchase-qc /v1/goods-receipts /v1/goods-receipts/{goodsReceiptId}/lines/{goodsReceiptLineId}/qc \
+    /v1/inventory/transfers /v1/inventory/counts /v1/planning-runs/commercial \
+    /v1/work-orders/{workOrderId}/material-returns /v1/work-orders/{workOrderId}/material-return-candidates \
+    /v1/work-orders/{workOrderId}/production-receipts/{receiptId}/qc-decisions \
+    /sales-orders/v1/{salesOrderId}/reservations \
     /users/v1 /access/v1/roles /access/v1/scopes /access/v1/assignments /auth/v1/me
 do
     case " $OPENAPI_PATHS " in
@@ -474,6 +482,19 @@ while IFS='|' read -r icode mat lab ovh; do
 done < <(rows "$COST_ROWS")
 info "$COST_COUNT dòng giá thành chuẩn"
 
+# G11: đơn giá giờ (nhân công + sản xuất chung) theo từng tổ sản xuất. Lệnh sản xuất chụp đơn giá này
+# vào baseline lúc release, nên bước này phải chạy TRƯỚC mọi lệnh release.
+log "Đơn giá giờ theo tổ sản xuất"
+RATE_COUNT=0
+while IFS='|' read -r wcode labor overhead; do
+    [ -z "$wcode" ] && continue
+    call PUT "/v1/plants/$PLANT/production-cost-rates/${ID[workCenters.$wcode]}" \
+        "{\"expectedVersion\":0,\"currency\":\"VND\",\"laborRate\":$labor,\"overheadRate\":$overhead,\"reason\":\"Initial hourly rate of the demo dataset\"}" \
+        -H "Idempotency-Key: $NS-RATE-$wcode" >/dev/null
+    RATE_COUNT=$((RATE_COUNT + 1))
+done < <(rows "$COST_RATE_ROWS")
+info "$RATE_COUNT đơn giá giờ"
+
 ################################################################################
 # 10. Nhà cung cấp
 ################################################################################
@@ -619,6 +640,38 @@ print(json.dumps([{'purchaseOrderLineId': l['purchaseOrderLineId'],
     assert_status "/v1/purchase-orders/$poid" "$state"
     info "$pono -> $state (đã nhập kho)"
 done < <(rows "$PO_ROWS")
+
+# ── QC hàng mua (G7c) ────────────────────────────────────────────────────────
+# Từ G7b mọi lần nhận mua đều vào vùng chờ kiểm — tồn khả dụng chỉ tăng sau khi QC chấp nhận.
+# Hầu hết dòng được chấp nhận hết; hai dòng cố ý khác để có dữ liệu cho màn hình QC:
+#   - FRAME20: chấp nhận bớt 5, để lại 5 CHỜ QC (hàng mua chờ QC hiện cạnh nhu cầu MRP, CF-4)
+#   - CARTON : chấp nhận 90, LOẠI 10 kèm lý do (phần loại hiện ở tồn kho vùng chờ, CF-3)
+log "QC hàng mua"
+QC_QUEUE=$(call GET "/v1/purchase-qc?companyId=$CO&plantId=$PLANT&page=0&size=100")
+QC_LINES=$(echo "$QC_QUEUE" | extract "chr(10).join('|'.join([x['goodsReceiptId'], x['goodsReceiptLineId'], x['itemCode'], str(x['pendingQuantity'])]) for x in d['result']['content'])" | tr -d '\r')
+QC_DONE=0
+while IFS='|' read -r grid grlid icode pending; do
+    [ -z "$grid" ] && continue
+    accepted="$pending"; rejected=0; reason='Incoming inspection passed'
+    case "$icode" in
+        *-RM-FRAME20) accepted=$(num "float('$pending') - 5") ;;
+        *-RM-CARTON)  rejected=10; accepted=$(num "float('$pending') - 10"); reason='Crushed cartons rejected at incoming inspection' ;;
+    esac
+    call POST "/v1/goods-receipts/$grid/lines/$grlid/qc" \
+        "{\"expectedVersion\":$(call GET "/v1/goods-receipts/$grid" | rid version),\"acceptedQuantity\":$accepted,\"rejectedQuantity\":$rejected,\"reason\":\"$reason\"}" \
+        -H "Idempotency-Key: $NS-PQC-$grlid" >/dev/null
+    QC_DONE=$((QC_DONE + 1))
+    info "$icode: nhận $accepted, loại $rejected (chờ $pending)"
+done <<<"$QC_LINES"
+info "$QC_DONE dòng phiếu nhận đã qua QC mua"
+
+# Phiếu nhận NHÁP (G7b) trên đơn mua đã xác nhận: màn hình phiếu nhận có cả trạng thái DRAFT.
+PO0002_ID="${ID[purchaseOrders.$NS-PO-0002]}"
+PO0002_LINE=$(call GET "/v1/purchase-orders/$PO0002_ID" | extract "d['result']['lines'][0]['purchaseOrderLineId']")
+call POST /v1/goods-receipts \
+    "{\"purchaseOrderId\":\"$PO0002_ID\",\"receivedDate\":\"$(plant_today)\",\"reference\":\"DN-$NS-0002\",\"notes\":\"Draft receipt waiting for the truck\",\"lines\":[{\"purchaseOrderLineId\":\"$PO0002_LINE\",\"receivedQuantity\":10}]}" \
+    -H "Idempotency-Key: $NS-GRDRAFT-0002" >/dev/null
+info "phiếu nhận nháp trên $NS-PO-0002"
 
 ################################################################################
 # 13. Đơn bán hàng
@@ -784,11 +837,14 @@ planned_qty() { call GET "/v1/work-orders/$1" | extract "int(float(d['result']['
 # công đoạn đó làm đủ kế hoạch; chỉ công đoạn cuối nhận SỐ_LƯỢNG. Công đoạn cuối chỉ kết thúc khi lệnh
 # đã COMPLETED — lệnh làm một phần dừng ở IN_PROGRESS với công đoạn cuối còn mở.
 report_output() {
-    local wo="$1" qty="$2" key="$3" ops op n i=0 step planned
+    local wo="$1" qty="$2" key="$3" ops op n i=0 step planned cons=""
+    # G11: để chốt được giá thành, mọi dòng vật tư đã xuất phải có vật tư thực dùng (hoặc đã hoàn).
+    # Tham số thứ tư = consume: lượt báo sản lượng của công đoạn CUỐI ghi nhận phần còn lại là đã dùng.
+    [ "${4:-}" = "consume" ] && cons=",\"consumption\":$(consumption_json "$wo")"
     ops=$(call GET "/v1/work-orders/$wo/operations" | extract "' '.join(o['workOrderOperationId'] for o in d['result'])")
     if [ -z "$ops" ]; then
         call POST "/v1/work-orders/$wo/production-executions" \
-            "{\"goodQuantity\":$qty,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")}" \
+            "{\"goodQuantity\":$qty,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")$cons}" \
             -H "Idempotency-Key: $key" >/dev/null
         return
     fi
@@ -797,12 +853,13 @@ report_output() {
     for op in $ops; do
         i=$((i + 1))
         step=$planned
-        [ "$i" -eq "$n" ] && step=$qty
+        opcons=""
+        [ "$i" -eq "$n" ] && { step=$qty; opcons="$cons"; }
         call POST "/v1/work-orders/$wo/operations/$op/input" \
             "{\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"quantity\":$step}" \
             -H "Idempotency-Key: $key-IN$i" >/dev/null
         call POST "/v1/work-orders/$wo/production-executions" \
-            "{\"workOrderOperationId\":\"$op\",\"goodQuantity\":$step,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")}" \
+            "{\"workOrderOperationId\":\"$op\",\"goodQuantity\":$step,\"scrapQuantity\":0,\"reworkQuantity\":0,\"actualStartedAt\":\"$(ts_ago 6)\",\"actualEndedAt\":\"$(ts_ago 1)\",\"notes\":\"Day shift output report\",\"expectedWorkOrderVersion\":$(wo_version "$wo")$opcons}" \
             -H "Idempotency-Key: $key-OP$i" >/dev/null
         if [ "$i" -lt "$n" ] || [ "$(call GET "/v1/work-orders/$wo" | rid status)" = "COMPLETED" ]; then
             call POST "/v1/work-orders/$wo/operations/$op/finish" \
@@ -811,14 +868,58 @@ report_output() {
     done
 }
 
+# consumption_json WO_ID — mảng consumption[]: toàn bộ vật tư đã xuất mà chưa dùng/chưa hoàn được ghi là đã dùng.
+consumption_json() {
+    call GET "/v1/work-orders/$1/material-return-candidates?page=0&size=100" | "$PY" -c "
+import json,sys
+c = json.loads(sys.stdin.buffer.read().decode('utf-8'))['result']['content']
+print(json.dumps([{'issueLineId': l['issueLineId'], 'quantity': float(l['unusedQuantity'])}
+                  for l in c if float(l['unusedQuantity']) > 0]))
+"
+}
+
+# return_some WO_ID KHOÁ — G8d: hoàn một phần vật tư chưa dùng của một dòng xuất về đúng kho nguồn.
+return_some() {
+    local pick
+    pick=$(call GET "/v1/work-orders/$1/material-return-candidates?page=0&size=100" | "$PY" -c "
+import json,sys
+c = json.loads(sys.stdin.buffer.read().decode('utf-8'))['result']['content']
+l = next(x for x in c if float(x['returnableQuantity']) > 0)
+print(l['issueLineId'], round(min(1.0, float(l['returnableQuantity']) / 2), 6))
+")
+    call POST "/v1/work-orders/$1/material-returns" \
+        "{\"expectedWorkOrderVersion\":$(wo_version "$1"),\"reason\":\"Surplus material returned to the warehouse\",\"lines\":[{\"sourceIssueLineId\":\"${pick%% *}\",\"quantity\":${pick##* }}]}" \
+        -H "Idempotency-Key: $2" >/dev/null
+    info "hoàn ${pick##* } vật tư về kho nguồn"
+}
+
+# close_wo WO_ID KHOÁ — G11: tính thử giá thành rồi chốt giá thành + đóng lệnh trong một giao dịch.
+# Đường POST /close cũ trả 409 CLOSE_BLOCKED cho lệnh có baseline giá thành.
+close_wo() {
+    local wo="$1" key="$2" ck src ver run runid rv
+    ck=$(call GET "/v1/work-orders/$wo/cost-checklist")
+    src=$(echo "$ck" | rid sourceVersion)
+    ver=$(echo "$ck" | rid workOrderVersion)
+    run=$(call POST "/v1/work-orders/$wo/cost-runs" \
+        "{\"expectedVersion\":$ver,\"expectedSourceVersion\":\"$src\"}" -H "Idempotency-Key: $key-RUN")
+    runid=$(echo "$run" | rid runId)
+    rv=$(echo "$run" | rid runVersion)
+    ver=$(echo "$run" | rid workOrderVersion)
+    call POST "/v1/work-orders/$wo/finalize-cost-and-close" \
+        "{\"expectedVersion\":$ver,\"expectedSourceVersion\":\"$src\",\"runId\":\"$runid\",\"expectedRunVersion\":$rv,\"reason\":\"Production cost verified and the work order closed\"}" \
+        -H "Idempotency-Key: $key-FIN" >/dev/null
+}
+
 # receipt_and_qc WO_ID SỐ_LƯỢNG LÔ KHOÁ [QC]
 #   QC=yes  -> nhập kho, duyệt, QC cho phép xuất (lô AVAILABLE)
 #   QC=hold -> nhập kho, duyệt, DỪNG ở lô HOLD chờ QC (trạng thái nghiệp vụ bình thường,
 #              và là thứ làm màn hình Lô hàng có cả hai trạng thái để chụp)
 receipt_and_qc() {
-    local wo="$1" qty="$2" lot="$3" key="$4" mode="${5:-yes}" rid_
+    local wo="$1" qty="$2" lot="$3" key="$4" mode="${5:-yes}" rid_ lotpart=""
+    # Vật tư không theo lô (bán thành phẩm) thì không gửi lotNumber.
+    [ -n "$lot" ] && lotpart="\"lotNumber\":\"$lot\","
     rid_=$(call POST "/v1/work-orders/$wo/production-receipts" \
-        "{\"destinationWarehouseId\":\"${ID[warehouses.$WH_FG]}\",\"lotNumber\":\"$lot\",\"quantity\":$qty,\"reason\":\"Finished goods receipt\",\"note\":\"Production receipt of the demo dataset\",\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"receivedOn\":\"$(plant_today)\"}" \
+        "{\"destinationWarehouseId\":\"${ID[warehouses.$WH_FG]}\",$lotpart\"quantity\":$qty,\"reason\":\"Finished goods receipt\",\"note\":\"Production receipt of the demo dataset\",\"expectedWorkOrderVersion\":$(wo_version "$wo"),\"receivedOn\":\"$(plant_today)\"}" \
         -H "Idempotency-Key: $key" | rid receiptId)
     call POST "/v1/work-orders/$wo/production-receipts/$rid_/submit" "$(rcpt_versions "$wo" "$rid_")" >/dev/null
     call POST "/v1/work-orders/$wo/production-receipts/$rid_/approve" "$(rcpt_versions "$wo" "$rid_")" >/dev/null
@@ -853,9 +954,9 @@ issue_all "$WO_FULL" "$NS-ISSUE-1004"
 # 🔴 Số kế hoạch của lệnh sản xuất là số RÒNG của MRP, KHÔNG phải số trên đơn hàng: netting đã
 # trừ tồn kho sẵn có. Báo sản lượng theo số đặt hàng sẽ trả 409 PLANNED_QUANTITY_EXCEEDED (B54).
 QTY_FULL=$(planned_qty "$WO_FULL")
-report_output "$WO_FULL" "$QTY_FULL" "$NS-EXEC-1004"
+report_output "$WO_FULL" "$QTY_FULL" "$NS-EXEC-1004" consume
 receipt_and_qc "$WO_FULL" "$QTY_FULL" "$LOT_SO1004" "$NS-RECEIPT-1004" yes >/dev/null
-call POST "/v1/work-orders/$WO_FULL/close" >/dev/null
+close_wo "$WO_FULL" "$NS-CLOSE-1004"
 assert_status "/sales-orders/v1/$SO_PLANNED_FULL" "FULFILLED"
 info "$NS-WO-1004 -> CLOSED, $SO_PLANNED_FULL_NO -> FULFILLED, lô $LOT_SO1004 AVAILABLE"
 
@@ -971,20 +1072,72 @@ while IFS='|' read -r wono icode qty state; do
             issue_all "$wo" "$NS-ISSUE-$suffix"
             # Sản lượng nhỏ hơn kế hoạch ⇒ lệnh sản xuất dừng ở IN_PROGRESS, và lô nhập kho
             # dừng ở HOLD chờ QC — hai màn hình cần dữ liệu ở đúng trạng thái đó.
+            return_some "$wo" "$NS-RETURN-$suffix"
             report_output "$wo" 2 "$NS-EXEC-$suffix"
-            receipt_and_qc "$wo" 2 "$LOT_WO2004" "$NS-RECEIPT-$suffix" hold >/dev/null ;;
+            rc_=$(receipt_and_qc "$wo" 2 "$LOT_WO2004" "$NS-RECEIPT-$suffix" hold)
+            # G9c: QC theo lượng, nhiều lượt — chấp nhận 1 trong 2, phần còn lại ở lại lô gốc HOLD chờ QC.
+            rcv_=$(call GET "/v1/work-orders/$wo/production-receipts/$rc_")
+            call POST "/v1/work-orders/$wo/production-receipts/$rc_/qc-decisions" \
+                "{\"expectedVersion\":$(echo "$rcv_" | rid version),\"expectedWorkOrderVersion\":$(echo "$rcv_" | rid workOrderVersion),\"acceptedQuantity\":1,\"rejectedQuantity\":0,\"reason\":\"First unit passed inspection\"}" \
+                -H "Idempotency-Key: $NS-PRODQC-$suffix" >/dev/null ;;
         CLOSED)
             wo_cmd "$wo" reserve >/dev/null
             wo_cmd "$wo" release >/dev/null
             issue_all "$wo" "$NS-ISSUE-$suffix"
-            report_output "$wo" "$qty" "$NS-EXEC-$suffix"
+            return_some "$wo" "$NS-RETURN-$suffix"
+            report_output "$wo" "$qty" "$NS-EXEC-$suffix" consume
             receipt_and_qc "$wo" "$qty" "$LOT_WO2005" "$NS-RECEIPT-$suffix" yes >/dev/null
-            call POST "/v1/work-orders/$wo/close" >/dev/null ;;
+            close_wo "$wo" "$NS-CLOSE-$suffix" ;;
         *) die "trạng thái lệnh sản xuất không hỗ trợ: $state" ;;
     esac
     assert_status "/v1/work-orders/$wo" "$state"
     info "$wono ($icode x$qty) -> $state"
 done < <(rows "$WO_ROWS")
+
+# ── E. Các chức năng mới: MRP thương mại, chuyển kho, kiểm đếm, giữ tồn cho đơn, lô hết hạn ──
+# Chạy SAU mọi luồng ở trên để không làm lệch số netting của các lượt MRP và các phiếu giao.
+log "E. MRP thương mại / chuyển kho / kiểm đếm / giữ tồn cho đơn / lô hết hạn"
+
+# E1 (G6b) — lượt chạy MRP thương mại: lập kế hoạch phần CHƯA PHỦ của các dòng đơn bán hàng.
+SO1003_LINES=$(call GET "/sales-orders/v1/${ID[salesOrders.$NS-SO-1003]}" \
+    | extract "json.dumps([l['salesOrderLineId'] for l in d['result']['lines']])")
+RUN4=$(call POST /v1/planning-runs/commercial \
+    "{\"companyId\":\"$CO\",\"plantId\":\"$PLANT\",\"horizonStartDate\":\"$(d_today)\",\"horizonEndDate\":\"$(d_plus 60)\",\"salesOrderLineIds\":$SO1003_LINES}" \
+    -H "Idempotency-Key: $NS-RUN-COMMERCIAL")
+remember "planningRuns.commercial" "$(echo "$RUN4" | rid mrpRunId)"
+info "$(echo "$RUN4" | rid code): lượt chạy thương mại cho $NS-SO-1003"
+
+# E2 (G4) — chuyển kho nguyên tử trong cùng nhà máy.
+call POST /v1/inventory/transfers \
+    "{\"fromWarehouseId\":\"${ID[warehouses.$WH_RM]}\",\"toWarehouseId\":\"${ID[warehouses.$WH_WIP]}\",\"reason\":\"Move grips to the line-side store\",\"lines\":[{\"itemId\":\"${ID[items.$NS-RM-GRIP]}\",\"quantity\":10}]}" \
+    -H "Idempotency-Key: $NS-TRANSFER-1" >/dev/null
+info "chuyển 10 $NS-RM-GRIP từ $WH_RM sang $WH_WIP"
+
+# E3 (G4) — kiểm đếm tuyệt đối: đếm thiếu 2 so với sổ.
+DECAL_BAL=$(call GET "/v1/inventory/balances?warehouseId=${ID[warehouses.$WH_RM]}&itemId=${ID[items.$NS-RM-DECAL]}&size=50")
+DECAL_QTY=$(echo "$DECAL_BAL" | extract "d['result']['content'][0]['quantity']")
+DECAL_VER=$(echo "$DECAL_BAL" | extract "d['result']['content'][0]['version']")
+call POST /v1/inventory/counts \
+    "{\"itemId\":\"${ID[items.$NS-RM-DECAL]}\",\"warehouseId\":\"${ID[warehouses.$WH_RM]}\",\"countedQuantity\":$(num "float('$DECAL_QTY') - 2"),\"expectedVersion\":$DECAL_VER,\"reason\":\"Cycle count found 2 decals missing\"}" \
+    -H "Idempotency-Key: $NS-COUNT-1" >/dev/null
+info "kiểm đếm $NS-RM-DECAL: sổ $DECAL_QTY, đếm được $(num "float('$DECAL_QTY') - 2")"
+
+# E4 (G6a) — giữ tồn thành phẩm cho một đơn bán hàng đã xác nhận (chưa hoạch định).
+SO1002_ID="${ID[salesOrders.$NS-SO-1002]}"
+SO1002=$(call GET "/sales-orders/v1/$SO1002_ID")
+SO1002_LINE=$(echo "$SO1002" | extract "d['result']['lines'][0]['salesOrderLineId']")
+BIKE20_LOT=$(call GET "/v1/inventory/lots?warehouseId=${ID[warehouses.$WH_FG]}&itemId=${ID[items.$NS-FG-BIKE20]}&size=200" \
+    | extract "next(l['lotId'] for l in d['result']['content'] if l['lotCode']=='$NS-BIKE20-B001')")
+call POST "/sales-orders/v1/$SO1002_ID/reservations" \
+    "{\"expectedVersion\":$(echo "$SO1002" | rid version),\"salesOrderLineId\":\"$SO1002_LINE\",\"warehouseId\":\"${ID[warehouses.$WH_FG]}\",\"lotId\":\"$BIKE20_LOT\",\"quantity\":2}" >/dev/null
+info "$NS-SO-1002 giữ 2 thành phẩm từ lô $NS-BIKE20-B001"
+
+# E5 (CF-2) — một lô thành phẩm sắp hết hạn; set-lot-expiry.sh đẩy hạn của nó về quá khứ để thành
+# lô hết hạn (REST API từ chối hạn quá khứ nên bước đó phải đi bằng SQL).
+call POST /v1/inventory/receive \
+    "{\"itemId\":\"${ID[items.$NS-FG-BIKE16]}\",\"warehouseId\":\"${ID[warehouses.$WH_FG]}\",\"lotCode\":\"$NS-BIKE16-EXP1\",\"quantity\":3,\"expiresAt\":\"$(ts_at 30 00)\",\"reason\":\"Short-dated lot for expiry testing\",\"referenceType\":\"${NS}_EXPIRY_TEST\",\"referenceId\":\"$SEED_RUN_ID\"}" \
+    -H "Idempotency-Key: $NS-EXPIRY-LOT" >/dev/null
+info "lô $NS-BIKE16-EXP1 (3 cái) — chạy set-lot-expiry.sh để chuyển nó thành lô hết hạn"
 
 fi   # kết thúc khối chứng từ nghiệp vụ (profile "sample")
 
@@ -1102,6 +1255,22 @@ for st in PAID PARTIALLY_PAID UNPAID; do
     pf PF-16 "có hoá đơn ở trạng thái thanh toán $st"         "$(echo "$INV_JSON" | extract "'yes' if any(i['paymentState']=='$st' for i in d['result']['content']) else 'no'")" "yes"
 done
 pf PF-16 "$SO_PLANNED_FULL_NO giao đủ"     "$(call GET "/sales-orders/v1/$SO_PLANNED_FULL/fulfillment-summary" | extract "d['result']['deliveryProgress']")" "DELIVERED"
+
+# PF-17 các chức năng mới: giá thành đã chốt, QC mua còn dòng chờ, hoàn vật tư, chuyển kho
+for wono in 1004 2005; do
+    wid="${ID[workOrders.$NS-WO-$wono]}"
+    pf PF-17 "$NS-WO-$wono đã chốt giá thành (run FINALIZED)" \
+        "$(call GET "/v1/work-orders/$wid/cost-runs?page=0&size=10" \
+            | extract "'yes' if any(r['state']=='FINALIZED' for r in d['result']['content']) else 'no'")" "yes"
+    pf PF-17 "$NS-WO-$wono ở trạng thái CLOSED" "$(call GET "/v1/work-orders/$wid" | rid status)" "CLOSED"
+done
+pf PF-17 "còn dòng phiếu nhận chờ QC mua" \
+    "$(call GET "/v1/purchase-qc?companyId=$CO&plantId=$PLANT&page=0&size=50" \
+        | extract "'yes' if d['result']['totalElements'] >= 1 else 'no'")" "yes"
+pf PF-17 "phiếu hoàn vật tư" \
+    "$(call GET "/v1/material-returns?plantId=$PLANT&page=0&size=50" | extract "d['result']['totalElements']")" "2"
+pf PF-17 "phiếu chuyển kho" \
+    "$(call GET "/v1/inventory/transfers?plantId=$PLANT&page=0&size=50" | extract "d['result']['totalElements']")" "1"
 
 fi   # kết thúc preflight của phần chứng từ nghiệp vụ
 

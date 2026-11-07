@@ -68,7 +68,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/auth/v1/login",
             "/auth/v1/refresh",
             "/auth/v1/forgot-password",
-            "/auth/v1/reset-password");
+            "/auth/v1/reset-password",
+            "/auth/v1/password-challenges",
+            "/auth/v1/password-challenges/verify",
+            "/auth/v1/password-challenges/complete");
 
     private final JwtTokenProvider    jwtTokenProvider;
     private final UserDetailsService  userDetailsService;

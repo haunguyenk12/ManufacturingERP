@@ -7,6 +7,7 @@ import com.erp.manufacturing.common.security.TokenStoreService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.AuditLogService;
 import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
+import com.erp.manufacturing.module.auth.dto.AuthResponse;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
@@ -68,6 +69,7 @@ class AuthServiceTest {
     @Mock private UserRepository                  userRepository;
     @Mock private PasswordResetTokenService       passwordResetTokenService;
     @Mock private EmailNotificationService        emailNotificationService;
+    @Mock private PasswordFlowService             passwordFlowService;
 
     @InjectMocks
     private AuthService authService;
@@ -127,7 +129,7 @@ class AuthServiceTest {
         when(jwtTokenProvider.generateRefreshToken()).thenReturn("refresh-token");
         when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
 
-        var response = authService.login(new LoginRequest("testuser", "password123", null), httpRequest);
+        var response = (AuthResponse) authService.login(new LoginRequest("testuser", "password123", null), httpRequest);
 
         assertThat(response.accessToken()).isEqualTo("access.token");
         assertThat(response.refreshToken()).isEqualTo("refresh-token");
@@ -151,7 +153,7 @@ class AuthServiceTest {
         when(jwtTokenProvider.generateRefreshToken()).thenReturn("refresh-token");
         when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
 
-        var response = authService.login(new LoginRequest("testuser", "password123", "my-device-001"), httpRequest);
+        var response = (AuthResponse) authService.login(new LoginRequest("testuser", "password123", "my-device-001"), httpRequest);
 
         assertThat(response.deviceId()).isEqualTo("my-device-001");
         verify(tokenStore).saveDeviceSession(eq(testUser.getUserId()), eq("my-device-001"), eq("192.168.1.100"));
@@ -581,7 +583,7 @@ class AuthServiceTest {
         when(jwtProperties.accessTokenExpiryMs()).thenReturn(900_000L);
 
         Instant beforeCall = Instant.now();
-        var response = authService.login(new LoginRequest("testuser", "password123", null), httpRequest);
+        var response = (AuthResponse) authService.login(new LoginRequest("testuser", "password123", null), httpRequest);
 
         ArgumentCaptor<Instant> stamped = ArgumentCaptor.forClass(Instant.class);
         verify(tokenStore).saveSessionStart(eq(testUser.getUserId()), eq(response.tokenId()), stamped.capture());
@@ -726,6 +728,62 @@ class AuthServiceTest {
         assertThat(testUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
         verify(userRepository).save(testUser);
         verify(tokenStore).resetFailCount("testuser");
+    }
+
+    @Test
+    @DisplayName("adminUnlockAccount – an account that never finished first-login setup stays PENDING_SETUP")
+    void adminUnlockAccount_pendingSetup_isNotActivated() {
+        testUser.setStatus(UserStatus.PENDING_SETUP);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
+
+        authService.adminUnlockAccount(testUser.getUserId());
+
+        assertThat(testUser.getStatus()).isEqualTo(UserStatus.PENDING_SETUP);
+        verify(tokenStore).resetFailCount("testuser");
+    }
+
+    // ── Login: PENDING_SETUP ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("login – PENDING_SETUP with the right initial password returns the setup branch and issues no token")
+    void login_pendingSetup_returnsChallengeWithoutIssuingTokens() {
+        testUser.setStatus(UserStatus.PENDING_SETUP);
+        var challenge = new com.erp.manufacturing.module.auth.dto.ChallengeResponse(
+                UUID.randomUUID(), Instant.now().plusSeconds(600), Instant.now().plusSeconds(30));
+        when(tokenStore.getFailCount("testuser")).thenReturn(0L);
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(new UserPrincipal(testUser));
+        when(passwordEncoder.matches("Init1al!Pass", testUser.getPassword())).thenReturn(true);
+        when(userRepository.findById(testUser.getUserId())).thenReturn(Optional.of(testUser));
+        when(passwordFlowService.beginSetup(testUser)).thenReturn(challenge);
+
+        var result = authService.login(new LoginRequest("testuser", "Init1al!Pass", null), httpRequest);
+
+        assertThat(result).isInstanceOfSatisfying(
+                com.erp.manufacturing.module.auth.dto.PasswordSetupResponse.class, setup -> {
+                    assertThat(setup.kind()).isEqualTo("PASSWORD_SETUP");
+                    assertThat(setup.email()).isEqualTo("test@erp.local");
+                    assertThat(setup.challenge()).isEqualTo(challenge);
+                });
+        verifyNoInteractions(jwtTokenProvider);
+        verify(tokenStore, never()).saveRefreshToken(any(), any(), any(), anyLong());
+        verify(tokenStore, never()).saveDeviceSession(any(), any(), any());
+        verify(tokenStore, never()).deleteAllUserTokens(any());
+    }
+
+    @Test
+    @DisplayName("login – PENDING_SETUP with a WRONG password is INVALID_CREDENTIALS and sends no code")
+    void login_pendingSetup_wrongPassword_sendsNothing() {
+        testUser.setStatus(UserStatus.PENDING_SETUP);
+        when(tokenStore.getFailCount("testuser")).thenReturn(0L);
+        when(userDetailsService.loadUserByUsername("testuser")).thenReturn(new UserPrincipal(testUser));
+        when(passwordEncoder.matches("wrong", testUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest("testuser", "wrong", null), httpRequest))
+                .isInstanceOfSatisfying(AppException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_CREDENTIALS));
+
+        verifyNoInteractions(passwordFlowService);
+        verify(tokenStore).incrementFailCount("testuser");
     }
 
     // ── Me ────────────────────────────────────────────────────────────────

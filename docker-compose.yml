@@ -34,6 +34,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Throw-away mailbox for QA of the emailed-code flows. Not started by default:
+  #   docker compose --profile mail up -d mailpit
+  # then run the backend with SPRING_MAIL_HOST=localhost (SMTP :1025); read mail at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: erp-mailpit
+    profiles: ["mail"]
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+
 volumes:
   postgres_data:
   redis_data:

@@ -12,13 +12,16 @@ import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.auth.dto.AuthResponse;
 import com.erp.manufacturing.module.auth.dto.ForgotPasswordRequest;
 import com.erp.manufacturing.module.auth.dto.LoginRequest;
+import com.erp.manufacturing.module.auth.dto.LoginResult;
 import com.erp.manufacturing.module.auth.dto.LogoutRequest;
 import com.erp.manufacturing.module.auth.dto.MeResponse;
+import com.erp.manufacturing.module.auth.dto.PasswordSetupResponse;
 import com.erp.manufacturing.module.auth.dto.RefreshRequest;
 import com.erp.manufacturing.module.auth.dto.ResetPasswordRequest;
 import com.erp.manufacturing.module.organization.service.AccessControlService;
 import com.erp.manufacturing.module.user.domain.User;
 import com.erp.manufacturing.module.user.domain.UserPrincipal;
+import com.erp.manufacturing.module.user.domain.UserStatus;
 import com.erp.manufacturing.module.user.repository.UserRepository;
 import com.erp.manufacturing.module.user.service.UserDetailsServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
@@ -77,10 +80,15 @@ public class AuthService {
     private final UserRepository         userRepository;
     private final PasswordResetTokenService passwordResetTokenService;
     private final EmailNotificationService  emailNotificationService;
+    private final PasswordFlowService       passwordFlowService;
 
     // ── Login ─────────────────────────────────────────────────────────────
 
-    public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
+    /**
+     * @return the token pair, or {@link PasswordSetupResponse} when the credentials are right but the
+     *         account is still {@code PENDING_SETUP} — that branch issues no token of any kind.
+     */
+    public LoginResult login(LoginRequest request, HttpServletRequest httpRequest) {
         String ip      = (String) httpRequest.getAttribute("clientIp");
         String traceId = (String) httpRequest.getAttribute("traceId");
 
@@ -108,6 +116,16 @@ public class AuthService {
         }
 
         if (!principal.isEnabled()) {
+            // Reached only after the password matched, so a PENDING_SETUP account never confirms
+            // itself to someone who does not know the initial password.
+            User pending = userRepository.findById(principal.getUserId())
+                    .filter(u -> u.getStatus() == UserStatus.PENDING_SETUP).orElse(null);
+            if (pending != null) {
+                tokenStore.resetFailCount(request.username());
+                auditLogService.logAuth(pending.getUserId(), pending.getUsername(), ip, traceId,
+                        AuditAction.LOGIN, "Initial password accepted; account setup required");
+                return new PasswordSetupResponse(pending.getEmail(), passwordFlowService.beginSetup(pending));
+            }
             throw ExceptionFactory.unauthorized(AuthErrorCode.ACCOUNT_INACTIVE,
                     "Account is locked or inactive.");
         }
@@ -374,7 +392,11 @@ public class AuthService {
     public void adminUnlockAccount(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "User", userId));
-        user.activate();
+        // An account that never finished first-login setup stays PENDING_SETUP: unlocking must not
+        // be a way around choosing a password.
+        if (user.getStatus() != UserStatus.PENDING_SETUP) {
+            user.activate();
+        }
         userRepository.save(user);
         tokenStore.resetFailCount(user.getUsername());
         log.info("[AUTH] Account manually unlocked: user={}", user.getUsername());
