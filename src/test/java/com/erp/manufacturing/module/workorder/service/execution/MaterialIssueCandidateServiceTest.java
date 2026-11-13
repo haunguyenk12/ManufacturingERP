@@ -1,5 +1,7 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import static org.mockito.Mockito.mock;
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
@@ -49,7 +51,7 @@ class MaterialIssueCandidateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MaterialIssueCandidateService(reservationRepository, stockBalanceRepository,
+        service = new MaterialIssueCandidateService(reservationRepository, new StockBalanceReservationService(stockBalanceRepository),
                 new WorkOrderExecutionSupport(workOrderRepository, organizationLookupService, inventoryAvailabilityService));
         Company company = Company.builder().companyId(UUID.randomUUID()).code("CO").name("Co").status(OrganizationStatus.ACTIVE).build();
         Plant plant = Plant.builder().plantId(UUID.randomUUID()).company(company).code("P").name("P").status(OrganizationStatus.ACTIVE).build();

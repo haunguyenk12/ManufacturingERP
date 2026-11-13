@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.exception.AppException;
@@ -54,6 +55,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({StockTransferService.class, InventoryMapper.class, PlantContextResolver.class, IdempotencySupport.class,
+        OrganizationLookupService.class,
         TraceIdProvider.class, StockTransferIT.Config.class})
 class StockTransferIT extends AbstractPostgresIntegrationTest {
 

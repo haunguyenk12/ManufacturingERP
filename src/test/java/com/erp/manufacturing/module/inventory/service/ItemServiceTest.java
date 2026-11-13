@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -47,7 +50,7 @@ class ItemServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ItemService(itemRepository, companyRepository, uomLookupService, new InventoryMapper());
+        service = new ItemService(itemRepository, new OrganizationLookupService(companyRepository, mock(PlantRepository.class), mock(WarehouseRepository.class)), uomLookupService, new InventoryMapper());
     }
 
     @Test

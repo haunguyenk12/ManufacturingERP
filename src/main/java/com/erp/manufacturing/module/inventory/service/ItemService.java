@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -15,7 +16,6 @@ import com.erp.manufacturing.module.inventory.dto.ItemUpdateRequest;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.organization.domain.Company;
-import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.uom.domain.Uom;
 import com.erp.manufacturing.module.uom.service.UomLookupService;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +33,7 @@ import java.util.UUID;
 public class ItemService {
 
     private final ItemRepository itemRepository;
-    private final CompanyRepository companyRepository;
+    private final OrganizationLookupService organizationLookupService;
     private final UomLookupService uomLookupService;
     private final InventoryMapper mapper;
 
@@ -137,12 +137,12 @@ public class ItemService {
     }
 
     private Company findCompany(UUID companyId) {
-        return companyRepository.findById(companyId)
+        return organizationLookupService.findCompany(companyId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Company", companyId));
     }
 
     private void ensureCompanyExists(UUID companyId) {
-        if (!companyRepository.existsById(companyId)) {
+        if (!organizationLookupService.companyExists(companyId)) {
             throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Company", companyId);
         }
     }

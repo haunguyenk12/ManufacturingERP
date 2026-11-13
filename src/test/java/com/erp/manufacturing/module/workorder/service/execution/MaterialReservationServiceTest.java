@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
@@ -57,7 +58,7 @@ class MaterialReservationServiceTest {
                 workOrderRepository, organizationLookupService, inventoryAvailabilityService);
         service = new MaterialReservationService(
                 reservationRepository,
-                stockBalanceRepository,
+                new StockBalanceReservationService(stockBalanceRepository),
                 organizationLookupService,
                 support,
                 new ManufacturingExecutionMapper(),

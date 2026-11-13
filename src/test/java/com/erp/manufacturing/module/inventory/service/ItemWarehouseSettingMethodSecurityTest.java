@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
 import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
@@ -143,7 +146,7 @@ class ItemWarehouseSettingMethodSecurityTest {
                     settingRepository,
                     itemLookupService,
                     mock(ItemRepository.class),
-                    warehouseRepository,
+                    new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository),
                     new PlantContextResolver(),
                     mapper);
         }

@@ -1,14 +1,13 @@
 package com.erp.manufacturing.module.planning.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
-import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
-import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.domain.WarehouseType;
-import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import com.erp.manufacturing.module.planning.domain.PlanningMessageCode;
 import com.erp.manufacturing.module.planning.domain.WarehouseResolutionSource;
 import lombok.RequiredArgsConstructor;
@@ -23,20 +22,19 @@ public class MrpWarehouseResolutionService {
 
     public enum Role { SUPPLY, OUTPUT }
 
-    private final WarehouseRepository warehouseRepository;
-    private final ItemWarehouseSettingRepository settingRepository;
+    private final OrganizationLookupService organizationLookupService;
+    private final ItemLookupService itemLookupService;
 
     public Resolution resolve(Plant plant, Item item, Role role) {
-        List<Warehouse> activeWarehouses = warehouseRepository.findByPlantPlantId(plant.getPlantId()).stream()
+        List<Warehouse> activeWarehouses = organizationLookupService.findWarehousesInPlant(plant.getPlantId()).stream()
                 .filter(Warehouse::isActive)
                 .toList();
         if (activeWarehouses.size() == 1) {
             return Resolution.resolved(activeWarehouses.get(0), WarehouseResolutionSource.SINGLE_ACTIVE_WAREHOUSE);
         }
 
-        List<ItemWarehouseSetting> settings = settingRepository
-                .findByItemItemIdAndWarehousePlantPlantIdAndStatus(
-                        item.getItemId(), plant.getPlantId(), ItemWarehouseSettingStatus.ACTIVE)
+        List<ItemWarehouseSetting> settings = itemLookupService
+                .findActiveWarehouseSettingsInPlant(item.getItemId(), plant.getPlantId())
                 .stream()
                 .filter(setting -> setting.getWarehouse().isActive())
                 .toList();

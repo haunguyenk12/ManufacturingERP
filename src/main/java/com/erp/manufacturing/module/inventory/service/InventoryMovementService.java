@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
@@ -12,7 +13,6 @@ import com.erp.manufacturing.module.inventory.repository.SerialNumberRepository;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
-import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +32,7 @@ public class InventoryMovementService {
     public static final String COUNT_REFERENCE_TYPE = "STOCK_COUNT";
 
     private final ItemRepository itemRepository;
-    private final WarehouseRepository warehouseRepository;
+    private final OrganizationLookupService organizationLookupService;
     private final InventoryLotRepository lotRepository;
     private final SerialNumberRepository serialNumberRepository;
     private final StockBalanceRepository balanceRepository;
@@ -650,7 +650,7 @@ public class InventoryMovementService {
     }
 
     private Warehouse findActiveWarehouse(UUID warehouseId) {
-        Warehouse warehouse = warehouseRepository.findById(warehouseId)
+        Warehouse warehouse = organizationLookupService.findWarehouse(warehouseId)
                 .orElseThrow(() -> ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (!warehouse.isActive()) {
             throw ExceptionFactory.businessRule(BusinessErrorCode.RESOURCE_INACTIVE,

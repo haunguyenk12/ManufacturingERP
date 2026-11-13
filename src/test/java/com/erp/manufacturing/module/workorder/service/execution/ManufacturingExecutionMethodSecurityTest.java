@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.module.workorder.service.WorkOrderIdempotency;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderIdempotencyRecordRepository;
 import com.erp.manufacturing.common.context.TraceIdProvider;
@@ -608,7 +609,7 @@ class ManufacturingExecutionMethodSecurityTest {
                                                              WorkOrderExecutionSupport support,
                                                              ManufacturingExecutionMapper mapper) {
             return new MaterialReservationService(
-                    reservationRepository, stockBalanceRepository, organizationLookupService, support, mapper,
+                    reservationRepository, new StockBalanceReservationService(stockBalanceRepository), organizationLookupService, support, mapper,
                     new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
                             new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
         }
@@ -641,7 +642,7 @@ class ManufacturingExecutionMethodSecurityTest {
         MaterialIssueCandidateService materialIssueCandidateService(MaterialReservationRepository reservationRepository,
                                                                     StockBalanceRepository stockBalanceRepository,
                                                                     WorkOrderExecutionSupport support) {
-            return new MaterialIssueCandidateService(reservationRepository, stockBalanceRepository, support);
+            return new MaterialIssueCandidateService(reservationRepository, new StockBalanceReservationService(stockBalanceRepository), support);
         }
 
         @Bean

@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.purchasing.service;
 
+import com.erp.manufacturing.module.workorder.service.WorkOrderService;
+import com.erp.manufacturing.module.planning.service.SupplySuggestionService;
+import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.module.inventory.service.ItemLookupService;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
@@ -154,7 +157,7 @@ class PurchaseRequisitionMethodSecurityTest {
                                                               PurchaseOrderService purchaseOrderService,
                                                               PurchasingMapper mapper) {
             return new PurchaseRequisitionService(
-                    requisitionRepository, supplySuggestionRepository, organizationLookupService,
+                    requisitionRepository, new SupplySuggestionService(supplySuggestionRepository, mock(WorkOrderService.class), mock(MrpPlanningMapper.class)), organizationLookupService,
                     itemLookupService, supplierService, purchaseOrderService, mapper);
         }
 

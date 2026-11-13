@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -64,7 +67,7 @@ class StockTransferServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new StockTransferService(transferRepository, warehouseRepository, itemRepository, lotRepository,
+        service = new StockTransferService(transferRepository, new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository), itemRepository, lotRepository,
                 balanceRepository, movementRepository, idempotency, new TraceIdProvider(),
                 new PlantContextResolver(), userLookupService, new InventoryMapper());
     }

@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemStatus;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
@@ -139,7 +142,7 @@ class ItemMethodSecurityTest {
         ItemService itemService(ItemRepository itemRepository,
                                  CompanyRepository companyRepository,
                                  InventoryMapper mapper) {
-            return new ItemService(itemRepository, companyRepository, mock(UomLookupService.class), mapper);
+            return new ItemService(itemRepository, new OrganizationLookupService(companyRepository, mock(PlantRepository.class), mock(WarehouseRepository.class)), mock(UomLookupService.class), mapper);
         }
 
         @Bean

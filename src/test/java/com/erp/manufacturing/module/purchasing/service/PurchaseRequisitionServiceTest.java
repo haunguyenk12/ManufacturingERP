@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.purchasing.service;
 
+import com.erp.manufacturing.module.workorder.service.WorkOrderService;
+import com.erp.manufacturing.module.planning.service.SupplySuggestionService;
+import com.erp.manufacturing.module.planning.mapper.MrpPlanningMapper;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.module.inventory.domain.*;
@@ -48,7 +51,7 @@ class PurchaseRequisitionServiceTest {
     void setUp() {
         service = new PurchaseRequisitionService(
                 purchaseRequisitionRepository,
-                supplySuggestionRepository,
+                new SupplySuggestionService(supplySuggestionRepository, mock(WorkOrderService.class), mock(MrpPlanningMapper.class)),
                 organizationLookupService,
                 itemLookupService,
                 supplierService,

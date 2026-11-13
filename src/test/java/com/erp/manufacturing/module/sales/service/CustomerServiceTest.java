@@ -6,7 +6,6 @@ import com.erp.manufacturing.common.exception.MultiErrorException;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
-import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.sales.domain.Customer;
 import com.erp.manufacturing.module.sales.domain.CustomerStatus;
@@ -42,14 +41,13 @@ import static org.mockito.Mockito.*;
 class CustomerServiceTest {
 
     @Mock CustomerRepository customerRepository;
-    @Mock CompanyRepository companyRepository;
     @Mock OrganizationLookupService organizationLookupService;
 
     CustomerService service;
 
     @BeforeEach
     void setUp() {
-        service = new CustomerService(customerRepository, companyRepository, organizationLookupService,
+        service = new CustomerService(customerRepository, organizationLookupService,
                 new CustomerMapper());
     }
 
@@ -164,7 +162,7 @@ class CustomerServiceTest {
     @Test
     void list_unknownCompany_throwsNotFoundBeforeSearching() {
         UUID companyId = UUID.randomUUID();
-        when(companyRepository.existsById(companyId)).thenReturn(false);
+        when(organizationLookupService.companyExists(companyId)).thenReturn(false);
 
         assertThatThrownBy(() -> service.list(companyId, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AppException.class)
@@ -178,7 +176,7 @@ class CustomerServiceTest {
     void list_trimsTheSearchTermAndForwardsTheStatusInOneQuery() {
         UUID companyId = UUID.randomUUID();
         Pageable pageable = PageRequest.of(0, 20);
-        when(companyRepository.existsById(companyId)).thenReturn(true);
+        when(organizationLookupService.companyExists(companyId)).thenReturn(true);
         when(customerRepository.search(companyId, CustomerStatus.INACTIVE, "acme", pageable))
                 .thenReturn(Page.empty(pageable));
 
@@ -191,7 +189,7 @@ class CustomerServiceTest {
     void list_blankSearchTermIsForwardedAsNull() {
         UUID companyId = UUID.randomUUID();
         Pageable pageable = PageRequest.of(0, 20);
-        when(companyRepository.existsById(companyId)).thenReturn(true);
+        when(organizationLookupService.companyExists(companyId)).thenReturn(true);
         when(customerRepository.search(eq(companyId), isNull(), isNull(), eq(pageable)))
                 .thenReturn(Page.empty(pageable));
 

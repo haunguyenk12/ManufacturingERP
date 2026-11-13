@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ErrorCode;
@@ -49,7 +50,7 @@ class SalesOrderStockReservationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SalesOrderStockReservationService(reservationRepository, stockBalanceRepository);
+        service = new SalesOrderStockReservationService(reservationRepository, new StockBalanceReservationService(stockBalanceRepository));
         warehouse = Warehouse.builder().warehouseId(UUID.randomUUID()).code("FG").build();
     }
 

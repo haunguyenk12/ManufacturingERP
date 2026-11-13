@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.organization.service;
 
+import java.util.Optional;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -92,6 +93,35 @@ public class OrganizationLookupService {
                     "Warehouse " + warehouseId + " does not belong to plant " + plantId);
         }
         return warehouse;
+    }
+
+    // ── Raw reads for other modules (rule C7, RA-1). No status check: each caller keeps its own rule and
+    //    its own error message, which is why these return Optional/boolean instead of throwing. ──────────
+
+    @Transactional(readOnly = true)
+    public Optional<Company> findCompany(UUID companyId) {
+        return companyRepository.findById(companyId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean companyExists(UUID companyId) {
+        return companyRepository.existsById(companyId);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Warehouse> findWarehouse(UUID warehouseId) {
+        return warehouseRepository.findById(warehouseId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean warehouseExists(UUID warehouseId) {
+        return warehouseRepository.existsById(warehouseId);
+    }
+
+    /** Every warehouse of the plant, any status. */
+    @Transactional(readOnly = true)
+    public List<Warehouse> findWarehousesInPlant(UUID plantId) {
+        return warehouseRepository.findByPlantPlantId(plantId);
     }
 
     @Transactional(readOnly = true)

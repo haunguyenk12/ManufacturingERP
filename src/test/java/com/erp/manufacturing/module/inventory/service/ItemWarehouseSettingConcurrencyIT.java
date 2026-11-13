@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -66,7 +67,7 @@ import static org.mockito.Mockito.when;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({ItemWarehouseSettingService.class, InventoryMapper.class, PlantContextResolver.class,
+@Import({ItemWarehouseSettingService.class, InventoryMapper.class, PlantContextResolver.class, OrganizationLookupService.class,
         ItemWarehouseSettingConcurrencyIT.AuditingConfig.class})
 class ItemWarehouseSettingConcurrencyIT extends AbstractPostgresIntegrationTest {
 

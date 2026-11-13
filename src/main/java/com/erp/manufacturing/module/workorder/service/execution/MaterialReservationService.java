@@ -1,14 +1,13 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
-import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import com.erp.manufacturing.module.inventory.domain.StockBalance;
-import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.organization.domain.ScopeResourceType;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
@@ -38,7 +37,7 @@ import java.util.UUID;
 public class MaterialReservationService {
 
     private final MaterialReservationRepository reservationRepository;
-    private final StockBalanceRepository stockBalanceRepository;
+    private final StockBalanceReservationService stockBalanceReservationService;
     private final OrganizationLookupService organizationLookupService;
     private final WorkOrderExecutionSupport support;
     private final ManufacturingExecutionMapper mapper;
@@ -86,8 +85,7 @@ public class MaterialReservationService {
                                                    WorkOrderComponentLine componentLine,
                                                    StockBalance balance,
                                                    BigDecimal quantity) {
-        balance.reserve(quantity);
-        stockBalanceRepository.save(balance);
+        stockBalanceReservationService.reserve(balance, quantity);
         return reservationRepository.save(MaterialReservation.builder()
                 .workOrder(workOrder)
                 .componentLine(componentLine)
@@ -150,8 +148,8 @@ public class MaterialReservationService {
             if (outstanding.compareTo(BigDecimal.ZERO) <= 0) {
                 continue;
             }
-            for (StockBalance balance : stockBalanceRepository.findIssuableBalancesFefo(
-                    componentLine.getComponentItem().getItemId(), warehouseIds, LotStatus.AVAILABLE, now)) {
+            for (StockBalance balance : stockBalanceReservationService.findIssuable(
+                    componentLine.getComponentItem().getItemId(), warehouseIds, now)) {
                 if (outstanding.compareTo(BigDecimal.ZERO) <= 0) {
                     break;
                 }
@@ -303,7 +301,6 @@ public class MaterialReservationService {
                 reservation.getItem(),
                 reservation.getWarehouse(),
                 reservation.getLot() != null ? reservation.getLot().getLotId() : null);
-        balance.releaseReserved(remaining);
-        stockBalanceRepository.save(balance);
+        stockBalanceReservationService.releaseReserved(balance, remaining);
     }
 }

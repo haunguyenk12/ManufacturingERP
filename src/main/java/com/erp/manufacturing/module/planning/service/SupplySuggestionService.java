@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.planning.service;
 
+import java.util.Optional;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -222,5 +223,19 @@ public class SupplySuggestionService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    // ── Entry points for purchasing's conversion to a purchase requisition (rule C7, RA-1). No
+    //    @PreAuthorize: the caller, PurchaseRequisitionService.convertFromSuggestion, is already guarded. ──
+
+    @Transactional(readOnly = true)
+    public Optional<SupplySuggestion> findWithDetails(UUID suggestionId) {
+        return supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestionId);
+    }
+
+    @Transactional
+    public void markConverted(SupplySuggestion suggestion, String referenceType, UUID referenceId) {
+        suggestion.markConverted(referenceType, referenceId);
+        supplySuggestionRepository.save(suggestion);
     }
 }

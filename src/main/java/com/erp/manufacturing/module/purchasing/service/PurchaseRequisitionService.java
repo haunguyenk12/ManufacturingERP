@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.purchasing.service;
 
+import com.erp.manufacturing.module.planning.service.SupplySuggestionService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -15,7 +16,6 @@ import com.erp.manufacturing.module.organization.service.OrganizationLookupServi
 import com.erp.manufacturing.module.planning.domain.SupplySuggestion;
 import com.erp.manufacturing.module.planning.domain.SupplySuggestionStatus;
 import com.erp.manufacturing.module.planning.domain.SupplySuggestionType;
-import com.erp.manufacturing.module.planning.repository.SupplySuggestionRepository;
 import com.erp.manufacturing.module.purchasing.domain.*;
 import com.erp.manufacturing.module.purchasing.dto.*;
 import com.erp.manufacturing.module.purchasing.mapper.PurchasingMapper;
@@ -40,7 +40,7 @@ public class PurchaseRequisitionService {
     private static final String REFERENCE_TYPE_PURCHASE_REQUISITION = "PURCHASE_REQUISITION";
 
     private final PurchaseRequisitionRepository purchaseRequisitionRepository;
-    private final SupplySuggestionRepository supplySuggestionRepository;
+    private final SupplySuggestionService supplySuggestionService;
     private final OrganizationLookupService organizationLookupService;
     private final ItemLookupService itemLookupService;
     private final SupplierService supplierService;
@@ -76,7 +76,7 @@ public class PurchaseRequisitionService {
                warehouseId = "#result?.warehouseId()")
     public PurchaseRequisitionResponse convertFromSuggestion(UUID suggestionId,
                                                              PurchaseRequisitionFromSuggestionRequest request) {
-        SupplySuggestion suggestion = supplySuggestionRepository.findWithDetailsBySupplySuggestionId(suggestionId)
+        SupplySuggestion suggestion = supplySuggestionService.findWithDetails(suggestionId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Supply suggestion", suggestionId));
         if (suggestion.getStatus() != SupplySuggestionStatus.APPROVED) {
@@ -120,8 +120,8 @@ public class PurchaseRequisitionService {
                 .build();
         requisition.getLines().add(line);
         PurchaseRequisition saved = purchaseRequisitionRepository.save(requisition);
-        suggestion.markConverted(REFERENCE_TYPE_PURCHASE_REQUISITION, saved.getPurchaseRequisitionId());
-        supplySuggestionRepository.save(suggestion);
+        supplySuggestionService.markConverted(
+                suggestion, REFERENCE_TYPE_PURCHASE_REQUISITION, saved.getPurchaseRequisitionId());
         return mapper.toResponse(saved, true);
     }
 

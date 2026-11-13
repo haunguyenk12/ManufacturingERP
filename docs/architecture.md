@@ -1,9 +1,8 @@
 # Manufacturing ERP – System Architecture
 
-> **Status**: tài liệu viết ở giai đoạn nền tảng (Phase 1). **Rà lại 2026-11-12:** §3.3 (bản đồ module) và
-> §12 (việc chưa làm) đã viết lại theo code hiện tại; §5.3 và §9.5 có ghi chú đính chính. Các mục khác
-> (§1, §2, §6, §8, §9.1–§9.4, §10, §11) **chưa được đối chiếu lại** — khi lệch thì code và `CLAUDE.md`
-> của từng module là nguồn đúng.
+> **Status**: viết ở giai đoạn nền tảng (Phase 1), **đối chiếu lại toàn bộ với code ngày 2026-11-13**
+> (`RA-1`). Mục nào mô tả thiết kế gốc chưa làm thì ghi rõ "chưa làm". Khi lệch, code và `CLAUDE.md` của
+> từng module là nguồn đúng.
 > **Stack**: Spring Boot 3.x · Java 17 · PostgreSQL · Redis · Flyway · Spring Security 6 + JWT
 > **Architecture**: Modular Monolith (không tách microservice ở giai đoạn hiện tại)
 
@@ -11,44 +10,20 @@
 
 ## 1. Current Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       Manufacturing ERP                          │
-│                                                                  │
-│  com.erp.manufacturing                                           │
-│  ├── common/                (cross-cutting concerns)            │
-│  │   ├── exception/         ErrorCode interface + 3 enum impls  │
-│  │   ├── response/          ApiResponse envelope                 │
-│  │   ├── security/          JWT, filters, TokenStore            │
-│  │   ├── audit/             AuditLog, AuditLogEvent, Aspect     │
-│  │   └── context/           RequestContext (immutable snapshot) │
-│  │                                                               │
-│  ├── config/                Spring configs (Security, Redis, …) │
-│  │                                                               │
-│  └── module/                domain modules                       │
-│      ├── auth/              login, refresh, logout               │
-│      │   ├── controller/                                         │
-│      │   ├── dto/                                                │
-│      │   └── service/       AuthService                         │
-│      └── user/              user & role management               │
-│          ├── controller/                                         │
-│          ├── domain/        User, Role, UserPrincipal, Enum     │
-│          ├── dto/                                                │
-│          ├── mapper/                                             │
-│          ├── repository/                                         │
-│          └── service/       UserService, UserDetailsServiceImpl │
-│                                                                  │
-│  Infrastructure:                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐ │
-│  │  PostgreSQL  │  │    Redis     │  │     Flyway             │ │
-│  │  users       │  │  refresh     │  │  V1__create_base…     │ │
-│  │  roles       │  │  blacklist   │  │  V2__seed_admin…      │ │
-│  │  user_roles  │  │  failcount   │  │  V5__create_audit…    │ │
-│  │  audit_logs  │  │  sessions    │  │                        │ │
-│  └──────────────┘  │  rate-limit  │  └───────────────────────┘ │
-│                    └──────────────┘                              │
-└─────────────────────────────────────────────────────────────────┘
-```
+Modular monolith một tiến trình Spring Boot, gồm:
+
+- `common/` — exception, response envelope, security (JWT, filter, token store), audit, request context,
+  idempotency, web (phân trang, `X-Plant-Id`).
+- `config/` — cấu hình Spring (Security, Redis, Async, Audit, CORS, OpenAPI, validator khởi động).
+- `module/` — 18 module nghiệp vụ; danh sách và cổng giao tiếp ở **§3.3**.
+
+Hạ tầng:
+
+| Thành phần | Dùng cho |
+|---|---|
+| PostgreSQL 16 | Toàn bộ dữ liệu nghiệp vụ và audit; schema do Flyway quản lý (`V1`…`V96`, `ddl-auto: validate`) |
+| Redis 7 | Refresh token, blacklist access token, device session, bộ đếm brute-force, rate limit, token đặt lại mật khẩu |
+| SMTP (tuỳ chọn) | Mã xác thực email; chỉ gửi khi đặt `SPRING_MAIL_HOST` (QA dùng Mailpit trong `docker-compose.yml`) |
 
 ---
 
@@ -88,9 +63,9 @@ Client Request
 │      • Set SecurityContextHolder                               │
 │      • Set request attr: authenticatedUserId, authenticatedJti │
 │      • Set MDC: userId                                         │
-│    Refresh path (/api/auth/v1/refresh):                        │
-│      • Extract claims even if token expired                    │
-│      • Set authenticatedUserId only (not SecurityContext)      │
+│    Public paths (BYPASS_PATHS: login, refresh, password…):    │
+│      • Skipped entirely; refresh resolves the user from        │
+│        tokenId, never from the access token (B107)             │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
                           ▼
@@ -104,12 +79,11 @@ Client Request
                           ▼
                     Controller / Service
                           │
-                    AuditLogService
-                    (ApplicationEventPublisher → async)
+                    @Auditable / AuditRecorder
+                     → INSERT audit_outbox (same transaction as the business write)
                           │
-                    [auditExecutor thread]
-                     AuditLogListener → INSERT audit_logs
-                     -- [TODO Phase 2] audit_log_changes batch insert
+                    AuditOutboxDispatcher (@Scheduled, 1 s)
+                     → audit_logs + audit_log_changes + audit_log_entities
 ```
 
 **Error responses in filters** bypass `GlobalExceptionHandler` and write directly to the response stream using the same `ApiResponse` envelope (`{code, result, message}`).
@@ -136,9 +110,9 @@ module/<name>/
 
 | Rule | Rationale |
 |---|---|
-| A module **must not** call another module's `repository` directly | Prevents coupling at the persistence layer |
+| A module **must not** call another module's `repository` directly | Prevents coupling at the persistence layer. Ngoại lệ còn tồn tại: `.claude/rules/coding-rules.md` C7 |
 | Cross-module calls go through the target module's **service** (application service) | Single source of business logic |
-| For async or decoupled integration, use **Spring ApplicationEvent** | Avoids direct dependency between modules |
+| For async or decoupled integration, use **Spring ApplicationEvent** | Avoids direct dependency between modules. *(Hiện chưa module nghiệp vụ nào dùng event; mọi tích hợp là gọi service đồng bộ.)* |
 | `common/*` packages may be used by any module | They are true cross-cutting concerns |
 
 ### 3.3 Current Module Map *(2026-11-12)*
@@ -148,13 +122,13 @@ module/<name>/
 | `module/auth` | Đăng nhập, refresh, logout, khôi phục và đặt mật khẩu bằng mã email | `AuthService` |
 | `module/user` | Tài khoản người dùng | `UserService`, `UserLookupService` |
 | `module/organization` | Công ty, nhà máy, kho; role, permission, access scope, assignment | `OrganizationLookupService`, `PermissionGuard` |
-| `module/inventory` | Vật tư, tồn kho, lô, serial, chuyển kho, thiết lập vật tư–kho | `ItemLookupService`, `InventoryLotLookupService`, `StockPoolLookupService`, `InventoryAvailabilityService` |
+| `module/inventory` | Vật tư, tồn kho, lô, serial, chuyển kho, thiết lập vật tư–kho | `ItemLookupService`, `InventoryLotLookupService`, `StockPoolLookupService`, `InventoryAvailabilityService`, `StockBalanceReservationService` (giữ/nhả tồn) |
 | `module/uom` | Đơn vị tính | `UomLookupService` |
 | `module/bom` | Định mức (BOM đa cấp, phiên bản) | `BomLookupService` |
 | `module/routing` | Quy trình công nghệ | `RoutingLookupService` |
 | `module/workcenter` | Trung tâm làm việc | `WorkCenterLookupService` |
 | `module/shift` | Ca và lịch làm việc | `WorkCalendarLookupService` |
-| `module/planning` | Nhu cầu, lượt chạy MRP, đề xuất cung ứng | `PlanningDemandService` |
+| `module/planning` | Nhu cầu, lượt chạy MRP, đề xuất cung ứng | `PlanningDemandService`, `SupplySuggestionService` (`findWithDetails`/`markConverted` cho purchasing) |
 | `module/purchasing` | Nhà cung cấp, yêu cầu mua, đơn mua, nhận hàng, QC mua | `SupplierLookupService`, `PurchaseQcLookupService` |
 | `module/workorder` | Lệnh sản xuất, giữ chỗ, cấp vật tư, công đoạn, phiếu nhập thành phẩm, QC, giá thành sản xuất | các `*LookupService` trong `service/query` |
 | `module/costing` | Giá thành chuẩn của vật tư | `ItemStandardCostLookupService` |
@@ -172,50 +146,13 @@ Quy tắc gọi chéo module và danh sách ngoại lệ hiện có: `.claude/ru
 
 ## 4. Error Response Contract
 
-**All responses** (success and error) use the same envelope:
+Mọi response dùng envelope `{code, result, message, errors?}`. `code` là **tên hằng** của `ErrorCode`
+(vd `STATE_CONFLICT`), không phải mã ngắn `AUTH_XXX`/`BIZ_XXX` như bản thiết kế đầu; `errors` là **mảng**
+`{field, message}`. Hai lớp exception (`AppException`, `MultiErrorException`), tạo qua `ExceptionFactory`;
+loại lỗi mới là một hằng mới trong enum, không phải class mới.
 
-```json
-{
-  "code":    "AUTH_001",
-  "result":  null,
-  "message": "Invalid username or password",
-  "errors":  { "field": "message" }
-}
-```
-
-| Field | Always present | Description |
-|---|---|---|
-| `code` | ✅ | Machine-readable code. `SUCCESS` on success, `AUTH_XXX` / `VAL_XXX` / `BIZ_XXX` on error |
-| `result` | — | Data payload on success; `null` on error |
-| `message` | ✅ | Human-readable text |
-| `errors` | ❌ | Present only for multi-field validation failures |
-
-### 4.1 ErrorCode Hierarchy
-
-```
-ErrorCode  (interface: code(), message(), status())
-├── AuthErrorCode      AUTH_001…AUTH_030   (credentials, tokens, session, access)
-├── ValidationErrorCode VAL_001…VAL_021   (input, user fields, resource existence)
-└── BusinessErrorCode  BIZ_001…BIZ_100    (domain rules, inventory, BOM, rate-limit)
-```
-
-### 4.2 Exception Hierarchy
-
-```
-RuntimeException
-└── AppException                    (root – holds ErrorCode + HttpStatus + message)
-    └── MultiErrorException         (aggregates field-level errors for validation)
-```
-
-**Factory**: `ExceptionFactory` provides named static methods (`notFound`, `unauthorized`, `alreadyExists`, `businessRule`, `custom`, `withErrors`) so throw-sites are intent-revealing.
-
-**GlobalExceptionHandler** handles (in order):
-1. `MultiErrorException` → field-level errors JSON
-2. `AppException` → single error
-3. `MethodArgumentNotValidException` → Bean Validation (uses `ValidationErrorCode.INVALID_INPUT`)
-4. `AccessDeniedException` (Spring Security) → `AuthErrorCode.ACCESS_DENIED`
-5. `DataIntegrityViolationException` → `ValidationErrorCode.RESOURCE_ALREADY_EXISTS`
-6. `Exception` (catch-all) → `BusinessErrorCode.INTERNAL_SERVER_ERROR`
+Chi tiết đầy đủ — bảng chọn 409/422, danh sách handler, phân loại `DataIntegrityViolationException`, lỗi
+trong filter chain: `.claude/rules/error-handling.md`. Lịch sử mã lỗi: `docs/error-codes-history.md`.
 
 ---
 
@@ -225,7 +162,7 @@ RuntimeException
 
 | Token | Storage | TTL | Purpose |
 |---|---|---|---|
-| Access Token (JWT, HS256) | Client only | 15 min | Stateless API auth |
+| Access Token (JWT, HS256) | Client only | 15 min mặc định (`JWT_ACCESS_TOKEN_EXPIRY_MS`) | Stateless API auth |
 | Refresh Token (opaque UUID) | Redis | 7 days (sliding) | Issue new access tokens |
 | Blacklist entry | Redis | Remaining access token TTL | Invalidate on logout |
 
@@ -245,7 +182,11 @@ auth:failcount:{username}                  TTL=15m (reset on success)
 auth:session:device:{userId}:{deviceId}   TTL=7d (sliding on refresh)
 ```
 
-> **Note**: The CLAUDE.md section 4.4 references `auth:refresh:used:{tokenId}` (RTR reuse detection) and `auth:reset:{token}` (password reset) as planned features. These keys are **documented in design but not yet implemented** in `TokenStoreService`. See §9 Roadmap.
+Ngoài các key trên, code hiện còn dùng: `auth:refresh:owner:{tokenId}` (tra userId khi refresh, `B107`),
+`auth:refresh:used:{tokenId}` (phát hiện dùng lại, `B80`), `auth:refresh:{userId}:{tokenId}:meta` (mốc
+bắt đầu phiên, `B81`), `auth:refresh:lock:{tokenId}` và `auth:refresh:rotated:{tokenId}` (refresh đồng thời,
+`B95`), `auth:reset:{token}` + `auth:reset:user:{userId}` (đặt lại mật khẩu, `D8c`). Danh sách đầy đủ kèm TTL:
+`common/security/CLAUDE.md §4.4`. Phiên tuyệt đối 30 ngày tính từ lúc đăng nhập.
 
 ### 5.3 Multi-Device Session
 
@@ -262,49 +203,25 @@ Each device is identified by a `deviceId` (client-provided or derived server-sid
 
 ## 6. Audit Log Design
 
-### 6.1 Architecture
+Thiết kế ban đầu (event `@Async` + `@TransactionalEventListener(AFTER_COMMIT)`) đã được thay bằng
+**transactional outbox** ở track `AR-*` (2026-09-02), vì cơ chế cũ bỏ mất mọi event ghi ngoài transaction
+(toàn bộ event đăng nhập) và mất event `FAILURE` khi rollback.
 
 ```
-Business code
-  └── AuditLogService.log*(...)
-        └── ApplicationEventPublisher.publishEvent(AuditLogEvent)
-              │
-              [auditExecutor thread – MDC propagated via MdcTaskDecorator]
-              │
-              AuditLogListener
-                @Async("auditExecutor")
-                @TransactionalEventListener(AFTER_COMMIT)
-                  └── auditLogRepository.save(AuditLog)
+@Auditable / AuditRecorder
+  ├─ SUCCESS → INSERT audit_outbox trong CÙNG transaction nghiệp vụ
+  └─ FAILURE → INSERT audit_outbox ở REQUIRES_NEW (bean riêng) — sống qua rollback
+        │
+AuditOutboxDispatcher (@Scheduled, mặc định 1 s, lease + retry + backoff)
+  └─ audit_logs (1 dòng/hành động) + audit_log_changes (thay đổi theo field) + audit_log_entities
 ```
 
-**Key properties**:
-- Async → does not block response time
-- `AFTER_COMMIT` → not written if the business transaction rolls back
-- MDC (`traceId`, `userId`, `clientIp`) propagated to async thread via `MdcTaskDecorator`
-- Context (`userId`, `username`, `clientIp`, `traceId`) captured as immutable `RequestContext` record **on the request thread** before crossing async boundary
+- Idempotent nhờ `eventId` do producer sinh + unique index `uk_audit_logs_event_id`.
+- Ba bảng audit append-only: trigger `V68` chặn `UPDATE`/`DELETE` với mọi role.
+- Chính sách lỗi `FAIL_OPEN`: audit hỏng không đổi kết quả nghiệp vụ.
+- Listener cũ vẫn còn trong code nhưng **mặc định tắt** (`AUDIT_LEGACY_LISTENER_ENABLED=false`).
 
-### 6.2 Known Limitation (documented)
-
-> **Risk**: If the JVM crashes after the business transaction commits but before the async audit event is processed, the audit entry is lost.
-
-**Current mitigation**: None — acceptable for Phase 1 foundation.
-
-**Planned mitigation** (Phase 2+): Transactional Outbox pattern — write an `outbox_events` row in the same transaction, background worker processes and deletes it. See §9 Roadmap.
-
-### 6.3 Schema
-
-```sql
--- Current (implemented): single-table design
-audit_logs         -- 1 row per action (LOGIN, WORK_ORDER_UPDATED, etc.)
-
--- [TODO Phase 2] field-level change tracking
--- audit_log_changes  -- N rows per action (field_name, old_value, new_value)
---                    -- Only for CREATE/UPDATE/DELETE on business entities
---                    -- Migration: V6__create_audit_log_changes.sql
-```
-
-> **Current migration** (`V5__create_audit_logs.sql`) only creates `audit_logs`.
-> `audit_log_changes` is planned for Phase 2 when the existing `@Auditable` AOP flow is extended to capture field-level changes.
+Chi tiết: `src/main/java/com/erp/manufacturing/common/audit/CLAUDE.md`.
 
 ---
 
@@ -318,6 +235,9 @@ audit_logs         -- 1 row per action (LOGIN, WORK_ORDER_UPDATED, etc.)
 | User layer | `UserRateLimitFilter` (Order 4) | `USER` rules | After JWT — uses authenticated userId |
 
 ### 7.2 Config-Driven Rules (application.yml)
+
+Bộ đếm là **fixed window** (`INCR` trên key theo cửa sổ thời gian), không phải sliding window. Mọi `limit`
+và `enabled` đọc từ biến môi trường `RATE_LIMIT_*`; giá trị dưới đây là mặc định.
 
 ```yaml
 app:
@@ -335,6 +255,13 @@ app:
         scope: IP
         pattern: "/auth/v1/**"
         limit: 10
+        window-seconds: 60
+        action: BLOCK
+
+      - id: auth-refresh-ip
+        scope: IP
+        pattern: "/auth/v1/refresh"
+        limit: 20
         window-seconds: 60
         action: BLOCK
 
@@ -389,6 +316,9 @@ This is a **stateless monolith** designed to scale horizontally:
 
 ### 9.1 Planned Bounded Contexts
 
+> Bảng dưới là **kế hoạch ban đầu**, giữ để tham chiếu. Module thật hiện có ở §3.3. Chưa có: Quality
+> (QC nằm trong `purchasing` và `workorder`), Reporting dạng materialized view, Integration/MES.
+
 | Context | Owns | Public Interface |
 |---|---|---|
 | **Identity & Access** (current) | users, roles | AuthService, UserService |
@@ -415,6 +345,10 @@ Company (1)
 
 Role and permission assignment will need to be scoped to `(user, company)` or `(user, plant)` — not just global `ADMIN/MANAGER/OPERATOR`. This must be designed before Inventory or Work Order modules are added.
 
+> **Đã làm:** công ty / nhà máy / kho có từ `V6`; phân quyền theo phạm vi qua `access_scopes` +
+> `user_role_assignments` (GLOBAL / COMPANY / PLANT / WAREHOUSE), kiểm tra bằng `PermissionGuard`.
+> Bất biến RBAC: `module/organization/CLAUDE.md`.
+
 ### 9.3 Inventory Ledger Design (Architecture Decision)
 
 > **ADR-002**: Stock movements are the source of truth (append-only). Stock balance is a projection/snapshot derived from movements.
@@ -440,7 +374,8 @@ GET  /api/v1/jobs/{jobId}  → return { status: PENDING|RUNNING|DONE|FAILED, res
 > `MrpRunResponse` ngay (`MrpRunService.run`); không có bảng job, không có `/api/v1/jobs`. Đường dẫn
 > ở trên đã đổi tên theo `F5-B` để không còn trỏ tới `/api/v1/mrp/**` đã bị xoá.
 
-Idempotency key required: client sends `Idempotency-Key` header → server stores result in Redis TTL 24h.
+Idempotency key: client gửi header `Idempotency-Key`; server lưu ở cột `mrp_runs.idempotency_key` + UNIQUE
+(`V58`), **không** lưu Redis. Gửi lại cùng key trả lượt chạy cũ; cùng key khác payload ⇒ `409 IDEMPOTENCY_CONFLICT`.
 
 ### 9.4.1 Manufacturing Business Gates (Phase P1 – implemented)
 
@@ -459,19 +394,13 @@ must fail (so the caller's transaction rolls back and the client gets an error),
 `BLOCKED` state must survive so planners can query which work orders are waiting on material.
 A single transaction can only deliver one of the two.
 
-**Gate 1c splits the receipt into two steps.** Posting a receipt no longer touches inventory:
+**Gate 1c splits the receipt into two steps.** Posting a receipt does not touch inventory; only
+`approve` creates the stock movement, and new output lots open in `HOLD` for QC.
 
-```
-POST /work-orders/{id}/production-receipts              → PENDING_APPROVAL, no movement
-POST /work-orders/{id}/production-receipts/{rid}/approve → POSTED + RECEIVE movement, new lot = HOLD
-POST /work-orders/{id}/production-receipts/{rid}/reject  → REJECTED, no inventory impact
-```
-
-`POSTED` is deliberately reused as the post-approval state (rather than adding `APPROVED`):
-existing `POSTED` rows already mean "written to stock", so no data backfill is needed.
-
-Output lots created by approval open in `LotStatus.HOLD`, which is what unlocks Phase P2
-(Quality Control): QC only has to add the `HOLD → AVAILABLE / REJECTED` workflow.
+> **Đã thay đổi sau P1:** vòng đời phiếu nhập được viết lại ở `G9a`–`G9c` (nháp, sửa, rút, huỷ, version,
+> QC nhiều lượt theo lượng). Đường dẫn và trạng thái hiện tại: `docs/api-guide-for-frontend.md` và
+> `module/workorder/service/execution/CLAUDE.md` (mục G9a–G9c). Phần endpoint chi tiết của P1 đã bỏ
+> khỏi đây vì không còn đúng.
 
 **Known limitations (P1, accepted):**
 1. An item that is not lot-tracked has no lot status to carry `HOLD`. `D5` enabled QC on its receipt;
@@ -518,13 +447,12 @@ Log pattern: `%d{ISO8601} [%X{traceId}] [%X{userId}] [%X{clientIp}] %-5level [%t
 
 ### 10.2 Health & Metrics
 
-```yaml
-management:
-  endpoints.web.exposure.include: health, info, metrics, prometheus
-  endpoint.health.show-details: when-authorized   # not exposed public
-```
+Actuator chạy ở **cổng quản trị riêng** (`MANAGEMENT_SERVER_PORT`, mặc định 8081). Mặc định chỉ mở
+`health`, `info` (`MANAGEMENT_ENDPOINTS_EXPOSURE_INCLUDE`); `show-details` mặc định `never`. Không có
+registry Prometheus trong `pom.xml`. `/actuator/info` có `build.*` và `app.commit` (`APP_COMMIT`).
 
-Key metrics to instrument (currently partially done via Actuator defaults):
+Metric tự định nghĩa hiện có **chỉ của audit** (`AuditMetrics`, `AuditOutboxHealth`). Bảng dưới là các
+metric **dự kiến, chưa làm**:
 
 | Metric | Type | When |
 |---|---|---|
@@ -537,7 +465,8 @@ Key metrics to instrument (currently partially done via Actuator defaults):
 
 ### 10.3 Security Note
 
-`/actuator/health` and `/actuator/info` are public (permitted in `SecurityConfig`). Detail is `when-authorized`. `/actuator/metrics` and `/actuator/prometheus` require auth — do not expose publicly without authentication in production.
+`/actuator/health` và `/actuator/info` là `permitAll` trong `SecurityConfig`; mọi `/actuator/**` khác yêu cầu
+role `ADMIN`. Không mở cổng quản trị ra ngoài ở production.
 
 ---
 
@@ -554,34 +483,19 @@ module/<name>/
   repository/<Name>Repository.java    # extends JpaRepository
   dto/<Name>Request.java              # record, @Valid annotations
   dto/<Name>Response.java             # record
-  mapper/<Name>Mapper.java            # static toResponse(entity) method
+  mapper/<Name>Mapper.java            # @Component, toResponse(entity), viết tay (chỉ UserMapper dùng MapStruct)
 ```
 
 ### 11.2 ErrorCode Convention for New Modules
 
-Create a new enum per domain:
-```java
-// e.g. module/inventory → InventoryErrorCode
-public enum InventoryErrorCode implements ErrorCode {
-    INSUFFICIENT_STOCK("INV_001", "Insufficient stock", HttpStatus.UNPROCESSABLE_ENTITY),
-    ...
-}
-```
-
-Prefix codes by domain: `INV_`, `BOM_`, `WO_`, `MRP_`, `QC_`.
+**Không** tạo enum `XxxErrorCode` riêng với tiền tố `INV_`/`WO_` như bản thiết kế đầu. Thêm hằng vào
+`BusinessErrorCode` / `ValidationErrorCode`; chỉ tách enum riêng khi domain có vốn từ lỗi khác hẳn (tiền
+lệ duy nhất: `ImportErrorCode` cho lỗi cấp dòng của file import). Xem `.claude/rules/error-handling.md §5.2`.
 
 ### 11.3 Migration Naming
 
-```
-V1__create_base_schema.sql
-V2__seed_admin_user.sql
-V3__create_organization.sql     ← next: Organization scope
-V4__create_inventory.sql
-V5__create_audit_logs.sql       ← already exists
-V6__create_bom_routing.sql
-```
-
-> **Rule**: Never modify existing migration files. New changes = new migration version.
+`V<số kế tiếp>__<mô_tả_snake_case>.sql`; số mới nhất ở `CLAUDE.md §0.0`. Không sửa migration đã có.
+Xem `.claude/rules/dev-workflow.md §6.4`.
 
 ---
 

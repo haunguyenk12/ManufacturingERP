@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.context.TraceIdProvider;
@@ -17,7 +18,6 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.*;
 import com.erp.manufacturing.module.organization.domain.Plant;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
-import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -46,7 +46,7 @@ public class StockTransferService {
     static final String REFERENCE_TYPE = "STOCK_TRANSFER";
 
     private final StockTransferRepository transferRepository;
-    private final WarehouseRepository warehouseRepository;
+    private final OrganizationLookupService organizationLookupService;
     private final ItemRepository itemRepository;
     private final InventoryLotRepository lotRepository;
     private final StockBalanceRepository balanceRepository;
@@ -149,7 +149,7 @@ public class StockTransferService {
                                                   String plantHeader, Pageable pageable) {
         plantContextResolver.ensureMatches(plantHeader, plantId);
         if (warehouseId != null) {
-            Warehouse warehouse = warehouseRepository.findById(warehouseId)
+            Warehouse warehouse = organizationLookupService.findWarehouse(warehouseId)
                     .orElseThrow(() -> ExceptionFactory.notFound(
                             ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
             if (!warehouse.getPlant().getPlantId().equals(plantId)) {
@@ -301,7 +301,7 @@ public class StockTransferService {
     }
 
     private Warehouse findActiveWarehouse(UUID warehouseId) {
-        Warehouse warehouse = warehouseRepository.findById(warehouseId)
+        Warehouse warehouse = organizationLookupService.findWarehouse(warehouseId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (!warehouse.isActive()) {

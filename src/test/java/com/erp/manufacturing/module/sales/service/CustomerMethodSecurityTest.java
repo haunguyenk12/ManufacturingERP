@@ -2,7 +2,6 @@ package com.erp.manufacturing.module.sales.service;
 
 import com.erp.manufacturing.module.organization.domain.Company;
 import com.erp.manufacturing.module.organization.domain.OrganizationStatus;
-import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.sales.domain.Customer;
@@ -49,12 +48,11 @@ class CustomerMethodSecurityTest {
     @Autowired PermissionGuard permissionGuard;
     @Autowired SalesPermissionGuard salesPermissionGuard;
     @Autowired CustomerRepository customerRepository;
-    @Autowired CompanyRepository companyRepository;
     @Autowired OrganizationLookupService organizationLookupService;
 
     @BeforeEach
     void setUp() {
-        reset(permissionGuard, salesPermissionGuard, customerRepository, companyRepository, organizationLookupService);
+        reset(permissionGuard, salesPermissionGuard, customerRepository, organizationLookupService);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("user", null, List.of()));
     }
@@ -98,7 +96,7 @@ class CustomerMethodSecurityTest {
         assertThatThrownBy(() -> customerService.list(companyId, null, null, PageRequest.of(0, 20)))
                 .isInstanceOf(AccessDeniedException.class);
 
-        verifyNoInteractions(customerRepository, companyRepository);
+        verifyNoInteractions(customerRepository, organizationLookupService);
         verify(permissionGuard).hasResourceAccess(any(), eq("PERM_CUSTOMER_READ"), eq("COMPANY"), eq(companyId));
     }
 
@@ -107,7 +105,7 @@ class CustomerMethodSecurityTest {
         UUID companyId = UUID.randomUUID();
         when(permissionGuard.hasResourceAccess(any(), eq("PERM_CUSTOMER_READ"), eq("COMPANY"), eq(companyId)))
                 .thenReturn(true);
-        when(companyRepository.existsById(companyId)).thenReturn(true);
+        when(organizationLookupService.companyExists(companyId)).thenReturn(true);
         when(customerRepository.search(eq(companyId), isNull(), isNull(), any())).thenReturn(Page.empty());
 
         assertThatCode(() -> customerService.list(companyId, null, null, PageRequest.of(0, 20)))
@@ -208,9 +206,8 @@ class CustomerMethodSecurityTest {
 
         @Bean
         CustomerService customerService(CustomerRepository customerRepository,
-                                        CompanyRepository companyRepository,
                                         OrganizationLookupService organizationLookupService) {
-            return new CustomerService(customerRepository, companyRepository, organizationLookupService,
+            return new CustomerService(customerRepository, organizationLookupService,
                     new CustomerMapper());
         }
 
@@ -221,7 +218,6 @@ class CustomerMethodSecurityTest {
         SalesPermissionGuard salesPermissionGuard() { return mock(SalesPermissionGuard.class); }
 
         @Bean CustomerRepository customerRepository() { return mock(CustomerRepository.class); }
-        @Bean CompanyRepository companyRepository() { return mock(CompanyRepository.class); }
         @Bean OrganizationLookupService organizationLookupService() { return mock(OrganizationLookupService.class); }
     }
 }

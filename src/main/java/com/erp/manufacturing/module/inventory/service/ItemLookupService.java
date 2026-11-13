@@ -1,5 +1,9 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import java.util.List;
+import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSettingStatus;
+import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
+import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -24,6 +28,7 @@ public class ItemLookupService {
 
     private final ItemRepository itemRepository;
     private final InventoryLotRepository lotRepository;
+    private final ItemWarehouseSettingRepository settingRepository;
 
     @Transactional(readOnly = true)
     public Item getItem(UUID itemId) {
@@ -96,5 +101,15 @@ public class ItemLookupService {
                     "Lot does not belong to item: " + item.getItemId());
         }
         return lot;
+    }
+
+    /**
+     * {@code ACTIVE} item–warehouse settings of one item in the warehouses of one plant (planning's warehouse
+     * resolution, rule C7). The warehouse's own status is not filtered here; the caller decides.
+     */
+    @Transactional(readOnly = true)
+    public List<ItemWarehouseSetting> findActiveWarehouseSettingsInPlant(UUID itemId, UUID plantId) {
+        return settingRepository.findByItemItemIdAndWarehousePlantPlantIdAndStatus(
+                itemId, plantId, ItemWarehouseSettingStatus.ACTIVE);
     }
 }

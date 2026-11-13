@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -12,7 +13,6 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.ItemRepository;
 import com.erp.manufacturing.module.inventory.repository.ItemWarehouseSettingRepository;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
-import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,7 +30,7 @@ public class ItemWarehouseSettingService {
     private final ItemWarehouseSettingRepository settingRepository;
     private final ItemLookupService itemLookupService;
     private final ItemRepository itemRepository;
-    private final WarehouseRepository warehouseRepository;
+    private final OrganizationLookupService organizationLookupService;
     private final PlantContextResolver plantContextResolver;
     private final InventoryMapper mapper;
 
@@ -101,7 +101,7 @@ public class ItemWarehouseSettingService {
     }
 
     private Warehouse findActiveWarehouse(UUID warehouseId) {
-        Warehouse warehouse = warehouseRepository.findById(warehouseId)
+        Warehouse warehouse = organizationLookupService.findWarehouse(warehouseId)
                 .orElseThrow(() -> ExceptionFactory.notFound(
                         ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId));
         if (!warehouse.isActive()) {

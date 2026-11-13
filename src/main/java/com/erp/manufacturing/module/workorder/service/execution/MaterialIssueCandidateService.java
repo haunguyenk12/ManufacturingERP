@@ -1,10 +1,10 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import com.erp.manufacturing.module.inventory.domain.StockBalance;
-import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservation;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus;
 import com.erp.manufacturing.module.workorder.domain.WorkOrder;
@@ -46,7 +46,7 @@ public class MaterialIssueCandidateService {
     public enum Mode { NORMAL, SUPPLEMENTAL }
 
     private final MaterialReservationRepository reservationRepository;
-    private final StockBalanceRepository stockBalanceRepository;
+    private final StockBalanceReservationService stockBalanceReservationService;
     private final WorkOrderExecutionSupport support;
 
     @Transactional(readOnly = true)
@@ -100,9 +100,8 @@ public class MaterialIssueCandidateService {
             return rows;
         }
         for (WorkOrderComponentLine component : components) {
-            for (StockBalance balance : stockBalanceRepository.findReservableBalancesFefo(
-                    component.getComponentItem().getItemId(), warehouseIds, LotStatus.AVAILABLE, asOf,
-                    Pageable.unpaged()).getContent()) {
+            for (StockBalance balance : stockBalanceReservationService.findReservable(
+                    component.getComponentItem().getItemId(), warehouseIds, asOf, Pageable.unpaged()).getContent()) {
                 rows.add(row(component, "FREE_STOCK", null, balance.getWarehouse().getWarehouseId(),
                         balance.getWarehouse().getCode(), balance.getLot(), balance.availableQuantity(), null, null, asOf));
             }

@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.common.audit.AuditAction;
 import com.erp.manufacturing.common.audit.Auditable;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
@@ -11,7 +12,6 @@ import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceAggregateProjection;
 import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.inventory.repository.StockMovementRepository;
-import com.erp.manufacturing.module.organization.repository.WarehouseRepository;
 import com.erp.manufacturing.module.purchasing.service.query.PurchaseQcLookupService;
 import com.erp.manufacturing.module.user.service.UserLookupService;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +32,7 @@ import java.util.UUID;
 public class InventoryService {
 
     private final InventoryMovementService movementService;
-    private final WarehouseRepository warehouseRepository;
+    private final OrganizationLookupService organizationLookupService;
     private final StockBalanceRepository balanceRepository;
     private final StockMovementRepository movementRepository;
     private final InventoryMapper mapper;
@@ -190,7 +190,7 @@ public class InventoryService {
     }
 
     private void ensureWarehouseExists(UUID warehouseId) {
-        if (!warehouseRepository.existsById(warehouseId)) {
+        if (!organizationLookupService.warehouseExists(warehouseId)) {
             throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Warehouse", warehouseId);
         }
     }

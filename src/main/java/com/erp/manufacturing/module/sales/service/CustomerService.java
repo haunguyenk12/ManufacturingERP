@@ -7,7 +7,6 @@ import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.organization.domain.Company;
-import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
 import com.erp.manufacturing.module.sales.domain.Customer;
 import com.erp.manufacturing.module.sales.domain.CustomerStatus;
@@ -40,7 +39,6 @@ public class CustomerService {
     private static final int CODE_MAX_LENGTH = 100;
 
     private final CustomerRepository customerRepository;
-    private final CompanyRepository companyRepository;
     private final OrganizationLookupService organizationLookupService;
     private final CustomerMapper mapper;
 
@@ -147,7 +145,7 @@ public class CustomerService {
     }
 
     private void ensureCompanyExists(UUID companyId) {
-        if (!companyRepository.existsById(companyId)) {
+        if (!organizationLookupService.companyExists(companyId)) {
             throw ExceptionFactory.notFound(ValidationErrorCode.RESOURCE_NOT_FOUND, "Company", companyId);
         }
     }

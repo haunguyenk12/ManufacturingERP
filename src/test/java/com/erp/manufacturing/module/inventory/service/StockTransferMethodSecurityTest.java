@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.idempotency.IdempotencySupport;
 import com.erp.manufacturing.common.web.PlantContextResolver;
@@ -158,7 +161,7 @@ class StockTransferMethodSecurityTest {
         @Bean
         StockTransferService stockTransferService(StockTransferRepository transferRepository,
                                                   WarehouseRepository warehouseRepository) {
-            return new StockTransferService(transferRepository, warehouseRepository,
+            return new StockTransferService(transferRepository, new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository),
                     mock(ItemRepository.class), mock(InventoryLotRepository.class),
                     mock(StockBalanceRepository.class), mock(StockMovementRepository.class),
                     new IdempotencySupport(new ObjectMapper()), new TraceIdProvider(),

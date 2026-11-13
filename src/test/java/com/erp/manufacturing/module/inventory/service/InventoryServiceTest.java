@@ -1,5 +1,9 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import static org.mockito.Mockito.mock;
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.common.response.PageResult;
 import com.erp.manufacturing.module.inventory.dto.StockBalanceAggregateResponse;
 import com.erp.manufacturing.module.inventory.mapper.InventoryMapper;
@@ -57,7 +61,7 @@ class InventoryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new InventoryService(movementService, warehouseRepository, balanceRepository, movementRepository,
+        service = new InventoryService(movementService, new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository), balanceRepository, movementRepository,
                 new InventoryMapper(), userLookupService, lotQcOwnershipGuard, purchaseQcLookupService);
         when(warehouseRepository.existsById(WAREHOUSE_ID)).thenReturn(true);
     }

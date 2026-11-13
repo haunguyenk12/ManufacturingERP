@@ -1,5 +1,12 @@
 package com.erp.manufacturing.module.planning.service;
 
+import com.erp.manufacturing.module.inventory.repository.InventoryLotRepository;
+import com.erp.manufacturing.module.inventory.repository.ItemRepository;
+import com.erp.manufacturing.module.inventory.service.ItemLookupService;
+import static org.mockito.Mockito.mock;
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.ItemType;
 import com.erp.manufacturing.module.inventory.domain.ItemWarehouseSetting;
@@ -47,7 +54,8 @@ class MrpWarehouseResolutionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MrpWarehouseResolutionService(warehouseRepository, settingRepository);
+        service = new MrpWarehouseResolutionService(new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository),
+                new ItemLookupService(mock(ItemRepository.class), mock(InventoryLotRepository.class), settingRepository));
         plant = Plant.builder().plantId(UUID.randomUUID()).code("PLANT-A").build();
         rawMaterial = item(ItemType.RAW_MATERIAL);
     }

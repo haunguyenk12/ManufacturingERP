@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.dataimport.service;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
@@ -82,7 +83,7 @@ import static org.mockito.Mockito.eq;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({DataImportBatchService.class, DataImportBatchCommitter.class, FixedTemplateValidator.class,
+@Import({StockBalanceReservationService.class, DataImportBatchService.class, DataImportBatchCommitter.class, FixedTemplateValidator.class,
         FixedTemplateReader.class, ImportTargetRegistry.class, CustomerImportTargetHandler.class,
         CustomerService.class, CustomerLookupService.class, CustomerMapper.class,
         OrganizationLookupService.class, IdempotencySupport.class, DataImportMapper.class,

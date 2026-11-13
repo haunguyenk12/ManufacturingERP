@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.purchasing.service;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.common.context.TraceIdProvider;
 import com.erp.manufacturing.common.exception.AppException;
@@ -96,7 +97,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({PurchaseQualityService.class, GoodsReceiptDraftService.class, GoodsReceiptPoster.class, PurchasingIdempotency.class,
+@Import({StockBalanceReservationService.class, PurchaseQualityService.class, GoodsReceiptDraftService.class, GoodsReceiptPoster.class, PurchasingIdempotency.class,
         PurchasingMapper.class, IdempotencySupport.class, TraceIdProvider.class, InventoryMovementService.class,
         ItemLookupService.class, OrganizationLookupService.class, UserLookupService.class, LotQcOwnershipGuard.class,
         PurchaseQcLookupService.class, LotQcOriginLookupService.class, InventoryService.class, InventoryMapper.class,

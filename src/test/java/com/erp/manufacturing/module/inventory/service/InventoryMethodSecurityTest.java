@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.module.organization.security.PermissionGuard;
 import com.erp.manufacturing.module.inventory.domain.*;
 import com.erp.manufacturing.module.inventory.dto.StockCountRequest;
@@ -194,7 +197,7 @@ class InventoryMethodSecurityTest {
                                           UserLookupService userLookupService) {
             return new InventoryService(
                     movementService,
-                    warehouseRepository,
+                    new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository),
                     balanceRepository,
                     movementRepository,
                     mapper,

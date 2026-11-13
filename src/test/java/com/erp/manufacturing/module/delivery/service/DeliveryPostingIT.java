@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.delivery.service;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.AbstractPostgresIntegrationTest;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.context.TraceIdProvider;
@@ -77,7 +78,7 @@ import static org.mockito.Mockito.when;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({DeliveryService.class, DeliverySupport.class, SalesOrderCommercialLookupService.class,
+@Import({StockBalanceReservationService.class, DeliveryService.class, DeliverySupport.class, SalesOrderCommercialLookupService.class,
         SalesOrderStockReservationService.class, InventoryMovementService.class, ItemLookupService.class,
         OrganizationLookupService.class, CommercialIdempotency.class, IdempotencySupport.class, TraceIdProvider.class,
         com.erp.manufacturing.module.sales.service.SalesOrderPricingService.class, DeliveryPostingIT.Config.class})

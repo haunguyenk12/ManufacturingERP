@@ -1,5 +1,6 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
+import com.erp.manufacturing.module.inventory.service.StockBalanceReservationService;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ExceptionFactory;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -7,7 +8,6 @@ import com.erp.manufacturing.module.inventory.domain.InventoryLot;
 import com.erp.manufacturing.module.inventory.domain.Item;
 import com.erp.manufacturing.module.inventory.domain.LotStatus;
 import com.erp.manufacturing.module.inventory.domain.StockBalance;
-import com.erp.manufacturing.module.inventory.repository.StockBalanceRepository;
 import com.erp.manufacturing.module.organization.domain.Warehouse;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservation;
 import com.erp.manufacturing.module.workorder.domain.MaterialReservationStatus;
@@ -45,7 +45,7 @@ import java.util.UUID;
 public class SalesOrderStockReservationService {
 
     private final MaterialReservationRepository reservationRepository;
-    private final StockBalanceRepository stockBalanceRepository;
+    private final StockBalanceReservationService stockBalanceReservationService;
 
     /**
      * Holds {@code quantity} of {@code item} in {@code warehouse} for one sales order line. With
@@ -81,9 +81,8 @@ public class SalesOrderStockReservationService {
             takes.add(quantity);
         } else {
             BigDecimal outstanding = quantity;
-            for (StockBalance balance : stockBalanceRepository.findReservableBalancesFefo(
-                    item.getItemId(), List.of(warehouse.getWarehouseId()), LotStatus.AVAILABLE, now,
-                    Pageable.unpaged()).getContent()) {
+            for (StockBalance balance : stockBalanceReservationService.findReservable(
+                    item.getItemId(), List.of(warehouse.getWarehouseId()), now, Pageable.unpaged()).getContent()) {
                 if (outstanding.signum() <= 0) {
                     break;
                 }
@@ -104,8 +103,7 @@ public class SalesOrderStockReservationService {
         for (int i = 0; i < sources.size(); i++) {
             StockBalance balance = sources.get(i);
             BigDecimal take = takes.get(i);
-            balance.reserve(take);
-            stockBalanceRepository.save(balance);
+            stockBalanceReservationService.reserve(balance, take);
             created.add(reservationRepository.save(MaterialReservation.builder()
                     .salesOrderId(salesOrderId)
                     .salesOrderLineId(salesOrderLineId)
@@ -203,16 +201,11 @@ public class SalesOrderStockReservationService {
     /** Positions a line could be held from: free, lot {@code AVAILABLE} and not expired (FE A08). */
     @Transactional(readOnly = true)
     public Page<StockBalance> findCandidates(UUID itemId, Collection<UUID> warehouseIds, Pageable pageable) {
-        return stockBalanceRepository.findReservableBalancesFefo(
-                itemId, warehouseIds, LotStatus.AVAILABLE, Instant.now(), pageable);
+        return stockBalanceReservationService.findReservable(itemId, warehouseIds, Instant.now(), pageable);
     }
 
     private StockBalance findPosition(Item item, Warehouse warehouse, UUID lotId) {
-        return (lotId == null
-                ? stockBalanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(
-                        item.getItemId(), warehouse.getWarehouseId())
-                : stockBalanceRepository.findByItemItemIdAndWarehouseWarehouseIdAndLotLotId(
-                        item.getItemId(), warehouse.getWarehouseId(), lotId))
+        return stockBalanceReservationService.findPosition(item.getItemId(), warehouse.getWarehouseId(), lotId)
                 .orElseThrow(() -> ExceptionFactory.businessRule(BusinessErrorCode.INSUFFICIENT_STOCK,
                         "No stock of this item exists in the warehouse for that lot"));
     }
@@ -237,7 +230,6 @@ public class SalesOrderStockReservationService {
         }
         StockBalance balance = findPosition(reservation.getItem(), reservation.getWarehouse(),
                 reservation.getLot() != null ? reservation.getLot().getLotId() : null);
-        balance.releaseReserved(remaining);
-        stockBalanceRepository.save(balance);
+        stockBalanceReservationService.releaseReserved(balance, remaining);
     }
 }

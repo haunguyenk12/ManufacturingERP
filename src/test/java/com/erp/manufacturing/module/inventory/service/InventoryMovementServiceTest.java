@@ -1,5 +1,8 @@
 package com.erp.manufacturing.module.inventory.service;
 
+import com.erp.manufacturing.module.organization.service.OrganizationLookupService;
+import com.erp.manufacturing.module.organization.repository.PlantRepository;
+import com.erp.manufacturing.module.organization.repository.CompanyRepository;
 import com.erp.manufacturing.common.exception.AppException;
 import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.common.exception.ValidationErrorCode;
@@ -55,7 +58,7 @@ class InventoryMovementServiceTest {
     void setUp() {
         service = new InventoryMovementService(
                 itemRepository,
-                warehouseRepository,
+                new OrganizationLookupService(mock(CompanyRepository.class), mock(PlantRepository.class), warehouseRepository),
                 lotRepository,
                 serialNumberRepository,
                 balanceRepository,
