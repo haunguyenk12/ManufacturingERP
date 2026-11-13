@@ -11,14 +11,14 @@ Không dùng tolerance mỗi dòng để che sai BOM/version/UOM hoặc áp thà
 
 **4 task tiếp nối:1 FE_QUESTION +3 FE_REQUEST**, mỗi task có8mục§0–§7 và message4dòng.
 
-[Tải ZIP gồm4 tài liệu và4 tin nhắn](CAPSTONE3_BE_SUPPLEMENT_2026-10-30.zip). Mục lục nội bộ này không nằm trong ZIP; từng task vẫn tự chứa để gửi riêng.
+Tải ZIP gồm4 tài liệu và4 tin nhắn (`CAPSTONE3_BE_SUPPLEMENT_2026-10-30.zip`, không có trong repo). Mục lục nội bộ này không nằm trong ZIP; từng task vẫn tự chứa để gửi riêng.
 
 | Thứ tự | Nội dung | Bản mới | Tài liệu | Tin nhắn |
 |---|---|---|---|---|
-| 1 | Gửi đủ contract và OpenAPI còn thiếu sau CF-8 | v3 / FE_QUESTION | [Mở](FE_QUESTION_GD06_GD07_CONTRACT_2026-10-30_v3.md) | [Mở](FE_QUESTION_GD06_GD07_CONTRACT_2026-10-30_v3_MESSAGE.md) |
-| 2 | Bổ sung test xuyên BOM–MRP–WO–giá thành theo cách làm tròn đã chốt | v2 / FE_REQUEST | [Mở](FE_REQUEST_SCRAP_ALLOWANCE_ALIGNMENT_2026-10-30_v2.md) | [Mở](FE_REQUEST_SCRAP_ALLOWANCE_ALIGNMENT_2026-10-30_v2_MESSAGE.md) |
-| 3 | Bổ sung test chuyển kho, giữ chỗ và xuất hàng không theo lô đang chờ QC | v3 / FE_REQUEST | [Mở](FE_REQUEST_PURCHASE_QUARANTINE_GUARDS_2026-10-30_v3.md) | [Mở](FE_REQUEST_PURCHASE_QUARANTINE_GUARDS_2026-10-30_v3_MESSAGE.md) |
-| 4 | Chạy lại smoke phiếu nhập và chốt giá thành trên binary sau bản sửa version | v2 / FE_REQUEST | [Mở](FE_REQUEST_COST_CLOSE_VERIFICATION_2026-10-30_v2.md) | [Mở](FE_REQUEST_COST_CLOSE_VERIFICATION_2026-10-30_v2_MESSAGE.md) |
+| 1 | Gửi đủ contract và OpenAPI còn thiếu sau CF-8 | v3 / FE_QUESTION | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_QUESTION_GD06_GD07_CONTRACT_2026-10-30_v3.md) | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_QUESTION_GD06_GD07_CONTRACT_2026-10-30_v3_MESSAGE.md) |
+| 2 | Bổ sung test xuyên BOM–MRP–WO–giá thành theo cách làm tròn đã chốt | v2 / FE_REQUEST | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_SCRAP_ALLOWANCE_ALIGNMENT_2026-10-30_v2.md) | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_SCRAP_ALLOWANCE_ALIGNMENT_2026-10-30_v2_MESSAGE.md) |
+| 3 | Bổ sung test chuyển kho, giữ chỗ và xuất hàng không theo lô đang chờ QC | v3 / FE_REQUEST | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_PURCHASE_QUARANTINE_GUARDS_2026-10-30_v3.md) | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_PURCHASE_QUARANTINE_GUARDS_2026-10-30_v3_MESSAGE.md) |
+| 4 | Chạy lại smoke phiếu nhập và chốt giá thành trên binary sau bản sửa version | v2 / FE_REQUEST | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_COST_CLOSE_VERIFICATION_2026-10-30_v2.md) | [Mở](CAPSTONE3_BE_SUPPLEMENT_2026-10-30/FE_REQUEST_COST_CLOSE_VERIFICATION_2026-10-30_v2_MESSAGE.md) |
 
 ## Phần đã được ghi nhận, không giao lại
 

@@ -10,9 +10,10 @@ hotfix/*                      → fix khẩn cấp, merge vào main
 
 Không có nhánh `develop`.
 
-> ⚠️ Hiện trạng 2026-11-12: mọi việc từ 08/2026 (`G2`–`G11`, `CF-*`, `AP-1`) nằm trên
-> `feature/D8b-absolute-session-timeout`, chưa merge vào `main`. Merge nhánh này trước khi mở nhánh
-> cho phase kế tiếp; việc merge và push do user quyết định.
+> Hiện trạng 2026-11-13: `feature/D8b-absolute-session-timeout` (mọi việc từ 08/2026 tới `RA-1`) đã
+> **fast-forward vào `main` cục bộ, chưa push**. Phase kế tiếp mở nhánh mới từ `main`; push do user quyết định.
+> Build tăng dần trên thư mục OneDrive có thể dùng class cũ ("Nothing to compile" dù file đã sửa) — kết quả
+> lạ thì chạy lại bằng `clean`.
 
 ## 6.2 Commit (Conventional Commits, có mã phase)
 

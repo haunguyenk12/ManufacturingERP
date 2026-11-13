@@ -23,9 +23,9 @@ là yêu cầu mới nhất, thay đoạn cũ “không dùng mật khẩu ban �
 - Live acceptance của contract Auth/Admin mới: **chưa chạy**. Tablet/touch/dark chưa được kiểm tra lại
   trong các phiên UI gần nhất.
 
-Tham chiếu: [kế hoạch](CAPSTONE3_FE_DELIVERY_PLAN_2026-10-07.md),
-[báo cáo FE](CAPSTONE3_GD1_FE_REVIEW_2026-10-08.md),
-[bản nháp lịch sử và từ điển 43 nhãn quyền](CAPSTONE3_GD1_BE_CONTRACT_DRAFT_2026-10-08.md).
+Tham chiếu: kế hoạch (`CAPSTONE3_FE_DELIVERY_PLAN_2026-10-07.md`, không có trong repo),
+báo cáo FE (`CAPSTONE3_GD1_FE_REVIEW_2026-10-08.md`, không có trong repo),
+bản nháp lịch sử và từ điển 43 nhãn quyền (`CAPSTONE3_GD1_BE_CONTRACT_DRAFT_2026-10-08.md`, không có trong repo).
 
 ## 2. Luồng nghiệp vụ cần BE thực hiện
 

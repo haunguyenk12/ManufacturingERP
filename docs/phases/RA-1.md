@@ -75,3 +75,60 @@ Thêm `V97__add_role_version.sql` mà không kiểm tra: `roles.version` đã c�
 - Sau `A5`, trên Spring Boot 3.5.16: `clean verify` **2401 unit + 367 IT**, 0 failure, 0 error
   (`ProductionFlowE2EIT` là `@SpringBootTest` nên phủ luôn việc dựng full context trên bản mới).
 - Chưa chạy ứng dụng thật và chưa smoke HTTP: thay đổi `A3`, `A6`, `A7` chỉ được kiểm bằng test, không phải bằng một lần khởi động profile dev.
+
+---
+
+## Lượt 3 (2026-11-13) — mục E1, E2, E4–E8, E11
+
+User duyệt từ báo cáo cập nhật: `E1`, `E2`, `E4`, `E5`, `E6`, `E7`, `E8`, `E11`. Không duyệt: `E3` (`@MockBean`),
+`E9` (security headers), `E10` (coverage), và 6 mục cũ `B6`, `B9`, `D3`–`D6`.
+
+| Mục | Kết quả |
+|---|---|
+| `E1` | Hai commit `a22422b` (`chore(docs)`: sắp xếp tài liệu, rules) và `3cf87d9` (`fix(user)`: code, cấu hình, test, nâng Spring Boot, cùng các tài liệu mô tả thay đổi đó — theo `dev-workflow.md §6.6`, tài liệu đi cùng code) |
+| `E8` | `.env` trên máy (không track): `LOG_LEVEL_HIBERNATE_SQL=WARN`, `LOG_LEVEL_HIBERNATE_BIND=WARN`, `JWT_ACCESS_TOKEN_EXPIRY_MS=3600000`. Chỉ ba dòng; cùng tập khoá, cùng thứ tự |
+| `E11` | Liên kết hỏng trong 4 file gói ở `docs/handoff/`: **42 trỏ lại được** — file tồn tại trong thư mục con cùng tên gói (`CAPSTONE3_BE_*_<ngày>/`), liên kết chỉ thiếu tiền tố thư mục; **6 chuyển thành chữ** vì file không có trong repo (3 tài liệu FE gốc của `BE_HANDOFF_GD_01`, 3 file zip) |
+| `E7` | `docs/architecture.md` đối chiếu xong toàn bộ: §1 viết lại; §2 sửa nhánh refresh (`BYPASS_PATHS`, `B107`) và đường audit (outbox); §4, §6, §11.2, §11.3 thay bằng tóm tắt đúng + trỏ sang rules; §5.2 liệt kê đủ key Redis; §7 thêm luật `auth-refresh-ip`, ghi fixed window; §9 ghi rõ phần đã làm/chưa làm, sửa idempotency MRP (cột DB, không Redis); §10 sửa actuator/metric |
+| `E6` | `common/security/CLAUDE.md` 46 → 23 KB: 7 mục dài (4.12, 4.12a, 4.14, 4.15, 4.17, 4.19, 4.20) chuyển **nguyên văn** sang `docs/security-design-notes.md`, giữ tiêu đề + tóm tắt nên tham chiếu `§4.x` vẫn đúng. **`inventory/CLAUDE.md` không rút gọn**: gần như toàn bộ là bảng bất biến có test bảo vệ, cắt nữa là cắt quy tắc |
+| `E4` | `.github/workflows/ci.yml`: JDK 17 (Temurin), `mvn -B -ntp verify` trên push (`main`, `feature/**`, `hotfix/**`) và PR, upload báo cáo test khi đỏ. **Chưa chạy trên GitHub** (chưa push) |
+| `E5` | Xem dưới |
+| `E2` | Xem cuối mục |
+
+### `E5` — bỏ gọi repository chéo module
+
+18 ⇒ 8 import. Phần **đọc** chuyển sang service của module sở hữu; phần kiểm tra và thông báo lỗi **giữ nguyên ở chỗ
+gọi** (mỗi chỗ có điều kiện riêng, vd `InventoryMovementService` chỉ kiểm kho `ACTIVE` còn `OrganizationLookupService.getActiveWarehouse`
+kiểm cả nhà máy) — nên không đổi response nào.
+
+| Chỗ gọi | Trước | Sau |
+|---|---|---|
+| `InventoryMovementService`, `ItemWarehouseSettingService`, `StockTransferService` | `WarehouseRepository.findById` | `OrganizationLookupService.findWarehouse` |
+| `InventoryService` | `WarehouseRepository.existsById` | `OrganizationLookupService.warehouseExists` |
+| `ItemService` | `CompanyRepository.findById` / `existsById` | `OrganizationLookupService.findCompany` / `companyExists` |
+| `CustomerService` | `CompanyRepository.existsById` | `OrganizationLookupService.companyExists` (đã có field này sẵn) |
+| `MrpWarehouseResolutionService` | `WarehouseRepository`, `ItemWarehouseSettingRepository` | `OrganizationLookupService.findWarehousesInPlant`, `ItemLookupService.findActiveWarehouseSettingsInPlant` |
+| `MaterialIssueCandidateService`, `MaterialReservationService`, `SalesOrderStockReservationService` | `StockBalanceRepository` (FEFO + `save`) | **`StockBalanceReservationService`** (mới, `module/inventory`): `findReservable`, `findIssuable`, `findPosition`, `reserve`, `releaseReserved`. Không `@Transactional` — chạy trong transaction của chỗ gọi như các lệnh repository cũ |
+| `PurchaseRequisitionService` | `SupplySuggestionRepository` | `SupplySuggestionService.findWithDetails` / `markConverted` |
+
+**Cố ý giữ** (ghi ở `coding-rules.md` C7): cụm định danh `auth` ↔ `user` ↔ `organization` (6 import) và
+`config/AdminBootstrapService` (2). Ngoài phạm vi đề xuất `E5`; `auth` ghi `users` trên đường đăng nhập và khôi phục
+mật khẩu, bọc lại không thêm cách ly.
+
+Test: 18 file dựng service bằng `new` được bọc tham số repository vào service mới (stub và `verify` trên repository giữ
+nguyên ý nghĩa); 2 IT dùng `@Import` thêm `OrganizationLookupService`. Không xoá test nào.
+
+Sai sót trong lượt này: lượt `clean verify` đầu của `E5` có 365 IT lỗi vì **Docker Desktop tự tắt** giữa chừng (không
+liên quan code); chạy lại thì lộ **40 lỗi thật** — 5 IT (`DataImportBatchIT`, `DeliveryPostingIT`, `PurchaseQcHoldGuardsIT`,
+`SalesOrderReservationIT`, `SalesOrderUpdateLinesIT`) khai context bằng `@Import` nhiều dòng mà lần dò trước chỉ đọc dòng
+đầu, nên thiếu bean `StockBalanceReservationService`. Đã thêm. Một lượt chạy riêng 5 IT sau đó hỏng ở bước phát hiện
+test (`NoClassDefFoundError`) do Maven báo "Nothing to compile" với file đã sửa — build tăng dần không tin được trên
+thư mục OneDrive (mục `B9`/`D6` của báo cáo); `clean verify` thì sạch.
+
+### Kiểm chứng lượt 3
+
+`mvn clean verify` (Spring Boot 3.5.16): **2401 unit + 367 IT**, 0 failure, 0 error. Không thêm, không xoá test.
+
+### `E2` — merge vào `main`
+
+`main` là tổ tiên trực tiếp của `feature/D8b-absolute-session-timeout`, nên merge là **fast-forward** cục bộ tới commit
+cuối của lượt này; cây thư mục trùng với cây vừa `clean verify`. **Chưa push** — đẩy lên `origin` do user quyết định.

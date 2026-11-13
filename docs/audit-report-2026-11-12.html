@@ -73,10 +73,10 @@
 <body>
 <main>
   <h1>Rà soát dự án ManufacturingERP</h1>
-  <p class="sub">Rà ngày 2026-11-12 · cập nhật sau khi sửa: 2026-11-13 · nhánh <code>feature/D8b-absolute-session-timeout</code> · <b>chưa commit</b></p>
+  <p class="sub">Rà ngày 2026-11-12 · cập nhật lần 3: 2026-11-13 · đã commit và fast-forward vào <code>main</code> cục bộ · <b>chưa push</b></p>
 
   <div class="stats">
-    <div class="stat"><b>39</b><span>mục đã xử lý (14 tự sửa + 25 đã duyệt)</span></div>
+    <div class="stat"><b>47</b><span>mục đã xử lý (14 tự sửa + 33 đã duyệt)</span></div>
     <div class="stat"><b id="nProp">0</b><span>mục chờ duyệt</span></div>
     <div class="stat"><b>2401 + 367</b><span>unit + integration test xanh</span></div>
     <div class="stat"><b>85 → 39 KB</b><span>tài liệu nạp vào mọi phiên</span></div>
@@ -88,12 +88,19 @@
   </div>
 
   <div class="note warn">
-    <p><b>Việc cần bạn tự làm trên máy:</b> profile dev nay đọc đúng <code>.env</code>. File <code>.env</code> của bạn đang
-    đặt SQL log <code>DEBUG</code> và access token 15 phút; trước đây hai giá trị này bị <code>application-dev.yml</code> ghi đè thành
-    <code>WARN</code> và 1 giờ. Muốn giữ như cũ thì xem mục <b>E8</b>.</p>
+    <p><b>Còn lại cho bạn:</b> <code>main</code> chỉ mới cập nhật trên máy. Muốn đẩy lên GitHub thì chạy
+    <code>git push origin main feature/D8b-absolute-session-timeout</code> (hoặc bảo tôi làm). Workflow CI mới chỉ chạy lần đầu sau khi push.</p>
   </div>
 
   <h2>1. Đã xử lý</h2>
+
+  <h3>Lượt 3 — 8 mục E bạn duyệt</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Mục</th><th>Kết quả</th><th>TT</th></tr></thead>
+    <tbody id="done3"></tbody>
+  </table>
+  </div>
 
   <h3>Lượt 2 — 25 mục bạn duyệt</h3>
   <div class="tablewrap">
@@ -171,9 +178,20 @@ const DONE2 = [
   ["D2", "Xoá bản backup docx; bỏ track 2 dump có ngày (file còn trên đĩa); chỉ <code>d26-seeded.dump</code> được track.", "✅"]
 ];
 
+const DONE3 = [
+  ["E1", "Commit <code>a22422b</code> (sắp xếp tài liệu) và <code>3cf87d9</code> (code, cấu hình, test cùng tài liệu mô tả thay đổi). Lượt 3 thêm hai commit nữa.", "✅"],
+  ["E2", "<code>main</code> fast-forward cục bộ tới commit cuối; cây thư mục trùng cây vừa kiểm chứng. <b>Chưa push.</b>", "✅"],
+  ["E4", "<code>.github/workflows/ci.yml</code>: JDK 17, <code>mvn -B verify</code> (unit + IT qua Testcontainers) trên push và PR; giữ báo cáo test khi đỏ. Chưa chạy trên GitHub vì chưa push.", "✅"],
+  ["E5", "Import repository chéo module 18 ⇒ 8. Thêm <code>StockBalanceReservationService</code> (giữ/nhả tồn), phương thức đọc thô ở <code>OrganizationLookupService</code>, <code>ItemLookupService</code>, <code>SupplySuggestionService</code>. Kiểm tra và thông báo lỗi giữ ở chỗ gọi nên không đổi response. Cụm định danh <code>auth/user/organization</code> và <code>AdminBootstrapService</code> giữ lại có chủ đích (ghi ở C7).", "◐"],
+  ["E6", "<code>common/security/CLAUDE.md</code> 46 ⇒ 23 KB: 7 mục dài chuyển nguyên văn sang <code>docs/security-design-notes.md</code>. <code>inventory/CLAUDE.md</code> không rút gọn: gần như toàn bảng bất biến có test bảo vệ.", "◐"],
+  ["E7", "<code>docs/architecture.md</code> đối chiếu xong toàn bộ với code: sửa luồng request, audit (outbox), mã lỗi, key Redis, rate limit, idempotency MRP, actuator, quy ước mã lỗi và migration.", "✅"],
+  ["E8", "<code>.env</code>: SQL log <code>WARN</code>, access token 1 giờ. Chỉ ba dòng, không đụng secret.", "✅"],
+  ["E11", "42 liên kết trỏ lại được (file nằm trong thư mục con cùng tên gói); 6 chuyển thành chữ vì file không có trong repo.", "✅"]
+];
+
 const GROUPS = [
   ["C", "Mục cũ chưa duyệt"],
-  ["E", "Mới phát sinh trong lúc sửa"]
+  ["E", "Mới phát sinh trong lúc sửa (chưa duyệt)"]
 ];
 
 const PROPS = [
@@ -202,38 +220,10 @@ const PROPS = [
     fix: "Chuyển repo sang thư mục ngoài OneDrive, ví dụ <code>C:\\dev\\ManufacturingERP</code>. Bạn tự làm; tôi không di chuyển thư mục làm việc của chính phiên này.",
     eff: "Nhỏ" },
 
-  { id: "E1", g: "E", sev: "hi", t: "Commit đợt sửa RA-1",
-    why: "Toàn bộ thay đổi (khoảng 160 file, phần lớn là di chuyển tài liệu) đang nằm trong working tree, chưa commit. File dump <code>full-qa-2026-11-07.dump</code> chưa track từ trước sẽ không được đưa vào.",
-    fix: "Hai commit: <code>fix(user): RA-1 — …</code> cho code, cấu hình, test, nâng Spring Boot; <code>chore(docs): RA-1 — …</code> cho rules, tài liệu, di chuyển file. Không push.",
-    eff: "Rất nhỏ" },
-  { id: "E2", g: "E", sev: "mid", t: "Merge nhánh feature/D8b-absolute-session-timeout vào main",
-    why: "Mọi việc từ tháng 8 (G2–G11, CF, AP-1, RA-1) nằm trên nhánh này; <code>main</code> tụt xa.",
-    fix: "Làm sau E1: merge cục bộ vào <code>main</code>, chạy lại <code>clean verify</code> trên <code>main</code>. Không push trừ khi bạn yêu cầu.",
-    eff: "Nhỏ nếu không xung đột" },
   { id: "E3", g: "E", sev: "lo", t: "55 file test dùng @MockBean đã deprecated",
     why: "Từ Spring Boot 3.4, <code>@MockBean</code> bị đánh dấu deprecated, vẫn chạy ở 3.5.16 nhưng bị gỡ ở 4.x.",
     fix: "Đổi sang <code>@MockitoBean</code> (<code>org.springframework.test.context.bean.override.mockito</code>) trong 55 file, chạy lại test.",
     eff: "Nhỏ, nhiều file nhưng thay thế máy móc" },
-  { id: "E4", g: "E", sev: "mid", t: "Chưa có CI",
-    why: "Repo không có workflow nào; test chỉ chạy khi ai đó nhớ chạy trên máy.",
-    fix: "Thêm <code>.github/workflows/ci.yml</code>: JDK 17, <code>mvn -B verify</code> trên mỗi push và PR (runner của GitHub có Docker sẵn nên Testcontainers chạy được).",
-    eff: "Nhỏ" },
-  { id: "E5", g: "E", sev: "lo", t: "Refactor thật cho ngoại lệ C7 (gọi repository chéo module)",
-    why: "B2 mới chỉ ghi nhận 18 ngoại lệ vào quy tắc.",
-    fix: "Thêm application service ở <code>inventory</code> cho việc đọc FEFO + ghi số giữ chỗ trên <code>StockBalance</code>, và <code>WarehouseLookupService</code> cho các chỗ chỉ đọc kho. Làm thành một phase riêng.",
-    eff: "Trung bình đến lớn" },
-  { id: "E6", g: "E", sev: "lo", t: "Rút gọn CLAUDE.md của inventory và common/security",
-    why: "Hai file 46 KB mỗi file, nạp khi đụng module tương ứng. Không có thư mục con để tách như workorder; phần lớn là bảng bất biến, nhưng <code>common/security</code> còn nhiều đoạn thiết kế dài (§4.15, §4.19, §4.20).",
-    fix: "Giữ bảng bất biến và entry point; chuyển tường thuật lịch sử và thiết kế chưa làm sang <code>docs/</code>, có liên kết lại.",
-    eff: "Trung bình" },
-  { id: "E7", g: "E", sev: "lo", t: "Đối chiếu nốt docs/architecture.md",
-    why: "Đã viết lại §3.3 và §12; §1, §2, §6, §8, §9.1–§9.4, §10, §11 chưa đối chiếu với code. Đầu file có ghi rõ điều này.",
-    fix: "Đối chiếu từng mục với code; sửa hoặc xoá phần không còn đúng.",
-    eff: "Trung bình" },
-  { id: "E8", g: "E", sev: "mid", t: "Đặt lại ba giá trị trong .env trên máy",
-    why: "Sau A3, <code>.env</code> có hiệu lực ở profile dev: SQL log thành <code>DEBUG</code>, access token thành 15 phút (trước đây là <code>WARN</code> và 1 giờ).",
-    fix: "Sửa <code>LOG_LEVEL_HIBERNATE_SQL=WARN</code>, <code>LOG_LEVEL_HIBERNATE_BIND=WARN</code>, <code>JWT_ACCESS_TOKEN_EXPIRY_MS=3600000</code>. Chỉ sửa ba dòng này, không đọc hay đụng các secret khác.",
-    eff: "Rất nhỏ" },
   { id: "E9", g: "E", sev: "lo", t: "Cấu hình security headers bổ sung",
     why: "Thiết kế §4.17 (CSP, <code>Referrer-Policy</code>, <code>Permissions-Policy</code>) chưa có trong <code>SecurityConfig</code>; hiện chỉ có header mặc định.",
     fix: "Thêm khối <code>headers(...)</code> với CSP chặt cho API JSON (<code>default-src 'none'; frame-ancestors 'none'</code>), nới riêng cho Swagger UI; thêm test kiểm header.",
@@ -241,18 +231,16 @@ const PROPS = [
   { id: "E10", g: "E", sev: "lo", t: "Đo lại coverage",
     why: "JaCoCo chưa đo lại từ <code>D8b</code> (tháng 8), trong khi số test đã tăng từ khoảng 1200 lên 2401.",
     fix: "Chạy <code>clean verify</code> có báo cáo JaCoCo, ghi số line/branch vào <code>CLAUDE.md §0.0</code>.",
-    eff: "Rất nhỏ" },
-  { id: "E11", g: "E", sev: "lo", t: "48 liên kết hỏng trong file gói trao đổi",
-    why: "Ba file <code>CAPSTONE3_*_PACKAGE</code> và <code>BE_HANDOFF_GD_01</code> trỏ tới file và zip chưa từng được commit. Đã hỏng từ trước, không do việc di chuyển.",
-    fix: "Bỏ liên kết, giữ tên file dạng text; hoặc để nguyên vì đây là tài liệu đã gửi.",
     eff: "Rất nhỏ" }
 ];
 
 const SEV = { hi: "Cao", mid: "Trung bình", lo: "Thấp" };
-const KEY = "erp-audit-2026-11-13";
+const KEY = "erp-audit-2026-11-13-r3";
 
 document.getElementById("done1").innerHTML = DONE1.map(r =>
   `<tr><td><code>${r[0]}</code></td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+document.getElementById("done3").innerHTML = DONE3.map(r =>
+  `<tr><td class="id">${r[0]}</td><td>${r[1]}</td><td class="st${r[2] === "◐" ? " part" : ""}">${r[2] === "◐" ? "◐ một phần" : "✅"}</td></tr>`).join("");
 document.getElementById("done2").innerHTML = DONE2.map(r =>
   `<tr><td class="id">${r[0]}</td><td>${r[1]}</td><td class="st${r[2] === "◐" ? " part" : ""}">${r[2] === "◐" ? "◐ một phần" : "✅"}</td></tr>`).join("");
 

@@ -69,7 +69,7 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | Track **`CF-*`** (Capstone 3 follow-up, `BE_GAP_NEXT_PLAN.md`): `CF-0`→`CF-5` ✅, `CF-8` ✅, `CF-9`–`CF-13` ✅, gói bổ sung 30/10 ✅ (2026-11-02). `CF-6` (sổ giá trị tồn kho) **hoãn**; `CF-7` chọn phương án A (giữ giới hạn scale 6 cho BOM). Bản ghi: `docs/phases/0.72.md`. Việc lẻ `AP-1` (luồng mật khẩu/tài khoản cho FE, 2026-11-06): `docs/phases/AP-1.md`. Rà soát + dọn dẹp `RA-1` (2026-11-13, có đổi hành vi phân quyền user và cấu hình dev, lên Spring Boot 3.5.16): `docs/phases/RA-1.md` |
+| **Phase đang chạy** | Track **`CF-*`** (Capstone 3 follow-up, `BE_GAP_NEXT_PLAN.md`): `CF-0`→`CF-5` ✅, `CF-8` ✅, `CF-9`–`CF-13` ✅, gói bổ sung 30/10 ✅ (2026-11-02). `CF-6` (sổ giá trị tồn kho) **hoãn**; `CF-7` chọn phương án A (giữ giới hạn scale 6 cho BOM). Bản ghi: `docs/phases/0.72.md`. Việc lẻ `AP-1` (luồng mật khẩu/tài khoản cho FE, 2026-11-06): `docs/phases/AP-1.md`. Rà soát + dọn dẹp `RA-1` (2026-11-13, có đổi hành vi phân quyền user và cấu hình dev, lên Spring Boot 3.5.16, bỏ 10/18 import repository chéo module, thêm CI; đã fast-forward vào `main` cục bộ): `docs/phases/RA-1.md` |
 | **GĐ nghiệp vụ FE** | `G2`–`G11` đều **BE xong** (giá thành `G11` xong 2026-10-27), chờ FE nghiệm thu. Bản ghi: `0.50`–`0.71` |
 | **Migration mới nhất** | **`V96`** (`AP-1`, bảng `password_challenges` cho mã email đặt/đổi mật khẩu). `MANUFACTURING_PHASE_PLAN_P7_P11.md` (WIP valuation, shop floor, traceability, CRP, MPS) đánh số lại từ **`V97`** |
 | **Bất biến mới nhất** | **`B282`** (`module/auth`: endpoint công khai khai ở cả `SecurityConfig` lẫn `JwtAuthenticationFilter.BYPASS_PATHS`; `B275`–`B282` là luồng mã email). Bất biến theo module nằm ở `CLAUDE.md` của từng module |
