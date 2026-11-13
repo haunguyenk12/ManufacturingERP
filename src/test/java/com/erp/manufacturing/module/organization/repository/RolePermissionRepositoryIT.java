@@ -14,11 +14,13 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Exercises the real JPQL behind {@link RolePermissionRepository#findPermissionsByRoleId} against a
@@ -36,6 +38,9 @@ class RolePermissionRepositoryIT extends AbstractPostgresIntegrationTest {
 
     @Autowired
     RolePermissionRepository repository;
+
+    @Autowired
+    RoleRepository roleRepository;
 
     @Autowired
     TestEntityManager entityManager;
@@ -138,5 +143,27 @@ class RolePermissionRepositoryIT extends AbstractPostgresIntegrationTest {
         assertThat(firstPage.getTotalElements()).isEqualTo(3);
         assertThat(firstPage.getTotalPages()).isEqualTo(2);
         assertThat(firstPage.isLast()).isFalse();
+    }
+
+    /**
+     * {@code roles.version} (a column since V6, mapped with {@code @Version} on 2026-11-12). Two detached copies of one role, both loaded at the same version: the
+     * first save wins and the second must be rejected instead of silently overwriting the first edit.
+     */
+    @Test
+    void concurrentRoleEdit_staleVersion_throwsOptimisticLockException() {
+        Role persisted = persistRole();
+        entityManager.clear();
+
+        Role first = roleRepository.findById(persisted.getRoleId()).orElseThrow();
+        entityManager.detach(first);
+        Role second = roleRepository.findById(persisted.getRoleId()).orElseThrow();
+        entityManager.detach(second);
+
+        first.setName("Renamed first");
+        roleRepository.saveAndFlush(first);
+
+        second.setName("Renamed second");
+        assertThatThrownBy(() -> roleRepository.saveAndFlush(second))
+                .isInstanceOf(ObjectOptimisticLockingFailureException.class);
     }
 }

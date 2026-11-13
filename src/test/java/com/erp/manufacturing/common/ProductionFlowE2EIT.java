@@ -1,5 +1,6 @@
 package com.erp.manufacturing.common;
 
+import com.erp.manufacturing.common.exception.BusinessErrorCode;
 import com.erp.manufacturing.module.bom.domain.BomHeader;
 import com.erp.manufacturing.module.bom.domain.BomLine;
 import com.erp.manufacturing.module.bom.domain.BomStatus;
@@ -503,7 +504,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         // rather than the "no component requirements" guard that sits before it.
         mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/release", workOrderId).content(versionBody(workOrderId))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"))
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers
                         .containsString("component(s) not fully reserved")));
 
@@ -807,7 +808,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         // D5: the P6 close would skip the checklist, so a work order with a baseline cannot use it.
         mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/close", workOrderId)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("CLOSE_BLOCKED"));
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.CLOSE_BLOCKED.code()));
 
         JsonNode checklist = result(get("/v1/work-orders/{id}/cost-checklist", workOrderId), 200);
         assertThat(checklist.get("readiness").asText()).as("checklist %s", checklist).isEqualTo("BLOCKED");
@@ -834,7 +835,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
                         .header("Idempotency-Key", "E2E-G11-STALE-" + fixture.suffix)
                         .content(json(finalizeBody(versionBeforePreview, "cs1-not-the-current-one", runId)))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("COST_SOURCE_STALE"));
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.COST_SOURCE_STALE.code()));
 
         // Two finalizes on the same versions with different keys: the row lock serialises them, one commits.
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
@@ -956,7 +957,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
         mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/finalize-cost-and-close", ready.workOrderId())
                         .header("Idempotency-Key", key).content(body)))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.code").value("INTERNAL_SERVER_ERROR"));
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.INTERNAL_SERVER_ERROR.code()));
         assertThat(failed).isTrue();
         assertThat(entriesWrittenBeforeFailure.get()).as("value entries were in the database before the failure")
                 .isEqualTo(1);
@@ -1149,7 +1150,7 @@ class ProductionFlowE2EIT extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(withDefaults(post("/v1/work-orders/{id}/reserve", workOrderId).content(versionBody(workOrderId))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
 
         assertThat(stockBalanceRepository
                 .findByItemItemIdAndWarehouseWarehouseIdAndLotIsNull(fixture.componentId, fixture.warehouseId)

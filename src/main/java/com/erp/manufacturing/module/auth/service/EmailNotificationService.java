@@ -42,7 +42,7 @@ public class EmailNotificationService {
     }
 
     /** The 6-digit code for a SETUP or RESET challenge. */
-    @Async
+    @Async("mailExecutor")
     public void sendPasswordCode(String to, PasswordPurpose purpose, String code, Instant expiresAt) {
         JavaMailSender sender = mailSender.getIfAvailable();
         if (sender == null) {

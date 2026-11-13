@@ -51,6 +51,11 @@ public class Role {
     @Builder.Default
     private RoleStatus status = RoleStatus.ACTIVE;
 
+    /** The column has existed since V6 (default 0); it was simply never mapped. */
+    @Version
+    @Column(name = "version")
+    private Long version;
+
     public boolean isActive() {
         return status == RoleStatus.ACTIVE;
     }

@@ -34,7 +34,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    baseline-on-migrate: true
+    # false on purpose: with true, pointing the app at a non-empty schema that has no history table
+    # marks it as baselined and skips V1 instead of failing.
+    baseline-on-migrate: false
 
   # Outgoing mail for password-setup/reset codes. spring.mail.host is deliberately NOT declared:
   # the JavaMailSender bean exists as soon as the key does (even empty), so set SPRING_MAIL_HOST
@@ -216,9 +218,9 @@ app:
     fixed-template-max-rows: ${DATA_IMPORT_FIXED_TEMPLATE_MAX_ROWS:500}
     fixed-template-max-file-bytes: ${DATA_IMPORT_FIXED_TEMPLATE_MAX_FILE_BYTES:5242880}
 
-  # Redis sliding-window rate limiting, per IP/user and per route pattern
+  # Redis fixed-window rate limiting (INCR on a per-window key), per IP/user and per route pattern
   rate-limit:
-    enabled: true
+    enabled: ${RATE_LIMIT_ENABLED:true}
     rules:
       - id: global-ip
         scope: IP

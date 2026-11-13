@@ -1,6 +1,5 @@
 package com.erp.manufacturing.module.workorder.service.execution;
 
-import org.springframework.test.util.ReflectionTestUtils;
 import com.erp.manufacturing.common.audit.SecurityAuditorAware;
 import com.erp.manufacturing.common.exception.AuthErrorCode;
 import com.erp.manufacturing.common.exception.MultiErrorException;
@@ -33,6 +32,7 @@ import com.erp.manufacturing.module.workorder.dto.execution.MaterialIssueRespons
 import com.erp.manufacturing.module.workorder.mapper.ManufacturingExecutionMapper;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueLineRepository;
 import com.erp.manufacturing.module.workorder.repository.MaterialIssueRepository;
+import com.erp.manufacturing.module.workorder.repository.ProductionExecutionRepository;
 import com.erp.manufacturing.module.workorder.repository.WorkOrderRepository;
 import com.erp.manufacturing.module.workorder.service.WorkOrderPermissionGuard;
 import org.junit.jupiter.api.AfterEach;
@@ -79,6 +79,8 @@ class MaterialIssueServiceTest {
     @Mock WorkOrderCostAccumulatorService costAccumulatorService;
     @Mock InventoryLotLookupService inventoryLotLookupService;
     @Mock WorkOrderIdempotencyRecordRepository idempotencyRecordRepository;
+    @Mock ProductionExecutionRepository productionExecutionRepository;
+    @Mock SecurityAuditorAware auditorAware;
 
     MaterialIssueService service;
 
@@ -101,7 +103,9 @@ class MaterialIssueServiceTest {
                 costAccumulatorService,
                 inventoryLotLookupService,
                 new WorkOrderIdempotency(idempotencyRecordRepository,
-                        new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
+                        new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
+                productionExecutionRepository,
+                auditorAware);
     }
 
     @AfterEach
@@ -239,9 +243,7 @@ class MaterialIssueServiceTest {
     }
 
     private void actingAs(UUID userId) {
-        SecurityAuditorAware auditor = mock(SecurityAuditorAware.class);
-        when(auditor.getCurrentAuditor()).thenReturn(Optional.of(userId));
-        ReflectionTestUtils.setField(service, "auditorAware", auditor);
+        when(auditorAware.getCurrentAuditor()).thenReturn(Optional.of(userId));
         authenticate();
     }
 

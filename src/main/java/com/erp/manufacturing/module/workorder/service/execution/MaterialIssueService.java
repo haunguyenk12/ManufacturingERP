@@ -42,7 +42,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -75,12 +74,8 @@ public class MaterialIssueService {
     private final WorkOrderCostAccumulatorService costAccumulatorService;
     private final InventoryLotLookupService inventoryLotLookupService;
     private final WorkOrderIdempotency idempotencyRecords;
-
-    @Autowired(required = false)
-    private ProductionExecutionRepository productionExecutionRepository;
-
-    @Autowired(required = false)
-    private SecurityAuditorAware auditorAware;
+    private final ProductionExecutionRepository productionExecutionRepository;
+    private final SecurityAuditorAware auditorAware;
 
     @Transactional
     @PreAuthorize("@workOrderPermissionGuard.hasWorkOrderAccess(authentication, 'PERM_MATERIAL_ISSUE_MANAGE', #workOrderId)")
@@ -650,7 +645,7 @@ public class MaterialIssueService {
         ReasonRules.lengthChecked(request.reason(), "reason");
         support.ensureExecutable(workOrder);
         // FE Q3: approving your own request needs OVERRIDE on top of APPROVE — never a role-name bypass.
-        UUID actor = auditorAware == null ? null : auditorAware.getCurrentAuditor().orElse(null);
+        UUID actor = auditorAware.getCurrentAuditor().orElse(null);
         if (actor != null && actor.equals(issue.getCreatedBy()) && !workOrderPermissionGuard.hasWorkOrderAccess(
                 SecurityContextHolder.getContext().getAuthentication(), OVERRIDE_PERMISSION, workOrderId)) {
             throw ExceptionFactory.custom(AuthErrorCode.ACCESS_DENIED,
@@ -726,8 +721,7 @@ public class MaterialIssueService {
         String reason = requiredReason(request, "Reject reason is required");
         ensureVersions(issue, request);
         idempotencyRecords.record(key, WorkOrderCommand.ISSUE_REJECT, issueId, fingerprint);
-        issue.reject(Instant.now(), auditorAware == null
-                ? null : auditorAware.getCurrentAuditor().orElse(null), reason);
+        issue.reject(Instant.now(), auditorAware.getCurrentAuditor().orElse(null), reason);
         MaterialIssue saved = materialIssueRepository.saveAndFlush(issue);
         support.touchAndFlush(issue.getWorkOrder());
         return toResponse(saved);
@@ -751,7 +745,7 @@ public class MaterialIssueService {
         MaterialIssue issue = findPendingIssue(workOrderId, issueId);
         String reason = requiredReason(request, "Cancel reason is required");
         ensureVersions(issue, request);
-        UUID actor = auditorAware == null ? null : auditorAware.getCurrentAuditor().orElse(null);
+        UUID actor = auditorAware.getCurrentAuditor().orElse(null);
         if (actor == null || !actor.equals(issue.getCreatedBy())) {
             throw ExceptionFactory.custom(AuthErrorCode.ACCESS_DENIED,
                     "Only the person who made the request can cancel it; a manager rejects it instead");
@@ -804,7 +798,7 @@ public class MaterialIssueService {
     }
 
     private ProductionExecution resolveSourceExecution(WorkOrder workOrder, UUID executionId) {
-        if (executionId == null || productionExecutionRepository == null) {
+        if (executionId == null) {
             return null;
         }
         ProductionExecution execution = productionExecutionRepository.findById(executionId)

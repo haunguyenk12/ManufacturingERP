@@ -218,7 +218,7 @@ class CapacityControllerTest {
                                  "periodStart":"2026-10-13","periodEnd":"2026-10-13"}
                                 """.formatted(UUID.randomUUID())))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("STATE_CONFLICT"));
+                .andExpect(jsonPath("$.code").value(BusinessErrorCode.STATE_CONFLICT.code()));
         org.mockito.Mockito.verifyNoInteractions(capacityPreviewService);
     }
 

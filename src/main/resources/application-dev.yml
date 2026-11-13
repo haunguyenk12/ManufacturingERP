@@ -12,16 +12,8 @@ spring:
   flyway:
     enabled: true
 
+# Log levels and JWT lifetimes are NOT set here: a profile file outranks application.yml, so a value
+# hard-coded in this file silently disabled the matching LOG_LEVEL_* / JWT_* variable in .env.
 logging:
   level:
-    root: INFO
-    com.erp.manufacturing: DEBUG
-    org.hibernate.SQL: WARN
-    org.hibernate.orm.jdbc.bind: WARN
     org.hibernate.engine.internal.StatisticalLoggingSessionEventListener: WARN
-
-app:
-  jwt:
-    access-token-expiry-ms: 3600000   # 1 hour for easier dev
-    refresh-token-expiry-ms: 604800000
-    absolute-session-timeout-ms: 2592000000   # 30 days

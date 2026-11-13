@@ -1,7 +1,7 @@
 # Roles & Permissions – Manufacturing ERP
 
 > Tài liệu tham chiếu nhanh về vai trò và quyền hạn trong hệ thống.  
-> Cập nhật lần cuối: 2025 · Stack: Java 17 · Spring Boot 3 · Dynamic RBAC
+> Cập nhật lần cuối: 2026-11-12 · Stack: Java 17 · Spring Boot 3 · Dynamic RBAC
 
 ---
 
@@ -113,7 +113,7 @@ ADMIN **không** can thiệp vào luồng sản xuất hay mua hàng.
 | Quyền | Mô tả |
 |-------|-------|
 | `AUTH_LOGIN` | Đăng nhập / Đăng xuất / Refresh token |
-| `USER_WRITE` | Tạo / sửa / vô hiệu hoá tài khoản người dùng |
+| `USER_WRITE` | Tạo / sửa / vô hiệu hoá tài khoản người dùng, gán / gỡ role cũ (`/api/users/v1/**`). **[2026-11-12]** Canh bằng `PERM_ACCESS_MANAGE` (trước là `hasRole('ADMIN')`); `GET /api/users/v1/{id}` cho chính chủ đọc tài khoản mình. Mở khoá tài khoản (`/api/admin/users/v1/{id}/unlock`) vẫn là role `ADMIN` |
 | `ROLE_WRITE` | Tạo / sửa vai trò và gán permission cho role. **[`C2-4`]** Nay có đủ CRUD + lifecycle: `GET`/`PATCH /access/roles/{id}`, `POST .../activate`, `POST .../deactivate` — role `is_system` (ADMIN/MANAGER/OPERATOR) không deactivate được, kể cả bởi `admin` |
 | `SCOPE_WRITE` | Định nghĩa Access Scope (Company / Plant / Warehouse). **[`C2-4`]** Cùng bộ CRUD + lifecycle: `GET`/`PATCH /access/scopes/{id}`, `POST .../activate`, `POST .../deactivate` |
 | `USER_ROLE_ASSIGN` | Gán / thu hồi vai trò cho người dùng. **[`C2-4`]** `GET /access/assignments?userId=&roleId=&scopeId=` để tra cứu, cùng quyền `PERM_ACCESS_MANAGE` — không thêm permission mới |

@@ -16,7 +16,6 @@ import com.erp.manufacturing.module.routing.service.RoutingLookupService;
 import com.erp.manufacturing.module.workorder.service.query.WorkOrderSupplyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -33,10 +32,7 @@ public class MrpCalculationService {
     private final WorkOrderSupplyService workOrderSupplyService;
     private final PurchaseOrderSupplyService purchaseOrderSupplyService;
     private final RoutingLookupService routingLookupService;
-
-    /** Optional only so older isolated unit tests can keep constructing this service directly. */
-    @Autowired(required = false)
-    private MrpWarehouseResolutionService warehouseResolutionService;
+    private final MrpWarehouseResolutionService warehouseResolutionService;
 
     /** Every quantity column is {@code NUMERIC(19,6)}; derived component demand is rounded up to it (Q28). */
     static final int QUANTITY_SCALE = 6;
@@ -222,7 +218,7 @@ public class MrpCalculationService {
                     ? WarehouseResolutionSource.RUN_DEMAND_WAREHOUSE
                     : WarehouseResolutionSource.UNRESOLVED;
         PlanningMessageCode blockingMessage = null;
-        if (warehouse == null && warehouseResolutionService != null) {
+        if (warehouse == null) {
             MrpWarehouseResolutionService.Resolution resolution = warehouseResolutionService.resolve(
                     run.getPlant(), demand.getItem(), MrpWarehouseResolutionService.Role.OUTPUT);
             warehouse = resolution.warehouse();
@@ -264,7 +260,7 @@ public class MrpCalculationService {
                 childWarehouse = mapped;
                 resolutionSource = WarehouseResolutionSource.RUN_ITEM_MAPPING;
                 blockingMessage = null;
-            } else if (warehouseResolutionService != null) {
+            } else {
                 MrpWarehouseResolutionService.Resolution resolution = warehouseResolutionService.resolve(
                         seed.sourceDemand().getPlant(), component, MrpWarehouseResolutionService.Role.SUPPLY);
                 childWarehouse = resolution.warehouse();

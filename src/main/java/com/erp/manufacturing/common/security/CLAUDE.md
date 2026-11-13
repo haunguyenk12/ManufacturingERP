@@ -88,9 +88,9 @@ auth:refresh:rotated:{tokenId}                 →  {newTokenId}  TTL=5s
 # Ghi ở login, carry-forward nguyên giá trị qua mỗi lần rotate (B81).
 auth:refresh:{userId}:{tokenId}:meta           →  {sessionCreatedAt}  TTL=7d
 
-# ── Planned (chưa implement) ────────────────────────────────────
-# Forgot password token (single-use)
-auth:reset:{token}                             →  {userId}  TTL=15m  [TODO D8c]
+# Forgot password token (single-use) — đã có từ D8c (PasswordResetTokenService)
+auth:reset:{token}                             →  {userId}  TTL=15m
+auth:reset:user:{userId}                       →  {token}   TTL=15m  (index ngược: token mới thay token cũ)
 ```
 
 ## 4.5 Cấu Trúc JWT Claims
@@ -473,7 +473,7 @@ account enumeration thật, không chỉ là "cùng câu chữ response".
 #### Admin Manual Unlock
 ```
 PATCH /api/v1/admin/users/{userId}/unlock
-  → Yêu cầu role ADMIN (@PreAuthorize("hasRole('ADMIN')"), giống UserService)
+  → Yêu cầu role ADMIN (@PreAuthorize("hasRole('ADMIN')"); UserService từ 2026-11-12 dùng PERM_ACCESS_MANAGE)
   → Xóa auth:failcount:{username} trong Redis
   → Cập nhật users.status = ACTIVE (User.activate(), có sẵn từ trước)
   → Ghi audit: ACCOUNT_UNLOCKED
@@ -558,7 +558,10 @@ Khi validate refresh (SAU khi token đã được chứng minh hợp lệ, TRƯ�
 
 ---
 
-## 4.17 Security Headers Đầy Đủ
+## 4.17 Security Headers Đầy Đủ [◻ THIẾT KẾ — chưa cấu hình]
+
+> Kiểm tra 2026-11-12: `SecurityConfig` không có khối `headers(...)` nào, nên hiện chỉ có header mặc định của
+> Spring Security. Bảng dưới là mục tiêu, không phải hiện trạng.
 
 Cấu hình qua Spring Security `HeadersConfigurer` + custom filter:
 
@@ -597,7 +600,10 @@ Reset password token        → NEVER log
 
 ---
 
-## 4.19 Device Fingerprinting cho Refresh Token
+## 4.19 Device Fingerprinting cho Refresh Token [◻ THIẾT KẾ — chưa triển khai]
+
+> Kiểm tra 2026-11-12: `AuthService` và `TokenStoreService` không có code fingerprint nào. `deviceId` chỉ dùng
+> để đặt tên device session, không ràng buộc refresh token.
 
 > **Mục tiêu**: Gắn chặt (bind) Refresh Token với môi trường thiết bị đã đăng nhập ban đầu. Ngay cả khi kẻ tấn công lấy được chuỗi Refresh Token, hắn cũng không thể dùng nó từ một thiết bị/mạng khác mà không bị phát hiện.
 

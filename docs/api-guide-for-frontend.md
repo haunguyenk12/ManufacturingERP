@@ -56,16 +56,18 @@ mvn spring-boot:run           # API tại http://localhost:8080
 | | |
 |---|---|
 | **Base URL** | `http://localhost:8080` |
-| **API prefix** | `/api/v1` |
-| **Swagger UI** | `http://localhost:8080/swagger-ui.html` |
-| **OpenAPI JSON** | `http://localhost:8080/v3/api-docs` |
-| **Health check** | `http://localhost:8080/actuator/health` |
+| **API prefix** | `/api/v1` — **trừ 5 nhóm** đặt `/v1` sau tên nhóm: `/api/auth/v1`, `/api/admin/users/v1`, `/api/users/v1`, `/api/access/v1`, `/api/sales-orders/v1` (xem [`fe-api-v1-migration-guide.md`](./fe-api-v1-migration-guide.md)) |
+| **Swagger UI** | `http://localhost:8080/api/swagger-ui.html` (chỉ khi bật `SPRINGDOC_SWAGGER_UI_ENABLED`) |
+| **OpenAPI JSON** | `http://localhost:8080/api/v3/api-docs` (chỉ khi bật `SPRINGDOC_API_DOCS_ENABLED`) |
+| **Health check** | `http://localhost:8081/actuator/health` (cổng quản trị riêng, `MANAGEMENT_SERVER_PORT`) |
 
 > Swagger UI là **nguồn chính xác nhất tại thời điểm chạy** — tài liệu này giải thích *cách dùng* và
 > *cạm bẫy*, Swagger cho bạn schema sinh tự động từ code. Dùng cả hai.
 
-Endpoint **không cần token**: `/api/v1/auth/**`, `/actuator/health`, `/actuator/info`,
-`/v3/api-docs/**`, `/swagger-ui/**`. Mọi endpoint `/api/v1/**` khác đều cần `Authorization: Bearer`.
+Endpoint **không cần token**: `/api/auth/v1/{login, refresh, forgot-password, reset-password,
+password-challenges/**}`, `/actuator/health`, `/actuator/info`, `/api/v3/api-docs/**`,
+`/api/swagger-ui/**`. Mọi endpoint khác — kể cả `/api/auth/v1/{me, logout, logout-all,
+password/change}` — đều cần `Authorization: Bearer`.
 
 ### 1.1 CORS *(thêm ở `C2-5`, 2026-08-04)*
 
@@ -234,7 +236,7 @@ làm tròn sai ở nghiệp vụ tồn kho. Dùng `decimal.js` / `big.js`.
 
 ## 3. Đăng nhập & giữ phiên
 
-### `POST /api/v1/auth/login`
+### `POST /api/auth/v1/login`
 
 ```jsonc
 // Request
@@ -262,7 +264,7 @@ không refresh được.
 ⚠️ **Hệ thống hiện đang enforce single-session**: đăng nhập mới sẽ **huỷ toàn bộ phiên cũ** của user
 đó (mọi thiết bị). Nếu FE mở 2 tab với 2 lần login riêng, tab cũ sẽ hỏng ở lần refresh kế tiếp.
 
-### `POST /api/v1/auth/refresh`
+### `POST /api/auth/v1/refresh`
 
 Gọi khi access token sắp/đã hết hạn (bắt `401 TOKEN_EXPIRED`).
 
@@ -299,9 +301,9 @@ mang nguyên qua mọi lần rotate — user dùng liên tục vẫn bị buộc
 nhiều request 401 cùng lúc, chỉ **một** cái được gọi refresh, các cái còn lại **chờ** kết quả rồi
 retry — đừng để mỗi request tự gọi refresh riêng.
 
-### `POST /api/v1/auth/logout` — body `{refreshToken, tokenId}` · `POST /api/v1/auth/logout-all` — không body
+### `POST /api/auth/v1/logout` — body `{refreshToken, tokenId}` · `POST /api/auth/v1/logout-all` — không body
 
-### `GET /api/v1/auth/me` — profile, permissions, plant & access scope sau login
+### `GET /api/auth/v1/me` — profile, permissions, plant & access scope sau login
 
 Endpoint duy nhất trong `AuthController` **không** permit-all — cần `Authorization: Bearer` hợp lệ,
 không cần permission `PERM_*` cụ thể (tự xem thông tin của chính mình).
@@ -334,7 +336,7 @@ nếu FE muốn ẩn/hiện nút ngay mà không đợi round-trip — nhưng ch
 Chi tiết đầy đủ (code mẫu TypeScript, cách chọn plant từ `scopes[]`, và bằng chứng chạy thật):
 **[`fe-session-bootstrap.md`](./fe-session-bootstrap.md)**.
 
-### `POST /api/v1/auth/forgot-password` / `POST /api/v1/auth/reset-password` (`D8c`)
+### `POST /api/auth/v1/forgot-password` / `POST /api/auth/v1/reset-password` (`D8c`)
 
 ```jsonc
 // POST /auth/forgot-password { "email": "user@erp.local" }
@@ -357,7 +359,7 @@ Token chỉ dùng được **một lần**, sống **15 phút**, và một reque
 token cũ (không tích luỹ nhiều token sống cùng lúc). Reset thành công đăng xuất **mọi thiết bị** —
 FE phải điều hướng về màn login sau khi reset, không chỉ đóng modal.
 
-### `PATCH /api/v1/admin/users/{userId}/unlock` (`D8c`) — không body, role `ADMIN`
+### `PATCH /api/admin/users/v1/{userId}/unlock` (`D8c`) — không body, role `ADMIN`
 
 Xoá bộ đếm brute-force trong Redis và đưa tài khoản về `ACTIVE`. `200 { result: null }` khi thành
 công; `403` nếu người gọi không có role `ADMIN`. 🔴 **[2026-11-06]** Tài khoản `PENDING_SETUP` (xem mục dưới) **giữ
@@ -371,6 +373,11 @@ nguyên** `PENDING_SETUP` — mở khoá không phải đường vòng qua bư�
 **Admin tạo tài khoản** — `POST /api/admin/users/v1/accounts/commands`, body `{kind:"CREATE", username, email, password}` (password là mật khẩu **ban đầu**),
 quyền `PERM_ACCESS_MANAGE` ở phạm vi GLOBAL. `201` trả tài khoản với `status:"PENDING_SETUP"`. Chỉ `kind:"CREATE"` được hỗ trợ (kind khác ⇒ `400`
 field `kind`). `POST /api/users/v1` cũ **không đổi** (vẫn tạo `ACTIVE`).
+
+**Quản lý tài khoản `/api/users/v1/**`** *(2026-11-12)* — danh sách, tạo, sửa, vô hiệu hoá, gán/gỡ role nay yêu cầu quyền
+`PERM_ACCESS_MANAGE` (trước là role `ADMIN`; tài khoản `ADMIN` vẫn qua). `GET /api/users/v1/{userId}` còn cho phép **chính chủ** đọc
+tài khoản của mình — trước đó nhánh này luôn trả `403` do lỗi so sánh kiểu. `PATCH /api/users/v1/{userId}` **không** có nhánh chính chủ:
+người dùng đổi mật khẩu qua `POST /api/auth/v1/password/change`.
 
 **Đăng nhập lần đầu** (4 bước, FE ở nguyên `/login`):
 
@@ -453,7 +460,7 @@ tracked, hoặc không tracking gì, không bao giờ cả hai cùng lúc.
 
 ### Bước 1 — Tạo & xác nhận Sales Order
 
-**`POST /api/v1/sales-orders`** → `201`
+**`POST /api/sales-orders/v1`** → `201`
 
 ```jsonc
 {
@@ -470,7 +477,7 @@ tracked, hoặc không tracking gì, không bao giờ cả hai cùng lúc.
 > `lineNo` do **server** cấp (1..N theo thứ tự mảng) — FE không gửi.
 > Đơn tạo ra ở trạng thái `DRAFT`, **chưa** sinh nhu cầu cho MRP.
 
-**`POST /api/v1/sales-orders/{salesOrderId}/confirm`** → `200`, status → `CONFIRMED`.
+**`POST /api/sales-orders/v1/{salesOrderId}/confirm`** → `200`, status → `CONFIRMED`.
 Đây mới là lúc mỗi dòng đơn sinh **một** planning demand.
 
 > Huỷ đơn: `POST /{id}/cancel` — chỉ được từ `DRAFT`/`CONFIRMED`. Từ `IN_PRODUCTION` trở đi →
@@ -480,7 +487,7 @@ tracked, hoặc không tracking gì, không bao giờ cả hai cùng lúc.
 
 ### Bước 2 — Màn hình Planning: chọn demand rồi chạy MRP
 
-**`GET /api/v1/sales-orders/planning-demands?plantId={…}&horizonEnd=2026-09-30`** → mảng trần
+**`GET /api/sales-orders/v1/planning-demands?plantId={…}&horizonEnd=2026-09-30`** → mảng trần
 
 ```jsonc
 {
@@ -902,7 +909,7 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 |---|---|
 | WO đầy đủ (kèm `componentLines`, `operations`, `allocations`) | `GET /api/v1/work-orders/{id}` |
 | Tồn kho | `GET /api/v1/inventory/balances?warehouseId={…}&itemId={…}` (`warehouseId` **bắt buộc**, `itemId` tuỳ chọn) |
-| Đơn hàng đã giao tới đâu | `GET /api/v1/sales-orders/{id}` → `lines[].fulfilledQuantity` |
+| Đơn hàng đã giao tới đâu | `GET /api/sales-orders/v1/{id}` → `lines[].fulfilledQuantity` |
 | Chênh lệch kế hoạch/thực tế | `GET /api/v1/work-orders/{id}/variance` |
 
 > ✅ **[`C2-4`, 2026-08-05] `variance` nay trả đủ 4 khối:** `materialLines` + `outputVariance` +
@@ -940,12 +947,16 @@ rút hàng ra khỏi tồn khả dụng thay vì đóng một lot lại. Vì m�
 
 ## 5. Tham chiếu endpoint theo màn hình
 
+> **Đường dẫn trong mục này viết tắt.** Mặc định thêm `/api/v1` phía trước (`/work-orders/{id}` →
+> `/api/v1/work-orders/{id}`). Riêng 5 nhóm `/auth`, `/admin/users`, `/users`, `/access`, `/sales-orders` thì `/v1` đứng
+> **sau** tên nhóm: `/auth/login` → `/api/auth/v1/login`, `/sales-orders/{id}` → `/api/sales-orders/v1/{id}`.
+
 ### Auth
 | Việc | Endpoint | Quyền |
 |---|---|---|
 | Login | `POST /auth/login` | permitAll |
 | Refresh token | `POST /auth/refresh` | permitAll |
-| Logout / logout tất cả thiết bị | `POST /auth/logout` · `/auth/logout-all` | permitAll |
+| Logout / logout tất cả thiết bị | `POST /auth/logout` · `/auth/logout-all` | đã đăng nhập |
 | Profile + permissions + scope hiện tại | `GET /auth/me` | đã đăng nhập (không cần `PERM_*` cụ thể) |
 | Quên mật khẩu (`D8c`) | `POST /auth/forgot-password` — body `{email}` | permitAll |
 | Đặt lại mật khẩu (`D8c`) | `POST /auth/reset-password` — body `{token, newPassword}` | permitAll |
@@ -1932,7 +1943,7 @@ Spec cũ có thể khiến FE nghĩ receipt là thứ hoàn thành WO. Thực t�
 BASE=http://localhost:8080/api/v1
 
 # 1. Login
-TOKEN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/v1/login -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"<mật khẩu>"}' | jq -r '.result.accessToken')
 
 # 2. Company → Plant → Warehouse

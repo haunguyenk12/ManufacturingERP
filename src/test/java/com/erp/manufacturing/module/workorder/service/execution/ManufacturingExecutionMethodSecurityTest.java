@@ -624,14 +624,17 @@ class ManufacturingExecutionMethodSecurityTest {
                                                   ManufacturingExecutionMapper mapper,
                                                   UserLookupService userLookupService,
                                                   WorkOrderCostAccumulatorService costAccumulatorService,
-                                                  InventoryLotLookupService inventoryLotLookupService) {
+                                                  InventoryLotLookupService inventoryLotLookupService,
+                                                  ProductionExecutionRepository productionExecutionRepository,
+                                                  SecurityAuditorAware auditorAware) {
             return new MaterialIssueService(
                     issueRepository, issueLineRepository, reservationService, movementService,
                     wipTransactionService, workOrderPermissionGuard, support,
                     new IdempotencySupport(new ObjectMapper()), mapper, new TraceIdProvider(),
                     userLookupService, costAccumulatorService, inventoryLotLookupService,
                     new WorkOrderIdempotency(mock(WorkOrderIdempotencyRecordRepository.class),
-                            new IdempotencySupport(new ObjectMapper().findAndRegisterModules())));
+                            new IdempotencySupport(new ObjectMapper().findAndRegisterModules())),
+                    productionExecutionRepository, auditorAware);
         }
 
         @Bean

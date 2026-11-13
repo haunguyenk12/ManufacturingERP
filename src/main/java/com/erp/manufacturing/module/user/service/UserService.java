@@ -48,13 +48,14 @@ public class UserService {
     // ── Read ──────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     public PageResult<UserResponse> findAll(Pageable pageable) {
         return PageResult.from(userRepository.findAll(pageable).map(userMapper::toResponse));
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.userId.toString()")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE') "
+            + "or #userId == authentication.principal.userId")
     public UserResponse findById(UUID userId) {
         return userRepository.findById(userId)
                 .map(userMapper::toResponse)
@@ -64,7 +65,7 @@ public class UserService {
     // ── Create ────────────────────────────────────────────────────────────
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     @Auditable(action = AuditAction.USER_CREATED, entityType = "User",
                entityIdExpression = "userId.toString()")
     public UserResponse create(CreateUserRequest request) {
@@ -132,7 +133,7 @@ public class UserService {
     // ── Update ────────────────────────────────────────────────────────────
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.userId.toString()")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     @Auditable(action = AuditAction.USER_UPDATED, entityType = "User",
                entityIdExpression = "userId.toString()")
     public UserResponse update(UUID userId, UpdateUserRequest request) {
@@ -157,7 +158,7 @@ public class UserService {
     // ── Delete (soft) ─────────────────────────────────────────────────────
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     // entityId (not entityIdExpression): the method returns void, so "toString()" was evaluated
     // against nothing and the deleted user was never named in its own deletion record.
     @Auditable(action = AuditAction.USER_DELETED, entityType = "User",
@@ -175,7 +176,7 @@ public class UserService {
     // ── Role management ───────────────────────────────────────────────────
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     @Auditable(action = AuditAction.ROLE_ASSIGNED, entityType = "User",
                entityIdExpression = "userId.toString()")
     public UserResponse assignRole(UUID userId, String roleName) {
@@ -189,7 +190,7 @@ public class UserService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@permissionGuard.hasPermission(authentication, 'PERM_ACCESS_MANAGE')")
     @Auditable(action = AuditAction.ROLE_REVOKED, entityType = "User",
                entityIdExpression = "userId.toString()")
     public UserResponse revokeRole(UUID userId, String roleName) {

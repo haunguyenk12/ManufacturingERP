@@ -53,12 +53,12 @@ do not delete 47 lines above
 
 ---
 
-## 0. TRẠNG THÁI DỰ ÁN  *(cập nhật: 2026-11-06)*
+## 0. TRẠNG THÁI DỰ ÁN  *(cập nhật: 2026-11-13)*
 
 > **Đọc mục này TRƯỚC KHI sửa bất kỳ dòng code nào.**
-> Thứ tự tài liệu bắt buộc: `CLAUDE.md` (file này) →
-> `NEXT_PHASE_PLAN.md` (phase nghiệp vụ đang chạy) → `TEST_IMPROVEMENT_PLAN.md` (phase test).
-> *(`AGENTS.md` đã xoá 2026-07-25 — nội dung được phân bổ vào `CLAUDE.md` và các file split, xem "BẢN ĐỒ TÀI LIỆU" ở cuối file này.)*
+> Thứ tự tài liệu: `CLAUDE.md` (file này, §0.0) → file kế hoạch của track đang chạy ghi ở §0.0.
+> `NEXT_PHASE_PLAN.md` chỉ chứa phase đang chạy (hiện "chưa chốt"); roadmap `G2`–`G11` cũ nằm ở
+> `docs/phases/NEXT_PHASE_PLAN-G2-G11.md` (~290 KB — chỉ `Grep` rồi `Read` có `offset`/`limit`).
 
 > 🔴 **Lịch sử phase đã chuyển khỏi file này (2026-11-06).** Trước đó `CLAUDE.md` nặng ~534 KB (~170k token) và bị nạp vào *mọi* phiên.
 > Toàn bộ `§0.1`–`§0.72` (trừ `§0.5`) nằm **nguyên văn** ở `docs/phases/` — mở `docs/phases/INDEX.md` để tra.
@@ -69,18 +69,16 @@ do not delete 47 lines above
 
 | | |
 |---|---|
-| **Phase đang chạy** | Track **`CF-*`** (Capstone 3 follow-up, `BE_GAP_NEXT_PLAN.md`): `CF-0`→`CF-5` ✅, `CF-8` ✅, `CF-9`–`CF-13` ✅, gói bổ sung 30/10 ✅ (2026-11-02). `CF-6` (sổ giá trị tồn kho) **hoãn**; `CF-7` chọn phương án A (giữ giới hạn scale 6 cho BOM). Bản ghi: `docs/phases/0.72.md`. Việc lẻ `AP-1` (luồng mật khẩu/tài khoản cho FE, 2026-11-06): `docs/phases/AP-1.md` |
+| **Phase đang chạy** | Track **`CF-*`** (Capstone 3 follow-up, `BE_GAP_NEXT_PLAN.md`): `CF-0`→`CF-5` ✅, `CF-8` ✅, `CF-9`–`CF-13` ✅, gói bổ sung 30/10 ✅ (2026-11-02). `CF-6` (sổ giá trị tồn kho) **hoãn**; `CF-7` chọn phương án A (giữ giới hạn scale 6 cho BOM). Bản ghi: `docs/phases/0.72.md`. Việc lẻ `AP-1` (luồng mật khẩu/tài khoản cho FE, 2026-11-06): `docs/phases/AP-1.md`. Rà soát + dọn dẹp `RA-1` (2026-11-13, có đổi hành vi phân quyền user và cấu hình dev, lên Spring Boot 3.5.16): `docs/phases/RA-1.md` |
 | **GĐ nghiệp vụ FE** | `G2`–`G11` đều **BE xong** (giá thành `G11` xong 2026-10-27), chờ FE nghiệm thu. Bản ghi: `0.50`–`0.71` |
 | **Migration mới nhất** | **`V96`** (`AP-1`, bảng `password_challenges` cho mã email đặt/đổi mật khẩu). `MANUFACTURING_PHASE_PLAN_P7_P11.md` (WIP valuation, shop floor, traceability, CRP, MPS) đánh số lại từ **`V97`** |
 | **Bất biến mới nhất** | **`B282`** (`module/auth`: endpoint công khai khai ở cả `SecurityConfig` lẫn `JwtAuthenticationFilter.BYPASS_PATHS`; `B275`–`B282` là luồng mã email). Bất biến theo module nằm ở `CLAUDE.md` của từng module |
-| **Baseline test** | **2378 unit + 366 IT** (`AP-1`, 2026-11-06, `clean verify` xanh). Coverage JaCoCo chưa đo lại từ `D8b` (xem `0.1`) |
-| **Phase kế tiếp** | Chưa chốt. Roadmap: `NEXT_PHASE_PLAN.md`, `MANUFACTURING_PHASE_PLAN_P7_P11.md` |
+| **Baseline test** | **2401 unit + 367 IT** (`RA-1`, 2026-11-13, `clean verify` xanh trên Spring Boot 3.5.16). Coverage JaCoCo chưa đo lại từ `D8b` (xem `0.1`) |
+| **Phase kế tiếp** | Chưa chốt. Ứng viên: `MANUFACTURING_PHASE_PLAN_P7_P11.md`, `MANUFACTURING_GAP_ROADMAP.md`. Khi chốt thì viết vào `NEXT_PHASE_PLAN.md` |
 
-### 0.0.1 Quy tắc ghi chép (thay cho `dev-workflow.md §6.5` cũ)
+### 0.0.1 Quy tắc ghi chép
 
-- Phase mới ⇒ tạo `docs/phases/<mã phase>.md` (nghiệm thu mutation, smoke, breaking change, hệ quả) + thêm **một dòng** vào `docs/phases/INDEX.md`.
-- Chỉ sửa `CLAUDE.md` ở **§0.0** (vài ô trong bảng trên) và ở `CLAUDE.md` của module nếu có bất biến `B<n>` mới. **Không** dán lại bản ghi dài vào file này.
-- Không sửa `CLAUDE.md` giữa phiên làm việc — mỗi lần sửa làm mất prompt cache của cả file; gom về cuối phiên.
+Xem `.claude/rules/dev-workflow.md §6.5` (phase mới ⇒ `docs/phases/<mã>.md` + một dòng INDEX; file này chỉ sửa §0.0, và chỉ sửa ở cuối phiên).
 
 ### 0.0.2 Làm việc tiết kiệm token
 
@@ -118,63 +116,7 @@ Manufacturing ERP là hệ thống hoạch định nguồn lực doanh nghiệp 
 - Work Order execution
 - Material issue / production receipt / WIP tracking / variance
 
-### 1.2 So Sánh với Commercial ERP
-
-| Chiều | Manufacturing ERP | Commercial ERP |
-|---|---|---|
-| Sản xuất | BOM đa cấp, Work Order, Routing, MRP I/II | Không có / cơ bản |
-| Tồn kho | WIP, theo dõi Batch/Lot/Serial | Chỉ kho tiêu chuẩn |
-| Chi phí | Job/Process/Standard Costing + Phân tích variance | Chỉ COGS |
-| Hoạch định | MRP + CRP (tự động yêu cầu vật tư/năng lực) | Dự báo cầu cơ bản |
-| Truy xuất nguồn gốc | Toàn chuỗi (bắt buộc) | Tùy chọn |
-| Tích hợp MES | Giao diện ERP ↔ MES 2 chiều | Không cần |
-
-### 1.3 Lộ Trình Module
-
-```
-Phase 1 – Foundation
-├── Auth & Security (JWT, RBAC, Session management)
-├── User & Organization Management
-└── Inventory / Warehouse (cờ IsManufacturing)
-
-Phase 2 – Manufacturing Core
-├── Bill of Materials (BOM đa cấp)
-├── Work Order Management
-├── Material Requirements Planning (MRP)
-└── Shop Floor Control
-
-Phase 3 – Advanced & Integration
-├── MES Integration (chuẩn ISA-95)
-├── Quality Control (truy xuất Batch/Lot)
-├── Costing Engine (Standard/Job/Process)
-└── Reporting & Analytics (OEE, Variance)
-```
-
-### 1.4 Tham Chiếu Thực Tế
-- **VinFast / Foxconn**: BOM 8–10 cấp + MES thời gian thực trên dây chuyền lắp ráp
-- **Masan / TH True Milk**: Sản xuất theo quy trình + kiểm soát Batch/phế liệu
-- Mô hình kiến trúc: **ISA-95** (chuẩn tích hợp ERP ↔ MES)
-
----
-
-## 2. TECHNOLOGY STACK
-
-```yaml
-language:       Java 17 (records, sealed classes, pattern matching)
-framework:      Spring Boot 3.x
-security:       Spring Security 6 + JWT (jjwt)
-database:
-  primary:      PostgreSQL (quan hệ, ACID)
-  cache:        Redis (token store, session blacklist, rate-limit)
-orm:            Spring Data JPA + Hibernate
-migration:      Flyway
-build:          Maven
-documentation:  Springdoc OpenAPI 3 (Swagger UI)
-testing:        JUnit 5 · Mockito · MockMvc · Testcontainers
-monitoring:     Spring Boot Actuator + Micrometer
-logging:        SLF4J + Logback (JSON có cấu trúc trong prod)
-containerize:   Docker + Docker Compose
-```
+> Bối cảnh sản phẩm, so sánh với ERP thương mại, danh sách công nghệ và cách chạy trên máy: `README.md`.
 
 ---
 
@@ -194,7 +136,9 @@ com.erp.manufacturing
 │   ├── response/           # ApiResponse, PageResult wrappers
 │   ├── security/           # JWT utils, filters, IpExtractor, TokenStoreService — CLAUDE.md riêng
 │   ├── audit/              # BaseEntity, AuditLog entity, AuditLogService, Aspect — CLAUDE.md riêng
-│   └── context/            # RequestContext (userId, ip, traceId) – ThreadLocal holder
+│   ├── context/            # RequestContext (userId, ip, traceId) – ThreadLocal holder
+│   ├── idempotency/        # IdempotencySupport (so payload khi replay Idempotency-Key)
+│   └── web/                # PageableFactory, PlantContextResolver (X-Plant-Id)
 ├── config/
 │   ├── SecurityConfig.java
 │   ├── RedisConfig.java
@@ -213,6 +157,9 @@ com.erp.manufacturing
 │   ├── sales/              # Sales Order + independent demand cho MRP — CLAUDE.md riêng
 │   ├── planning/           # MRP run, requirement explosion, supply suggestion — CLAUDE.md riêng
 │   ├── purchasing/         # Supplier, PR → PO → Goods Receipt — CLAUDE.md riêng
+│   ├── uom/ · workcenter/ · shift/        # Master data xưởng — mỗi module có CLAUDE.md riêng
+│   ├── costing/ · dataimport/             # Giá thành chuẩn · nhập Excel — CLAUDE.md riêng
+│   ├── delivery/ · billing/               # Giao hàng · hoá đơn + thanh toán — CLAUDE.md riêng
 │   └── reporting/          # Report controller theo domain (inventory/workorder/purchasing)
 └── ManufacturingErpApplication.java
 ```
@@ -221,9 +168,12 @@ com.erp.manufacturing
 > khi có agent thực sự đọc/sửa code trong đúng thư mục ấy. Xem bảng đầy đủ ở "Bản Đồ Tài Liệu" dưới đây.
 
 ### 3.3 Quy Ước API
-- Base path: `/api/v1/`
-- Auth endpoints: `/api/v1/auth/**` (permit all)
-- Protected: `/api/v1/**` (yêu cầu JWT hợp lệ)
+- `/api` là `server.servlet.context-path`; `/v1` nằm ở mapping của từng controller ⇒ mặc định `/api/v1/<resource>`.
+  **5 nhóm ngoại lệ** đặt `/v1` sau tên nhóm: `/api/auth/v1`, `/api/admin/users/v1`, `/api/users/v1`,
+  `/api/access/v1`, `/api/sales-orders/v1` (`docs/fe-api-v1-migration-guide.md`)
+- Công khai: chỉ các endpoint liệt kê trong `SecurityConfig` (login, refresh, forgot/reset password,
+  password-challenges); `/api/auth/v1/me`, `logout`, `password/change` **cần** JWT
+- Còn lại: yêu cầu JWT hợp lệ
 - HTTP status codes: tuân thủ chặt chẽ ngữ nghĩa REST
 - Phân trang: query params `page`, `size`, `sortBy`, `sortDir`
 
@@ -233,23 +183,26 @@ com.erp.manufacturing
 
 > File này đã được chia nhỏ (2026-07-25) để agent chỉ tự nạp phần liên quan đến task đang làm,
 > thay vì luôn nạp toàn bộ ~1500 dòng. Cơ chế:
-> - `.claude/rules/*.md` → Claude Code **luôn** tự nạp cùng `CLAUDE.md`, dùng cho rule cross-cutting (áp dụng mọi module).
+> - `.claude/rules/*.md` → Claude Code tự nạp cùng `CLAUDE.md`; file có frontmatter `paths:` chỉ nạp khi đọc file khớp đường dẫn.
 > - `<package>/CLAUDE.md` (lồng trong `src/main/java/...`) → chỉ tự nạp khi agent đọc/sửa file trong đúng thư mục đó.
 
 | Chủ đề | File | Cơ chế nạp |
 |---|---|---|
-| Error handling / response contract | `.claude/rules/error-handling.md` | Luôn nạp |
-| Git workflow / commit convention / migration naming | `.claude/rules/dev-workflow.md` | Luôn nạp |
+| Git workflow / commit / migration / quy tắc ghi chép | `.claude/rules/dev-workflow.md` | Luôn nạp |
 | Key architectural decisions | `.claude/rules/architecture-decisions.md` | Luôn nạp |
-| Best practices checklist (security/API/DB/code quality/perf/test/observability) | `.claude/rules/best-practices.md` | Luôn nạp |
-| Coding rules hàng ngày (N+1, breaking change, cấm) | `.claude/rules/coding-rules.md` | Luôn nạp |
+| Best practices checklist (security/API/DB/code quality/perf/observability) | `.claude/rules/best-practices.md` | Luôn nạp |
+| Coding rules hàng ngày (N+1, breaking change, cấm, ngoại lệ C7) | `.claude/rules/coding-rules.md` | Luôn nạp |
+| Error handling / response contract / chọn mã lỗi 409–422 | `.claude/rules/error-handling.md` | Khi đọc file trong `src/**` (frontmatter `paths`) |
+| Quy tắc viết test T1–T6, R1–R10 | `.claude/rules/testing.md` | Khi đọc file trong `src/test/**` |
 | Auth/Session design (JWT, Redis key, rate limit, RTR, fingerprint) + bất biến B35-B36 | `src/main/java/com/erp/manufacturing/common/security/CLAUDE.md` | Chỉ khi chạm `common/security/**` |
 | AuthService/AuthController + bất biến B33-B34 | `src/main/java/com/erp/manufacturing/module/auth/CLAUDE.md` | Chỉ khi chạm `module/auth/**` |
 | Audit Log Architecture | `src/main/java/com/erp/manufacturing/common/audit/CLAUDE.md` | Chỉ khi chạm `common/audit/**` |
 | Bất biến RBAC B30-B32, B37 | `src/main/java/com/erp/manufacturing/module/organization/CLAUDE.md` | Chỉ khi chạm `module/organization/**` |
 | Bất biến Inventory B1-B6 | `src/main/java/com/erp/manufacturing/module/inventory/CLAUDE.md` | Chỉ khi chạm `module/inventory/**` |
 | Bất biến BOM B7-B11 | `src/main/java/com/erp/manufacturing/module/bom/CLAUDE.md` | Chỉ khi chạm `module/bom/**` |
-| Bất biến Work Order & Manufacturing Execution B12-B20 | `src/main/java/com/erp/manufacturing/module/workorder/CLAUDE.md` | Chỉ khi chạm `module/workorder/**` |
+| Bất biến Work Order: lệnh SX, lịch, phân bổ đơn bán, đóng lệnh | `src/main/java/com/erp/manufacturing/module/workorder/CLAUDE.md` | Chỉ khi chạm `module/workorder/**` |
+| Bất biến thực thi: cấp vật tư, công đoạn, phiếu nhập, QC, serial | `…/module/workorder/service/execution/CLAUDE.md` | Chỉ khi chạm `workorder/service/execution/**` — đọc tay khi sửa controller/DTO/entity cùng luồng |
+| Bất biến giá thành sản xuất (`G11`) | `…/module/workorder/service/cost/CLAUDE.md` | Chỉ khi chạm `workorder/service/cost/**` |
 | Bất biến Planning/MRP B21-B26 | `src/main/java/com/erp/manufacturing/module/planning/CLAUDE.md` | Chỉ khi chạm `module/planning/**` |
 | Bất biến Routing B48-B52 + quyết định `MISSING_ROUTING` / Work Center FK (`C2-6`) | `src/main/java/com/erp/manufacturing/module/routing/CLAUDE.md` | Chỉ khi chạm `module/routing/**` |
 | Bất biến Sales Order B43-B47 + quyết định `sales`→`planning` | `src/main/java/com/erp/manufacturing/module/sales/CLAUDE.md` | Chỉ khi chạm `module/sales/**` |
@@ -262,15 +215,19 @@ com.erp.manufacturing
 | Bất biến Data Import B142-B148 + hai đường nhập chung bảng (`G3`) | `src/main/java/com/erp/manufacturing/module/dataimport/CLAUDE.md` | Chỉ khi chạm `module/dataimport/**` |
 | Bất biến Costing B91-B92 + entry points `ItemStandardCostLookupService` (`P3`) | `src/main/java/com/erp/manufacturing/module/costing/CLAUDE.md` | Chỉ khi chạm `module/costing/**` |
 | **Hướng dẫn API cho FE** (envelope, auth, luồng 10 bước, mã lỗi, chỗ lệch spec) | `docs/api-guide-for-frontend.md` | Đọc thủ công — **tài liệu đối ngoại**, viết cho team FE |
-| **Session bootstrap cho FE** (decode JWT lấy permissions, workaround profile/plant/scope) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. Ghi rõ 2 khoảng trống: không có `GET /auth/me`, không có "default plant" |
+| **Session bootstrap + phân quyền giao diện cho FE** (decode JWT, `/auth/v1/me`, scope, pattern ẩn/hiện nút; đã gộp `RoleDocs.md`) | `docs/fe-session-bootstrap.md` | Đọc thủ công — **tài liệu đối ngoại**. `GET /api/auth/v1/me` (có từ 2026-08-01) trả profile, permissions, `scopes[]`, `defaultPlantId`; §7 của file là bằng chứng lịch sử, URL ở đó là dạng cũ |
 | **Bộ dữ liệu demo Capstone 2** (namespace `D26-`: 3 tài khoản, kịch bản trình diễn 9 bước, cách dựng lại, các chỗ script cố ý lệch tài liệu nguồn) | `docs/demo-capstone2-guide.md` | Đọc thủ công — cặp với `scripts/demo-capstone2/`. 🔴 Đây là bộ dữ liệu **cho khách hàng xem** (sạch, không bản ghi lỗi); bộ `VIETBIKE` ở hàng dưới là bộ **kiểm thử** (cố ý phủ cả trạng thái xấu) — **đừng trộn hai bộ trên cùng một môi trường**. Sửa dữ liệu thì sửa `scripts/demo-capstone2/catalogue.sh` |
 | **Bộ dữ liệu demo** (chủ đề nhà máy xe đạp `VIETBIKE`: tài khoản, cây BOM, ma trận trạng thái, kịch bản thuyết trình, các trạng thái **không** seed được) | `docs/demo-dataset-guide.md` | Đọc thủ công — cặp với `scripts/demo/seed-demo.sh`. 🔴 Sửa dữ liệu demo thì sửa **`scripts/demo/lib/catalogue.sh`**, không sửa các file trong `stages/` |
-| **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và **5 câu hỏi đang chờ FE trả lời** — `C2-1`/`C2-2` bị chặn cho tới khi có câu 1 và 2 |
+| **Phản hồi gap Capstone 2** (đối chiếu `BACKEND_CAPSTONE2_API_GAPS.md` của FE với code thật) | `docs/capstone2-api-gap-response.md` | Đọc thủ công — **tài liệu đối ngoại**, thêm ở `C2-0` (2026-08-04). Chứa 3 mục FE báo thiếu mà **đã có**, 2 chỗ FE mô tả nhẹ hơn thực tế (audit diff rỗng, lot-status vs `B62`), và 5 câu hỏi gửi FE lúc đó (`C2-1`/`C2-2` đã xong 2026-08-06, không còn bị chặn) |
 
 > 🔴 **`docs/api-guide-for-frontend.md` là tài liệu FE đang dùng để wire API.** Phase nào đổi
 > endpoint / DTO / mã lỗi trên luồng sản xuất **phải** cập nhật file đó trong cùng commit — để nó lệch
 > code chính là làm FE gắn sai. Nguồn của nó là **code thật**, không phải spec; spec gốc ở
 > `docs/fe-spec-omniplant.md`, phần lệch giữa hai bên nằm ở §9 của guide.
+
+| Trao đổi FE–BE (`FE_HANDOFF_*`, `BE_RESPONSE_*`, `CAPSTONE3_*`, OpenAPI export, tài khoản thử) | `docs/handoff/` | Đọc thủ công; tham chiếu theo tên file trong code và tài liệu trỏ vào đây |
+| Kế hoạch refactor đã xong (`AuditRefactorPlan`, `ConfigRefactorPlan`, `ExceptionHandlerRefactorPlan`, `BACKEND_SECURITY_PLAN`, `DiagramPlan`) | `docs/plans/` | Đọc thủ công |
+| Tài liệu cũ được khôi phục để tra (`TEST_IMPROVEMENT_PLAN`, `FRONTEND_ALIGNMENT_ROADMAP`, `BE_SYSTEM_ISSUES_RESOLUTION_PLAN`, `BACKEND_CAPSTONE2_API_GAPS`, `live-data-audit`) và bản rules trước khi rút gọn | `docs/archive/` | Đọc thủ công |
 
 > Nội dung không mất — chỉ đổi vị trí. Khi cần tra một bất biến `B<n>` hay một mục `4.x`/`9.x` cụ thể mà
 > không chắc nằm ở file nào, grep theo mã bất biến hoặc theo tên class liên quan trong bảng trên.

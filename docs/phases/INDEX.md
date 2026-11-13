@@ -78,5 +78,7 @@
 | [0.71](0.71.md) | 0.71 `G11` – Giá Thành Sản Xuất, Chênh Lệch Và Đóng Lệnh (2026-10-27) | 4.9 |
 | [0.72](0.72.md) | 0.72 Track `CF-*` – Capstone 3 Follow-up (từ 2026-10-27) | 17.8 |
 | [AP-1](AP-1.md) | AP-1 Luồng tài khoản và mật khẩu: đăng nhập lần đầu bằng mã email, đổi mật khẩu (2026-11-06) | 4.6 |
+| [NEXT_PHASE_PLAN-G2-G11](NEXT_PHASE_PLAN-G2-G11.md) | Roadmap `G2`–`G11` nguyên văn (file `NEXT_PHASE_PLAN.md` cũ ở gốc repo, chuyển 2026-11-12). Tham chiếu "`NEXT_PHASE_PLAN.md §9`…`§18`" trỏ vào đây | 284 |
+| [RA-1](RA-1.md) | RA-1 Rà soát toàn dự án và dọn dẹp: sửa self-access user, quyền `PERM_ACCESS_MANAGE`, rút gọn rules, sắp xếp tài liệu (2026-11-13) | 5.6 |
 
 `§0.5` (ba cột số lượng của `work_orders`) vẫn nằm trong `CLAUDE.md`.

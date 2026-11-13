@@ -28,6 +28,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,17 +42,28 @@ class MrpCalculationServiceTest {
     @Mock WorkOrderSupplyService workOrderSupplyService;
     @Mock PurchaseOrderSupplyService purchaseOrderSupplyService;
     @Mock RoutingLookupService routingLookupService;
+    @Mock MrpWarehouseResolutionService warehouseResolutionService;
 
     MrpCalculationService service;
 
+    /**
+     * What the resolver answers for items the run does not map: these scenarios model an item with a
+     * default warehouse setting (a clean resolution, so no fallback warning is added to the proposal).
+     */
+    Warehouse plantWarehouse;
+
     @BeforeEach
     void setUp() {
+        lenient().when(warehouseResolutionService.resolve(any(), any(), any()))
+                .thenAnswer(invocation -> MrpWarehouseResolutionService.Resolution.resolved(
+                        plantWarehouse, WarehouseResolutionSource.ITEM_WAREHOUSE_DEFAULT));
         service = new MrpCalculationService(
                 bomLookupService,
                 inventoryAvailabilityService,
                 workOrderSupplyService,
                 purchaseOrderSupplyService,
-                routingLookupService);
+                routingLookupService,
+                warehouseResolutionService);
     }
 
     @Test
@@ -737,7 +749,7 @@ class MrpCalculationServiceTest {
     }
 
     private Warehouse warehouse(UUID warehouseId, Plant plant) {
-        return Warehouse.builder()
+        plantWarehouse = Warehouse.builder()
                 .warehouseId(warehouseId)
                 .plant(plant)
                 .code("WH1")
@@ -745,6 +757,7 @@ class MrpCalculationServiceTest {
                 .type(WarehouseType.GENERAL)
                 .status(OrganizationStatus.ACTIVE)
                 .build();
+        return plantWarehouse;
     }
 
     private Plant plant(UUID plantId, Company company) {
