@@ -16,6 +16,9 @@ application-secret.yml
 .env.*
 !.env.example
 
+# Microsoft Office owner-lock files (created while a document is open)
+~$*
+
 # Logs
 logs/
 *.log
@@ -36,3 +39,7 @@ UserAccount.md
 demo-capstone2-ids.json
 demo-capstone2-ids.partial.json
 demo-capstone2-preflight.json
+
+# DB checkpoints: only the default restore point (d26-seeded.dump) is versioned
+scripts/demo-capstone2/backups/*.dump
+!scripts/demo-capstone2/backups/d26-seeded.dump

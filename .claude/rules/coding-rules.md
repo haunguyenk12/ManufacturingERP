@@ -14,7 +14,7 @@
 | C4 | `@Transactional` đặt ở **service**; read-only method dùng `@Transactional(readOnly = true)` |
 | C5 | **Không sửa migration cũ.** Mọi thay đổi schema = migration mới, số hiệu tiếp theo (`V25`, `V26`...) |
 | C6 | Không hard-delete document nghiệp vụ. Dùng status / cancel / reversal |
-| C7 | Cross-module: gọi qua lookup/application service của module đó, **không** gọi repository của module khác. Ví dụ đã có: BOM cần item → `ItemLookupService`; Work Order cần BOM → `BomLookupService`; Planning cần BOM + inventory availability → lookup/service tương ứng của module đó |
+| C7 | Cross-module: **code mới** gọi qua lookup/application service của module đó, **không** gọi repository của module khác. Ví dụ đã có: BOM cần item → `ItemLookupService`; Work Order cần BOM → `BomLookupService`; Planning cần BOM + inventory availability → lookup/service tương ứng của module đó.<br>**Ngoại lệ đang tồn tại (18 import, đếm 2026-11-12) — không thêm cái mới:** ① cụm định danh `auth` ↔ `user` ↔ `organization` (`UserRepository`, `RoleRepository`, `UserRoleAssignmentRepository`); ② `inventory`, `sales`, `planning` đọc `WarehouseRepository` / `CompanyRepository`; ③ `workorder` đọc **và ghi** `StockBalanceRepository` khi giữ chỗ (FEFO + ghi số giữ trong cùng transaction — thay bằng lookup service không đủ, cần một application service ở `inventory`); ④ `planning` → `ItemWarehouseSettingRepository`, `purchasing` → `SupplySuggestionRepository`; ⑤ `config/AdminBootstrapService` |
 | C8 | `orElseThrow()` với message rõ ràng — **không** `Optional.get()` |
 | C9 | Fail fast: validate ở đầu method, throw ngay khi invalid, **trước khi** đụng tồn kho / ghi DB |
 | C10 | Thêm permission mới ⇒ **bắt buộc** seed trong migration cùng phase + ghi vào `docs/roles-and-permissions.md` |
@@ -44,7 +44,7 @@ Thêm 1 giá trị enum status là **breaking change ngầm**. Checklist bắt b
 
 1. Ghi rõ vào mục "Breaking Changes" của `NEXT_PHASE_PLAN.md` phase hiện tại
 2. Chạy `mvn -q test` lấy **baseline** trước khi bắt đầu
-3. **Sửa** test cũ cho khớp — **không xoá**, không nới assertion (xem rule `R10` trong `.claude/rules/best-practices.md` §8.6.1)
+3. **Sửa** test cũ cho khớp — **không xoá**, không nới assertion (xem rule `R10` trong `.claude/rules/testing.md`)
 4. Kết thúc: số test case **≥ baseline**, `failures = 0`
 5. Cập nhật `docs/architecture.md`, `docs/system-flow.md`, `docs/roles-and-permissions.md`
 
@@ -58,6 +58,7 @@ Thêm 1 giá trị enum status là **breaking change ngầm**. Checklist bắt b
 - ❌ Log password / raw token / refresh token (xem `common/security/CLAUDE.md` §4.18)
 - ❌ Expose stack trace ra API response
 - ❌ Thay đổi API hiện có nếu không được yêu cầu; cần breaking change thì phải nêu rõ (xem §11.4)
+- ❌ Spring WebFlux / reactive, Liquibase — stack là Spring MVC + Flyway
 
 ## 11.6 Database Schema Conventions (từ `AGENTS.md` §4)
 

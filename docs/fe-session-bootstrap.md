@@ -5,7 +5,7 @@
 > Bổ sung cho [`api-guide-for-frontend.md`](./api-guide-for-frontend.md). Nguồn: đọc trực tiếp
 > `JwtTokenProvider`, `UserPrincipal`, `UserDetailsServiceImpl`, `AuthService`, `AccessControlService`.
 > Viết ban đầu 2026-08-01 (khi `GET /auth/me` **chưa** tồn tại) — **cập nhật cùng ngày** sau khi
-> `GET /api/v1/auth/me` được triển khai. §7 giữ nguyên làm bằng chứng lịch sử của lượt kiểm chứng đầu.
+> `GET /api/auth/v1/me` được triển khai. §7 giữ nguyên làm bằng chứng lịch sử của lượt kiểm chứng đầu.
 
 ---
 
@@ -13,13 +13,13 @@
 
 | # | Thông tin | Có endpoint? | Lấy thế nào hôm nay |
 |---|---|---|---|
-| 1 | **Username** | ✅ Có | Decode JWT (`sub`) **hoặc** `GET /api/v1/auth/me` (`username`) |
-| 1b | **userId, email** | ✅ **Có** | `GET /api/v1/auth/me` → `userId`, `email`, `status` |
-| 2 | **Permissions + roles** | ✅ **Có** | Decode JWT (union phẳng, nhanh) **hoặc** `GET /api/v1/auth/me` (cùng union, tách sẵn `roles[]`/`permissions[]`) |
-| 3 | **Default Plant** | ✅ **Có (gợi ý)** | `GET /api/v1/auth/me` → `defaultPlantId` (plant đầu tiên theo `(companyCode, plantCode)`; `null` nếu user không có scope `PLANT` nào) |
-| 4 | **Access scope** (company/plant được phép, permission theo từng scope) | ✅ **Có** | `GET /api/v1/auth/me` → `scopes[]` |
+| 1 | **Username** | ✅ Có | Decode JWT (`sub`) **hoặc** `GET /api/auth/v1/me` (`username`) |
+| 1b | **userId, email** | ✅ **Có** | `GET /api/auth/v1/me` → `userId`, `email`, `status` |
+| 2 | **Permissions + roles** | ✅ **Có** | Decode JWT (union phẳng, nhanh) **hoặc** `GET /api/auth/v1/me` (cùng union, tách sẵn `roles[]`/`permissions[]`) |
+| 3 | **Default Plant** | ✅ **Có (gợi ý)** | `GET /api/auth/v1/me` → `defaultPlantId` (plant đầu tiên theo `(companyCode, plantCode)`; `null` nếu user không có scope `PLANT` nào) |
+| 4 | **Access scope** (company/plant được phép, permission theo từng scope) | ✅ **Có** | `GET /api/auth/v1/me` → `scopes[]` |
 
-✅ **`GET /api/v1/auth/me` đã tồn tại** kể từ 2026-08-01 — endpoint mới, yêu cầu `Authorization: Bearer`
+✅ **`GET /api/auth/v1/me` đã tồn tại** kể từ 2026-08-01 — endpoint mới, yêu cầu `Authorization: Bearer`
 hợp lệ (đây là ngoại lệ duy nhất trong `AuthController`: 4 endpoint còn lại — `login`/`refresh`/
 `logout`/`logout-all` — vẫn permit-all). Không cần permission `PERM_*` cụ thể, chỉ cần đã đăng nhập.
 
@@ -121,10 +121,10 @@ phiên" gọi `POST /auth/refresh`.
 
 ## 3. Lấy profile đầy đủ (userId, email)
 
-### `GET /api/v1/auth/me`
+### `GET /api/auth/v1/me`
 
 ```
-GET /api/v1/auth/me
+GET /api/auth/v1/me
 Authorization: Bearer <accessToken>
 ```
 
@@ -153,7 +153,7 @@ Không token → `401`. Đây là ví dụ **thật**, lấy trực tiếp từ 
 `UserRoleAssignment` nào (hợp lệ, không phải lỗi).
 
 ```ts
-const res = await api.get('/api/v1/auth/me');
+const res = await api.get('/api/auth/v1/me');
 const me  = res.data.result;
 // me: { userId, username, email, status, roles[], permissions[], scopes[], defaultPlantId }
 ```
@@ -168,7 +168,7 @@ trước khi round-trip network kịp về, xem §2).
 
 ### `scopes[]` của `/auth/me` — nguồn chính, thay cho workaround probe-403
 
-`GET /api/v1/auth/me` trả `scopes[]`: mỗi phần tử là một scope `GLOBAL`/`COMPANY`/`PLANT` mà user có
+`GET /api/auth/v1/me` trả `scopes[]`: mỗi phần tử là một scope `GLOBAL`/`COMPANY`/`PLANT` mà user có
 assignment `ACTIVE`, kèm permission áp dụng riêng cho scope đó (khác với `permissions[]` top-level —
 union phẳng toàn hệ thống, không phân biệt theo company/plant nào).
 
@@ -203,7 +203,7 @@ FE dùng nó để **auto-chọn** plant khi mở app, nhưng vẫn phải cho u
 `defaultPlantId` là `null` hoặc user muốn plant khác.
 
 ```ts
-const me = (await api.get('/api/v1/auth/me')).data.result;
+const me = (await api.get('/api/auth/v1/me')).data.result;
 const plantScopes = me.scopes.filter(s => s.scopeType === 'PLANT');
 const currentPlant = plantScopes.find(s => s.plantId === me.defaultPlantId) ?? plantScopes[0] ?? null;
 // currentPlant: null ⇒ user không có plant nào — chỉ có GLOBAL/COMPANY scope, cho thao tác không cần X-Plant-Id
@@ -236,11 +236,11 @@ nhầm thành bug.
 ## 6. Luồng bootstrap khuyến nghị cho FE
 
 ```
-1. POST /api/v1/auth/login
+1. POST /api/auth/v1/login
       ↓ lưu accessToken + refreshToken + tokenId
 2. decodeJwt(accessToken)   [tuỳ chọn, cho UI phản hồi ngay trước khi round-trip #3 kịp về]
       ↓ username, roles[], permissions[]  → dựng menu, ẩn/hiện nút
-3. GET /api/v1/auth/me
+3. GET /api/auth/v1/me
       ↓ userId, email, status, roles[], permissions[], scopes[], defaultPlantId
 4. Chọn plant hiện tại từ scopes[]:
       defaultPlantId khác null → auto-chọn plant đó
@@ -256,7 +256,7 @@ nhầm thành bug.
 
 ### Checklist Scope 0
 
-- [ ] Sau login: gọi `GET /api/v1/auth/me`, lưu `{userId, username, email, roles, permissions, scopes, defaultPlantId}` vào state client
+- [ ] Sau login: gọi `GET /api/auth/v1/me`, lưu `{userId, username, email, roles, permissions, scopes, defaultPlantId}` vào state client
 - [ ] Dùng `permissions[]` để ẩn/hiện nút — nhưng **vẫn** xử lý `403` tử tế (đây là union mọi scope, không phải per-plant)
 - [ ] Dùng `scopes[]` khi cần permission **theo đúng plant/company** đang thao tác
 - [ ] Plant: `defaultPlantId` auto-chọn lần đầu; sau đó ưu tiên lựa chọn đã lưu trong localStorage
@@ -355,3 +355,125 @@ GET /api/v1/auth/me   (Authorization: Bearer <token>)     → HTTP 200
 `defaultPlantId: null` là **đúng**, không phải bug — `admin` seed chỉ có scope `GLOBAL`, không có scope
 `PLANT` nào (xem quy tắc chọn `defaultPlantId` ở §4). Route `/api/v1/khong-ton-tai` **vẫn** trả `500`
 (chưa sửa, xem §7.4) — thêm route mới không ảnh hưởng tới bug đó.
+
+---
+
+## 8. Phân quyền giao diện *(gộp từ `RoleDocs.md`, 2026-11-12)*
+
+> `RoleDocs.md` đã gộp vào đây. Phần trùng với §2–§6 ở trên (decode JWT, `GET /api/auth/v1/me`, `scopes[]`,
+> checklist) đã bỏ. Danh mục permission theo role **không** chép lại: nguồn duy nhất là
+> [`roles-and-permissions.md`](./roles-and-permissions.md).
+
+### Mô hình phân quyền — 3 khái niệm cần nắm trước
+
+| Khái niệm | Là gì |
+|---|---|
+| **Role** (`ADMIN`/`MANAGER`/`OPERATOR`) | Nhãn thô, dùng để phân nhánh giao diện lớn (menu cấu hình chỉ ADMIN thấy). **Không** dùng để ẩn/hiện từng nút — quá thô |
+| **Permission** (`PERM_<MODULE>_<ACTION>`, vd `PERM_WORK_ORDER_MANAGE`) | Đơn vị cấp quyền thật sự. Mỗi nút/hành động trên UI nên map tới đúng 1 permission code |
+| **Scope** (`GLOBAL` / `COMPANY` / `PLANT`) | Permission **không** áp dụng toàn hệ thống mặc định — nó gắn với một phạm vi. Có `PERM_WORK_ORDER_MANAGE` ở Plant A **không** có nghĩa dùng được ở Plant B |
+
+Hệ thống là **Dynamic RBAC**: một user có thể có nhiều `UserRoleAssignment`, mỗi assignment gắn
+`(role, scope)`. Permission cuối cùng của user là **hợp của mọi assignment `ACTIVE`, chưa hết hạn**.
+
+### Cấu trúc tên permission
+
+```
+PERM_<MODULE>_<ACTION>
+```
+
+| Action suffix | Ý nghĩa |
+|---|---|
+| `_READ` | Xem/list |
+| `_MANAGE` | Tạo/sửa/activate/deactivate (CRUD ghi trên master data hoặc chứng từ) |
+| `_EXECUTE` | Thực thi thao tác vận hành (không phải CRUD, không phải duyệt) |
+| `_APPROVE` | Duyệt/từ chối một đề nghị đang chờ |
+| `_OVERRIDE` | Ghi đè một giới hạn nghiệp vụ (kèm lý do bắt buộc) |
+| `_MOVE` | Nhập/xuất/điều chỉnh tồn kho thủ công |
+
+> ⚠️ Vài tài liệu nội bộ backend còn dùng tên thiết kế cũ (`WO_WRITE`, `BOM_READ`, `STOCK_RECEIVE`…) ở
+> một số bảng lịch sử — **tên thật trả về trên wire (JWT/`/auth/me`) luôn có tiền tố `PERM_`**. Nếu
+> thấy một permission không có tiền tố này trong tài liệu, đó là tên cũ chưa migrate, đừng dùng để so
+> khớp trong code FE.
+
+### Hai cơ chế kiểm tra quyền ở backend — vì sao đôi khi 403 dù có permission
+
+Đây là chỗ dễ gây bug khó hiểu nhất nếu FE không biết. Backend có **hai** cách gác quyền khác nhau
+cho hai nhóm endpoint khác nhau:
+
+| Cơ chế | Áp dụng cho | Cách hoạt động |
+|---|---|---|
+| `hasResourceAccess` | Phần lớn permission (`PERM_WORK_ORDER_*`, `PERM_BOM_*`, `PERM_INVENTORY_*`, `PERM_ITEM_*`…) | Đi theo cây `Company → Plant → Warehouse`. Có permission qua **bất kỳ** scope nào phủ tới resource đang thao tác là qua (`GLOBAL`, hoặc `COMPANY` chứa nó, hoặc đúng `PLANT`/`WAREHOUSE` đó) |
+| `hasPermission` | **Chỉ** những quyền "không gắn resource cụ thể": `PERM_ORG_READ`/`PERM_ORG_MANAGE`, `PERM_ACCESS_MANAGE`, `PERM_UOM_*`, `PERM_AUDIT_READ` | **Chỉ** đọc assignment có `scopeType = GLOBAL`. Có permission đó nhưng gắn scope `PLANT`/`COMPANY` vẫn bị **403** |
+
+**Hệ quả cho FE:** một user có `PERM_UOM_MANAGE` ở scope `PLANT` (không phải `GLOBAL`) sẽ thấy
+permission đó trong `permissions[]` (vì đó là union phẳng, không lọc theo scope), nhưng gọi API thật
+sự vẫn nhận `403 PERMISSION_DENIED`. ⇒ Với nhóm quyền ở cột phải (org/access/uom/audit), **đừng** chỉ
+dựa vào `permissions[]`/`scopes[]` để quyết định hiện nút — coi đây là nhóm "chỉ admin cấu hình toàn
+cục mới chắc chắn dùng được", và **luôn** xử lý `403` tử tế thay vì coi UI hiện = chắc chắn gọi được.
+
+### Áp dụng trên FE — pattern khuyến nghị
+
+#### 7.1 Ẩn/hiện nút (permission check thô, dùng `permissions[]`)
+
+```ts
+function Can({ perm, children }: { perm: string; children: React.ReactNode }) {
+  const { permissions } = useSession();
+  return permissions.includes(perm) ? <>{children}</> : null;
+}
+
+<Can perm="PERM_PRODUCTION_RECEIPT_APPROVE">
+  <Button onClick={approve}>Duyệt phiếu nhập</Button>
+</Can>
+```
+
+#### 7.2 Ẩn/hiện nút theo đúng plant đang thao tác (dùng `scopes[]`)
+
+```ts
+<Can perm="PERM_WORK_ORDER_MANAGE" plantId={currentPlant.plantId}>
+  <Button onClick={createWorkOrder}>Tạo Work Order</Button>
+</Can>
+```
+
+#### 7.3 Guard route
+
+```ts
+function RequirePermission({ perm, children }: { perm: string; children: React.ReactNode }) {
+  const { permissions } = useSession();
+  if (!permissions.includes(perm)) return <Navigate to="/403" replace />;
+  return <>{children}</>;
+}
+```
+
+#### 7.4 Luôn xử lý `403 PERMISSION_DENIED` từ server, đừng chỉ tin UI
+
+UI chỉ **ẩn/hiện**, không phải nguồn chân lý cuối cùng. Ba lý do request vẫn có thể 403 dù nút đã
+hiện:
+1. Permission trong JWT/`/auth/me` **cũ** (đã bị revoke sau khi token phát hành — permission chỉ cập
+   nhật khi có access token mới, xem §8).
+2. Đang thao tác trên resource **ngoài scope** thật của user (`scopes[]` không được dùng để check,
+   chỉ dùng `permissions[]` thô).
+3. Permission thuộc nhóm `hasPermission`/`GLOBAL` (§5) — có trong `permissions[]` nhưng scope thật
+   không phải `GLOBAL`.
+
+```ts
+try {
+  await api.post('/work-orders', payload);
+} catch (e) {
+  if (e.response?.data?.code === 'PERMISSION_DENIED') {
+    toast.error('Bạn không có quyền thực hiện thao tác này.');
+    return; // KHÔNG retry
+  }
+  throw e;
+}
+```
+
+### Khi nào permission "cập nhật"
+
+Permission trong JWT/`/auth/me` là **snapshot tại thời điểm phát hành token**. Admin gán/thu hồi
+quyền cho user khác **không** có hiệu lực ngay:
+
+| Sự kiện | Khi nào permission mới có hiệu lực |
+|---|---|
+| Admin gán thêm/thu hồi permission | Lần `refresh` kế tiếp (access token hết hạn: 15 phút prod / 1 giờ dev), hoặc login lại |
+| User muốn thấy hiệu lực ngay | Cho nút "Làm mới phiên" gọi `POST /auth/refresh` rồi gọi lại `/auth/me` |
+| Sau mỗi lần `refresh` thành công | **Luôn** gọi lại `/auth/me` — đừng chỉ decode access token mới rồi coi state cũ vẫn đúng |

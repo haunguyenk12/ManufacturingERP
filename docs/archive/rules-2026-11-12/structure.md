@@ -37,7 +37,7 @@ Dependency Injection and IoC
 
 Testing
 - Write unit tests using JUnit 5 and Spring Boot Test (Mockito, MockMvc).
-- **Trong repo này**: hạn chế `@SpringBootTest` (chậm, chưa dùng lần nào — xem
+- **Trong repo này**: hạn chế `@SpringBootTest` (chậm; chỉ `ProductionFlowE2EIT` được phép dùng — xem
   `.claude/rules/best-practices.md` §8.6 T1). Ưu tiên unit test + `@WebMvcTest`/`@DataJpaTest` có mục
   tiêu rõ, không dựng full context trừ khi thực sự cần integration test.
 

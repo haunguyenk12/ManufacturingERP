@@ -1,88 +1,67 @@
 # Development Workflow
 
-> Tách từ `CLAUDE.md` §6 (2026-07-25).
+## 6.1 Nhánh git
 
-## 6.1 Git Branch Strategy
 ```
-main          → production-ready
-develop       → integration branch
-feature/*     → tính năng mới (merge vào develop qua PR)
-hotfix/*      → fix khẩn cấp (merge vào main + develop)
+main                          → nhánh ổn định
+feature/<mã-phase>-<mô-tả>    → một nhánh cho một phase hoặc track; merge vào main khi phase xong
+hotfix/*                      → fix khẩn cấp, merge vào main
 ```
 
-## 6.2 Commit Convention (Conventional Commits)
-```
-feat(auth): implement JWT refresh token rotation
-fix(inventory): correct WIP balance calculation
-chore(db): add V3__idx_workorder_status migration
-```
+Không có nhánh `develop`.
 
-## 6.3 Environment Profiles
-```yaml
-spring.profiles.active: ${APP_ENV:dev}
+> ⚠️ Hiện trạng 2026-11-12: mọi việc từ 08/2026 (`G2`–`G11`, `CF-*`, `AP-1`) nằm trên
+> `feature/D8b-absolute-session-timeout`, chưa merge vào `main`. Merge nhánh này trước khi mở nhánh
+> cho phase kế tiếp; việc merge và push do user quyết định.
 
-# application-dev.yml   → dev local, bảo mật lỏng, PG local
-# application-test.yml  → Testcontainers, Redis in-memory
-# application-prod.yml  → cấu hình strict, secrets qua env variables
+## 6.2 Commit (Conventional Commits, có mã phase)
+
+```
+feat(planning): F10 — persist projectedAvailable, freeze routing snapshot
+fix(inventory): CF-1 — refuse manual adjust on lots QC still owns
+chore(docs): CF-8 — record the OpenAPI re-export
 ```
 
-## 6.4 Database Migration Naming
+Mã phase trong tiêu đề để `git log --grep "F10"` tìm lại được. Không dùng tiêu đề kiểu "cap2 done".
+
+## 6.3 Profile
+
 ```
-V1__create_users_roles.sql
-V2__create_inventory_tables.sql
-V3__create_bom_workorder.sql
-V4__add_idx_performance.sql
-V5__create_audit_logs.sql
+application.yml        → mặc định, mọi giá trị môi trường qua ${ENV_VAR}
+application-dev.yml    → nạp .env; KHÔNG đặt log level hay JWT expiry ở đây (file profile thắng
+                         application.yml nên sẽ vô hiệu hoá biến tương ứng trong .env)
+application-test.yml   → giá trị giả an toàn (DB/Redis trỏ cổng 1); *IT lấy Postgres thật từ
+                         Testcontainers qua @DynamicPropertySource
+application-prod.yml   → tắt springdoc, actuator chỉ health/info
 ```
 
-## 6.5 Sau Mỗi Thay Đổi (bắt buộc, mọi task — không chỉ breaking change)
+## 6.4 Tên migration
 
-Trước khi báo cáo task là xong, cập nhật tài liệu cho khớp với thay đổi vừa làm:
+`V<số kế tiếp>__<mô_tả_snake_case>.sql`, ví dụ `V96__add_password_setup_challenges.sql`.
+Số mới nhất ghi ở `CLAUDE.md §0.0`. Trước khi thêm cột, `grep` tên cột trong `db/migration/` — cột
+có thể đã tồn tại mà entity chưa ánh xạ (vd `roles.version` có từ `V6`).
 
-1. **`CLAUDE.md`** (root) — nếu thay đổi ảnh hưởng phase/trạng thái/baseline test/coverage → chỉ sửa
-   bảng **§0.0** (vài ô). Bản ghi chi tiết của phase (nghiệm thu mutation, smoke, breaking change, hệ quả)
-   viết vào `docs/phases/<mã phase>.md` + một dòng trong `docs/phases/INDEX.md` — **không** dán vào
-   `CLAUDE.md` (file đó được nạp vào mọi phiên; từng phình tới ~534 KB). Nếu thêm/sửa module,
-   permission, business rule mới → cập nhật đúng file split tương ứng (xem "BẢN ĐỒ TÀI LIỆU" ở cuối
-   `CLAUDE.md`) — **không** viết đè nội dung đó thẳng vào root.
-2. **File tiến độ liên quan** — cập nhật đúng file đang track phase của thay đổi:
-   - `NEXT_PHASE_PLAN.md` — phase nghiệp vụ/test đang chạy (checklist, Definition of Done, breaking changes).
-   - `TEST_IMPROVEMENT_PLAN.md` — nếu thay đổi thêm/sửa test, coverage, hoặc trả nợ kỹ thuật `T*`.
-   - `MANUFACTURING_GAP_ROADMAP.md` — nếu thay đổi thuộc phase nghiệp vụ `P*`.
-   - `FRONTEND_ALIGNMENT_ROADMAP.md` — nếu thay đổi thuộc phase căn chỉnh FE `F*` (tổng quan + lịch sử).
-   - `docs/roles-and-permissions.md` — nếu thêm/sửa permission (bắt buộc, xem `coding-rules.md` C10).
-3. Nếu thay đổi thêm bất biến nghiệp vụ mới hoặc sửa bất biến hiện có (bảng `B<n>`) → cập nhật đúng
-   `CLAUDE.md` split file của module đó, **không** để bất biến chỉ tồn tại trong code/test mà thiếu
-   trong tài liệu.
-4. Không hoãn việc này sang task sau — tài liệu lệch code dù chỉ 1 task cũng đủ để agent kế tiếp đọc
-   sai trạng thái dự án.
+## 6.5 Sau mỗi thay đổi (bắt buộc)
 
-## 6.6 Commit Sau Khi Hoàn Thành Một Phase Của `NEXT_PHASE_PLAN.md` (bắt buộc)
+Trước khi báo xong, cập nhật tài liệu cho khớp:
 
-> **Mục tiêu:** lịch sử một phase phải suy ra được từ `git log`, không chỉ từ tài liệu — hai nguồn kể
-> hai câu chuyện khác nhau là đúng loại lỗi `CLAUDE.md §0.20` đã cảnh báo (repo tuyên bố "đã đóng" một
-> nợ ba lần mà thực tế phạm vi hẹp hơn). Commit theo phase là bằng chứng độc lập, đối chiếu được.
+1. **Phase mới** ⇒ tạo `docs/phases/<mã phase>.md` (nghiệm thu, smoke, breaking change, hệ quả) + một
+   dòng trong `docs/phases/INDEX.md`.
+2. **`CLAUDE.md` gốc**: chỉ sửa bảng **§0.0** (vài ô). Không dán bản ghi dài vào đó — file được nạp vào
+   mọi phiên và từng phình tới ~534 KB. Không sửa `CLAUDE.md` giữa phiên (mất prompt cache); gom về cuối phiên.
+3. **Bất biến `B<n>`** mới hoặc đổi ⇒ cập nhật `CLAUDE.md` của đúng module đó.
+4. **File kế hoạch của track đang chạy** theo ô "Phase đang chạy" ở `CLAUDE.md §0.0`
+   (`NEXT_PHASE_PLAN.md` chỉ chứa đúng một phase đang chạy; `MANUFACTURING_GAP_ROADMAP.md` cho phase `P*`).
+5. **Permission** thêm hoặc đổi ⇒ `docs/roles-and-permissions.md` (C10).
+6. **Endpoint / DTO / mã lỗi** đổi ⇒ `docs/api-guide-for-frontend.md` trong cùng commit.
+7. Không hoãn sang task sau.
 
-1. **Thứ tự bắt buộc: kiểm chứng → cập nhật tài liệu (§6.5) → commit.** Không commit code rồi để tài
-   liệu theo sau ở commit khác — lúc đó `git log` tại thời điểm code commit sẽ nói dối về trạng thái
-   dự án.
-2. **`git status` trước khi `add`.** Working tree có thể đang chứa thay đổi **không thuộc phase vừa
-   làm** (việc dở của phiên trước, file người dùng đang sửa tay). Chỉ `git add` đúng những file nằm
-   trong phạm vi phase — liệt kê theo tên, không dùng `git add -A`/`git add .`. Thấy thay đổi lạ thì
-   hỏi trước khi gộp vào cùng commit.
-3. **Message theo Conventional Commits (§6.2), ghi rõ mã phase** để `git log --grep "F10"` (hoặc
-   `D8`, `P3`...) tìm lại đúng commit:
-   ```
-   feat(planning): F10 — persist projectedAvailable, freeze routing snapshot, add document codes
+## 6.6 Commit sau khi xong một phase (bắt buộc)
 
-   Closes debts G/F/H (FRONTEND_ALIGNMENT_ROADMAP.md §7.1). Migration V40. No wire breaking change.
-   ```
-   Phase sửa nhiều module (vd `F5`, `D7`) thì chọn scope là module chiếm phần lớn thay đổi, hoặc
-   `chore(docs)` riêng cho commit chỉ sửa tài liệu.
-4. **Sau commit, `NEXT_PHASE_PLAN.md` phải phản ánh đúng trạng thái mới** — phase vừa xong không còn
-   được mô tả như "đang chạy" trong file đó (chuyển nội dung chi tiết vào roadmap tương ứng theo quy
-   ước đã có, giữ `NEXT_PHASE_PLAN.md` là **đúng một** phase đang chạy hoặc "chưa chốt").
-5. **Không `push`** trừ khi user yêu cầu tường minh trong chính lượt đó (xem "Executing actions with
-   care" — commit là hành động cục bộ, push là hành động chia sẻ, hai mức rủi ro khác nhau).
-6. Phase không migration/không breaking change vẫn phải commit theo đúng quy trình này — "nhỏ" không
-   phải lý do để bỏ qua bước tài liệu hoá.
+1. Thứ tự: **kiểm chứng → cập nhật tài liệu (§6.5) → commit**. Không commit code rồi để tài liệu ở commit sau.
+2. `git status` trước khi `add`. Chỉ `git add` đúng các file thuộc phase, liệt kê theo tên; không
+   `git add -A`. Thấy thay đổi lạ thì hỏi trước.
+3. Message theo §6.2. Phase sửa nhiều module thì chọn scope là module chiếm phần lớn thay đổi.
+4. Sau commit, `NEXT_PHASE_PLAN.md` không còn mô tả phase vừa xong là "đang chạy".
+5. **Không `push`** trừ khi user yêu cầu tường minh trong chính lượt đó.
+6. Phase nhỏ, không migration vẫn theo đúng quy trình này.

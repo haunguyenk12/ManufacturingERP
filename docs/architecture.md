@@ -1,6 +1,9 @@
 # Manufacturing ERP – System Architecture
 
-> **Status**: Foundation Layer (Phase 1)
+> **Status**: tài liệu viết ở giai đoạn nền tảng (Phase 1). **Rà lại 2026-11-12:** §3.3 (bản đồ module) và
+> §12 (việc chưa làm) đã viết lại theo code hiện tại; §5.3 và §9.5 có ghi chú đính chính. Các mục khác
+> (§1, §2, §6, §8, §9.1–§9.4, §10, §11) **chưa được đối chiếu lại** — khi lệch thì code và `CLAUDE.md`
+> của từng module là nguồn đúng.
 > **Stack**: Spring Boot 3.x · Java 17 · PostgreSQL · Redis · Flyway · Spring Security 6 + JWT
 > **Architecture**: Modular Monolith (không tách microservice ở giai đoạn hiện tại)
 
@@ -85,7 +88,7 @@ Client Request
 │      • Set SecurityContextHolder                               │
 │      • Set request attr: authenticatedUserId, authenticatedJti │
 │      • Set MDC: userId                                         │
-│    Refresh path (/api/v1/auth/refresh):                        │
+│    Refresh path (/api/auth/v1/refresh):                        │
 │      • Extract claims even if token expired                    │
 │      • Set authenticatedUserId only (not SecurityContext)      │
 └─────────────────────────┬───────────────────────────────────────┘
@@ -138,15 +141,32 @@ module/<name>/
 | For async or decoupled integration, use **Spring ApplicationEvent** | Avoids direct dependency between modules |
 | `common/*` packages may be used by any module | They are true cross-cutting concerns |
 
-### 3.3 Current Module Map
+### 3.3 Current Module Map *(2026-11-12)*
 
-| Module | Owns | Public Interface |
+| Module | Phụ trách | Cổng cho module khác |
 |---|---|---|
-| `module/user` | `users`, `roles`, `user_roles` tables | `UserService`, `UserDetailsServiceImpl` |
-| `module/auth` | Session logic (Redis) | `AuthService` |
-| `module/sales` | `sales_orders`, `sales_order_lines` | `SalesOrderService` (consumes `PlanningDemandService`; nothing consumes `sales` yet — see `module/sales/CLAUDE.md`) |
-| `common/audit` | `audit_logs` table | `AuditLogService` |
-| `common/security` | JWT, rate-limit, token store | `TokenStoreService`, `JwtTokenProvider` |
+| `module/auth` | Đăng nhập, refresh, logout, khôi phục và đặt mật khẩu bằng mã email | `AuthService` |
+| `module/user` | Tài khoản người dùng | `UserService`, `UserLookupService` |
+| `module/organization` | Công ty, nhà máy, kho; role, permission, access scope, assignment | `OrganizationLookupService`, `PermissionGuard` |
+| `module/inventory` | Vật tư, tồn kho, lô, serial, chuyển kho, thiết lập vật tư–kho | `ItemLookupService`, `InventoryLotLookupService`, `StockPoolLookupService`, `InventoryAvailabilityService` |
+| `module/uom` | Đơn vị tính | `UomLookupService` |
+| `module/bom` | Định mức (BOM đa cấp, phiên bản) | `BomLookupService` |
+| `module/routing` | Quy trình công nghệ | `RoutingLookupService` |
+| `module/workcenter` | Trung tâm làm việc | `WorkCenterLookupService` |
+| `module/shift` | Ca và lịch làm việc | `WorkCalendarLookupService` |
+| `module/planning` | Nhu cầu, lượt chạy MRP, đề xuất cung ứng | `PlanningDemandService` |
+| `module/purchasing` | Nhà cung cấp, yêu cầu mua, đơn mua, nhận hàng, QC mua | `SupplierLookupService`, `PurchaseQcLookupService` |
+| `module/workorder` | Lệnh sản xuất, giữ chỗ, cấp vật tư, công đoạn, phiếu nhập thành phẩm, QC, giá thành sản xuất | các `*LookupService` trong `service/query` |
+| `module/costing` | Giá thành chuẩn của vật tư | `ItemStandardCostLookupService` |
+| `module/sales` | Khách hàng, đơn bán hàng | `CustomerLookupService`, `SalesOrderCommercialLookupService` |
+| `module/delivery` | Phiếu giao hàng | `DeliveryLookupService` |
+| `module/billing` | Hoá đơn bán hàng, thu tiền | — |
+| `module/dataimport` | Nhập Excel dữ liệu nền và chứng từ | — |
+| `module/reporting` | Controller báo cáo theo domain | — |
+| `common/audit` | Audit trail (outbox + bảng append-only) | `AuditLogService`, `@Auditable` |
+| `common/security` | JWT, rate limit, token store | `TokenStoreService`, `JwtTokenProvider` |
+
+Quy tắc gọi chéo module và danh sách ngoại lệ hiện có: `.claude/rules/coding-rules.md` C7.
 
 ---
 
@@ -229,6 +249,9 @@ auth:session:device:{userId}:{deviceId}   TTL=7d (sliding on refresh)
 
 ### 5.3 Multi-Device Session
 
+> **Đính chính 2026-11-12:** hạ tầng theo thiết bị vẫn còn, nhưng **chính sách là một phiên cho mỗi user**:
+> `AuthService.login` xoá mọi refresh token và device session cũ mỗi lần đăng nhập. Đoạn dưới mô tả thiết kế ban đầu.
+
 Each device is identified by a `deviceId` (client-provided or derived server-side as `sha256(userAgent:ip)[:24]`). A user can be logged in from multiple devices simultaneously. Each device session is independent with its own sliding TTL.
 
 ### 5.4 Filter Chain Security Note
@@ -310,7 +333,7 @@ app:
 
       - id: auth-ip
         scope: IP
-        pattern: "/api/v1/auth/**"
+        pattern: "/auth/v1/**"
         limit: 10
         window-seconds: 60
         action: BLOCK
@@ -460,6 +483,9 @@ Output lots created by approval open in `LotStatus.HOLD`, which is what unlocks 
 
 ### 9.5 Transactional Outbox (Phase 2+)
 
+> **Đính chính 2026-11-12:** outbox đã triển khai cho audit từ track `AR-*` (bảng `audit_outbox`, `V67`/`V68`).
+> Schema thật khác bản phác dưới đây; xem `common/audit/CLAUDE.md`.
+
 Replace fire-and-forget Spring event audit with:
 ```
 outbox_events (
@@ -559,16 +585,21 @@ V6__create_bom_routing.sql
 
 ---
 
-## 12. What's Not Yet Implemented (Honest Gaps)
+## 12. Việc chưa làm *(viết lại 2026-11-12 theo code)*
 
-| Feature | CLAUDE.md / Design | Reality | Phase |
-|---|---|---|---|
-| RTR reuse detection (`auth:refresh:used:{tokenId}`) | Documented in §4.12 | Not in `TokenStoreService` | Phase 2 |
-| Password reset flow | Documented in §4.14 | Not implemented | Phase 2 |
-| Absolute session timeout (30d) | Documented in §4.15 | Not in `AuthService.refresh` | Phase 2 |
-| Device fingerprinting | Documented in §4.19 | Not implemented | Nice-to-have |
-| Transactional outbox | ADR above | Not implemented | Phase 2 |
-| Organization / plant / warehouse | ADR-001 above | Not implemented | Phase 1 next |
-| Inventory, BOM, Work Order, MRP | Roadmap | Not started | Phase 2+ |
-| Structured JSON logging (prod) | Noted in CLAUDE.md | Logback pattern only | Phase 1 cleanup |
-| Custom Micrometer metrics | Listed in §10.2 | Default Actuator only | Phase 1 cleanup |
+Các mục bản cũ liệt kê là "chưa làm" nay **đã có**: phát hiện dùng lại refresh token, luồng đặt lại mật khẩu,
+absolute session timeout, transactional outbox cho audit, tổ chức / nhà máy / kho, tồn kho, BOM, lệnh sản
+xuất, MRP.
+
+| Hạng mục | Thực tế |
+|---|---|
+| Log JSON có cấu trúc cho prod | Chỉ có pattern text của Logback |
+| Metric nghiệp vụ tự định nghĩa | Chỉ audit có (`AuditMetrics`, `AuditOutboxHealth`); không có registry Prometheus |
+| Security headers bổ sung (CSP, `Referrer-Policy`, `Permissions-Policy`) | Chỉ có header mặc định của Spring Security |
+| Gắn refresh token với dấu vân tay thiết bị (thiết kế §4.19 của `common/security/CLAUDE.md`) | Chưa thấy trong `AuthService` / `TokenStoreService` |
+| Email đặt lại mật khẩu bằng link (`sendPasswordResetEmail`) | Vẫn là mock ghi log; chỉ mã 6 số gửi SMTP thật |
+| Cache (cây BOM, kết quả MRP) | Chưa có `@Cacheable` nào |
+| Xử lý bất đồng bộ cho MRP / report | Chạy đồng bộ |
+| Rate limit sliding window | Đang là fixed window |
+| CI | Repo chưa có workflow nào |
+| Tích hợp MES, module chất lượng độc lập, sổ giá trị tồn kho | Chưa làm (xem `MANUFACTURING_PHASE_PLAN_P7_P11.md`) |
